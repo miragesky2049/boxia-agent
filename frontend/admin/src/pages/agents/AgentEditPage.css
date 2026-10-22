@@ -1,0 +1,86 @@
+.agent-edit__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 34, 74, 0.04);
+}
+
+.agent-edit__header .page-header__desc {
+  margin-top: 2px;
+}
+
+.agent-edit__body {
+  display: flex;
+  align-items: flex-start;
+  gap: 20px;
+}
+
+.agent-edit__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.agent-edit__aside {
+  width: 180px;
+  flex: none;
+}
+
+.agent-edit__anchor {
+  position: sticky;
+  top: 84px;
+  padding: 16px 12px;
+  border-radius: 12px;
+  background: #fff;
+}
+
+.agent-edit__anchor .ant-anchor {
+  padding-left: 4px;
+}
+
+.agent-edit__anchor .ant-anchor-link {
+  padding-block: 6px;
+}
+
+.config-card {
+  margin-bottom: 16px;
+  border-radius: 14px;
+  box-shadow: 0 1px 3px rgba(15, 34, 74, 0.04);
+}
+
+.config-card .ant-card-head {
+  border-bottom-color: #f0f2f6;
+}
+
+.config-card__tip {
+  margin: 0 0 16px;
+  color: #86909c;
+  font-size: 13px;
+}
+
+.agent-edit__footer {
+  display: flex;
+  justify-content: flex-end;
+  padding: 16px 20px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 34, 74, 0.04);
+}
+
+.faq-item {
+  margin-bottom: 4px;
+}
+
+.faq-item__remove {
+  margin-top: 30px;
+}
+
+@media (max-width: 1100px) {
+  .agent-edit__aside {
+    display: none;
+  }
+}

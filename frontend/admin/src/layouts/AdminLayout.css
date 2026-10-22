@@ -1,0 +1,147 @@
+.admin-layout {
+  min-height: 100vh;
+}
+
+.admin-sider {
+  border-right: 1px solid #edf0f5;
+}
+
+.admin-sider .ant-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+  padding-top: 8px;
+}
+
+.admin-sider__brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 56px;
+  padding: 0 20px;
+  cursor: pointer;
+}
+
+.admin-sider__logo {
+  display: flex;
+  width: 32px;
+  height: 32px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 9px;
+  background: linear-gradient(145deg, #2f6bff, #1f4fd6);
+  color: #fff;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.admin-sider__title {
+  display: flex;
+  flex-direction: column;
+  color: #1d2129;
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.admin-sider__title small {
+  color: #86909c;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.admin-sider__menu {
+  flex: 1;
+  border-inline-end: none;
+  padding: 8px 8px 0;
+}
+
+.admin-sider__menu .ant-menu-item {
+  height: 42px;
+  border-radius: 10px;
+  color: #4e5969;
+}
+
+.admin-sider__menu .ant-menu-item-selected {
+  font-weight: 600;
+}
+
+.admin-header {
+  display: flex;
+  height: 60px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  border-bottom: 1px solid #edf0f5;
+  background: #fff;
+}
+
+.admin-header__crumb {
+  color: #86909c;
+  font-size: 14px;
+}
+
+.admin-header__user {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 10px 4px 4px;
+  border: none;
+  border-radius: 999px;
+  background: transparent;
+  color: #1d2129;
+  font-size: 14px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.admin-header__user:hover {
+  background: #f2f5fa;
+}
+
+.admin-content {
+  padding: 24px;
+  background: #f5f7fb;
+}
+
+.page-card {
+  padding: 24px;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(15, 34, 74, 0.04);
+}
+
+.page-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.page-header__title {
+  margin: 0;
+  color: #1d2129;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.page-header__desc {
+  margin: 6px 0 0;
+  color: #86909c;
+  font-size: 13px;
+}
+
+.page-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.page-loading {
+  display: flex;
+  min-height: 60vh;
+  align-items: center;
+  justify-content: center;
+}

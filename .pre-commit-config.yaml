@@ -1,0 +1,39 @@
+# 必须位于仓库根目录：pre-commit 默认从根目录发现配置并安装 Git 钩子。
+# 后端：ruff；前端：oxlint + prettier；通用：空白、文件结尾、YAML/TOML、私钥、大文件。
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-merge-conflict
+      - id: check-yaml
+      - id: check-toml
+      - id: detect-private-key
+      - id: check-added-large-files
+
+  - repo: local
+    hooks:
+      - id: backend-ruff
+        name: backend ruff check
+        entry: uv run --project backend ruff check
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+      - id: backend-ruff-format
+        name: backend ruff format check
+        entry: uv run --project backend ruff format --check
+        language: system
+        files: ^backend/.*\.py$
+        pass_filenames: false
+      - id: frontend-oxlint
+        name: frontend oxlint
+        entry: npx --prefix frontend/admin oxlint src
+        language: system
+        files: ^frontend/admin/src/.*\.(ts|tsx)$
+        pass_filenames: false
+      - id: frontend-prettier
+        name: frontend prettier check
+        entry: npx --prefix frontend/admin prettier --check
+        language: system
+        files: ^frontend/admin/.*\.(ts|tsx|css|json)$

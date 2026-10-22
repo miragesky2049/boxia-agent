@@ -1,0 +1,74 @@
+"""组件管理接口。"""
+
+from fastapi import APIRouter, Depends, Query, status
+
+from internal.domain.entity.common import Page  # noqa: F401  (用于类型可读性)
+from internal.domain.entity.resource import Component
+from web.admin.schemas import ComponentOut, ComponentPayload, PageOut
+from web.deps.auth import require_editor
+from web.deps.services import ComponentServiceDep
+
+router = APIRouter(prefix="/components", tags=["admin-components"])
+
+
+@router.get("", response_model=PageOut[ComponentOut])
+def list_components(
+    service: ComponentServiceDep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = Query(None, max_length=100),
+    is_enabled: bool | None = Query(None),
+) -> PageOut[ComponentOut]:
+    """分页查询组件。"""
+    result = service.list(page, page_size, keyword, is_enabled)
+    return _to_page_out(result)
+
+
+@router.post(
+    "",
+    response_model=ComponentOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
+)
+def create_component(payload: ComponentPayload, service: ComponentServiceDep) -> ComponentOut:
+    """创建组件。"""
+    return ComponentOut.model_validate(service.create(payload.model_dump()))
+
+
+@router.get("/{component_id}", response_model=ComponentOut)
+def get_component(component_id: int, service: ComponentServiceDep) -> ComponentOut:
+    """查询组件详情。"""
+    return ComponentOut.model_validate(service.get(component_id))
+
+
+@router.put(
+    "/{component_id}",
+    response_model=ComponentOut,
+    dependencies=[Depends(require_editor)],
+)
+def update_component(
+    component_id: int,
+    payload: ComponentPayload,
+    service: ComponentServiceDep,
+) -> ComponentOut:
+    """更新组件。"""
+    return ComponentOut.model_validate(service.update(component_id, payload.model_dump()))
+
+
+@router.delete(
+    "/{component_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
+)
+def delete_component(component_id: int, service: ComponentServiceDep) -> None:
+    """删除组件。"""
+    service.delete(component_id)
+
+
+def _to_page_out(result: Page[Component]) -> PageOut[ComponentOut]:
+    return PageOut[ComponentOut](
+        items=[ComponentOut.model_validate(item) for item in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )

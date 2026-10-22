@@ -216,3 +216,24 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# 依赖与构建产物（各端仍有各自的 .gitignore，这里兜底）
+node_modules/
+*.tsbuildinfo
+
+# 本地环境变量（保留各端 .env.example / .env.*.example 模板）
+.env.local
+.env.*.local
+backend/.env.*
+!backend/.env.example
+frontend/*/.env.local
+!frontend/*/.env.*.example
+
+# 跨端运维本地文件
+ops/.env.production
+ops/backups/
+
+# 前端测试与质量产物
+frontend/admin/coverage/
+frontend/admin/playwright-report/
+frontend/admin/test-results/

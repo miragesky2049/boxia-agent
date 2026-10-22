@@ -1,0 +1,8 @@
+{
+  "name": "boxia-frontend",
+  "private": true,
+  "scripts": {
+    "dev": "node scripts/dev-all.mjs",
+    "stop": "node scripts/stop-all.mjs"
+  }
+}

@@ -1,0 +1,185 @@
+"""仓储与工作单元协议：应用层只依赖接口，不感知数据库实现。"""
+
+from datetime import datetime
+from typing import Any, Protocol, TypeVar
+from uuid import UUID
+
+from internal.domain.entity.admin_user import AdminUser
+from internal.domain.entity.audit_log import AuditLog
+from internal.domain.entity.refresh_token import RefreshToken
+from internal.domain.entity.resource import Agent, Component, Prompt, Skill, Tool
+
+TResource = TypeVar("TResource")
+
+
+class AdminUserRepository(Protocol):
+    """管理员账号仓储。"""
+
+    def get_by_username(self, username: str) -> AdminUser | None:
+        """按用户名查询。"""
+
+    def get_by_username_for_update(self, username: str) -> AdminUser | None:
+        """按用户名加行锁查询，用于登录失败计数。"""
+
+    def get_by_id(self, user_id: int) -> AdminUser | None:
+        """按主键查询。"""
+
+    def list_page(
+        self, page: int, page_size: int, keyword: str | None
+    ) -> tuple[list[AdminUser], int]:
+        """分页查询管理员。"""
+
+    def create(self, values: dict[str, Any]) -> AdminUser:
+        """创建管理员。"""
+
+    def update(self, user_id: int, values: dict[str, Any]) -> AdminUser | None:
+        """更新管理员基础字段。"""
+
+    def mark_login_success(self, user_id: int) -> None:
+        """登录成功：清零失败次数并记录时间。"""
+
+    def record_failed_login(
+        self, user_id: int, max_attempts: int, lock_minutes: int
+    ) -> datetime | None:
+        """累计失败次数，返回新的锁定截止时间（未锁定返回 None）。"""
+
+    def update_password(
+        self,
+        user_id: int,
+        password_hash: str,
+        must_change_password: bool,
+        changed_at: datetime,
+    ) -> None:
+        """更新密码并递增令牌版本。"""
+
+    def bump_token_version(self, user_id: int) -> int:
+        """递增令牌版本，使已签发令牌失效。"""
+
+
+class RefreshTokenRepository(Protocol):
+    """刷新令牌仓储。"""
+
+    def create(self, values: dict[str, Any]) -> RefreshToken:
+        """写入刷新令牌（哈希）。"""
+
+    def get_by_hash_for_update(self, token_hash: str) -> RefreshToken | None:
+        """按哈希加行锁查询。"""
+
+    def rotate(self, old_id: int, replaced_by_id: int) -> None:
+        """标记旧令牌已轮换。"""
+
+    def revoke_family(self, family_id: UUID) -> int:
+        """撤销同一会话族全部令牌。"""
+
+    def revoke_all_for_user(self, user_id: int) -> int:
+        """撤销用户全部令牌。"""
+
+    def is_family_active(self, family_id: UUID) -> bool:
+        """会话族是否仍有有效令牌。"""
+
+    def delete_expired(self, before: datetime) -> int:
+        """清理过期令牌。"""
+
+
+class AuditLogRepository(Protocol):
+    """审计日志仓储。"""
+
+    def record(self, values: dict[str, Any]) -> None:
+        """写入审计记录。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        action: str | None,
+        actor_id: int | None,
+    ) -> tuple[list[AuditLog], int]:
+        """分页查询审计记录。"""
+
+
+class ResourceRepository(Protocol[TResource]):
+    """通用资源仓储（技能/工具/组件/提示词）。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        is_enabled: bool | None,
+    ) -> tuple[list[TResource], int]:
+        """分页查询。"""
+
+    def get(self, resource_id: int) -> TResource | None:
+        """按主键查询。"""
+
+    def create(self, values: dict) -> TResource:
+        """创建。"""
+
+    def update(self, resource_id: int, values: dict) -> TResource | None:
+        """全量更新。"""
+
+    def delete(self, resource_id: int) -> bool:
+        """删除。"""
+
+    def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
+        """名称是否已存在。"""
+
+    def ids_exist(self, ids: list[int]) -> set[int]:
+        """返回给定 id 中真实存在的部分。"""
+
+
+class AgentRepository(Protocol):
+    """智能体仓储。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        is_enabled: bool | None,
+    ) -> tuple[list[Agent], int]:
+        """分页查询。"""
+
+    def get(self, agent_id: int) -> Agent | None:
+        """查询详情（含工具/技能关联）。"""
+
+    def create(self, values: dict) -> Agent:
+        """创建智能体并写入关联。"""
+
+    def update(self, agent_id: int, values: dict) -> Agent | None:
+        """全量更新并替换关联。"""
+
+    def delete(self, agent_id: int) -> bool:
+        """删除。"""
+
+    def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
+        """名称是否已存在。"""
+
+
+class UnitOfWork(Protocol):
+    """请求级工作单元，负责事务提交与仓储访问。"""
+
+    admin_users: AdminUserRepository
+    refresh_tokens: RefreshTokenRepository
+    audit_logs: AuditLogRepository
+    agents: AgentRepository
+    skills: ResourceRepository[Skill]
+    tools: ResourceRepository[Tool]
+    components: ResourceRepository[Component]
+    prompts: ResourceRepository[Prompt]
+
+    def commit(self) -> None:
+        """提交事务。"""
+
+    def rollback(self) -> None:
+        """回滚事务。"""
+
+    def close(self) -> None:
+        """释放会话。"""
+
+
+# 便于在类型注解中直接引用具体资源仓储
+SkillRepository = ResourceRepository[Skill]
+ToolRepository = ResourceRepository[Tool]
+ComponentRepository = ResourceRepository[Component]
+PromptRepository = ResourceRepository[Prompt]
