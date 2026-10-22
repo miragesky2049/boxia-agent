@@ -4,11 +4,11 @@
 
 本手册同时服务三类读者，可以按目的跳读：
 
-| 你的目的 | 建议阅读 |
-| --- | --- |
-| 第一次接触项目，想把它跑起来 | 第 1–4 章，照着做即可 |
-| 准备面试，需要讲清架构和亮点 | 第 12–13 章，含流程串联、技术选型和高频问答 |
-| 要把项目部署到生产环境 | 第 14–15 章，含服务器准备、上线、回滚、备份和监控 |
+| 你的目的                     | 建议阅读                                          |
+|------------------------------|---------------------------------------------------|
+| 第一次接触项目，想把它跑起来 | 第 1–4 章，照着做即可                             |
+| 准备面试，需要讲清架构和亮点 | 第 12–13 章，含流程串联、技术选型和高频问答       |
+| 要把项目部署到生产环境       | 第 14–15 章，含服务器准备、上线、回滚、备份和监控 |
 
 > 建议在 **Git Bash**（Windows）、macOS 或 Linux 终端中执行本文命令。仓库中的 `ops/*.sh` 脚本需要 Bash；Windows 安装 [Git for Windows](https://git-scm.com/download/win) 即可获得 Git Bash。
 >
@@ -70,41 +70,41 @@
 
 ### 1.3 核心能力
 
-| 模块 | 能力 |
-| --- | --- |
-| 智能体管理 | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
-| 资源管理 | 技能、工具、组件、提示词四类资源的增删改查、搜索、分页、启用/停用 |
-| 多租户 | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级资源对租户只读复用 |
-| 认证与会话 | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步 |
-| 权限控制 | `superadmin` / `admin` / `viewer` 三级角色，接口级 RBAC |
-| 安全防护 | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流 |
-| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标 |
-| 工程化交付 | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本 |
+| 模块         | 能力                                                                                           |
+|--------------|------------------------------------------------------------------------------------------------|
+| 智能体管理   | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
+| 资源管理     | 技能、工具、组件、提示词四类资源的增删改查、搜索、分页、启用/停用                              |
+| 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级资源对租户只读复用                     |
+| 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
+| 权限控制     | `superadmin` / `admin` / `viewer` 三级角色，接口级 RBAC                                        |
+| 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
+| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标                         |
+| 工程化交付   | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本                         |
 
 ### 1.4 名词解释
 
 第一次看可能不懂的词，先看这张表：
 
-| 名词 | 用大白话解释 |
-| --- | --- |
-| 智能体（Agent） | 一个配置好的 AI 助手。比如“陪练剧本生成助手”，它有自己的人设、模型、欢迎语和可用能力 |
-| 技能（Skill） | 智能体会的一项本领，比如“根据业务信息生成剧本” |
-| 工具（Tool） | 智能体可以调用的外部接口，比如“查询天气”“创建工单” |
-| 组件（Component） | 对话页面上的展示模块，比如欢迎语卡片、常见问题列表 |
-| 提示词（Prompt） | 写给 AI 模型的指令模板，决定它怎么理解和回答 |
-| 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步 |
-| Token | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁 |
-| RBAC | 基于角色的权限控制。不同角色能做的事不一样 |
-| 产品级平台 | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护对所有租户可见的产品级智能体与资源 |
-| 租户级平台 | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源 |
+| 名词              | 用大白话解释                                                                         |
+|-------------------|--------------------------------------------------------------------------------------|
+| 智能体（Agent）   | 一个配置好的 AI 助手。比如“陪练剧本生成助手”，它有自己的人设、模型、欢迎语和可用能力 |
+| 技能（Skill）     | 智能体会的一项本领，比如“根据业务信息生成剧本”                                       |
+| 工具（Tool）      | 智能体可以调用的外部接口，比如“查询天气”“创建工单”                                   |
+| 组件（Component） | 对话页面上的展示模块，比如欢迎语卡片、常见问题列表                                   |
+| 提示词（Prompt）  | 写给 AI 模型的指令模板，决定它怎么理解和回答                                         |
+| 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步                             |
+| Token             | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁               |
+| RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
+| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护对所有租户可见的产品级智能体与资源 |
+| 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
 
 ### 1.5 账号角色
 
-| 角色 | 能读资源 | 能改资源 | 能管管理员 | 能看审计 |
-| --- | --- | --- | --- | --- |
-| `superadmin`（超级管理员） | 是 | 是 | 是 | 是 |
-| `admin`（管理员） | 是 | 是 | 否 | 否 |
-| `viewer`（只读） | 是 | 否 | 否 | 否 |
+| 角色                       | 能读资源 | 能改资源 | 能管管理员 | 能看审计 |
+|----------------------------|----------|----------|------------|----------|
+| `superadmin`（超级管理员） | 是       | 是       | 是         | 是       |
+| `admin`（管理员）          | 是       | 是       | 否         | 否       |
+| `viewer`（只读）           | 是       | 否       | 否         | 否       |
 
 > 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
 
@@ -112,14 +112,14 @@
 
 ### 1.6 技术栈速览
 
-| 部分 | 主要技术 |
-| --- | --- |
-| 后端 | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17、Alembic、PyJWT + bcrypt |
-| 管理端 | React 19、TypeScript、Vite、Ant Design 5 |
-| 用户端 | React 19、TypeScript、Vite |
-| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标 |
-| 测试 | pytest + httpx、Vitest + Testing Library、Playwright |
-| 部署 | Docker Compose、Nginx、GitHub Actions |
+| 部分     | 主要技术                                                                     |
+|----------|------------------------------------------------------------------------------|
+| 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17、Alembic、PyJWT + bcrypt |
+| 管理端   | React 19、TypeScript、Vite、Ant Design 5                                     |
+| 用户端   | React 19、TypeScript、Vite                                                   |
+| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标                       |
+| 测试     | pytest + httpx、Vitest + Testing Library、Playwright                         |
+| 部署     | Docker Compose、Nginx、GitHub Actions                                        |
 
 ---
 
@@ -127,14 +127,14 @@
 
 ### 2.1 安装清单
 
-| 软件 | 版本要求 | 用途 | 检查命令 |
-| --- | --- | --- | --- |
-| Git | 最新版 | 下载代码 | `git --version` |
-| Python | 3.12 或更高 | 运行后端 | `python --version` |
-| uv | 最新版 | 管理 Python 依赖和虚拟环境 | `uv --version` |
-| Node.js | `^20.19.0` 或 `>=22.12.0` | 运行前端 | `node --version` |
-| pnpm | 11 或更高 | 安装前端依赖 | `pnpm --version` |
-| Docker Desktop | 最新版 | 启动本地 PostgreSQL 数据库 | `docker --version` 和 `docker compose version` |
+| 软件           | 版本要求                  | 用途                       | 检查命令                                       |
+|----------------|---------------------------|----------------------------|------------------------------------------------|
+| Git            | 最新版                    | 下载代码                   | `git --version`                                |
+| Python         | 3.12 或更高               | 运行后端                   | `python --version`                             |
+| uv             | 最新版                    | 管理 Python 依赖和虚拟环境 | `uv --version`                                 |
+| Node.js        | `^20.19.0` 或 `>=22.12.0` | 运行前端                   | `node --version`                               |
+| pnpm           | 11 或更高                 | 安装前端依赖               | `pnpm --version`                               |
+| Docker Desktop | 最新版                    | 启动本地 PostgreSQL 数据库 | `docker --version` 和 `docker compose version` |
 
 安装参考：
 
@@ -332,11 +332,11 @@ uv run uvicorn web.app:app --reload
 
 保持后端终端运行，用浏览器依次打开：
 
-| 地址 | 应该看到 |
-| --- | --- |
-| <http://127.0.0.1:8000/health/live> | `{"status":"ok"}` |
+| 地址                                 | 应该看到                                           |
+|--------------------------------------|----------------------------------------------------|
+| <http://127.0.0.1:8000/health/live>  | `{"status":"ok"}`                                  |
 | <http://127.0.0.1:8000/health/ready> | `status` 为 `ok`，表示数据库已连通且表结构是最新的 |
-| <http://127.0.0.1:8000/docs> | Swagger 接口文档（开发环境自动开启） |
+| <http://127.0.0.1:8000/docs>         | Swagger 接口文档（开发环境自动开启）               |
 
 如果 `/health/ready` 返回 503，看 [4.6](#46-healthready-返回-503-migration_outdated)。
 
@@ -416,26 +416,26 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 ### 3.7 如何停止服务
 
-| 服务 | 停止方式 |
-| --- | --- |
-| 后端 | 在后端终端按 `Ctrl + C` |
+| 服务            | 停止方式                                                                     |
+|-----------------|------------------------------------------------------------------------------|
+| 后端            | 在后端终端按 `Ctrl + C`                                                      |
 | 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或回到仓库根目录执行 `cd frontend && pnpm run stop` |
-| 数据库 | 执行 `docker compose -f backend/docker/docker-compose.yml down` |
+| 数据库          | 执行 `docker compose -f backend/docker/docker-compose.yml down`              |
 
 > `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
 
 ### 3.8 端口速查
 
-| 服务 | 地址 | 说明 |
-| --- | --- | --- |
-| 管理端 | <http://localhost:5173> | 管理后台（本地回环，可用请求头切换作用域） |
-| 管理端（平台子域名） | <http://adminsystem.localhost:5173> | 本地验证产品级平台域名解析 |
-| 管理端（租户子域名） | `http://<租户编码>.localhost:5173` | 本地验证租户域名解析，需先创建租户 |
-| 用户端 | <http://localhost:5174> | 用户门户（骨架） |
-| 后端 | <http://127.0.0.1:8000/> | 返回服务名和版本 |
-| 健康检查 | `http://127.0.0.1:8000/health/live`、`/health/ready` | 存活 / 就绪 |
-| 接口文档 | <http://127.0.0.1:8000/docs> | 开发环境在线调试 |
-| 数据库 | `127.0.0.1:5432` | 仅本机可访问 |
+| 服务                 | 地址                                                 | 说明                                       |
+|----------------------|------------------------------------------------------|--------------------------------------------|
+| 管理端               | <http://localhost:5173>                              | 管理后台（本地回环，可用请求头切换作用域） |
+| 管理端（平台子域名） | <http://adminsystem.localhost:5173>                  | 本地验证产品级平台域名解析                 |
+| 管理端（租户子域名） | `http://<租户编码>.localhost:5173`                   | 本地验证租户域名解析，需先创建租户         |
+| 用户端               | <http://localhost:5174>                              | 用户门户（骨架）                           |
+| 后端                 | <http://127.0.0.1:8000/>                             | 返回服务名和版本                           |
+| 健康检查             | `http://127.0.0.1:8000/health/live`、`/health/ready` | 存活 / 就绪                                |
+| 接口文档             | <http://127.0.0.1:8000/docs>                         | 开发环境在线调试                           |
+| 数据库               | `127.0.0.1:5432`                                     | 仅本机可访问                               |
 
 ### 3.9 常用命令速查
 
@@ -697,12 +697,12 @@ boxia-agent/
 
 ### 5.2 根目录文件为什么这样放
 
-| 路径 | 用途 | 为什么在根目录 |
-| --- | --- | --- |
-| `backend/`、`frontend/` | 两个可独立构建的应用 | 按端拆分，互不依赖 |
-| `ops/` | 跨端的开发、检查、部署、备份脚本 | 不属于任何一个端 |
-| `.github/workflows/` | CI 与镜像发布 | GitHub 固定读取这个路径 |
-| `.pre-commit-config.yaml` | 提交前质量钩子 | pre-commit 默认只从仓库根目录读取 |
+| 路径                      | 用途                             | 为什么在根目录                    |
+|---------------------------|----------------------------------|-----------------------------------|
+| `backend/`、`frontend/`   | 两个可独立构建的应用             | 按端拆分，互不依赖                |
+| `ops/`                    | 跨端的开发、检查、部署、备份脚本 | 不属于任何一个端                  |
+| `.github/workflows/`      | CI 与镜像发布                    | GitHub 固定读取这个路径           |
+| `.pre-commit-config.yaml` | 提交前质量钩子                   | pre-commit 默认只从仓库根目录读取 |
 
 ### 5.3 代码分层约定
 
@@ -714,15 +714,15 @@ boxia-agent/
 
 ### 5.4 想改某个功能，应该动哪里
 
-| 需求 | 通常要改的文件 |
-| --- | --- |
+| 需求               | 通常要改的文件                                                                                                                                                                          |
+|--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 新增一个管理端接口 | `backend/web/admin/xxx.py`（路由和请求响应模型）→ `backend/internal/application/xxx_service.py`（业务）→ `backend/internal/infrastructure/repository/postgres_xxx_repository.py`（SQL） |
-| 新增一张表 | `backend/internal/infrastructure/model/xxx.py`（ORM 模型）→ `backend/internal/domain/entity/xxx.py`（领域实体）→ 生成 Alembic 迁移 |
-| 新增一个管理端页面 | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装） |
-| 调整权限 | `backend/web/deps/auth.py`、`backend/web/admin/router.py`、前端 `RequireRole` |
-| 调整租户识别与隔离 | `backend/web/deps/tenant.py`、仓储的 `_visible` / `_owned`、`backend/tests/test_tenants.py` |
-| 调整登录/令牌逻辑 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`、前端 `src/api/client.ts`、`src/auth/AuthContext.tsx` |
-| 调整数据库结构 | 修改 ORM 模型 → `uv run alembic revision --autogenerate -m "说明"` → 检查生成的迁移 → `uv run alembic upgrade head` |
+| 新增一张表         | `backend/internal/infrastructure/model/xxx.py`（ORM 模型）→ `backend/internal/domain/entity/xxx.py`（领域实体）→ 生成 Alembic 迁移                                                      |
+| 新增一个管理端页面 | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装）                                                                     |
+| 调整权限           | `backend/web/deps/auth.py`、`backend/web/admin/router.py`、前端 `RequireRole`                                                                                                           |
+| 调整租户识别与隔离 | `backend/web/deps/tenant.py`、仓储的 `_visible` / `_owned`、`backend/tests/test_tenants.py`                                                                                             |
+| 调整登录/令牌逻辑  | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`、前端 `src/api/client.ts`、`src/auth/AuthContext.tsx`                              |
+| 调整数据库结构     | 修改 ORM 模型 → `uv run alembic revision --autogenerate -m "说明"` → 检查生成的迁移 → `uv run alembic upgrade head`                                                                     |
 
 ---
 
@@ -739,37 +739,37 @@ boxia-agent/
 
 ### 6.2 变量一览
 
-| 变量 | 默认值 | 必填 | 说明 |
-| --- | --- | --- | --- |
-| `APP_ENV` | `local` | 否 | `local`（本机调试）/ `development` / `test` / `production` |
-| `DATABASE_URL` | 无 | 是 | 形如 `postgresql+psycopg://user:pass@host:5432/db` |
-| `DATABASE_POOL_SIZE` | `10` | 否 | 连接池大小 |
-| `DATABASE_MAX_OVERFLOW` | `10` | 否 | 池溢出连接数 |
-| `DATABASE_POOL_TIMEOUT` | `10` | 否 | 获取连接超时（秒） |
-| `DATABASE_POOL_RECYCLE` | `1800` | 否 | 连接回收周期（秒） |
-| `STATEMENT_TIMEOUT_MS` | `5000` | 否 | 单条 SQL 超时 |
-| `LOCK_TIMEOUT_MS` | `3000` | 否 | 锁等待超时 |
-| `JWT_SECRET` | 无 | 是 | 签名密钥；生产需至少 32 字符且不能是示例值（`openssl rand -hex 32`） |
-| `ACCESS_TOKEN_MINUTES` | `30` | 否 | 访问令牌有效期 |
-| `REFRESH_TOKEN_DAYS` | `14` | 否 | 刷新令牌有效期 |
-| `BCRYPT_ROUNDS` | `12` | 否 | 密码哈希成本因子 |
-| `LOGIN_MAX_ATTEMPTS` | `5` | 否 | 连续失败几次后锁定 |
-| `LOGIN_LOCK_MINUTES` | `15` | 否 | 锁定时长（分钟） |
-| `ROOT_DOMAIN` | 空 | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 留空时回退 `localhost`，其余环境未配置会拒绝启动，见 6.4 |
-| `PLATFORM_ADMIN_SUBDOMAIN` | `adminsystem` | 否 | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>` |
-| `PLATFORM_NAME` | `Agent运营管理平台` | 否 | 管理端展示的平台名称 |
-| `DEFAULT_TENANT_CODE` | 空 | 否 | 访问根域名时默认进入的租户；留空则拒绝根域名访问 |
-| `ALLOW_TENANT_HEADER` | `false` | 否 | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**，开发/测试/生产开启会拒绝启动 |
-| `CORS_ORIGINS` | 空 | 否 | 逗号分隔的允许来源；生产禁止 `*` |
-| `DOCS_ENABLED` | 生产关闭 | 否 | 是否暴露 Swagger 文档 |
-| `LEGACY_API_ENABLED` | `true` | 否 | 是否保留 `/api` 兼容别名 |
-| `USER_API_TOKEN` | 空 | 否 | 用户端骨架令牌；启用时生产要求至少 32 字符 |
-| `LOG_LEVEL` | `INFO` | 否 | 日志级别 |
-| `LOG_JSON` | 生产默认 `true` | 否 | 是否输出 JSON 日志 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | 空 | 否 | 链路数据上报地址，不配则不上报 |
-| `OTEL_SERVICE_NAME` | `boxia-agent` | 否 | 链路服务名 |
-| `OTEL_TRACES_SAMPLER_RATIO` | `1.0` | 否 | 链路采样率 |
-| `WEB_CONCURRENCY` | `2`（镜像） | 否 | 后端 worker 数 |
+| 变量                          | 默认值              | 必填     | 说明                                                                                                                                                  |
+|-------------------------------|---------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `APP_ENV`                     | `local`             | 否       | `local`（本机调试）/ `development` / `test` / `production`                                                                                            |
+| `DATABASE_URL`                | 无                  | 是       | 形如 `postgresql+psycopg://user:pass@host:5432/db`                                                                                                    |
+| `DATABASE_POOL_SIZE`          | `10`                | 否       | 连接池大小                                                                                                                                            |
+| `DATABASE_MAX_OVERFLOW`       | `10`                | 否       | 池溢出连接数                                                                                                                                          |
+| `DATABASE_POOL_TIMEOUT`       | `10`                | 否       | 获取连接超时（秒）                                                                                                                                    |
+| `DATABASE_POOL_RECYCLE`       | `1800`              | 否       | 连接回收周期（秒）                                                                                                                                    |
+| `STATEMENT_TIMEOUT_MS`        | `5000`              | 否       | 单条 SQL 超时                                                                                                                                         |
+| `LOCK_TIMEOUT_MS`             | `3000`              | 否       | 锁等待超时                                                                                                                                            |
+| `JWT_SECRET`                  | 无                  | 是       | 签名密钥；生产需至少 32 字符且不能是示例值（`openssl rand -hex 32`）                                                                                  |
+| `ACCESS_TOKEN_MINUTES`        | `30`                | 否       | 访问令牌有效期                                                                                                                                        |
+| `REFRESH_TOKEN_DAYS`          | `14`                | 否       | 刷新令牌有效期                                                                                                                                        |
+| `BCRYPT_ROUNDS`               | `12`                | 否       | 密码哈希成本因子                                                                                                                                      |
+| `LOGIN_MAX_ATTEMPTS`          | `5`                 | 否       | 连续失败几次后锁定                                                                                                                                    |
+| `LOGIN_LOCK_MINUTES`          | `15`                | 否       | 锁定时长（分钟）                                                                                                                                      |
+| `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 留空时回退 `localhost`，其余环境未配置会拒绝启动，见 6.4 |
+| `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
+| `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
+| `DEFAULT_TENANT_CODE`         | 空                  | 否       | 访问根域名时默认进入的租户；留空则拒绝根域名访问                                                                                                      |
+| `ALLOW_TENANT_HEADER`         | `false`             | 否       | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**，开发/测试/生产开启会拒绝启动                                                            |
+| `CORS_ORIGINS`                | 空                  | 否       | 逗号分隔的允许来源；生产禁止 `*`                                                                                                                      |
+| `DOCS_ENABLED`                | 生产关闭            | 否       | 是否暴露 Swagger 文档                                                                                                                                 |
+| `LEGACY_API_ENABLED`          | `true`              | 否       | 是否保留 `/api` 兼容别名                                                                                                                              |
+| `USER_API_TOKEN`              | 空                  | 否       | 用户端骨架令牌；启用时生产要求至少 32 字符                                                                                                            |
+| `LOG_LEVEL`                   | `INFO`              | 否       | 日志级别                                                                                                                                              |
+| `LOG_JSON`                    | 生产默认 `true`     | 否       | 是否输出 JSON 日志                                                                                                                                    |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 空                  | 否       | 链路数据上报地址，不配则不上报                                                                                                                        |
+| `OTEL_SERVICE_NAME`           | `boxia-agent`       | 否       | 链路服务名                                                                                                                                            |
+| `OTEL_TRACES_SAMPLER_RATIO`   | `1.0`               | 否       | 链路采样率                                                                                                                                            |
+| `WEB_CONCURRENCY`             | `2`（镜像）         | 否       | 后端 worker 数                                                                                                                                        |
 
 > 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
 
@@ -792,31 +792,31 @@ boxia-agent/
 
 **作用域判定**
 
-| 访问地址 | 作用域 | 能力 |
-| --- | --- | --- |
-| `adminsystem.example.com` | 产品级平台 | 跨租户管理、创建/停用租户、维护产品级智能体与资源 |
-| `acme.example.com` | 租户 `acme` | 维护本租户账号与资源；可使用产品级资源，但不能修改 |
-| `example.com` | 根域名 | 配置了 `DEFAULT_TENANT_CODE` 则进入该租户，否则返回 404 |
+| 访问地址                  | 作用域      | 能力                                                    |
+|---------------------------|-------------|---------------------------------------------------------|
+| `adminsystem.example.com` | 产品级平台  | 跨租户管理、创建/停用租户、维护产品级智能体与资源       |
+| `acme.example.com`        | 租户 `acme` | 维护本租户账号与资源；可使用产品级资源，但不能修改      |
+| `example.com`             | 根域名      | 配置了 `DEFAULT_TENANT_CODE` 则进入该租户，否则返回 404 |
 
 **域名是作用域的唯一事实来源。** 部署环境必须配置 `ROOT_DOMAIN`，只能通过二级域名（`adminsystem.<根域名>` 或 `<租户编码>.<根域名>`）访问；部署环境中的 `localhost`、回环地址、未知域名与多级子域名一律返回 404，**不再静默回退到产品级平台**。`X-Tenant-Code` 请求头与 `?tenant=` 参数只在 `local` 环境、且 `ALLOW_TENANT_HEADER=true` 时生效，并且只在回环/本机主机上生效；访问 `acme.localhost` 时即使带了其他租户的请求头，也以域名为准。
 
 本地不配置 `ROOT_DOMAIN` 时自动回退 `localhost`，因此可以直接验证真实子域名：
 
-| 本地访问地址 | 作用域 | 解析方式 |
-| --- | --- | --- |
-| `http://localhost:5173` | 产品级平台（无请求头时） | 默认兜底 `resolution=default` |
-| `http://localhost:5173/login?tenant=acme` | 租户 `acme` | 请求头模式 `resolution=header` |
-| `http://adminsystem.localhost:5173` | 产品级平台 | 域名 `resolution=host` |
-| `http://acme.localhost:5173` | 租户 `acme` | 域名 `resolution=host` |
+| 本地访问地址                              | 作用域                   | 解析方式                       |
+|-------------------------------------------|--------------------------|--------------------------------|
+| `http://localhost:5173`                   | 产品级平台（无请求头时） | 默认兜底 `resolution=default`  |
+| `http://localhost:5173/login?tenant=acme` | 租户 `acme`              | 请求头模式 `resolution=header` |
+| `http://adminsystem.localhost:5173`       | 产品级平台               | 域名 `resolution=host`         |
+| `http://acme.localhost:5173`              | 租户 `acme`              | 域名 `resolution=host`         |
 
 **多环境策略**
 
-| 环境 | `APP_ENV` | 根域名 | 平台地址 | 租户地址 | 租户切换方式 |
-| --- | --- | --- | --- | --- | --- |
-| 本地调试 | `local` | 可留空（回退 `localhost`） | `adminsystem.localhost:5173` | `acme.localhost:5173` | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
-| 开发环境部署 | `development` | 必填，如 `dev.example.com` | `adminsystem.dev.example.com` | `acme.dev.example.com` | 仅二级域名 |
-| 测试环境部署 | `test` | 必填，如 `test.example.com` | `adminsystem.test.example.com` | `acme.test.example.com` | 仅二级域名 |
-| 线上环境 | `production` | 必填，如 `example.com` | `adminsystem.example.com` | `acme.example.com` | 仅二级域名 |
+| 环境         | `APP_ENV`     | 根域名                      | 平台地址                       | 租户地址                | 租户切换方式                                  |
+|--------------|---------------|-----------------------------|--------------------------------|-------------------------|-----------------------------------------------|
+| 本地调试     | `local`       | 可留空（回退 `localhost`）  | `adminsystem.localhost:5173`   | `acme.localhost:5173`   | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
+| 开发环境部署 | `development` | 必填，如 `dev.example.com`  | `adminsystem.dev.example.com`  | `acme.dev.example.com`  | 仅二级域名                                    |
+| 测试环境部署 | `test`        | 必填，如 `test.example.com` | `adminsystem.test.example.com` | `acme.test.example.com` | 仅二级域名                                    |
+| 线上环境     | `production`  | 必填，如 `example.com`      | `adminsystem.example.com`      | `acme.example.com`      | 仅二级域名                                    |
 
 部署环境只认域名：前端在服务端报告 `tenant_switch_mode=none` 时会清掉本地残留的租户覆盖值；`?tenant=` 参数会被直接忽略并移出地址栏，不会误清登录态。开发/测试环境如确需临时联调请求头切换，仍需把 `APP_ENV` 改为 `local`，不要在生产打开该能力。
 
@@ -881,11 +881,11 @@ boxia-agent/
 
 ### 7.3 权限（RBAC）
 
-| 角色 | 读资源 | 写资源 | 管理员管理 | 审计查询 |
-| --- | --- | --- | --- | --- |
-| `superadmin` | 是 | 是 | 是 | 是 |
-| `admin` | 是 | 是 | 否 | 否 |
-| `viewer` | 是 | 否 | 否 | 否 |
+| 角色         | 读资源 | 写资源 | 管理员管理 | 审计查询 |
+|--------------|--------|--------|------------|----------|
+| `superadmin` | 是     | 是     | 是         | 是       |
+| `admin`      | 是     | 是     | 否         | 否       |
+| `viewer`     | 是     | 否     | 否         | 否       |
 
 每次请求都以数据库中的实时角色和状态为准，不信任令牌里的旧角色信息。
 
@@ -893,11 +893,11 @@ boxia-agent/
 
 以下操作会写入 `audit_logs`：
 
-| 类别 | action |
-| --- | --- |
-| 认证 | `auth.login`、`auth.login_failed`、`auth.refresh_replay`、`auth.logout`、`auth.password_changed` |
-| 管理员 | `admin_user.created`、`admin_user.updated`、`admin_user.password_reset` |
-| 租户（仅产品级平台） | `tenant.created`、`tenant.updated` |
+| 类别                 | action                                                                                           |
+|----------------------|--------------------------------------------------------------------------------------------------|
+| 认证                 | `auth.login`、`auth.login_failed`、`auth.refresh_replay`、`auth.logout`、`auth.password_changed` |
+| 管理员               | `admin_user.created`、`admin_user.updated`、`admin_user.password_reset`                          |
+| 租户（仅产品级平台） | `tenant.created`、`tenant.updated`                                                               |
 
 每条记录包含操作者、动作、资源、`request_id`、IP、User-Agent、作用域（`tenant_id`）和详情，便于追溯。登录失败、登出、改密也会写入归属的作用域：租户账号的审计只在租户内可见，产品级账号可以查看全部。
 
@@ -942,45 +942,45 @@ Authorization: Bearer <access_token>
 
 ### 8.2 认证接口
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| POST | `/admin/auth/login` | 登录，返回 access/refresh、有效期和用户信息 |
-| POST | `/admin/auth/refresh` | 用 refresh 换新令牌 |
-| POST | `/admin/auth/logout` | 登出并撤销当前会话，返回 204 |
-| POST | `/admin/auth/password` | 修改密码并撤销全部会话，返回 204 |
-| GET | `/admin/auth/me` | 当前管理员信息（含角色） |
-| GET | `/admin/context` | 当前登录账号的作用域、租户与域名配置 |
+| 方法 | 路径                   | 说明                                        |
+|------|------------------------|---------------------------------------------|
+| POST | `/admin/auth/login`    | 登录，返回 access/refresh、有效期和用户信息 |
+| POST | `/admin/auth/refresh`  | 用 refresh 换新令牌                         |
+| POST | `/admin/auth/logout`   | 登出并撤销当前会话，返回 204                |
+| POST | `/admin/auth/password` | 修改密码并撤销全部会话，返回 204            |
+| GET  | `/admin/auth/me`       | 当前管理员信息（含角色）                    |
+| GET  | `/admin/context`       | 当前登录账号的作用域、租户与域名配置        |
 
 匿名接口（登录页使用）：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/public/context` | 按当前域名返回产品级/租户级模式与平台名称 |
-| GET | `/public/tenants` | 仅 `local` 环境返回可选租户列表；开发/测试/线上返回 403 |
+| 方法 | 路径              | 说明                                                    |
+|------|-------------------|---------------------------------------------------------|
+| GET  | `/public/context` | 按当前域名返回产品级/租户级模式与平台名称               |
+| GET  | `/public/tenants` | 仅 `local` 环境返回可选租户列表；开发/测试/线上返回 403 |
 
 `/public/context` 与 `/admin/context` 的关键字段：
 
-| 字段 | 说明 |
-| --- | --- |
-| `scope` | `platform`（产品级）或 `tenant`（租户级） |
-| `tenant` | 当前租户信息；产品级为 `null` |
-| `app_env` | `local` / `development` / `test` / `production` |
-| `tenant_resolution` | 作用域来源：`host`（域名）/ `header`（本地请求头）/ `default`（本地兜底） |
-| `tenant_switch_mode` | 前端切换方式：`none`（仅域名）/ `header`（请求头）/ `host`（子域名跳转） |
-| `platform_admin_host` | 产品级平台完整主机名，如 `adminsystem.dev.example.com` |
-| `root_domain`、`platform_admin_subdomain`、`platform_name` | 当前环境的根域名、平台子域名与展示名称 |
+| 字段                                                       | 说明                                                                      |
+|------------------------------------------------------------|---------------------------------------------------------------------------|
+| `scope`                                                    | `platform`（产品级）或 `tenant`（租户级）                                 |
+| `tenant`                                                   | 当前租户信息；产品级为 `null`                                             |
+| `app_env`                                                  | `local` / `development` / `test` / `production`                           |
+| `tenant_resolution`                                        | 作用域来源：`host`（域名）/ `header`（本地请求头）/ `default`（本地兜底） |
+| `tenant_switch_mode`                                       | 前端切换方式：`none`（仅域名）/ `header`（请求头）/ `host`（子域名跳转）  |
+| `platform_admin_host`                                      | 产品级平台完整主机名，如 `adminsystem.dev.example.com`                    |
+| `root_domain`、`platform_admin_subdomain`、`platform_name` | 当前环境的根域名、平台子域名与展示名称                                    |
 
 ### 8.3 资源接口
 
 `{resource}` 可以是 `agents`、`skills`、`tools`、`components`、`prompts`：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/admin/{resource}` | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled` |
-| POST | `/admin/{resource}` | 创建，返回 201（viewer 返回 403） |
-| GET | `/admin/{resource}/{id}` | 详情 |
-| PUT | `/admin/{resource}/{id}` | 全量更新（viewer 返回 403） |
-| DELETE | `/admin/{resource}/{id}` | 删除，返回 204（viewer 返回 403） |
+| 方法   | 路径                     | 说明                                                                |
+|--------|--------------------------|---------------------------------------------------------------------|
+| GET    | `/admin/{resource}`      | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled` |
+| POST   | `/admin/{resource}`      | 创建，返回 201（viewer 返回 403）                                   |
+| GET    | `/admin/{resource}/{id}` | 详情                                                                |
+| PUT    | `/admin/{resource}/{id}` | 全量更新（viewer 返回 403）                                         |
+| DELETE | `/admin/{resource}/{id}` | 删除，返回 204（viewer 返回 403）                                   |
 
 分页响应格式：
 
@@ -998,22 +998,22 @@ Authorization: Bearer <access_token>
 
 ### 8.4 管理员与审计（仅 superadmin）
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/admin/users` | 管理员列表（关键字搜索、分页） |
-| POST | `/admin/users` | 创建管理员，返回 201 |
-| PATCH | `/admin/users/{id}` | 修改角色 / 显示名 / 启用状态 |
-| POST | `/admin/users/{id}/password` | 重置密码，返回 204 |
-| GET | `/admin/audit-logs` | 审计查询（按时间、用户、动作筛选） |
+| 方法  | 路径                         | 说明                               |
+|-------|------------------------------|------------------------------------|
+| GET   | `/admin/users`               | 管理员列表（关键字搜索、分页）     |
+| POST  | `/admin/users`               | 创建管理员，返回 201               |
+| PATCH | `/admin/users/{id}`          | 修改角色 / 显示名 / 启用状态       |
+| POST  | `/admin/users/{id}/password` | 重置密码，返回 204                 |
+| GET   | `/admin/audit-logs`          | 审计查询（按时间、用户、动作筛选） |
 
 租户管理（仅产品级平台 superadmin）：
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/admin/tenants` | 租户分页列表，支持 `keyword` |
-| POST | `/admin/tenants` | 创建租户并初始化租户管理员，返回 201 |
-| GET | `/admin/tenants/{id}` | 租户详情 |
-| PATCH | `/admin/tenants/{id}` | 修改租户名称或启用状态 |
+| 方法  | 路径                  | 说明                                 |
+|-------|-----------------------|--------------------------------------|
+| GET   | `/admin/tenants`      | 租户分页列表，支持 `keyword`         |
+| POST  | `/admin/tenants`      | 创建租户并初始化租户管理员，返回 201 |
+| GET   | `/admin/tenants/{id}` | 租户详情                             |
+| PATCH | `/admin/tenants/{id}` | 修改租户名称或启用状态               |
 
 管理员列表额外支持 `tenant_id` 与 `all_tenants=true`：
 
@@ -1023,11 +1023,11 @@ Authorization: Bearer <access_token>
 
 ### 8.5 运维端点
 
-| 方法 | 路径 | 说明 |
-| --- | --- | --- |
-| GET | `/health/live` | 进程是否存活 |
-| GET | `/health/ready` | 数据库连通且迁移版本与代码一致；失败返回 503 |
-| GET | `/metrics` | Prometheus 指标；生产由 Nginx 拒绝外部访问 |
+| 方法 | 路径            | 说明                                         |
+|------|-----------------|----------------------------------------------|
+| GET  | `/health/live`  | 进程是否存活                                 |
+| GET  | `/health/ready` | 数据库连通且迁移版本与代码一致；失败返回 503 |
+| GET  | `/metrics`      | Prometheus 指标；生产由 Nginx 拒绝外部访问   |
 
 ### 8.6 调用示例（Git Bash）
 
@@ -1065,17 +1065,17 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 { "detail": "错误说明", "code": "ERROR_CODE", "request_id": "..." }
 ```
 
-| 状态码 | code | 含义 |
-| --- | --- | --- |
-| 400 | `BAD_REQUEST` | 请求不合法 |
-| 401 | `UNAUTHORIZED` | 未登录，或令牌无效/过期/已撤销 |
-| 403 | `FORBIDDEN` | 角色不足或账号被禁用 |
-| 404 | `NOT_FOUND` | 资源不存在 |
-| 409 | `CONFLICT` | 名称重复或唯一约束冲突 |
-| 422 | `VALIDATION_ERROR` | 参数或业务校验失败（含 `errors` 明细） |
-| 429 | `ACCOUNT_LOCKED` / `RATE_LIMITED` | 登录锁定或触发限流，含 `Retry-After` |
-| 500 | `INTERNAL_ERROR` | 服务异常，只返回通用文案，堆栈只进日志 |
-| 503 | `SERVICE_UNAVAILABLE` | 依赖不可用（如就绪检查失败） |
+| 状态码 | code                              | 含义                                   |
+|--------|-----------------------------------|----------------------------------------|
+| 400    | `BAD_REQUEST`                     | 请求不合法                             |
+| 401    | `UNAUTHORIZED`                    | 未登录，或令牌无效/过期/已撤销         |
+| 403    | `FORBIDDEN`                       | 角色不足或账号被禁用                   |
+| 404    | `NOT_FOUND`                       | 资源不存在                             |
+| 409    | `CONFLICT`                        | 名称重复或唯一约束冲突                 |
+| 422    | `VALIDATION_ERROR`                | 参数或业务校验失败（含 `errors` 明细） |
+| 429    | `ACCOUNT_LOCKED` / `RATE_LIMITED` | 登录锁定或触发限流，含 `Retry-After`   |
+| 500    | `INTERNAL_ERROR`                  | 服务异常，只返回通用文案，堆栈只进日志 |
+| 503    | `SERVICE_UNAVAILABLE`             | 依赖不可用（如就绪检查失败）           |
 
 ---
 
@@ -1083,16 +1083,16 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 
 ### 9.1 表结构
 
-| 表 | 说明 |
-| --- | --- |
-| `tenants` | 租户编码（即子域名前缀）、名称、启用状态 |
-| `admin_users` | 管理员账号、角色、锁定状态、`token_version`、首登改密标记；`tenant_id=NULL` 为产品级账号 |
-| `admin_refresh_tokens` | Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA |
-| `audit_logs` | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
-| `agents` | 智能体，`config` 为 JSONB 完整配置 |
-| `skills` / `tools` / `components` / `prompts` | 四类资源表 |
-| `agent_tools` / `agent_skills` | 智能体与工具/技能的关联表，级联删除 |
-| `alembic_version` | 当前迁移版本 |
+| 表                                            | 说明                                                                                     |
+|-----------------------------------------------|------------------------------------------------------------------------------------------|
+| `tenants`                                     | 租户编码（即子域名前缀）、名称、启用状态                                                 |
+| `admin_users`                                 | 管理员账号、角色、锁定状态、`token_version`、首登改密标记；`tenant_id=NULL` 为产品级账号 |
+| `admin_refresh_tokens`                        | Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA                                         |
+| `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
+| `agents`                                      | 智能体，`config` 为 JSONB 完整配置                                                       |
+| `skills` / `tools` / `components` / `prompts` | 四类资源表                                                                               |
+| `agent_tools` / `agent_skills`                | 智能体与工具/技能的关联表，级联删除                                                      |
+| `alembic_version`                             | 当前迁移版本                                                                             |
 
 约定：
 
@@ -1140,17 +1140,17 @@ uv run python -m scripts.seed_demo
 
 ## 10. 管理端功能
 
-| 模块 | 能力 |
-| --- | --- |
-| 登录 | 账号密码登录、本地作用域切换（回环主机用下拉框/`?tenant=`，子域名主机跳转对应域名；部署环境仅域名）、环境与解析来源标识、锁定提示、登录后回跳、首次登录强制改密 |
-| 会话 | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销 |
-| 智能体管理 | 搜索、状态筛选、分页、新建、配置、启用/停用、删除 |
-| 智能体配置 | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件 |
-| 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读 |
-| 管理员管理 | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号 |
-| 租户管理 | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin） |
-| 多租户标识 | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」 |
-| 健壮性 | 路由懒加载、错误边界、404 页面、请求超时与重试 |
+| 模块                        | 能力                                                                                                                                                            |
+|-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 登录                        | 账号密码登录、本地作用域切换（回环主机用下拉框/`?tenant=`，子域名主机跳转对应域名；部署环境仅域名）、环境与解析来源标识、锁定提示、登录后回跳、首次登录强制改密 |
+| 会话                        | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销                                                                                               |
+| 智能体管理                  | 搜索、状态筛选、分页、新建、配置、启用/停用、删除                                                                                                               |
+| 智能体配置                  | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件                                                        |
+| 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读                                                                                                                     |
+| 管理员管理                  | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号                                                                            |
+| 租户管理                    | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin）                                                                                                        |
+| 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |
+| 健壮性                      | 路由懒加载、错误边界、404 页面、请求超时与重试                                                                                                                  |
 
 页面路由：
 
@@ -1434,16 +1434,16 @@ alembic upgrade head
 
 ### 13.4 技术选型与理由
 
-| 选择 | 理由 | 代价/替代方案 |
-| --- | --- | --- |
-| FastAPI | 类型提示 + Pydantic 自动校验、自动生成 OpenAPI、开发效率高 | 同步 ORM 需要线程池；纯高并发 IO 场景可换 async 或 Go |
-| PostgreSQL | JSONB 适合存智能体这类结构多变的配置；事务、索引、`pg_trgm` 模糊搜索都成熟 | 比 MySQL 运维门槛略高 |
-| SQLAlchemy 2.0 | 成熟、类型友好、迁移生态完善 | 同步模型在极高并发下需要调连接池 |
-| DDD 分层 | 业务规则与 HTTP/ORM 解耦，便于测试和演进 | 文件数量增加，小项目可能显得重 |
-| 短 Access + 可撤销 Refresh | 兼顾性能和可撤销性；Access 不落 localStorage，降低 XSS 风险 | Refresh 仍存 localStorage，需要 CSP、轮换和重放检测兜底 |
-| Nginx 做前端与反代 | 静态资源、SPA 回退、限流、安全头一次解决 | 多一层需要维护 |
-| 多租户：共享库 + `tenant_id` 行级隔离 | 一套代码、一套数据库，迁移和升级只做一次，运维成本低 | 查询必须始终带作用域条件；强合规或超大租户可演进为独立 Schema/独立库 |
-| Docker Compose | 小团队部署成本低，服务边界清晰 | 大规模编排可迁移到 Kubernetes |
+| 选择                                  | 理由                                                                       | 代价/替代方案                                                        |
+|---------------------------------------|----------------------------------------------------------------------------|----------------------------------------------------------------------|
+| FastAPI                               | 类型提示 + Pydantic 自动校验、自动生成 OpenAPI、开发效率高                 | 同步 ORM 需要线程池；纯高并发 IO 场景可换 async 或 Go                |
+| PostgreSQL                            | JSONB 适合存智能体这类结构多变的配置；事务、索引、`pg_trgm` 模糊搜索都成熟 | 比 MySQL 运维门槛略高                                                |
+| SQLAlchemy 2.0                        | 成熟、类型友好、迁移生态完善                                               | 同步模型在极高并发下需要调连接池                                     |
+| DDD 分层                              | 业务规则与 HTTP/ORM 解耦，便于测试和演进                                   | 文件数量增加，小项目可能显得重                                       |
+| 短 Access + 可撤销 Refresh            | 兼顾性能和可撤销性；Access 不落 localStorage，降低 XSS 风险                | Refresh 仍存 localStorage，需要 CSP、轮换和重放检测兜底              |
+| Nginx 做前端与反代                    | 静态资源、SPA 回退、限流、安全头一次解决                                   | 多一层需要维护                                                       |
+| 多租户：共享库 + `tenant_id` 行级隔离 | 一套代码、一套数据库，迁移和升级只做一次，运维成本低                       | 查询必须始终带作用域条件；强合规或超大租户可演进为独立 Schema/独立库 |
+| Docker Compose                        | 小团队部署成本低，服务边界清晰                                             | 大规模编排可迁移到 Kubernetes                                        |
 
 ### 13.5 五个可讲的亮点
 
@@ -1481,13 +1481,13 @@ alembic upgrade head
 
 ### 13.6 难点与取舍
 
-| 难点 | 做法 | 取舍 |
-| --- | --- | --- |
-| 令牌既要安全又要无感刷新 | 短 Access + 轮换 Refresh + 请求排队重放 | 实现复杂，前端需要处理并发刷新 |
-| 事务边界清晰 | UnitOfWork + 仓储只 flush | 代码层级增多 |
-| 迁移安全 | advisory lock + 就绪检查 + CI 漂移检查 | 上线流程要求先迁移后启动 |
-| 权限实时生效 | 每次请求查数据库校验角色/状态 | 每个请求多一次查询，用索引和连接池控制成本 |
-| 前后端分离部署 | Nginx 同源反代 `/api` | 需要维护 Nginx 配置和 SPA 回退 |
+| 难点                     | 做法                                    | 取舍                                       |
+|--------------------------|-----------------------------------------|--------------------------------------------|
+| 令牌既要安全又要无感刷新 | 短 Access + 轮换 Refresh + 请求排队重放 | 实现复杂，前端需要处理并发刷新             |
+| 事务边界清晰             | UnitOfWork + 仓储只 flush               | 代码层级增多                               |
+| 迁移安全                 | advisory lock + 就绪检查 + CI 漂移检查  | 上线流程要求先迁移后启动                   |
+| 权限实时生效             | 每次请求查数据库校验角色/状态           | 每个请求多一次查询，用索引和连接池控制成本 |
+| 前后端分离部署           | Nginx 同源反代 `/api`                   | 需要维护 Nginx 配置和 SPA 回退             |
 
 ### 13.7 高频面试问答
 
@@ -1553,17 +1553,17 @@ Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个
 
 ### 13.8 面试时打开哪些文件
 
-| 想讲的内容 | 打开 |
-| --- | --- |
-| 应用装配、中间件顺序 | `backend/web/app.py` |
-| 登录、刷新、撤销 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py` |
-| 鉴权与 RBAC | `backend/web/deps/auth.py`、`backend/web/admin/router.py` |
+| 想讲的内容                 | 打开                                                                                                                               |
+|----------------------------|------------------------------------------------------------------------------------------------------------------------------------|
+| 应用装配、中间件顺序       | `backend/web/app.py`                                                                                                               |
+| 登录、刷新、撤销           | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`                               |
+| 鉴权与 RBAC                | `backend/web/deps/auth.py`、`backend/web/admin/router.py`                                                                          |
 | 多租户作用域解析与租户管理 | `backend/web/deps/tenant.py`、`backend/internal/application/tenant_service.py`、`backend/migrations/versions/0004_multi_tenant.py` |
-| 事务与仓储 | `backend/internal/infrastructure/model/uow.py`、`backend/internal/infrastructure/repository/` |
-| 迁移与就绪检查 | `backend/migrations/env.py`、`backend/web/health.py` |
-| 前端无感刷新 | `frontend/admin/src/api/client.ts`、`frontend/admin/src/auth/AuthContext.tsx` |
-| 生产反代与限流 | `frontend/admin/nginx/default.conf` |
-| 生产编排与容器安全 | `ops/docker-compose.yml`、`backend/Dockerfile` |
+| 事务与仓储                 | `backend/internal/infrastructure/model/uow.py`、`backend/internal/infrastructure/repository/`                                      |
+| 迁移与就绪检查             | `backend/migrations/env.py`、`backend/web/health.py`                                                                               |
+| 前端无感刷新               | `frontend/admin/src/api/client.ts`、`frontend/admin/src/auth/AuthContext.tsx`                                                      |
+| 生产反代与限流             | `frontend/admin/nginx/default.conf`                                                                                                |
+| 生产编排与容器安全         | `ops/docker-compose.yml`、`backend/Dockerfile`                                                                                     |
 
 ### 13.9 面试演示建议
 
@@ -1601,15 +1601,15 @@ backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
 
 ### 14.2 服务器准备
 
-| 项目 | 建议 |
-| --- | --- |
-| 操作系统 | Ubuntu 22.04 / 24.04 LTS 或同类 Linux |
-| CPU / 内存 | 最低 2 核 4 GB；建议 4 核 8 GB |
-| 磁盘 | 40 GB 以上，数据库单独规划增长 |
-| 软件 | Docker Engine 24+、Docker Compose v2、Git |
-| 网络 | 安全组/防火墙只开放 22、80、443；22 建议限制来源 IP |
-| 域名 | 准备一个域名并解析到服务器公网 IP |
-| 时间同步 | 开启 NTP，避免令牌和日志时间异常 |
+| 项目       | 建议                                                |
+|------------|-----------------------------------------------------|
+| 操作系统   | Ubuntu 22.04 / 24.04 LTS 或同类 Linux               |
+| CPU / 内存 | 最低 2 核 4 GB；建议 4 核 8 GB                      |
+| 磁盘       | 40 GB 以上，数据库单独规划增长                      |
+| 软件       | Docker Engine 24+、Docker Compose v2、Git           |
+| 网络       | 安全组/防火墙只开放 22、80、443；22 建议限制来源 IP |
+| 域名       | 准备一个域名并解析到服务器公网 IP                   |
+| 时间同步   | 开启 NTP，避免令牌和日志时间异常                    |
 
 ### 14.3 准备环境变量与密钥
 
@@ -1682,12 +1682,12 @@ ENV_FILE=.env.test docker compose -f ops/docker-compose.yml up -d --build
 
 服务说明：
 
-| 服务 | 作用 | 对外 |
-| --- | --- | --- |
-| `db` | PostgreSQL 17，数据存 volume | 否 |
-| `migrate` | 一次性执行 `alembic upgrade head`，成功后退出 | 否 |
-| `backend` | FastAPI，非 root、只读根文件系统 | 否 |
-| `frontend` | Nginx 静态站点 + `/api` 反代 | 是（`HTTP_PORT:8080`） |
+| 服务       | 作用                                          | 对外                   |
+|------------|-----------------------------------------------|------------------------|
+| `db`       | PostgreSQL 17，数据存 volume                  | 否                     |
+| `migrate`  | 一次性执行 `alembic upgrade head`，成功后退出 | 否                     |
+| `backend`  | FastAPI，非 root、只读根文件系统              | 否                     |
+| `frontend` | Nginx 静态站点 + `/api` 反代                  | 是（`HTTP_PORT:8080`） |
 
 除一次性执行的 `migrate` 外，其他服务都配置了健康检查；所有服务都有日志轮转和内存上限。
 
@@ -1861,22 +1861,22 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 
 ### 14.13 生产常见问题
 
-| 现象 | 排查方向 |
-| --- | --- |
-| 访问域名 502 | `frontend` 容器是否健康；`backend` 是否启动；Nginx 日志 |
-| `/health/ready` 返回 503 `migration_outdated` | 查看 `migrate` 服务日志，确认迁移是否成功 |
-| 登录返回 429 | 触发登录限流或账号锁定；查看 `Retry-After` |
-| 容器启动后立即退出 | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库连不上 |
-| 只读文件系统报错 | 应用需要写入临时目录时，确认 Compose 已挂载 `tmpfs` |
-| 磁盘占满 | 检查数据库 volume、备份目录和容器日志轮转 |
-| 时间不对导致令牌异常 | 检查服务器 NTP 时间同步 |
-| 租户子域名返回 404 / 403 | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用 |
-| 未知域名也返回 404 | 这是预期行为：部署环境只认 `adminsystem.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
-| 启动失败：`必须配置 ROOT_DOMAIN` | 除 `local` 外，`development` / `test` / `production` 都必须配置完整域名 |
-| 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机 |
-| 所有子域名都进入平台作用域 | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名 |
-| 本地 `acme.localhost` 打不开 | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理） |
-| 登录提示账号不属于该租户 | 账号只能登录其所属作用域：产品级账号走 `adminsystem`，租户账号走本租户子域名 |
+| 现象                                                  | 排查方向                                                                                                                                     |
+|-------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
+| 访问域名 502                                          | `frontend` 容器是否健康；`backend` 是否启动；Nginx 日志                                                                                      |
+| `/health/ready` 返回 503 `migration_outdated`         | 查看 `migrate` 服务日志，确认迁移是否成功                                                                                                    |
+| 登录返回 429                                          | 触发登录限流或账号锁定；查看 `Retry-After`                                                                                                   |
+| 容器启动后立即退出                                    | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库连不上                                                                         |
+| 只读文件系统报错                                      | 应用需要写入临时目录时，确认 Compose 已挂载 `tmpfs`                                                                                          |
+| 磁盘占满                                              | 检查数据库 volume、备份目录和容器日志轮转                                                                                                    |
+| 时间不对导致令牌异常                                  | 检查服务器 NTP 时间同步                                                                                                                      |
+| 租户子域名返回 404 / 403                              | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用                                          |
+| 未知域名也返回 404                                    | 这是预期行为：部署环境只认 `adminsystem.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
+| 启动失败：`必须配置 ROOT_DOMAIN`                      | 除 `local` 外，`development` / `test` / `production` 都必须配置完整域名                                                                      |
+| 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机                                                                               |
+| 所有子域名都进入平台作用域                            | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名                                                            |
+| 本地 `acme.localhost` 打不开                          | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理）                                               |
+| 登录提示账号不属于该租户                              | 账号只能登录其所属作用域：产品级账号走 `adminsystem`，租户账号走本租户子域名                                                                 |
 
 ---
 
