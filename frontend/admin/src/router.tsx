@@ -15,6 +15,7 @@ const ToolsPage = lazy(() => import('./pages/ToolsPage'))
 const ComponentsPage = lazy(() => import('./pages/ComponentsPage'))
 const PromptsPage = lazy(() => import('./pages/PromptsPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const TenantsPage = lazy(() => import('./pages/TenantsPage'))
 
 export default function AppRouter() {
   return (
@@ -50,6 +51,14 @@ export default function AppRouter() {
               element={
                 <RequireRole role="superadmin">
                   <UsersPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/tenants"
+              element={
+                <RequireRole role="superadmin" platformOnly>
+                  <TenantsPage />
                 </RequireRole>
               }
             />

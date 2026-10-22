@@ -10,6 +10,7 @@ import './index.css'
 import { AuthProvider } from './auth/AuthContext'
 import AppErrorBoundary from './components/AppErrorBoundary'
 import AppRouter from './router'
+import { TenantGate, TenantProvider } from './tenant/TenantContext'
 
 dayjs.locale('zh-cn')
 
@@ -26,11 +27,15 @@ createRoot(document.getElementById('root')!).render(
       }}
     >
       <AntdApp>
-        <AuthProvider>
-          <AppErrorBoundary>
-            <AppRouter />
-          </AppErrorBoundary>
-        </AuthProvider>
+        <TenantProvider>
+          <TenantGate>
+            <AuthProvider>
+              <AppErrorBoundary>
+                <AppRouter />
+              </AppErrorBoundary>
+            </AuthProvider>
+          </TenantGate>
+        </TenantProvider>
       </AntdApp>
     </ConfigProvider>
   </StrictMode>,

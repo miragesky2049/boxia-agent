@@ -11,6 +11,7 @@ from web.admin.schemas import (
 )
 from web.deps.auth import AdminAuthDep
 from web.deps.services import AuthServiceDep
+from web.deps.tenant import RequestContextDep
 
 login_router = APIRouter(prefix="/admin/auth", tags=["admin-auth"])
 
@@ -22,10 +23,21 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
 
 
 @login_router.post("/login", response_model=LoginResponse)
-def login(payload: LoginRequest, request: Request, service: AuthServiceDep) -> LoginResponse:
-    """管理员登录，返回访问令牌与刷新令牌。"""
+def login(
+    payload: LoginRequest,
+    request: Request,
+    service: AuthServiceDep,
+    context: RequestContextDep,
+) -> LoginResponse:
+    """管理员登录，仅校验当前子域名作用域内的账号。"""
     ip, user_agent = _client_meta(request)
-    pair = service.login(payload.username, payload.password, ip=ip, user_agent=user_agent)
+    pair = service.login(
+        payload.username,
+        payload.password,
+        tenant_id=context.tenant_id,
+        ip=ip,
+        user_agent=user_agent,
+    )
     return LoginResponse(
         access_token=pair.access_token,
         expires_in=pair.expires_in,
@@ -36,10 +48,20 @@ def login(payload: LoginRequest, request: Request, service: AuthServiceDep) -> L
 
 
 @login_router.post("/refresh", response_model=LoginResponse)
-def refresh(payload: RefreshRequest, request: Request, service: AuthServiceDep) -> LoginResponse:
-    """轮换刷新令牌并签发新的访问令牌。"""
+def refresh(
+    payload: RefreshRequest,
+    request: Request,
+    service: AuthServiceDep,
+    context: RequestContextDep,
+) -> LoginResponse:
+    """轮换刷新令牌，令牌归属作用域必须与当前子域名一致。"""
     ip, user_agent = _client_meta(request)
-    pair = service.refresh(payload.refresh_token, ip=ip, user_agent=user_agent)
+    pair = service.refresh(
+        payload.refresh_token,
+        tenant_id=context.tenant_id,
+        ip=ip,
+        user_agent=user_agent,
+    )
     return LoginResponse(
         access_token=pair.access_token,
         expires_in=pair.expires_in,

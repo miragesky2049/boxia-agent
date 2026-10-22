@@ -7,6 +7,48 @@ export interface PageResult<T> {
 
 export type AdminRole = 'superadmin' | 'admin' | 'viewer'
 
+export type Scope = 'platform' | 'tenant'
+
+export interface Tenant {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PublicContext {
+  scope: Scope
+  tenant: Tenant | null
+  root_domain: string
+  platform_admin_subdomain: string
+  platform_name: string
+  dev_tenant_switch: boolean
+}
+
+export interface AdminContext {
+  scope: Scope
+  tenant: Tenant | null
+  user: AdminUser
+  root_domain: string
+  platform_admin_subdomain: string
+  platform_name: string
+}
+
+export interface TenantCreatePayload {
+  code: string
+  name: string
+  admin_username: string
+  admin_password: string
+  admin_display_name?: string
+}
+
+export interface TenantUpdatePayload {
+  name?: string
+  is_active?: boolean
+}
+
 export interface AdminUser {
   id: number
   username: string
@@ -14,6 +56,8 @@ export interface AdminUser {
   role: AdminRole
   is_active: boolean
   must_change_password: boolean
+  tenant_id: number | null
+  is_platform: boolean
   created_at: string
   updated_at: string
 }
@@ -32,6 +76,7 @@ export interface AdminUserCreatePayload {
   password: string
   display_name: string
   role: AdminRole
+  tenant_id?: number | null
 }
 
 export interface AdminUserUpdatePayload {
@@ -59,6 +104,8 @@ export interface ResourceBase {
   name: string
   description: string
   is_enabled: boolean
+  tenant_id: number | null
+  is_platform: boolean
   created_at: string
   updated_at: string
 }

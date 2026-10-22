@@ -1,4 +1,4 @@
-"""写入本地演示数据（仅开发/演示环境，幂等）。"""
+"""写入本地演示数据（仅开发/演示环境，幂等；资源归属产品级平台）。"""
 
 import sys
 
@@ -35,7 +35,10 @@ def main() -> int:
                 for row in rows:
                     name = row[0]
                     exists = conn.execute(
-                        text(f"SELECT 1 FROM {table} WHERE lower(name) = lower(:name)"),
+                        text(
+                            f"SELECT 1 FROM {table} "
+                            "WHERE lower(name) = lower(:name) AND tenant_id IS NULL"
+                        ),
                         {"name": name},
                     ).first()
                     if exists:

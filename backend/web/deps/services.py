@@ -8,8 +8,10 @@ from internal.application.admin_user_service import AdminUserService, AuditServi
 from internal.application.agent_service import AgentService
 from internal.application.auth_service import AuthService
 from internal.application.resource_service import ResourceService
+from internal.application.tenant_service import TenantService
 from internal.domain.entity.resource import Component, Prompt, Skill, Tool
 from web.deps.db import UowDep
+from web.deps.tenant import RequestContextDep
 
 
 def get_auth_service(uow: UowDep) -> AuthService:
@@ -17,39 +19,44 @@ def get_auth_service(uow: UowDep) -> AuthService:
     return AuthService(uow)
 
 
-def get_agent_service(uow: UowDep) -> AgentService:
+def get_agent_service(uow: UowDep, context: RequestContextDep) -> AgentService:
     """智能体用例。"""
-    return AgentService(uow)
+    return AgentService(uow, context)
 
 
-def get_skill_service(uow: UowDep) -> ResourceService[Skill]:
+def get_skill_service(uow: UowDep, context: RequestContextDep) -> ResourceService[Skill]:
     """技能用例。"""
-    return ResourceService(uow.skills, "技能", uow)
+    return ResourceService(uow.skills, "技能", uow, context)
 
 
-def get_tool_service(uow: UowDep) -> ResourceService[Tool]:
+def get_tool_service(uow: UowDep, context: RequestContextDep) -> ResourceService[Tool]:
     """工具用例。"""
-    return ResourceService(uow.tools, "工具", uow)
+    return ResourceService(uow.tools, "工具", uow, context)
 
 
-def get_component_service(uow: UowDep) -> ResourceService[Component]:
+def get_component_service(uow: UowDep, context: RequestContextDep) -> ResourceService[Component]:
     """组件用例。"""
-    return ResourceService(uow.components, "组件", uow)
+    return ResourceService(uow.components, "组件", uow, context)
 
 
-def get_prompt_service(uow: UowDep) -> ResourceService[Prompt]:
+def get_prompt_service(uow: UowDep, context: RequestContextDep) -> ResourceService[Prompt]:
     """提示词用例。"""
-    return ResourceService(uow.prompts, "提示词", uow)
+    return ResourceService(uow.prompts, "提示词", uow, context)
 
 
-def get_admin_user_service(uow: UowDep) -> AdminUserService:
+def get_admin_user_service(uow: UowDep, context: RequestContextDep) -> AdminUserService:
     """管理员账号管理用例。"""
-    return AdminUserService(uow)
+    return AdminUserService(uow, context)
 
 
-def get_audit_service(uow: UowDep) -> AuditService:
+def get_audit_service(uow: UowDep, context: RequestContextDep) -> AuditService:
     """审计日志查询用例。"""
-    return AuditService(uow)
+    return AuditService(uow, context)
+
+
+def get_tenant_service(uow: UowDep, context: RequestContextDep) -> TenantService:
+    """租户管理用例。"""
+    return TenantService(uow, context)
 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
@@ -60,3 +67,4 @@ ComponentServiceDep = Annotated[ResourceService[Component], Depends(get_componen
 PromptServiceDep = Annotated[ResourceService[Prompt], Depends(get_prompt_service)]
 AdminUserServiceDep = Annotated[AdminUserService, Depends(get_admin_user_service)]
 AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
+TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]

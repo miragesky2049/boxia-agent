@@ -54,12 +54,13 @@ class AuthService:
         self,
         username: str,
         password: str,
+        tenant_id: int | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenPair:
-        """校验账号密码并创建会话，失败时累计锁定次数。"""
+        """校验账号密码并创建会话；账号仅在当前作用域内查找。"""
         normalized = username.strip()
-        user = self._uow.admin_users.get_by_username_for_update(normalized)
+        user = self._uow.admin_users.get_by_username_for_update(normalized, tenant_id)
         now = datetime.now(UTC)
 
         if user is not None and user.locked_until and user.locked_until > now:
@@ -71,7 +72,9 @@ class AuthService:
 
         if user is None:
             verify_password(password, dummy_password_hash())
-            self._record_login_failure(None, normalized, ip, user_agent, reason="unknown_user")
+            self._record_login_failure(
+                None, normalized, ip, user_agent, reason="unknown_user", tenant_id=tenant_id
+            )
             raise UnauthorizedError("用户名或密码错误")
 
         if not verify_password(password, user.password_hash):
@@ -79,7 +82,7 @@ class AuthService:
                 user.id, self._settings.login_max_attempts, self._settings.login_lock_minutes
             )
             self._record_login_failure(
-                user.id, user.username, ip, user_agent, reason="bad_password"
+                user.id, user.username, ip, user_agent, reason="bad_password", tenant_id=tenant_id
             )
             if locked_until:
                 retry_after = max(int((locked_until - now).total_seconds()), 1)
@@ -90,7 +93,9 @@ class AuthService:
             raise UnauthorizedError("用户名或密码错误")
 
         if not user.is_active:
-            self._record_login_failure(user.id, user.username, ip, user_agent, reason="disabled")
+            self._record_login_failure(
+                user.id, user.username, ip, user_agent, reason="disabled", tenant_id=tenant_id
+            )
             raise ForbiddenError("账号已被禁用")
 
         self._uow.admin_users.mark_login_success(user.id)
@@ -102,6 +107,7 @@ class AuthService:
             actor_username=user.username,
             ip=ip,
             user_agent=user_agent,
+            tenant_id=tenant_id,
         )
         self._uow.commit()
         return pair
@@ -109,10 +115,11 @@ class AuthService:
     def refresh(
         self,
         refresh_token: str,
+        tenant_id: int | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenPair:
-        """轮换刷新令牌并签发新的访问令牌。"""
+        """轮换刷新令牌；令牌归属作用域与当前子域名不一致时拒绝。"""
         token_hash = hash_refresh_token(refresh_token)
         row = self._uow.refresh_tokens.get_by_hash_for_update(token_hash)
         now = datetime.now(UTC)
@@ -122,12 +129,14 @@ class AuthService:
 
         if row.revoked_at is not None or row.rotated_at is not None:
             self._uow.refresh_tokens.revoke_family(row.family_id)
+            replay_user = self._uow.admin_users.get_by_id(row.user_id)
             record_audit(
                 self._uow,
                 action="auth.refresh_replay",
                 actor_id=row.user_id,
                 ip=ip,
                 user_agent=user_agent,
+                tenant_id=replay_user.tenant_id if replay_user else tenant_id,
             )
             self._uow.commit()
             raise UnauthorizedError("登录状态已失效，请重新登录")
@@ -138,7 +147,12 @@ class AuthService:
             raise UnauthorizedError("登录已过期，请重新登录")
 
         user = self._uow.admin_users.get_by_id(row.user_id)
-        if user is None or not user.is_active or user.token_version != row.token_version:
+        if (
+            user is None
+            or not user.is_active
+            or user.token_version != row.token_version
+            or user.tenant_id != tenant_id
+        ):
             self._uow.refresh_tokens.revoke_family(row.family_id)
             self._uow.commit()
             raise UnauthorizedError("登录状态已失效，请重新登录")
@@ -165,6 +179,7 @@ class AuthService:
             actor_username=user.username,
             ip=ip,
             user_agent=user_agent,
+            tenant_id=user.tenant_id,
         )
         self._uow.commit()
 
@@ -197,6 +212,7 @@ class AuthService:
             actor_username=user.username,
             ip=ip,
             user_agent=user_agent,
+            tenant_id=user.tenant_id,
         )
         self._uow.commit()
 
@@ -213,6 +229,9 @@ class AuthService:
         user = self._uow.admin_users.get_by_id(user_id)
         if user is None or not user.is_active:
             raise UnauthorizedError("账号不存在或已被禁用")
+        token_tenant_id = int(payload.get("tid") or 0) or None
+        if token_tenant_id != user.tenant_id:
+            raise UnauthorizedError("身份凭证无效")
         if user.token_version != token_version:
             raise UnauthorizedError("登录状态已失效，请重新登录")
         if not self._uow.refresh_tokens.is_family_active(session_id):
@@ -253,7 +272,7 @@ class AuthService:
             self._uow.refresh_tokens.rotate(rotated_from, new_row.id)
 
         access_token, expires_in = create_access_token(
-            user.id, user.username, user.role, family, user.token_version
+            user.id, user.username, user.role, family, user.token_version, user.tenant_id
         )
         return TokenPair(
             access_token=access_token,
@@ -270,6 +289,7 @@ class AuthService:
         ip: str | None,
         user_agent: str | None,
         reason: str,
+        tenant_id: int | None = None,
     ) -> None:
         """记录登录失败审计（与失败计数同事务提交）。"""
         record_audit(
@@ -280,5 +300,6 @@ class AuthService:
             ip=ip,
             user_agent=user_agent,
             detail={"reason": reason},
+            tenant_id=tenant_id,
         )
         self._uow.commit()

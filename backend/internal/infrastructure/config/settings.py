@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     app_env: Literal["development", "test", "production"] = "development"
     app_name: str = "boxia-agent"
     app_version: str = "1.0.0"
+    platform_name: str = "Agent运营管理平台"
 
     database_url: str
     database_pool_size: int = Field(default=10, ge=1, le=100)
@@ -50,6 +51,14 @@ class Settings(BaseSettings):
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
     login_max_attempts: int = Field(default=5, ge=1, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
+
+    # 多租户域名配置：根域名如 example.com，产品级平台固定使用 adminsystem 子域名。
+    # 留空时仅通过 X-Tenant-Code（开发/测试）识别租户，未提供则进入产品级平台。
+    root_domain: str = ""
+    platform_admin_subdomain: str = "adminsystem"
+    default_tenant_code: str = ""
+    # 是否允许用请求头识别租户；留空时生产环境关闭、其他环境开启。
+    allow_tenant_header: bool | None = None
 
     cors_origins: str = ""
     log_level: str = "INFO"
@@ -82,6 +91,18 @@ class Settings(BaseSettings):
         """API 文档：生产默认关闭。"""
         return not self.is_production if self.docs_enabled is None else self.docs_enabled
 
+    @property
+    def tenant_header_enabled(self) -> bool:
+        """是否允许 X-Tenant-Code 请求头识别租户。"""
+        if self.allow_tenant_header is None:
+            return not self.is_production
+        return self.allow_tenant_header
+
+    @property
+    def normalized_root_domain(self) -> str:
+        """规范化根域名（小写、去除首尾点）。"""
+        return self.root_domain.strip().lower().strip(".")
+
     @model_validator(mode="after")
     def _validate_production(self) -> "Settings":
         """生产环境启动硬校验，避免带病上线。"""
@@ -95,6 +116,10 @@ class Settings(BaseSettings):
             raise ValueError("生产环境 CORS_ORIGINS 不允许通配符")
         if self.user_api_token and len(self.user_api_token.get_secret_value()) < 32:
             raise ValueError("生产环境 USER_API_TOKEN 至少 32 字符")
+        if not self.normalized_root_domain:
+            raise ValueError("生产环境必须配置 ROOT_DOMAIN 以启用子域名租户隔离")
+        if not self.platform_admin_subdomain.strip():
+            raise ValueError("生产环境必须配置 PLATFORM_ADMIN_SUBDOMAIN")
         return self
 
 

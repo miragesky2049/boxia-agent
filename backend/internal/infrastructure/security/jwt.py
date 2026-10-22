@@ -16,8 +16,12 @@ def create_access_token(
     role: str,
     session_id: uuid.UUID,
     token_version: int,
+    tenant_id: int | None = None,
 ) -> tuple[str, int]:
-    """签发管理端访问令牌，返回 (token, 有效期秒数)。"""
+    """签发管理端访问令牌，返回 (token, 有效期秒数)。
+
+    ``tid`` 为租户 ID，0 表示产品级平台账号；令牌只能在签发时对应的作用域使用。
+    """
     settings = get_settings()
     expires_in = settings.access_token_minutes * 60
     now = datetime.now(UTC)
@@ -26,6 +30,7 @@ def create_access_token(
         "username": username,
         "role": role,
         "scope": "admin",
+        "tid": tenant_id or 0,
         "sid": str(session_id),
         "ver": token_version,
         "jti": uuid.uuid4().hex,

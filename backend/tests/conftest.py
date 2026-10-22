@@ -17,6 +17,12 @@ os.environ["ACCESS_TOKEN_MINUTES"] = "60"
 os.environ["BCRYPT_ROUNDS"] = "4"
 os.environ["USER_API_TOKEN"] = "test-user-token-0123456789abcdef"
 os.environ["LOG_LEVEL"] = "WARNING"
+os.environ["ROOT_DOMAIN"] = "example.com"
+os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "adminsystem"
+os.environ["ALLOW_TENANT_HEADER"] = "true"
+
+PLATFORM_HOST = "adminsystem.example.com"
+TENANT_HEADER = "X-Tenant-Code"
 
 import psycopg  # noqa: E402
 import pytest  # noqa: E402
@@ -89,8 +95,19 @@ def _reset_data():
 
 @pytest.fixture(scope="session")
 def client():
-    with TestClient(app) as test_client:
+    """默认以产品级平台域名访问，与生产 adminsystem 子域名一致。"""
+    with TestClient(app, base_url=f"http://{PLATFORM_HOST}") as test_client:
         yield test_client
+
+
+@pytest.fixture(scope="session")
+def tenant_client():
+    """以租户子域名访问的客户端，用于验证租户级隔离。"""
+
+    def _factory(tenant_code: str) -> TestClient:
+        return TestClient(app, base_url=f"http://{tenant_code}.example.com")
+
+    return _factory
 
 
 @pytest.fixture

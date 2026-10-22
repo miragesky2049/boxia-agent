@@ -17,6 +17,12 @@ class Skill:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
+    tenant_id: int | None = None
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级资源（所有租户可见、仅产品级平台可维护）。"""
+        return self.tenant_id is None
 
 
 @dataclass(frozen=True)
@@ -31,6 +37,12 @@ class Tool:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
+    tenant_id: int | None = None
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级资源。"""
+        return self.tenant_id is None
 
 
 @dataclass(frozen=True)
@@ -45,6 +57,12 @@ class Component:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
+    tenant_id: int | None = None
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级资源。"""
+        return self.tenant_id is None
 
 
 @dataclass(frozen=True)
@@ -60,6 +78,12 @@ class Prompt:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
+    tenant_id: int | None = None
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级资源。"""
+        return self.tenant_id is None
 
 
 @dataclass(frozen=True)
@@ -76,3 +100,9 @@ class Agent:
     updated_at: datetime
     tool_ids: list[int] = field(default_factory=list)
     skill_ids: list[int] = field(default_factory=list)
+    tenant_id: int | None = None
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级智能体。"""
+        return self.tenant_id is None

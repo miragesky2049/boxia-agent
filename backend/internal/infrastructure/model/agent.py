@@ -3,7 +3,17 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, Column, DateTime, ForeignKey, String, Table, Text, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    Column,
+    DateTime,
+    ForeignKey,
+    String,
+    Table,
+    Text,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -30,6 +40,10 @@ class AgentModel(Base):
     __tablename__ = "agents"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # NULL 表示产品级智能体，所有租户可见；非空表示租户私有智能体。
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")

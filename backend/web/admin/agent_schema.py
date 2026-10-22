@@ -132,6 +132,8 @@ class AgentSummaryOut(BaseModel):
     avatar_url: str
     description: str
     is_enabled: bool
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 

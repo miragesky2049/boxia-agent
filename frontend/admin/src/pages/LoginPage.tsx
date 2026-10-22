@@ -1,9 +1,11 @@
 import { LockOutlined, UserOutlined } from '@ant-design/icons'
-import { Alert, Button, Form, Input } from 'antd'
+import { Alert, Button, Form, Input, Select, Tag } from 'antd'
 import { useState } from 'react'
 import { Navigate, useLocation, useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
+import { PLATFORM_TENANT_CODE } from '../tenant/scope'
 import './LoginPage.css'
 
 interface LoginFormValues {
@@ -21,10 +23,17 @@ function safeNextPath(search: string, fallback: string): string {
 
 export default function LoginPage() {
   const { user, signIn } = useAuth()
+  const { context, platformName, scopeLabel, isPlatform, devTenants, switchTenant } = useTenant()
   const navigate = useNavigate()
   const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
+
+  const currentScopeCode = isPlatform ? PLATFORM_TENANT_CODE : (context?.tenant?.code ?? '')
+  const scopeOptions = [
+    { label: '产品级运营管理平台', value: PLATFORM_TENANT_CODE },
+    ...devTenants.map((tenant) => ({ label: tenant.name, value: tenant.code })),
+  ]
 
   if (user) {
     return <Navigate to={user.must_change_password ? '/change-password' : '/agents'} replace />
@@ -61,12 +70,14 @@ export default function LoginPage() {
       <section className="login-brand">
         <div className="login-brand__inner">
           <div className="login-brand__logo">B</div>
-          <h1>Boxia Agent</h1>
-          <p className="login-brand__slogan">企业级智能体开发与运营平台</p>
+          <h1>{platformName}</h1>
+          <p className="login-brand__slogan">
+            {isPlatform ? '跨租户的智能体产品运营与治理' : '为本租户配置智能体、工具与技能'}
+          </p>
           <ul className="login-brand__features">
             <li>可视化编排智能体，沉淀提示词、技能与工具</li>
-            <li>统一管理会话渠道与知识库配置</li>
-            <li>开箱即用的管理后台，随时发布上线</li>
+            <li>产品级资源统一维护，租户内即取即用</li>
+            <li>按子域名隔离租户，数据与账号互不可见</li>
           </ul>
         </div>
         <div className="login-brand__orb login-brand__orb--one" />
@@ -75,8 +86,26 @@ export default function LoginPage() {
 
       <section className="login-panel">
         <div className="login-card">
+          <div className="login-card__scope">
+            <Tag color={isPlatform ? 'geekblue' : 'green'}>{scopeLabel}</Tag>
+            {context?.root_domain && (
+              <span className="login-card__domain">{context.root_domain}</span>
+            )}
+          </div>
           <h2>欢迎回来</h2>
-          <p className="login-card__subtitle">登录管理后台，开始配置你的智能体</p>
+          <p className="login-card__subtitle">
+            {isPlatform ? '登录产品级运营管理平台，维护全部租户' : '登录本租户运营管理平台'}
+          </p>
+
+          {context?.dev_tenant_switch && (
+            <Select
+              className="login-card__scope-select"
+              value={currentScopeCode}
+              options={scopeOptions}
+              onChange={switchTenant}
+              placeholder="切换产品级 / 租户"
+            />
+          )}
 
           {error && <Alert className="login-card__alert" type="error" showIcon message={error} />}
 
@@ -107,7 +136,7 @@ export default function LoginPage() {
             </Form.Item>
           </Form>
 
-          <p className="login-card__footer">Boxia Agent · 管理端</p>
+          <p className="login-card__footer">{platformName} · 管理端</p>
         </div>
       </section>
     </div>

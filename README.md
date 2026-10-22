@@ -71,6 +71,7 @@
 | --- | --- |
 | 智能体管理 | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
 | 资源管理 | 技能、工具、组件、提示词四类资源的增删改查、搜索、分页、启用/停用 |
+| 多租户 | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级资源对租户只读复用 |
 | 认证与会话 | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步 |
 | 权限控制 | `superadmin` / `admin` / `viewer` 三级角色，接口级 RBAC |
 | 安全防护 | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流 |
@@ -91,6 +92,8 @@
 | 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步 |
 | Token | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁 |
 | RBAC | 基于角色的权限控制。不同角色能做的事不一样 |
+| 产品级平台 | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护对所有租户可见的产品级智能体与资源 |
+| 租户级平台 | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源 |
 
 ### 1.5 账号角色
 
@@ -101,6 +104,8 @@
 | `viewer`（只读） | 是 | 否 | 否 | 否 |
 
 > 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
+
+角色只在所属作用域内生效：产品级账号只能登录 `adminsystem.<根域名>`，租户账号只能登录本租户子域名。不同作用域可以使用相同用户名，彼此互不影响。
 
 ### 1.6 技术栈速览
 
@@ -258,6 +263,8 @@ uv run python -m scripts.create_admin
 - 用户名：`admin`
 - 角色：`superadmin`
 - 首次登录必须改密
+
+默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`，本地为 `localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
 
 **密码规则**（不符合会直接报错）：
 
@@ -579,22 +586,23 @@ boxia-agent/
 │   ├── web/                     # HTTP 层：路由、请求/响应模型、异常处理
 │   │   ├── app.py               # 应用装配入口：中间件、异常、健康检查、指标、路由
 │   │   ├── api_v1.py            # /api/v1 路由汇总（含 /api 兼容别名）
-│   │   ├── admin/               # 管理端接口
+│   │   ├── public.py            # 匿名作用域信息、开发态租户列表
+│   │   ├── admin/               # 管理端接口（含租户管理、作用域信息）
 │   │   ├── user/                # 用户端接口（骨架）
-│   │   └── deps/                # 数据库、服务、鉴权依赖
+│   │   └── deps/                # 数据库、服务、鉴权、租户作用域依赖
 │   ├── internal/                # 业务实现
-│   │   ├── domain/              # 实体、分页对象、仓储协议
+│   │   ├── domain/              # 实体（含租户/请求上下文）、分页对象、仓储协议
 │   │   ├── application/         # 用例服务、统一业务异常
 │   │   └── infrastructure/      # 配置、ORM、仓储、安全、日志、中间件、链路追踪
-│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引）
+│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户）
 │   ├── scripts/                 # create_admin / seed_demo / wait_for_db
 │   ├── db/                      # 早期手工 SQL（仅本地参考，不再使用）
 │   ├── tests/                   # 后端接口测试
 │   └── Dockerfile
 ├── frontend/
 │   ├── admin/                   # 管理端（端口 5173）
-│   │   ├── src/                 # api / auth / components / layouts / pages / router
-│   │   ├── e2e/                 # Playwright 端到端用例
+│   │   ├── src/                 # api / auth / tenant / components / layouts / pages / router
+│   │   ├── e2e/                 # Playwright 端到端用例（含多租户场景）
 │   │   ├── nginx/               # 生产 Nginx 配置（SPA、反代、限流、安全头）
 │   │   └── Dockerfile           # Node 构建 + nginx-unprivileged 运行
 │   ├── user/                    # 用户端（端口 5174，骨架）
@@ -636,6 +644,7 @@ boxia-agent/
 | 新增一张表 | `backend/internal/infrastructure/model/xxx.py`（ORM 模型）→ `backend/internal/domain/entity/xxx.py`（领域实体）→ 生成 Alembic 迁移 |
 | 新增一个管理端页面 | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装） |
 | 调整权限 | `backend/web/deps/auth.py`、`backend/web/admin/router.py`、前端 `RequireRole` |
+| 调整租户识别与隔离 | `backend/web/deps/tenant.py`、仓储的 `_visible` / `_owned`、`backend/tests/test_tenants.py` |
 | 调整登录/令牌逻辑 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`、前端 `src/api/client.ts`、`src/auth/AuthContext.tsx` |
 | 调整数据库结构 | 修改 ORM 模型 → `uv run alembic revision --autogenerate -m "说明"` → 检查生成的迁移 → `uv run alembic upgrade head` |
 
@@ -668,6 +677,11 @@ boxia-agent/
 | `BCRYPT_ROUNDS` | `12` | 否 | 密码哈希成本因子 |
 | `LOGIN_MAX_ATTEMPTS` | `5` | 否 | 连续失败几次后锁定 |
 | `LOGIN_LOCK_MINUTES` | `15` | 否 | 锁定时长（分钟） |
+| `ROOT_DOMAIN` | 空 | 生产必填 | 租户根域名，如 `example.com`；生产必须配置，见 6.4 |
+| `PLATFORM_ADMIN_SUBDOMAIN` | `adminsystem` | 否 | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>` |
+| `PLATFORM_NAME` | `Agent运营管理平台` | 否 | 管理端展示的平台名称 |
+| `DEFAULT_TENANT_CODE` | 空 | 否 | 访问根域名时默认进入的租户；留空则拒绝根域名访问 |
+| `ALLOW_TENANT_HEADER` | 非生产开启 | 否 | 是否允许 `X-Tenant-Code` 请求头识别租户，仅用于开发/测试 |
 | `CORS_ORIGINS` | 空 | 否 | 逗号分隔的允许来源；生产禁止 `*` |
 | `DOCS_ENABLED` | 生产关闭 | 否 | 是否暴露 Swagger 文档 |
 | `LEGACY_API_ENABLED` | `true` | 否 | 是否保留 `/api` 兼容别名 |
@@ -688,8 +702,47 @@ boxia-agent/
 - `JWT_SECRET` 少于 32 字符，或使用了模板里的示例值
 - `CORS_ORIGINS` 包含 `*`
 - 启用 `USER_API_TOKEN` 但长度不足 32 字符
+- 未配置 `ROOT_DOMAIN` 或 `PLATFORM_ADMIN_SUBDOMAIN`（多租户域名解析依赖这两项）
 
 这些检查是为了避免“复制示例配置直接上线”导致的安全问题。
+
+### 6.4 多租户域名与使用方式
+
+**作用域判定**
+
+| 访问地址 | 作用域 | 能力 |
+| --- | --- | --- |
+| `adminsystem.example.com` | 产品级平台 | 跨租户管理、创建/停用租户、维护产品级智能体与资源 |
+| `acme.example.com` | 租户 `acme` | 维护本租户账号与资源；可使用产品级资源，但不能修改 |
+| `example.com` | 根域名 | 配置了 `DEFAULT_TENANT_CODE` 则进入该租户，否则返回 404 |
+
+后端按请求的 `Host` 解析租户。生产环境必须配置 `ROOT_DOMAIN`；`X-Tenant-Code` 请求头在生产默认被忽略（`ALLOW_TENANT_HEADER=false`），仅用于本地开发。
+
+**生产部署**
+
+1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口。
+2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
+3. 环境变量：在 `ops/.env.production` 设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`。
+4. 若前后端分离部署，`CORS_ORIGINS` 需要列出实际使用的平台与租户域名。
+
+**数据隔离规则**
+
+- 资源与账号都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有。
+- 产品级资源对所有租户可见、只读复用；租户资源只对本租户可见。
+- 登录、刷新与访问令牌都绑定作用域，跨作用域使用直接返回 401。
+- 同一作用域内资源名称唯一，不同租户之间允许同名；租户不能与产品级资源重名（产品级资源对所有租户可见）。
+- 用户名同样按作用域唯一：不同作用域可以有同名账号，它们属于不同的人。
+
+**创建并使用租户**
+
+1. 用产品级账号登录 `adminsystem.example.com`，进入「租户管理」新建租户。
+2. 租户编码即子域名前缀（如 `acme` → `acme.example.com`），创建后不可修改。
+3. 新建时填写的租户管理员账号首次登录会强制改密；该账号只能登录本租户子域名。
+4. 停用租户后，该子域名下的登录与已登录会话都会立即被拒绝。
+
+**本地开发**
+
+`backend/.env` 不配置 `ROOT_DOMAIN` 时，默认进入产品级平台；登录页会出现作用域下拉框，可在产品级与已有租户之间切换。也可以直接访问 `http://localhost:5173/login?tenant=acme`，或给接口加请求头 `X-Tenant-Code: acme`（产品级用 `platform`）。
 
 ---
 
@@ -707,6 +760,7 @@ boxia-agent/
 - 刷新令牌**用过一次就作废**，同时发一个新的（单次轮换）。
 - 如果旧的刷新令牌被再次使用，系统会认为可能被盗用，撤销整条会话链，要求重新登录。
 - 登出、改密、禁用或删除管理员时，该账号已有令牌立即失效。
+- 令牌绑定作用域：Access Token 里的 `tid` 必须与账号归属、当前子域名一致，拿产品级令牌访问租户子域名会被拒绝（反之亦然）。
 - 前端多标签页之间会同步登录和登出状态。
 
 ### 7.2 登录保护
@@ -728,13 +782,15 @@ boxia-agent/
 
 ### 7.4 审计日志
 
-以下操作都会写入 `audit_logs`：
+以下操作会写入 `audit_logs`：
 
-- 登录成功 / 失败、登出、改密
-- 资源的创建、修改、删除
-- 管理员的创建、修改、重置密码
+| 类别 | action |
+| --- | --- |
+| 认证 | `auth.login`、`auth.login_failed`、`auth.refresh_replay`、`auth.logout`、`auth.password_changed` |
+| 管理员 | `admin_user.created`、`admin_user.updated`、`admin_user.password_reset` |
+| 租户（仅产品级平台） | `tenant.created`、`tenant.updated` |
 
-每条记录包含操作者、动作、资源、`request_id`、IP、User-Agent 和详情，便于追溯。
+每条记录包含操作者、动作、资源、`request_id`、IP、User-Agent、作用域（`tenant_id`）和详情，便于追溯。登录失败、登出、改密也会写入归属的作用域：租户账号的审计只在租户内可见，产品级账号可以查看全部。
 
 ### 7.5 密码与密钥安全约定
 
@@ -784,6 +840,14 @@ Authorization: Bearer <access_token>
 | POST | `/admin/auth/logout` | 登出并撤销当前会话，返回 204 |
 | POST | `/admin/auth/password` | 修改密码并撤销全部会话，返回 204 |
 | GET | `/admin/auth/me` | 当前管理员信息（含角色） |
+| GET | `/admin/context` | 当前登录账号的作用域、租户与域名配置 |
+
+匿名接口（登录页使用）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/public/context` | 按当前域名返回产品级/租户级模式与平台名称 |
+| GET | `/public/tenants` | 开发/测试环境返回可选租户列表；生产不可用 |
 
 ### 8.3 资源接口
 
@@ -803,6 +867,8 @@ Authorization: Bearer <access_token>
 { "items": [], "total": 0, "page": 1, "page_size": 20 }
 ```
 
+资源与智能体的响应都带 `tenant_id`（`null` 表示产品级）和 `is_platform`：租户内看到的平台级资源 `is_platform=true`，前端据此切换只读状态；租户自有资源 `tenant_id` 为当前租户。
+
 智能体的特殊字段：
 
 - 创建/更新时可以传 `config`（对象）、`tool_ids`、`skill_ids`；后端会去重并校验关联是否存在。
@@ -818,6 +884,21 @@ Authorization: Bearer <access_token>
 | PATCH | `/admin/users/{id}` | 修改角色 / 显示名 / 启用状态 |
 | POST | `/admin/users/{id}/password` | 重置密码，返回 204 |
 | GET | `/admin/audit-logs` | 审计查询（按时间、用户、动作筛选） |
+
+租户管理（仅产品级平台 superadmin）：
+
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/admin/tenants` | 租户分页列表，支持 `keyword` |
+| POST | `/admin/tenants` | 创建租户并初始化租户管理员，返回 201 |
+| GET | `/admin/tenants/{id}` | 租户详情 |
+| PATCH | `/admin/tenants/{id}` | 修改租户名称或启用状态 |
+
+管理员列表额外支持 `tenant_id` 与 `all_tenants=true`：
+
+- 产品级平台可用 `tenant_id` 指定归属、用 `all_tenants=true` 查看全部租户账号；指定不存在的租户返回 404。
+- 租户账号的列表强制限定本租户，传 `all_tenants=true` 返回 403。
+- 审计查询同样按作用域过滤：租户只返回本租户记录，平台返回全部记录。
 
 ### 8.5 运维端点
 
@@ -844,7 +925,15 @@ curl -H "Authorization: Bearer $TOKEN" \
 curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"剧本生成","description":"示例","content":"生成剧本","config":{}}'
+
+# 本地开发：按租户作用域登录（产品级用 platform；生产环境忽略该请求头）
+# acme-admin 是创建租户时填写的管理员用户名，实际使用时替换成你的账号
+TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
+  -H 'X-Tenant-Code: acme' -H 'Content-Type: application/json' \
+  -d '{"username":"acme-admin","password":"你的密码"}')
 ```
+
+> 作用域由 `Host` 决定；本地访问 `127.0.0.1` 时回退到产品级平台，想操作租户数据必须带 `X-Tenant-Code`（或使用租户子域名）。
 
 > PowerShell 中 `curl` 是别名，请改用 `curl.exe`。
 
@@ -874,9 +963,10 @@ curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
 
 | 表 | 说明 |
 | --- | --- |
-| `admin_users` | 管理员账号、角色、锁定状态、`token_version`、首登改密标记 |
+| `tenants` | 租户编码（即子域名前缀）、名称、启用状态 |
+| `admin_users` | 管理员账号、角色、锁定状态、`token_version`、首登改密标记；`tenant_id=NULL` 为产品级账号 |
 | `admin_refresh_tokens` | Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA |
-| `audit_logs` | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB） |
+| `audit_logs` | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
 | `agents` | 智能体，`config` 为 JSONB 完整配置 |
 | `skills` / `tools` / `components` / `prompts` | 四类资源表 |
 | `agent_tools` / `agent_skills` | 智能体与工具/技能的关联表，级联删除 |
@@ -884,7 +974,8 @@ curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
 
 约定：
 
-- 资源名称忽略大小写唯一（`lower(name)` 唯一索引），重名返回 409。
+- 资源、管理员与审计记录都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有。
+- 资源名称与用户名按作用域唯一：唯一索引为 `(COALESCE(tenant_id, 0), lower(name))` 与 `(COALESCE(tenant_id, 0), username)`，不同租户可以同名；应用层额外禁止租户与产品级资源重名。
 - 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
 - 列表默认按 `updated_at DESC, id DESC` 排序。
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
@@ -913,10 +1004,13 @@ uv run alembic current             # 查看数据库当前版本（带 (head) �
 # 创建或重置管理员（默认首次登录强制改密）
 uv run python -m scripts.create_admin
 
+# 为指定租户创建管理员（租户需已存在；不传 TENANT_CODE 则创建产品级账号）
+TENANT_CODE=acme uv run python -m scripts.create_admin
+
 # 自动化环境可跳过首登改密（仅测试/演示）
 ADMIN_MUST_CHANGE_PASSWORD=false uv run python -m scripts.create_admin
 
-# 写入本地演示资源（幂等，可重复执行）
+# 写入本地演示资源（幂等，可重复执行；写入的是产品级资源，所有租户可见只读）
 uv run python -m scripts.seed_demo
 ```
 
@@ -926,12 +1020,14 @@ uv run python -m scripts.seed_demo
 
 | 模块 | 能力 |
 | --- | --- |
-| 登录 | 账号密码登录、锁定提示、登录后回跳、首次登录强制改密 |
+| 登录 | 账号密码登录、开发态作用域切换（产品级/租户）、锁定提示、登录后回跳、首次登录强制改密 |
 | 会话 | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销 |
 | 智能体管理 | 搜索、状态筛选、分页、新建、配置、启用/停用、删除 |
 | 智能体配置 | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件 |
 | 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读 |
-| 管理员管理 | 列表、创建、角色/状态调整、重置密码（仅 superadmin） |
+| 管理员管理 | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号 |
+| 租户管理 | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin） |
+| 多租户标识 | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」 |
 | 健壮性 | 路由懒加载、错误边界、404 页面、请求超时与重试 |
 
 页面路由：
@@ -944,6 +1040,7 @@ uv run python -m scripts.seed_demo
 /agents/:id/edit         智能体配置
 /skills  /tools  /components  /prompts
 /users                   管理员管理（superadmin）
+/tenants                 租户管理（产品级 superadmin）
 *                        404
 ```
 
@@ -967,7 +1064,7 @@ uv run alembic check                # 迁移漂移检查
 
 测试会自动创建独立数据库 `boxia_agent_test`，每次会话重建并执行全部迁移，每个用例前清理数据，互不影响。测试默认连接 `postgres:postgres@127.0.0.1:5432`，且账号需要有建库权限；如果你的本地配置不同，需要修改 `backend/tests/conftest.py` 顶部的连接配置。
 
-覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、错误模型、健康检查等。
+覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、产品级资源只读复用、租户账号与审计隔离）、错误模型、健康检查等。
 
 ### 11.2 管理端
 
@@ -1015,6 +1112,8 @@ E2E_PASSWORD="$E2E_PASSWORD" pnpm run e2e
 
 覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
 
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并在登录页切换作用域，因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需保持开发态（允许 `X-Tenant-Code`）。用例覆盖：平台租户管理、租户管理员作用域限制、产品级资源在租户内只读。
+
 ### 11.4 CI 与提交前检查
 
 - `.github/workflows/ci.yml`：后端 lint / 类型 / 测试 / 迁移漂移；前端类型 / Lint / 格式 / 单测 / 构建；Playwright E2E；Docker 构建 + Trivy 漏洞扫描。
@@ -1048,7 +1147,30 @@ uv run pre-commit install   # 钩子安装在仓库根目录
 5. 启动 Uvicorn，多个 worker 同时监听 8000。
 6. 管理端构建后由 Nginx 提供静态文件，并把 `/api/` 反向代理到后端。
 
-### 12.2 一次登录请求的完整旅程
+### 12.2 多租户作用域解析
+
+```text
+请求进入
+  ▼
+web/deps/tenant.py 读取 Host（去掉端口）
+  ├─ 本地/回环地址（localhost、127.0.0.1、testserver）
+  │    ├─ 开发态：允许 X-Tenant-Code 指定作用域（platform 表示产品级）
+  │    └─ 未指定：回退产品级平台
+  ├─ adminsystem.<ROOT_DOMAIN> → 产品级平台（tenant_id = NULL）
+  ├─ <code>.<ROOT_DOMAIN>      → 按 code 查询租户
+  │    ├─ 不存在 → 404；已停用 → 403
+  │    └─ 存在 → 租户作用域（tenant_id = 该租户）
+  └─ 根域名 → DEFAULT_TENANT_CODE 对应租户；未配置则 404
+  ▼
+RequestContext（scope、tenant）
+  ├─ /public/context：登录页据此展示产品级/租户级模式与平台名称
+  ├─ 登录/刷新：账号只在当前作用域查找，JWT 携带 tid
+  └─ 鉴权：令牌 tid、账号归属、当前作用域三者任一不一致 → 401
+```
+
+仓储层还会再按作用域过滤一次：平台只读写产品级数据（`tenant_id IS NULL`）；租户能“看到本租户 + 产品级”，但只能写本租户。即使上层校验有遗漏，SQL 层也不会跨租户读写。
+
+### 12.3 一次登录请求的完整旅程
 
 ```text
 浏览器
@@ -1061,7 +1183,7 @@ FastAPI 中间件（request_id、访问日志、审计、安全头）
 web/admin/auth.py（参数校验）
   ▼
 application/auth_service.py
-  ├─ 查询管理员（repository）
+  ├─ 按当前作用域查询管理员（repository）
   ├─ 账号不存在：执行一次固定 bcrypt 校验（防用户名枚举）
   ├─ 校验锁定状态 / 密码
   ├─ 成功：清零失败次数
@@ -1074,7 +1196,7 @@ application/auth_service.py
 前端：access 放内存，refresh 放 localStorage
 ```
 
-### 12.3 一次资源查询/写入的旅程
+### 12.4 一次资源查询/写入的旅程
 
 ```text
 GET/POST /api/v1/admin/agents
@@ -1084,31 +1206,32 @@ web/admin/router.py（统一管理员鉴权）
 web/deps/auth.py
   ├─ 解析 Bearer Token
   ├─ 校验签名、过期时间、token_version
+  ├─ 校验令牌作用域与当前域名一致（跨作用域 401）
   ├─ 查询数据库中的账号状态与角色
   └─ 写操作的接口再校验角色（viewer 拒绝）
   ▼
 web/admin/agents.py（请求/响应模型）
   ▼
-application/agent_service.py（业务规则、默认值、关联校验）
+application/agent_service.py（业务规则、默认值、关联校验、作用域可写校验）
   ▼
-infrastructure/repository/postgres_agent_repository.py
+infrastructure/repository/postgres_agent_repository.py（按 tenant_id 过滤可见/可写）
   ▼
 UnitOfWork.commit()
   ├─ 业务数据
   └─ 审计日志（同一事务）
 ```
 
-### 12.4 刷新令牌的轮换流程
+### 12.5 刷新令牌的轮换流程
 
 ```text
 前端发现 Access Token 过期（401）
   ▼
-调用 /admin/auth/refresh
+调用 /admin/auth/refresh（沿用登录时的作用域头/子域名）
   ▼
-后端校验 Refresh Token 哈希与会话状态
+后端校验 Refresh Token 哈希、会话状态与作用域
   ├─ 正常：旧令牌标记已轮换 → 签发新 refresh → 签发新 access
   ├─ 已轮换的旧令牌再次出现：判定为重放 → 撤销整族会话
-  └─ 已撤销/过期：返回 401，要求重新登录
+  └─ 已撤销 / 过期 / 归属作用域不一致：返回 401，要求重新登录
   ▼
 前端更新内存中的 access 和 localStorage 中的 refresh
   ▼
@@ -1117,7 +1240,7 @@ UnitOfWork.commit()
 
 多个标签页同时刷新时，前端使用 Web Locks 保证只有一个标签页真正发起刷新，其他标签页等待结果。
 
-### 12.5 数据库迁移流程
+### 12.6 数据库迁移流程
 
 ```text
 修改 ORM 模型
@@ -1188,6 +1311,7 @@ alembic upgrade head
 | DDD 分层 | 业务规则与 HTTP/ORM 解耦，便于测试和演进 | 文件数量增加，小项目可能显得重 |
 | 短 Access + 可撤销 Refresh | 兼顾性能和可撤销性；Access 不落 localStorage，降低 XSS 风险 | Refresh 仍存 localStorage，需要 CSP、轮换和重放检测兜底 |
 | Nginx 做前端与反代 | 静态资源、SPA 回退、限流、安全头一次解决 | 多一层需要维护 |
+| 多租户：共享库 + `tenant_id` 行级隔离 | 一套代码、一套数据库，迁移和升级只做一次，运维成本低 | 查询必须始终带作用域条件；强合规或超大租户可演进为独立 Schema/独立库 |
 | Docker Compose | 小团队部署成本低，服务边界清晰 | 大规模编排可迁移到 Kubernetes |
 
 ### 13.5 五个可讲的亮点
@@ -1217,6 +1341,12 @@ alembic upgrade head
    - 每个请求有 `request_id`，并支持 W3C `traceparent` 传播。
    - 结构化日志、OpenTelemetry 链路、Prometheus 指标。
    - 容器非 root、只读根文件系统、`cap_drop: ALL`，CI 中用 Trivy 扫描镜像漏洞。
+
+6. **多租户作用域隔离**
+   - 同一套代码按二级域名区分产品级与租户级，不需要为每个租户部署一套服务。
+   - 作用域在请求入口解析一次，贯穿认证、RBAC、仓储三层校验，令牌跨作用域直接拒绝。
+   - 产品级资源对所有租户只读复用；租户之间的数据、账号、审计完全隔离，同名资源按作用域唯一。
+   - 开发态支持请求头/登录页切换作用域，生产态只认域名，避免多一个越权入口。
 
 ### 13.6 难点与取舍
 
@@ -1297,6 +1427,7 @@ Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个
 | 应用装配、中间件顺序 | `backend/web/app.py` |
 | 登录、刷新、撤销 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py` |
 | 鉴权与 RBAC | `backend/web/deps/auth.py`、`backend/web/admin/router.py` |
+| 多租户作用域解析与租户管理 | `backend/web/deps/tenant.py`、`backend/internal/application/tenant_service.py`、`backend/migrations/versions/0004_multi_tenant.py` |
 | 事务与仓储 | `backend/internal/infrastructure/model/uow.py`、`backend/internal/infrastructure/repository/` |
 | 迁移与就绪检查 | `backend/migrations/env.py`、`backend/web/health.py` |
 | 前端无感刷新 | `frontend/admin/src/api/client.ts`、`frontend/admin/src/auth/AuthContext.tsx` |
@@ -1333,6 +1464,7 @@ backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
+- 入口使用泛域名 `*.example.com`：`adminsystem.example.com` 为产品级平台，其余子域为租户。
 - `backend`、`db` 不发布端口，只走 Compose 内部网络。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
@@ -1369,6 +1501,12 @@ JWT_SECRET=<openssl rand -hex 32 的输出>
 APP_ENV=production
 DOCS_ENABLED=false
 CORS_ORIGINS=
+# 租户根域名，未配置会拒绝启动
+ROOT_DOMAIN=example.com
+# 产品级平台子域名前缀，最终为 adminsystem.example.com
+PLATFORM_ADMIN_SUBDOMAIN=adminsystem
+# 可选：访问根域名时默认进入的租户编码，留空则根域名返回 404
+# DEFAULT_TENANT_CODE=acme
 
 # 对外端口（前面有 TLS 终止层时可改为 127.0.0.1:8080）
 HTTP_PORT=80
@@ -1426,7 +1564,7 @@ docker compose -f ops/docker-compose.yml run --rm \
   backend python -m scripts.create_admin
 ```
 
-首次登录会强制改密。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
+首次登录会强制改密。默认创建的是产品级平台账号，租户管理员请登录平台后在「租户管理」中创建。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
 
 > 非交互方式会把密码留在 shell 历史和进程列表中，生产环境优先用交互方式；如果必须非交互，执行后清理历史记录。
 
@@ -1434,24 +1572,27 @@ docker compose -f ops/docker-compose.yml run --rm \
 
 推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再转发到 `frontend` 容器。
 
-宿主机 Nginx 示例（证书可用 Let's Encrypt 申请）：
+多租户使用泛域名，证书必须同时覆盖根域和所有子域（如 `example.com` + `*.example.com`）。Let's Encrypt 的泛域名证书只能通过 DNS-01 验证申请。
+
+宿主机 Nginx 示例：
 
 ```nginx
 server {
     listen 80;
-    server_name agent.example.com;
+    server_name example.com *.example.com;
     return 301 https://$host$request_uri;
 }
 
 server {
     listen 443 ssl http2;
-    server_name agent.example.com;
+    server_name example.com *.example.com;
 
-    ssl_certificate     /etc/letsencrypt/live/agent.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/agent.example.com/privkey.pem;
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
 
     location / {
         proxy_pass http://127.0.0.1:8080;
+        # 必须透传原始域名：后端据此判断产品级 / 租户作用域
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1461,6 +1602,8 @@ server {
 ```
 
 对应地把 `.env.production` 的 `HTTP_PORT` 改为 `127.0.0.1:8080`，让容器端口只绑定本机。
+
+如果外层还有云负载均衡或网关，同样要求它**保留原始 Host 头**；把域名改写成固定后端地址会导致所有请求落到平台作用域。
 
 ### 14.7 Docker Hub 访问受限时
 
@@ -1496,11 +1639,14 @@ docker compose -f ops/docker-compose.yml logs migrate
 
 然后在浏览器中：
 
-- [ ] 通过 HTTPS 打开管理端
-- [ ] 使用首个管理员登录并完成改密
-- [ ] 创建一条技能，再创建一个智能体并关联该技能
+- [ ] 通过 HTTPS 打开 `https://adminsystem.<根域名>`，使用首个管理员登录并完成改密
+- [ ] 在「租户管理」创建一个租户，确认租户子域名可正常打开
+- [ ] 用该租户管理员登录租户子域名，确认看不到「租户管理」入口
+- [ ] 在平台侧创建一条产品级技能，确认租户内可见但不能修改
+- [ ] 在租户内创建一条技能，确认另一个租户看不到
+- [ ] 在平台侧创建一条技能，再创建一个智能体并关联该技能
 - [ ] 用 viewer 账号验证写接口返回 403
-- [ ] 用 superadmin 查看审计日志
+- [ ] 用 superadmin 查看审计日志，确认租户审计只在租户内可见
 - [ ] 确认 `/docs` 在生产不可访问（`DOCS_ENABLED=false`）
 - [ ] 确认 `/metrics` 从外部不可访问
 
@@ -1575,6 +1721,9 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 | 只读文件系统报错 | 应用需要写入临时目录时，确认 Compose 已挂载 `tmpfs` |
 | 磁盘占满 | 检查数据库 volume、备份目录和容器日志轮转 |
 | 时间不对导致令牌异常 | 检查服务器 NTP 时间同步 |
+| 租户子域名返回 404 / 403 | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用 |
+| 所有子域名都进入平台作用域 | 反向代理或网关没有透传原始 `Host` 头 |
+| 登录提示账号不属于该租户 | 账号只能登录其所属作用域：产品级账号走 `adminsystem`，租户账号走本租户子域名 |
 
 ---
 
@@ -1662,6 +1811,31 @@ git diff --cached | grep -iE "password|secret|token"
 ```
 
 仓库已经配置了 `.gitignore` 和 pre-commit 的私钥检测；真实配置只放在 `.env` 和 `ops/.env.production` 中，这两个文件不会进入 Git。
+
+**Q9：不同租户可以有同名资源或同名账号吗**
+
+可以。资源名和用户名的唯一索引都带作用域：`(COALESCE(tenant_id,0), lower(name))`、`(COALESCE(tenant_id,0), username)`。同一作用域内仍然唯一；租户不能与产品级资源重名，因为产品级资源对所有租户可见。
+
+**Q10：怎么新增租户，编码能改吗**
+
+用产品级账号登录平台，在「租户管理」新建；`code` 就是子域名前缀（如 `acme` → `acme.example.com`），创建后不可修改。也可以先在命令行建账号：
+
+```bash
+cd backend
+TENANT_CODE=acme uv run python -m scripts.create_admin
+```
+
+停用租户会立即生效：该子域名下的登录和已登录会话都会被拒绝。
+
+**Q11：本地没有配 DNS，怎么验证多租户**
+
+本地访问 `localhost` / `127.0.0.1` 时默认是产品级作用域，可以用三种方式切到租户：
+
+- 登录页的作用域下拉框（开发态自动出现）；
+- 地址加参数：`http://localhost:5173/login?tenant=acme`；
+- 调接口时加请求头：`X-Tenant-Code: acme`（产品级用 `platform`）。
+
+生产环境默认忽略 `X-Tenant-Code`，只按域名解析。
 
 ---
 

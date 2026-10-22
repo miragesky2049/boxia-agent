@@ -26,6 +26,8 @@ class AdminUserOut(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -55,12 +57,13 @@ class ChangePasswordRequest(BaseModel):
 
 
 class AdminUserCreateRequest(BaseModel):
-    """创建管理员请求。"""
+    """创建管理员请求；tenant_id 仅产品级平台可指定。"""
 
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=12, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     role: str = Field(default="admin", max_length=16)
+    tenant_id: int | None = Field(default=None, ge=1)
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -92,7 +95,60 @@ class AuditLogOut(BaseModel):
     ip: str | None
     user_agent: str | None
     detail: dict[str, Any]
+    tenant_id: int | None = None
     created_at: datetime
+
+
+class TenantOut(BaseModel):
+    """租户信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TenantCreateRequest(BaseModel):
+    """创建租户请求，同时初始化租户级超级管理员。"""
+
+    code: str = Field(min_length=1, max_length=63)
+    name: str = Field(min_length=1, max_length=100)
+    admin_username: str = Field(min_length=3, max_length=64)
+    admin_password: str = Field(min_length=12, max_length=128)
+    admin_display_name: str = Field(default="", max_length=64)
+
+
+class TenantUpdateRequest(BaseModel):
+    """更新租户请求。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    is_active: bool | None = None
+
+
+class AdminContextOut(BaseModel):
+    """当前管理端作用域上下文。"""
+
+    scope: str
+    tenant: TenantOut | None
+    user: AdminUserOut
+    root_domain: str
+    platform_admin_subdomain: str
+    platform_name: str
+
+
+class PublicContextOut(BaseModel):
+    """登录页等匿名场景使用的作用域上下文。"""
+
+    scope: str
+    tenant: TenantOut | None
+    root_domain: str
+    platform_admin_subdomain: str
+    platform_name: str
+    dev_tenant_switch: bool
 
 
 class PageOut(BaseModel, Generic[T]):
@@ -125,6 +181,8 @@ class SkillOut(SkillPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -142,6 +200,8 @@ class ToolOut(ToolPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -159,6 +219,8 @@ class ComponentOut(ComponentPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -177,5 +239,7 @@ class PromptOut(PromptPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
