@@ -4,6 +4,7 @@
     ADMIN_USERNAME=admin ADMIN_PASSWORD='...' python -m scripts.create_admin
 未提供 ADMIN_PASSWORD 时从标准输入读取（推荐）。
 ADMIN_MUST_CHANGE_PASSWORD=false 可关闭首登改密，仅用于自动化环境。
+TENANT_CODE=acme 时创建该租户下的账号，留空则创建产品级平台账号。
 """
 
 import getpass
@@ -40,12 +41,25 @@ def main() -> int:
 
     password_hash = hash_password(password)
     must_change = _must_change_password()
+    tenant_code = os.environ.get("TENANT_CODE", "").strip().lower()
     engine = get_engine()
     try:
         with engine.begin() as conn:
+            tenant_id = None
+            if tenant_code:
+                row = conn.execute(
+                    text("SELECT id FROM tenants WHERE code = :code"), {"code": tenant_code}
+                ).first()
+                if row is None:
+                    print(f"租户 {tenant_code} 不存在", file=sys.stderr)
+                    return 2
+                tenant_id = row[0]
             exists = conn.execute(
-                text("SELECT id FROM admin_users WHERE username = :username"),
-                {"username": username},
+                text(
+                    "SELECT id FROM admin_users WHERE username = :username "
+                    "AND tenant_id IS NOT DISTINCT FROM :tenant_id"
+                ),
+                {"username": username, "tenant_id": tenant_id},
             ).first()
             if exists:
                 conn.execute(
@@ -69,11 +83,12 @@ def main() -> int:
                 conn.execute(
                     text(
                         "INSERT INTO admin_users "
-                        "(username, password_hash, display_name, role, is_active, "
+                        "(tenant_id, username, password_hash, display_name, role, is_active, "
                         "must_change_password, password_changed_at) "
-                        "VALUES (:username, :hash, :name, :role, TRUE, :must_change, now())"
+                        "VALUES (:tenant_id, :username, :hash, :name, :role, TRUE, :must_change, now())"
                     ),
                     {
+                        "tenant_id": tenant_id,
                         "username": username,
                         "hash": password_hash,
                         "name": display_name,
@@ -81,7 +96,8 @@ def main() -> int:
                         "must_change": must_change,
                     },
                 )
-                print(f"管理员 {username} 创建成功")
+                scope = f"租户 {tenant_code}" if tenant_code else "产品级平台"
+                print(f"管理员 {username} 创建成功（{scope}）")
     finally:
         dispose_engine()
     return 0

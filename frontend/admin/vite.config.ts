@@ -8,10 +8,13 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       strictPort: true,
+      // 允许 *.localhost，便于本地验证真实子域名解析
+      allowedHosts: ['.localhost'],
       proxy: {
         '/api': {
           target: env.VITE_PROXY_TARGET || 'http://127.0.0.1:8000',
-          changeOrigin: true,
+          // 透传原始 Host，后端据此解析 adminsystem.localhost / acme.localhost
+          changeOrigin: false,
         },
       },
     },

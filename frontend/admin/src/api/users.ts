@@ -5,6 +5,8 @@ export interface UserListParams {
   page?: number
   page_size?: number
   keyword?: string
+  tenant_id?: number
+  all_tenants?: boolean
 }
 
 export async function listUsers(params: UserListParams = {}): Promise<PageResult<AdminUser>> {
@@ -12,6 +14,8 @@ export async function listUsers(params: UserListParams = {}): Promise<PageResult
   query.set('page', String(params.page ?? 1))
   query.set('page_size', String(params.page_size ?? 20))
   if (params.keyword) query.set('keyword', params.keyword)
+  if (params.tenant_id !== undefined) query.set('tenant_id', String(params.tenant_id))
+  if (params.all_tenants) query.set('all_tenants', 'true')
   return request<PageResult<AdminUser>>(`/admin/users?${query.toString()}`)
 }
 

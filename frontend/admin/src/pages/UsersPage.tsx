@@ -3,9 +3,12 @@ import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag } fr
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
+import { listTenants } from '../api/tenant'
+import type { AdminRole, AdminUser, Tenant } from '../api/types'
 import { createUser, listUsers, resetUserPassword, updateUser } from '../api/users'
-import type { AdminRole, AdminUser } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
+import { passwordRule } from '../utils/password'
 
 const ROLE_META: Record<AdminRole, { label: string; color: string }> = {
   superadmin: { label: '超级管理员', color: 'red' },
@@ -23,6 +26,7 @@ interface CreateFormValues {
   display_name: string
   password: string
   role: AdminRole
+  tenant_id?: number
 }
 
 interface EditFormValues {
@@ -37,7 +41,9 @@ interface ResetFormValues {
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth()
+  const { isPlatform, context } = useTenant()
   const { message } = App.useApp()
+  const [tenants, setTenants] = useState<Tenant[]>([])
   const [items, setItems] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -55,7 +61,12 @@ export default function UsersPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await listUsers({ page, page_size: pageSize, keyword: keyword || undefined })
+      const result = await listUsers({
+        page,
+        page_size: pageSize,
+        keyword: keyword || undefined,
+        all_tenants: isPlatform || undefined,
+      })
       setItems(result.items)
       setTotal(result.total)
     } catch (error) {
@@ -63,11 +74,29 @@ export default function UsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, message])
+  }, [page, pageSize, keyword, isPlatform, message])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (!isPlatform) {
+      setTenants([])
+      return
+    }
+    listTenants({ page: 1, page_size: 100 })
+      .then((result) => setTenants(result.items))
+      .catch(() => setTenants([]))
+  }, [isPlatform])
+
+  const tenantName = useCallback(
+    (tenantId: number | null) => {
+      if (tenantId === null) return '产品级平台'
+      return tenants.find((tenant) => tenant.id === tenantId)?.name ?? `租户 #${tenantId}`
+    },
+    [tenants],
+  )
 
   const handleCreate = async () => {
     const values = await createForm.validateFields()
@@ -78,6 +107,7 @@ export default function UsersPage() {
         display_name: values.display_name.trim(),
         password: values.password,
         role: values.role,
+        tenant_id: isPlatform ? values.tenant_id || null : undefined,
       })
       message.success('账号已创建，首次登录需修改密码')
       setCreateOpen(false)
@@ -164,6 +194,21 @@ export default function UsersPage() {
         return <Tag color={meta.color}>{meta.label}</Tag>
       },
     },
+    ...(isPlatform
+      ? [
+          {
+            title: '归属',
+            key: 'tenant',
+            width: 160,
+            render: (_: unknown, record: AdminUser) =>
+              record.tenant_id === null ? (
+                <Tag color="geekblue">产品级</Tag>
+              ) : (
+                <Tag color="green">{tenantName(record.tenant_id)}</Tag>
+              ),
+          },
+        ]
+      : []),
     {
       title: '密码状态',
       dataIndex: 'must_change_password',
@@ -231,7 +276,7 @@ export default function UsersPage() {
           icon={<PlusOutlined />}
           onClick={() => {
             createForm.resetFields()
-            createForm.setFieldsValue({ role: 'admin' })
+            createForm.setFieldsValue({ role: 'admin', tenant_id: 0 })
             setCreateOpen(true)
           }}
         >
@@ -303,7 +348,7 @@ export default function UsersPage() {
             label="初始密码"
             rules={[
               { required: true, message: '请输入初始密码' },
-              { min: 12, message: '密码至少 12 位' },
+              passwordRule(context?.password_policy),
             ]}
             extra="管理员首次登录后必须修改密码。"
           >
@@ -312,6 +357,25 @@ export default function UsersPage() {
           <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
             <Select options={ROLE_OPTIONS} />
           </Form.Item>
+          {isPlatform && (
+            <Form.Item
+              name="tenant_id"
+              label="归属"
+              extra="产品级账号仅能登录产品级平台；租户账号只能登录对应租户子域名。"
+            >
+              <Select
+                allowClear
+                placeholder="默认归属产品级平台"
+                options={[
+                  { label: '产品级平台', value: 0 },
+                  ...tenants.map((tenant) => ({
+                    label: `${tenant.name}（${tenant.code}）`,
+                    value: tenant.id,
+                  })),
+                ]}
+              />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 
@@ -355,7 +419,7 @@ export default function UsersPage() {
             label="新密码"
             rules={[
               { required: true, message: '请输入新密码' },
-              { min: 12, message: '密码至少 12 位' },
+              passwordRule(context?.password_policy),
             ]}
             extra="重置后该账号需在下次登录时再次修改密码。"
           >

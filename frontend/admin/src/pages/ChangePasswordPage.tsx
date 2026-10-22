@@ -4,6 +4,8 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ApiError } from '../api/client'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
+import { passwordRule } from '../utils/password'
 
 interface ChangePasswordFormValues {
   current_password: string
@@ -11,15 +13,9 @@ interface ChangePasswordFormValues {
   confirm_password: string
 }
 
-const PASSWORD_MIN_LENGTH = 12
-
-function isStrongPassword(value: string): boolean {
-  const classes = [/[a-z]/, /[A-Z]/, /\d/, /[^A-Za-z0-9]/].filter((rule) => rule.test(value))
-  return value.length >= PASSWORD_MIN_LENGTH && classes.length >= 3
-}
-
 export default function ChangePasswordPage() {
   const { changePassword, mustChangePassword } = useAuth()
+  const { context } = useTenant()
   const { message } = App.useApp()
   const navigate = useNavigate()
   const [form] = Form.useForm<ChangePasswordFormValues>()
@@ -81,14 +77,7 @@ export default function ChangePasswordPage() {
             label="新密码"
             rules={[
               { required: true, message: '请输入新密码' },
-              {
-                validator: (_, value: string | undefined) =>
-                  !value || isStrongPassword(value)
-                    ? Promise.resolve()
-                    : Promise.reject(
-                        new Error('至少 12 位，且包含大写字母、小写字母、数字、符号中的三类'),
-                      ),
-              },
+              passwordRule(context?.password_policy),
             ]}
           >
             <Input.Password prefix={<LockOutlined />} autoComplete="new-password" />

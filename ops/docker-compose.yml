@@ -10,7 +10,7 @@ services:
   db:
     image: postgres:17-alpine
     env_file:
-      - .env.production
+      - ${ENV_FILE:-.env.prod}
     volumes:
       - pgdata:/var/lib/postgresql/data
     networks:
@@ -32,7 +32,7 @@ services:
     image: boxia-agent-backend:local
     command: ["alembic", "upgrade", "head"]
     env_file:
-      - .env.production
+      - ${ENV_FILE:-.env.prod}
     depends_on:
       db:
         condition: service_healthy
@@ -49,7 +49,7 @@ services:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
     image: boxia-agent-backend:local
     env_file:
-      - .env.production
+      - ${ENV_FILE:-.env.prod}
     environment:
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
     depends_on:

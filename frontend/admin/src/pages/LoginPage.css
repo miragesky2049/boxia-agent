@@ -117,6 +117,29 @@
   box-shadow: 0 18px 50px rgba(15, 34, 74, 0.08);
 }
 
+.login-card__scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.login-card__domain {
+  color: #86909c;
+  font-size: 12px;
+}
+
+.login-card__hint {
+  margin: -8px 0 16px;
+  color: #86909c;
+  font-size: 12px;
+}
+
+.login-card__scope-select {
+  width: 100%;
+  margin-bottom: 20px;
+}
+
 .login-card h2 {
   margin: 0 0 6px;
   color: #1d2129;

@@ -1,8 +1,14 @@
 """智能体管理用例。"""
 
-from internal.application.errors import ConflictError, NotFoundError, ValidationError
+from internal.application.errors import (
+    ConflictError,
+    ForbiddenError,
+    NotFoundError,
+    ValidationError,
+)
 from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.entity.common import Page
+from internal.domain.entity.request_context import RequestContext
 from internal.domain.entity.resource import Agent
 from internal.domain.repository.protocols import UnitOfWork
 
@@ -10,8 +16,9 @@ from internal.domain.repository.protocols import UnitOfWork
 class AgentService:
     """智能体 CRUD 与工具/技能关联校验。"""
 
-    def __init__(self, uow: UnitOfWork):
+    def __init__(self, uow: UnitOfWork, context: RequestContext):
         self._uow = uow
+        self._context = context
 
     def list(
         self,
@@ -43,9 +50,11 @@ class AgentService:
         return agent
 
     def update(self, agent_id: int, values: dict) -> Agent:
-        """更新智能体。"""
-        if self._uow.agents.get(agent_id) is None:
+        """更新智能体；产品级智能体仅产品级平台可维护。"""
+        existing = self._uow.agents.get(agent_id)
+        if existing is None:
             raise NotFoundError("智能体不存在")
+        self._ensure_manageable(existing)
         if self._uow.agents.name_exists(values["name"], exclude_id=agent_id):
             raise ConflictError("智能体名称已存在")
         values = self._with_validated_relations(values)
@@ -56,10 +65,19 @@ class AgentService:
         return updated
 
     def delete(self, agent_id: int) -> None:
-        """删除智能体。"""
+        """删除智能体；产品级智能体仅产品级平台可维护。"""
+        existing = self._uow.agents.get(agent_id)
+        if existing is None:
+            raise NotFoundError("智能体不存在")
+        self._ensure_manageable(existing)
         if not self._uow.agents.delete(agent_id):
             raise NotFoundError("智能体不存在")
         self._uow.commit()
+
+    def _ensure_manageable(self, agent: Agent) -> None:
+        """校验当前作用域是否有权维护该智能体。"""
+        if not self._context.can_manage(agent.tenant_id):
+            raise ForbiddenError("该智能体属于产品级资源，仅产品级运营管理平台可维护")
 
     def _with_validated_relations(self, values: dict) -> dict:
         """校验关联的工具/技能存在，并去重。"""

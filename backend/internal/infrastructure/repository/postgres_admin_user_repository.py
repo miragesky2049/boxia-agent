@@ -16,17 +16,25 @@ class PostgresAdminUserRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def get_by_username(self, username: str) -> AdminUser | None:
-        """按用户名查询。"""
+    def get_by_username(self, username: str, tenant_id: int | None) -> AdminUser | None:
+        """按用户名与所属租户查询。"""
         row = self._session.scalar(
-            select(AdminUserModel).where(AdminUserModel.username == username)
+            select(AdminUserModel).where(
+                AdminUserModel.username == username,
+                self._tenant_condition(tenant_id),
+            )
         )
         return self._to_entity(row) if row else None
 
-    def get_by_username_for_update(self, username: str) -> AdminUser | None:
-        """按用户名查询并加行锁。"""
+    def get_by_username_for_update(self, username: str, tenant_id: int | None) -> AdminUser | None:
+        """按用户名与所属租户查询并加行锁。"""
         row = self._session.scalar(
-            select(AdminUserModel).where(AdminUserModel.username == username).with_for_update()
+            select(AdminUserModel)
+            .where(
+                AdminUserModel.username == username,
+                self._tenant_condition(tenant_id),
+            )
+            .with_for_update()
         )
         return self._to_entity(row) if row else None
 
@@ -36,10 +44,17 @@ class PostgresAdminUserRepository:
         return self._to_entity(row) if row else None
 
     def list_page(
-        self, page: int, page_size: int, keyword: str | None
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        tenant_id: int | None,
+        all_tenants: bool = False,
     ) -> tuple[list[AdminUser], int]:
-        """分页查询管理员。"""
+        """分页查询管理员；all_tenants 为真时跨租户查询。"""
         stmt = select(AdminUserModel)
+        if not all_tenants:
+            stmt = stmt.where(self._tenant_condition(tenant_id))
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -126,6 +141,12 @@ class PostgresAdminUserRepository:
         return row.token_version
 
     @staticmethod
+    def _tenant_condition(tenant_id: int | None):
+        if tenant_id is None:
+            return AdminUserModel.tenant_id.is_(None)
+        return AdminUserModel.tenant_id == tenant_id
+
+    @staticmethod
     def _to_entity(row: AdminUserModel) -> AdminUser:
         return AdminUser(
             id=row.id,
@@ -142,4 +163,5 @@ class PostgresAdminUserRepository:
             locked_until=row.locked_until,
             must_change_password=row.must_change_password,
             password_changed_at=row.password_changed_at,
+            tenant_id=row.tenant_id,
         )

@@ -5,6 +5,6 @@ playwright-report
 test-results
 .env
 .env.*
-!.env.production.example
+!.env.prod.example
 .git
 *.log

@@ -26,9 +26,12 @@ class PostgresAuditLogRepository:
         page_size: int,
         action: str | None,
         actor_id: int | None,
+        tenant_id: int | None = None,
     ) -> tuple[list[AuditLog], int]:
-        """分页查询审计记录。"""
+        """分页查询审计记录；tenant_id 非空时只查该租户。"""
         stmt = select(AuditLogModel)
+        if tenant_id is not None:
+            stmt = stmt.where(AuditLogModel.tenant_id == tenant_id)
         if action:
             stmt = stmt.where(AuditLogModel.action == action)
         if actor_id is not None:
@@ -55,4 +58,5 @@ class PostgresAuditLogRepository:
             user_agent=row.user_agent,
             detail=row.detail or {},
             created_at=row.created_at,
+            tenant_id=row.tenant_id,
         )

@@ -1,11 +1,12 @@
 import { ArrowLeftOutlined } from '@ant-design/icons'
-import { Anchor, App, Button, Form, Space, Spin } from 'antd'
+import { Anchor, App, Button, Form, Space, Spin, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { createAgent, getAgent, updateAgent } from '../../api/agents'
 import { componentsApi, skillsApi, toolsApi } from '../../api/resources'
 import type { AgentConfig, AgentPayload, ComponentResource, Skill, Tool } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
+import { useTenant } from '../../tenant/TenantContext'
 import BasicSection from './sections/BasicSection'
 import ChannelSection from './sections/ChannelSection'
 import ConversationSection from './sections/ConversationSection'
@@ -97,9 +98,12 @@ export default function AgentEditPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { canWrite } = useAuth()
+  const { isPlatform } = useTenant()
   const [form] = Form.useForm<AgentFormValues>()
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
+  const [platformResource, setPlatformResource] = useState(false)
+  const readonly = !canWrite || (!isPlatform && platformResource)
   const [tools, setTools] = useState<Tool[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [components, setComponents] = useState<ComponentResource[]>([])
@@ -139,6 +143,7 @@ export default function AgentEditPage() {
       try {
         const agent = await getAgent(agentId)
         if (!active) return
+        setPlatformResource(agent.is_platform)
         form.setFieldsValue({
           name: agent.name,
           avatar_url: agent.avatar_url,
@@ -197,6 +202,7 @@ export default function AgentEditPage() {
       layout="vertical"
       scrollToFirstError
       onFinish={handleFinish}
+      disabled={readonly}
       className="agent-edit"
     >
       <Spin spinning={loading}>
@@ -207,14 +213,16 @@ export default function AgentEditPage() {
               <h2 className="page-header__title">{isEdit ? '配置智能体' : '新建智能体'}</h2>
               <p className="page-header__desc">完成各栏目配置后保存，配置将实时持久化到数据库。</p>
             </div>
+            {platformResource && <Tag color="geekblue">平台级</Tag>}
           </Space>
           <Space>
             <Button onClick={() => navigate('/agents')}>返回</Button>
-            {canWrite && (
+            {!readonly && (
               <Button type="primary" htmlType="submit" loading={saving}>
                 保存配置
               </Button>
             )}
+            {readonly && canWrite && <Tag bordered={false}>产品级资源只读</Tag>}
           </Space>
         </div>
 
@@ -234,7 +242,7 @@ export default function AgentEditPage() {
             <div className="agent-edit__footer">
               <Space>
                 <Button onClick={() => navigate('/agents')}>返回</Button>
-                {canWrite && (
+                {!readonly && (
                   <Button type="primary" htmlType="submit" loading={saving}>
                     保存配置
                   </Button>

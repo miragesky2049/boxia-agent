@@ -20,6 +20,7 @@ import { useCallback, useEffect, useState } from 'react'
 import type { ResourceApi } from '../api/resources'
 import type { ResourceBase } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
 
 export type FormFieldType = 'text' | 'textarea' | 'switch' | 'select' | 'tags' | 'json' | 'number'
 
@@ -77,6 +78,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
 }: ResourceListPageProps<T, P>) {
   const { message } = App.useApp()
   const { canWrite } = useAuth()
+  const { isPlatform } = useTenant()
   const [form] = Form.useForm<FormValues>()
   const [items, setItems] = useState<T[]>([])
   const [total, setTotal] = useState(0)
@@ -181,7 +183,20 @@ export default function ResourceListPage<T extends ResourceBase, P>({
       width: 220,
       render: (_: unknown, record: T) => (
         <div>
-          <div className="resource-name">{record.name}</div>
+          <div className="resource-name">
+            {record.name}
+            {record.is_platform ? (
+              <Tag color="geekblue" bordered={false} style={{ marginLeft: 8 }}>
+                平台级
+              </Tag>
+            ) : (
+              !isPlatform && (
+                <Tag color="green" bordered={false} style={{ marginLeft: 8 }}>
+                  本租户
+                </Tag>
+              )
+            )}
+          </div>
           {record.description && <div className="resource-desc">{record.description}</div>}
         </div>
       ),
@@ -215,25 +230,28 @@ export default function ResourceListPage<T extends ResourceBase, P>({
             title: '操作',
             key: 'actions',
             width: 130,
-            render: (_: unknown, record: T) => (
-              <Space size={4}>
-                <Button type="link" size="small" onClick={() => openEdit(record)}>
-                  编辑
-                </Button>
-                <Popconfirm
-                  title="确认删除？"
-                  description="删除后不可恢复。"
-                  okText="删除"
-                  cancelText="取消"
-                  okButtonProps={{ danger: true }}
-                  onConfirm={() => handleDelete(record)}
-                >
-                  <Button type="link" size="small" danger>
-                    删除
+            render: (_: unknown, record: T) =>
+              record.is_platform && !isPlatform ? (
+                <Tag bordered={false}>产品级资源只读</Tag>
+              ) : (
+                <Space size={4}>
+                  <Button type="link" size="small" onClick={() => openEdit(record)}>
+                    编辑
                   </Button>
-                </Popconfirm>
-              </Space>
-            ),
+                  <Popconfirm
+                    title="确认删除？"
+                    description="删除后不可恢复。"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    onConfirm={() => handleDelete(record)}
+                  >
+                    <Button type="link" size="small" danger>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                </Space>
+              ),
           },
         ]
       : []),

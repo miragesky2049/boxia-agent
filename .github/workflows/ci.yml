@@ -18,6 +18,7 @@ jobs:
         working-directory: backend
     env:
       APP_ENV: test
+      ROOT_DOMAIN: example.com
       DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/boxia_agent_test
       JWT_SECRET: test-jwt-secret-0123456789abcdef0123456789abcdef
       LOG_LEVEL: WARNING
@@ -89,11 +90,14 @@ jobs:
     name: Playwright E2E
     runs-on: ubuntu-latest
     env:
-      APP_ENV: test
+      APP_ENV: local
+      ROOT_DOMAIN: localhost
       DATABASE_URL: postgresql+psycopg://postgres:postgres@127.0.0.1:5432/boxia_agent_e2e
       JWT_SECRET: test-jwt-secret-0123456789abcdef0123456789abcdef
       LOG_LEVEL: WARNING
       E2E_USERNAME: admin
+      # E2E 在 localhost 上运行，走本地请求头切换租户
+      ALLOW_TENANT_HEADER: 'true'
     services:
       postgres:
         image: postgres:17-alpine

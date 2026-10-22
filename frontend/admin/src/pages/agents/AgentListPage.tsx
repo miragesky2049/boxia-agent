@@ -7,11 +7,13 @@ import { useNavigate } from 'react-router-dom'
 import { deleteAgent, listAgents, updateAgent, getAgent } from '../../api/agents'
 import type { AgentSummary } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
+import { useTenant } from '../../tenant/TenantContext'
 
 export default function AgentListPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { canWrite } = useAuth()
+  const { isPlatform } = useTenant()
   const [items, setItems] = useState<AgentSummary[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -89,7 +91,20 @@ export default function AgentListPage() {
             style={{ backgroundColor: '#eef3ff', color: '#2f6bff' }}
           />
           <div>
-            <div className="resource-name">{record.name}</div>
+            <div className="resource-name">
+              {record.name}
+              {record.is_platform ? (
+                <Tag color="geekblue" bordered={false} style={{ marginLeft: 8 }}>
+                  平台级
+                </Tag>
+              ) : (
+                !isPlatform && (
+                  <Tag color="green" bordered={false} style={{ marginLeft: 8 }}>
+                    本租户
+                  </Tag>
+                )
+              )}
+            </div>
             <div className="resource-desc">{record.description || '暂无描述'}</div>
           </div>
         </div>
@@ -106,7 +121,7 @@ export default function AgentListPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
-          disabled={!canWrite}
+          disabled={!canWrite || (!isPlatform && record.is_platform)}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -134,7 +149,7 @@ export default function AgentListPage() {
           <Button type="link" size="small" onClick={() => navigate(`/agents/${record.id}/edit`)}>
             配置
           </Button>
-          {canWrite && (
+          {canWrite && (isPlatform || !record.is_platform) && (
             <Popconfirm
               title="确认删除该智能体？"
               description="删除后关联配置将一并移除。"
@@ -148,6 +163,7 @@ export default function AgentListPage() {
               </Button>
             </Popconfirm>
           )}
+          {canWrite && !isPlatform && record.is_platform && <Tag bordered={false}>只读</Tag>}
         </Space>
       ),
     },

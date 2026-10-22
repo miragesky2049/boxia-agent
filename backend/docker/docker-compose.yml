@@ -10,7 +10,10 @@ services:
     ports:
       - "127.0.0.1:5432:5432"
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # 默认使用命名卷 pgdata；如需数据落到宿主机目录，启动前设置 PG_DATA_DIR，例如
+      # Windows: set PG_DATA_DIR=D:/Docker/postgresql
+      # Linux/macOS: export PG_DATA_DIR=$PWD/.pgdata
+      - ${PG_DATA_DIR:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres -d boxia_agent"]
       interval: 10s
