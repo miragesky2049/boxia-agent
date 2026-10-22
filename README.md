@@ -199,6 +199,34 @@ docker ps
 
 > 如果镜像拉取失败，看 [4.2](#42-docker-拉取镜像失败)；如果提示 Docker daemon 连不上，看 [4.10](#410-docker-报-cannot-connect-to-the-docker-daemon)。
 
+**可选：把数据库数据目录放到宿主机**
+
+默认使用 Docker 命名卷 `pgdata` 存数据，它位于 Docker 虚拟机内部（Windows 下在 Docker Desktop 的 WSL 发行版里），资源管理器看不到。如果希望数据直接落在宿主机某个目录，启动前设置 `PG_DATA_DIR`：
+
+```powershell
+# Windows PowerShell（当前会话有效）
+$env:PG_DATA_DIR = "D:/Docker/postgresql"
+docker compose -f backend/docker/docker-compose.yml up -d
+```
+
+```bash
+# Linux / macOS
+export PG_DATA_DIR=$PWD/.pgdata
+docker compose -f backend/docker/docker-compose.yml up -d
+```
+
+也可以把 `PG_DATA_DIR=...` 写进 `backend/docker/.env`，之后每次 `docker compose -f backend/docker/docker-compose.yml` 都会自动读取，不用重复设置。
+
+确认实际挂载位置：
+
+```bash
+docker inspect postgres --format '{{range .Mounts}}{{.Type}}  {{.Source}}  ->  {{.Destination}}{{"\n"}}{{end}}'
+```
+
+`Type` 为 `volume` 表示用的是命名卷，为 `bind` 表示已经指向宿主机目录。
+
+> 切换挂载方式**不会迁移已有数据**，直接切换会得到一个空库。已有数据时先 `docker compose -f backend/docker/docker-compose.yml down`，把旧数据 `pg_dump` 出来，用新目录启动后再恢复。
+
 ### 3.2 第二步：初始化并启动后端
 
 **1）进入后端目录，准备配置文件**
