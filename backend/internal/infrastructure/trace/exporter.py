@@ -38,7 +38,7 @@ def get_tracer_provider(
         provider.add_span_processor(
             BatchSpanProcessor(OTLPSpanExporter(endpoint=settings.otel_exporter_otlp_endpoint))
         )
-    elif not settings.is_production:
+    elif not settings.is_prod:
         provider.add_span_processor(BatchSpanProcessor(ConsoleSpanExporter()))
     else:
         logger.warning("OTLP endpoint 未配置，生产环境不导出追踪数据")

@@ -9,7 +9,7 @@ export type AdminRole = 'superadmin' | 'admin' | 'viewer'
 
 export type Scope = 'platform' | 'tenant'
 
-export type AppEnv = 'local' | 'development' | 'test' | 'production'
+export type AppEnv = 'local' | 'dev' | 'test' | 'prod'
 
 export type TenantResolution = 'host' | 'header' | 'default'
 

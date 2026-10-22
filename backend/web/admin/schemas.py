@@ -132,7 +132,7 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
-AppEnv = Literal["local", "development", "test", "production"]
+AppEnv = Literal["local", "dev", "test", "prod"]
 TenantResolution = Literal["host", "header", "default"]
 TenantSwitchMode = Literal["none", "header", "host"]
 

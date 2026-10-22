@@ -685,7 +685,7 @@ boxia-agent/
 │   └── scripts/                 # 前端一键启停脚本
 ├── ops/                         # 跨端运维入口
 │   ├── docker-compose.yml       # 多环境编排：db / migrate / backend / frontend（ENV_FILE 选择配置）
-│   ├── .env.production          # 部署配置，自行创建且不入 Git（变量清单见 14.3）
+│   ├── .env.prod          # 部署配置，自行创建且不入 Git（变量清单见 14.3）
 │   ├── dev.sh                   # 本地一键启动
 │   ├── check.sh                 # 本地质量门禁（与 CI 基本一致）
 │   ├── backup.sh                # 数据库备份
@@ -731,7 +731,7 @@ boxia-agent/
 ### 6.1 配置文件从哪来
 
 - 本地开发：复制 `backend/.env.example` 为 `backend/.env` 后修改。
-- 部署：`ops/` 下没有模板文件，直接新建 `.env.production`（开发/测试环境分别新建 `.env.development`、`.env.test`），按 14.3 的清单填写。
+- 部署：`ops/` 下没有模板文件，直接新建 `.env.prod`（开发/测试环境分别新建 `.env.dev`、`.env.test`），按 14.3 的清单填写。
 
 真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。第一次使用先确认必填项，其余变量都有默认值，可以等需要时再调整：
 
@@ -744,7 +744,7 @@ boxia-agent/
 
 | 变量                          | 默认值              | 必填     | 说明                                                                                                                                                  |
 |-------------------------------|---------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `APP_ENV`                     | `local`             | 否       | `local`（本机调试）/ `development` / `test` / `production`                                                                                            |
+| `APP_ENV`                     | `local`             | 否       | `local`（本机调试）/ `dev` / `test` / `prod`                                                                                            |
 | `APP_NAME`                    | `boxia-agent`       | 否       | 服务名，出现在根路径响应和日志中                                                                                                                      |
 | `APP_VERSION`                 | `1.0.0`             | 否       | 服务版本，出现在根路径响应中                                                                                                                          |
 | `DATABASE_URL`                | 无                  | 是       | 形如 `postgresql+psycopg://user:pass@host:5432/db`                                                                                                    |
@@ -799,10 +799,10 @@ boxia-agent/
 后端启动前会按 `APP_ENV` 检查多租户配置，不合格直接拒绝启动，避免带病运行或静默回退到产品级平台：
 
 - 所有环境：`PLATFORM_ADMIN_SUBDOMAIN` 必须是一级域名标签（字母、数字、连字符）。
-- `development` / `test` / `production`：
+- `dev` / `test` / `prod`：
   - 必须配置 `ROOT_DOMAIN`，且不能是 `localhost`、`*.localhost` 或 IP 地址；
   - 禁止开启 `ALLOW_TENANT_HEADER`，部署环境只认二级域名。
-- `production` 额外要求：
+- `prod` 额外要求：
   - `JWT_SECRET` 至少 32 字符，且不能使用示例占位值；
   - `CORS_ORIGINS` 不允许 `*`；
   - 启用 `USER_API_TOKEN` 时长度至少 32 字符。
@@ -835,9 +835,9 @@ boxia-agent/
 | 环境         | `APP_ENV`     | 根域名                      | 平台地址                       | 租户地址                | 租户切换方式                                  |
 |--------------|---------------|-----------------------------|--------------------------------|-------------------------|-----------------------------------------------|
 | 本地调试     | `local`       | 可留空（回退 `localhost`）  | `adminsystem.localhost:5173`   | `acme.localhost:5173`   | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
-| 开发环境部署 | `development` | 必填，如 `dev.example.com`  | `adminsystem.dev.example.com`  | `acme.dev.example.com`  | 仅二级域名                                    |
+| 开发环境部署 | `dev` | 必填，如 `dev.example.com`  | `adminsystem.dev.example.com`  | `acme.dev.example.com`  | 仅二级域名                                    |
 | 测试环境部署 | `test`        | 必填，如 `test.example.com` | `adminsystem.test.example.com` | `acme.test.example.com` | 仅二级域名                                    |
-| 线上环境     | `production`  | 必填，如 `example.com`      | `adminsystem.example.com`      | `acme.example.com`      | 仅二级域名                                    |
+| 线上环境     | `prod`  | 必填，如 `example.com`      | `adminsystem.example.com`      | `acme.example.com`      | 仅二级域名                                    |
 
 部署环境只认域名：前端在服务端报告 `tenant_switch_mode=none` 时会清掉本地残留的租户覆盖值；`?tenant=` 参数会被直接忽略并移出地址栏，不会误清登录态。开发/测试环境如确需临时联调请求头切换，仍需把 `APP_ENV` 改为 `local`，不要在生产打开该能力。
 
@@ -847,7 +847,7 @@ boxia-agent/
 
 1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口；开发/测试环境分别解析 `*.dev.example.com`、`*.test.example.com`。
 2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
-3. 环境变量：按 14.3 创建 `ops/.env.production`，设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境对应使用 `.env.development` / `.env.test`。
+3. 环境变量：按 14.3 创建 `ops/.env.prod`，设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境对应使用 `.env.dev` / `.env.test`。
 4. 若前后端分离部署，`CORS_ORIGINS` 需要列出实际使用的平台与租户域名。
 
 **数据隔离规则**
@@ -985,7 +985,7 @@ Authorization: Bearer <access_token>
 |------------------------------------------------------------|---------------------------------------------------------------------------|
 | `scope`                                                    | `platform`（产品级）或 `tenant`（租户级）                                 |
 | `tenant`                                                   | 当前租户信息；产品级为 `null`                                             |
-| `app_env`                                                  | `local` / `development` / `test` / `production`                           |
+| `app_env`                                                  | `local` / `dev` / `test` / `prod`                           |
 | `tenant_resolution`                                        | 作用域来源：`host`（域名）/ `header`（本地请求头）/ `default`（本地兜底） |
 | `tenant_switch_mode`                                       | 前端切换方式：`none`（仅域名）/ `header`（请求头）/ `host`（子域名跳转）  |
 | `platform_admin_host`                                      | 产品级平台完整主机名，如 `adminsystem.dev.example.com`                    |
@@ -1638,7 +1638,7 @@ backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
 `ops/` 下没有模板文件，直接新建生产配置：
 
 ```bash
-cat > ops/.env.production <<'EOF'
+cat > ops/.env.prod <<'EOF'
 # ===== 必填 =====
 # 数据库：POSTGRES_* 用于初始化容器，DATABASE_URL 中的账号密码库名必须与之一致
 POSTGRES_DB=boxia
@@ -1653,7 +1653,7 @@ JWT_SECRET=CHANGE_ME_64_HEX_CHARACTERS
 ROOT_DOMAIN=example.com
 
 # ===== 按部署形态确认 =====
-APP_ENV=production
+APP_ENV=prod
 # 产品级平台子域名前缀，最终为 adminsystem.example.com
 PLATFORM_ADMIN_SUBDOMAIN=adminsystem
 PLATFORM_NAME=Agent运营管理平台
@@ -1673,7 +1673,7 @@ WEB_CONCURRENCY=2
 LOG_LEVEL=INFO
 LOG_JSON=true
 EOF
-chmod 600 ops/.env.production
+chmod 600 ops/.env.prod
 ```
 
 生成随机值：
@@ -1682,13 +1682,13 @@ chmod 600 ops/.env.production
 openssl rand -hex 32
 ```
 
-开发/测试环境同样在 `ops/` 下新建 `.env.development`、`.env.test`，把 `APP_ENV` 改为 `development` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），端口建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
+开发/测试环境同样在 `ops/` 下新建 `.env.dev`、`.env.test`，把 `APP_ENV` 改为 `dev` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），端口建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
 
-启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.production`），并把同一份文件交给 `--env-file` 供 Compose 插值：
+启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.prod`），并把同一份文件交给 `--env-file` 供 Compose 插值：
 
 ```bash
 cd ops
-ENV_FILE=.env.development docker compose --env-file .env.development up -d
+ENV_FILE=.env.dev docker compose --env-file .env.dev up -d
 ```
 
 注意事项：
@@ -1701,15 +1701,15 @@ ENV_FILE=.env.development docker compose --env-file .env.development up -d
 
 ```bash
 # 在仓库根目录执行；--env-file 让 HTTP_PORT、WEB_CONCURRENCY 等插值变量生效
-docker compose -f ops/docker-compose.yml --env-file ops/.env.production up -d --build
-docker compose -f ops/docker-compose.yml --env-file ops/.env.production ps
+docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build
+docker compose -f ops/docker-compose.yml --env-file ops/.env.prod ps
 ```
 
-开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.production`）：
+开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.prod`）：
 
 ```bash
 cd ops
-ENV_FILE=.env.development docker compose --env-file .env.development up -d --build
+ENV_FILE=.env.dev docker compose --env-file .env.dev up -d --build
 ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 ```
 
@@ -1785,7 +1785,7 @@ server {
 }
 ```
 
-对应地把 `.env.production` 的 `HTTP_PORT` 改为 `127.0.0.1:8080`，让容器端口只绑定本机。
+对应地把 `.env.prod` 的 `HTTP_PORT` 改为 `127.0.0.1:8080`，让容器端口只绑定本机。
 
 如果外层还有云负载均衡或网关，同样要求它**保留原始 Host 头**；把域名改写成固定后端地址会导致所有请求落到平台作用域。
 
@@ -1840,7 +1840,7 @@ docker compose -f ops/docker-compose.yml logs migrate
 
 1. 先备份数据库（见 14.10）。
 2. 拉取新代码。
-3. 重新构建并启动：`docker compose -f ops/docker-compose.yml --env-file ops/.env.production up -d --build`。
+3. 重新构建并启动：`docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build`。
 4. `migrate` 服务自动执行迁移，`backend` 等它成功后才启动。
 5. 按 14.8 验证。
 
@@ -1886,7 +1886,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 - [ ] 防火墙只开放 22、80、443；数据库和后端端口不对外
 - [ ] SSH 只允许密钥登录，禁用 root 远程登录
 - [ ] `ops/.env.*` 权限 600，密钥随机且未出现在 Git 历史中
-- [ ] `APP_ENV=production`、`DOCS_ENABLED=false`
+- [ ] `APP_ENV=prod`、`DOCS_ENABLED=false`
 - [ ] HTTPS 使用 TLS 1.2/1.3，证书自动续期
 - [ ] 容器非 root、只读根文件系统、`cap_drop: ALL`、`no-new-privileges`
 - [ ] `/metrics` 和 `/health/*` 不对外暴露
@@ -1907,7 +1907,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 | 时间不对导致令牌异常                                  | 检查服务器 NTP 时间同步                                                                                                                      |
 | 租户子域名返回 404 / 403                              | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用                                          |
 | 未知域名也返回 404                                    | 这是预期行为：部署环境只认 `adminsystem.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
-| 启动失败：`必须配置 ROOT_DOMAIN`                      | 除 `local` 外，`development` / `test` / `production` 都必须配置完整域名                                                                      |
+| 启动失败：`必须配置 ROOT_DOMAIN`                      | 除 `local` 外，`dev` / `test` / `prod` 都必须配置完整域名                                                                      |
 | 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机                                                                               |
 | 所有子域名都进入平台作用域                            | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名                                                            |
 | 本地 `acme.localhost` 打不开                          | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理）                                               |

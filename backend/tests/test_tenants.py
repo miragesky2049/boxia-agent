@@ -398,35 +398,35 @@ def test_deployed_environment_ignores_tenant_header_by_default(
     assert context.resolution == "host"
 
 
-def test_production_requires_root_domain() -> None:
+def test_prod_requires_root_domain() -> None:
     """生产环境未配置 ROOT_DOMAIN 时拒绝启动。"""
     with pytest.raises(ValidationError, match="ROOT_DOMAIN"):
-        _build_settings(app_env="production", root_domain="")
+        _build_settings(app_env="prod", root_domain="")
 
 
-def test_production_forbids_tenant_header() -> None:
+def test_prod_forbids_tenant_header() -> None:
     """生产环境必须通过二级域名识别租户，不允许开启请求头切换。"""
     with pytest.raises(ValidationError, match="ALLOW_TENANT_HEADER"):
         _build_settings(
-            app_env="production",
+            app_env="prod",
             root_domain="example.com",
             allow_tenant_header=True,
         )
 
 
-def test_production_rejects_localhost_host(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prod_rejects_localhost_host(monkeypatch: pytest.MonkeyPatch) -> None:
     """生产环境使用 localhost 等非子域名 Host 时拒绝访问。"""
-    settings = _build_settings(app_env="production", root_domain="example.com")
+    settings = _build_settings(app_env="prod", root_domain="example.com")
     monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
 
     with pytest.raises(NotFoundError):
         get_request_context(_request("localhost:5173"))
 
 
-def test_production_requires_subdomain(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_prod_requires_subdomain(monkeypatch: pytest.MonkeyPatch) -> None:
     """生产环境访问根域名（未配置默认租户）时要求改用二级域名。"""
     settings = _build_settings(
-        app_env="production",
+        app_env="prod",
         root_domain="example.com",
         default_tenant_code="",
     )
@@ -587,17 +587,17 @@ def test_host_normalized_with_case_port_and_trailing_dot(
     assert context.resolution == "host"
 
 
-def test_development_requires_root_domain() -> None:
+def test_dev_requires_root_domain() -> None:
     """开发环境未配置 ROOT_DOMAIN 时拒绝启动。"""
     with pytest.raises(ValidationError, match="ROOT_DOMAIN"):
-        _build_settings(app_env="development", root_domain="")
+        _build_settings(app_env="dev", root_domain="")
 
 
-def test_development_forbids_tenant_header() -> None:
+def test_dev_forbids_tenant_header() -> None:
     """开发/测试环境只认域名，开启请求头切换即启动失败。"""
     with pytest.raises(ValidationError, match="ALLOW_TENANT_HEADER"):
         _build_settings(
-            app_env="development",
+            app_env="dev",
             root_domain="dev.example.com",
             allow_tenant_header=True,
         )

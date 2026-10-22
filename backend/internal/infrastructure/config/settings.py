@@ -46,8 +46,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    # local=本机调试，development=开发环境部署，test=测试环境部署，production=线上
-    app_env: Literal["local", "development", "test", "production"] = "local"
+    # local=本机调试，dev=开发环境部署，test=测试环境部署，prod=线上
+    app_env: Literal["local", "dev", "test", "prod"] = "local"
     app_name: str = "boxia-agent"
     app_version: str = "1.0.0"
     platform_name: str = "Agent运营管理平台"
@@ -97,9 +97,9 @@ class Settings(BaseSettings):
     user_api_token: SecretStr | None = None
 
     @property
-    def is_production(self) -> bool:
+    def is_prod(self) -> bool:
         """是否生产环境。"""
-        return self.app_env == "production"
+        return self.app_env == "prod"
 
     @property
     def is_local(self) -> bool:
@@ -114,12 +114,12 @@ class Settings(BaseSettings):
     @property
     def effective_log_json(self) -> bool:
         """日志格式：生产默认 JSON，可用 LOG_JSON 覆盖。"""
-        return self.is_production if self.log_json is None else self.log_json
+        return self.is_prod if self.log_json is None else self.log_json
 
     @property
     def effective_docs_enabled(self) -> bool:
         """API 文档：生产默认关闭。"""
-        return not self.is_production if self.docs_enabled is None else self.docs_enabled
+        return not self.is_prod if self.docs_enabled is None else self.docs_enabled
 
     @property
     def normalized_root_domain(self) -> str:
@@ -161,7 +161,7 @@ class Settings(BaseSettings):
         if self.allow_tenant_header:
             raise ValueError("仅 local 环境允许开启 ALLOW_TENANT_HEADER")
 
-        if not self.is_production:
+        if not self.is_prod:
             return self
 
         secret = self.jwt_secret.get_secret_value()

@@ -15,9 +15,9 @@ interface LoginFormValues {
 
 const ENV_LABELS = {
   local: '本地',
-  development: '开发',
+  dev: '开发',
   test: '测试',
-  production: '线上',
+  prod: '线上',
 } as const
 
 const RESOLUTION_LABELS = {
@@ -105,7 +105,7 @@ export default function LoginPage() {
           <div className="login-card__scope">
             <span>
               <Tag color={isPlatform ? 'geekblue' : 'green'}>{scopeLabel}</Tag>
-              {context && context.app_env !== 'production' && (
+              {context && context.app_env !== 'prod' && (
                 <Tag color="orange">{ENV_LABELS[context.app_env]}</Tag>
               )}
             </span>

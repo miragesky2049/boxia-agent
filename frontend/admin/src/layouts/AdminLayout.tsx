@@ -28,9 +28,9 @@ const ROLE_LABELS = {
 
 const ENV_LABELS = {
   local: '本地',
-  development: '开发',
+  dev: '开发',
   test: '测试',
-  production: '线上',
+  prod: '线上',
 } as const
 
 export default function AdminLayout() {
@@ -90,7 +90,7 @@ export default function AdminLayout() {
             {platformName}
             <small>
               {scopeLabel}
-              {context && context.app_env !== 'production'
+              {context && context.app_env !== 'prod'
                 ? ` · ${ENV_LABELS[context.app_env]}环境`
                 : ''}
             </small>
