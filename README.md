@@ -115,10 +115,11 @@
 | 部分     | 主要技术                                                                     |
 |----------|------------------------------------------------------------------------------|
 | 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17、Alembic、PyJWT + bcrypt |
-| 管理端   | React 19、TypeScript、Vite、Ant Design 5                                     |
+| 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5                                 |
 | 用户端   | React 19、TypeScript、Vite                                                   |
 | 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标                       |
 | 测试     | pytest + httpx、Vitest + Testing Library、Playwright                         |
+| 代码质量 | ruff、mypy、oxlint、Prettier、pre-commit                                     |
 | 部署     | Docker Compose、Nginx、GitHub Actions                                        |
 
 ---
@@ -683,9 +684,7 @@ boxia-agent/
 │   └── scripts/                 # 前端一键启停脚本
 ├── ops/                         # 跨端运维入口
 │   ├── docker-compose.yml       # 多环境编排：db / migrate / backend / frontend（ENV_FILE 选择配置）
-│   ├── .env.production.example  # 生产环境变量模板
-│   ├── .env.development.example # 开发环境变量模板
-│   ├── .env.test.example        # 测试环境变量模板
+│   ├── .env.production          # 部署配置，自行创建且不入 Git（变量清单见 14.3）
 │   ├── dev.sh                   # 本地一键启动
 │   ├── check.sh                 # 本地质量门禁（与 CI 基本一致）
 │   ├── backup.sh                # 数据库备份
@@ -731,17 +730,22 @@ boxia-agent/
 ### 6.1 配置文件从哪来
 
 - 本地开发：复制 `backend/.env.example` 为 `backend/.env` 后修改。
-- 开发部署：复制 `ops/.env.development.example` 为 `ops/.env.development` 后修改。
-- 测试部署：复制 `ops/.env.test.example` 为 `ops/.env.test` 后修改。
-- 生产部署：复制 `ops/.env.production.example` 为 `ops/.env.production` 后修改。
+- 部署：`ops/` 下没有模板文件，直接新建 `.env.production`（开发/测试环境分别新建 `.env.development`、`.env.test`），按 14.3 的清单填写。
 
-真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。仓库里只保留 `.example` 模板。
+真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。第一次使用先确认必填项，其余变量都有默认值，可以等需要时再调整：
+
+| 配置文件 | 必填项 |
+|----------|--------|
+| `backend/.env`（本地） | `DATABASE_URL`、`JWT_SECRET`；`ROOT_DOMAIN` 设为 `localhost` 或留空（自动回退） |
+| `ops/.env.*`（部署） | `POSTGRES_PASSWORD`、`DATABASE_URL`（账号密码库名与 `POSTGRES_*` 一致）、`JWT_SECRET`、`ROOT_DOMAIN` |
 
 ### 6.2 变量一览
 
 | 变量                          | 默认值              | 必填     | 说明                                                                                                                                                  |
 |-------------------------------|---------------------|----------|-------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `APP_ENV`                     | `local`             | 否       | `local`（本机调试）/ `development` / `test` / `production`                                                                                            |
+| `APP_NAME`                    | `boxia-agent`       | 否       | 服务名，出现在根路径响应和日志中                                                                                                                      |
+| `APP_VERSION`                 | `1.0.0`             | 否       | 服务版本，出现在根路径响应中                                                                                                                          |
 | `DATABASE_URL`                | 无                  | 是       | 形如 `postgresql+psycopg://user:pass@host:5432/db`                                                                                                    |
 | `DATABASE_POOL_SIZE`          | `10`                | 否       | 连接池大小                                                                                                                                            |
 | `DATABASE_MAX_OVERFLOW`       | `10`                | 否       | 池溢出连接数                                                                                                                                          |
@@ -750,12 +754,15 @@ boxia-agent/
 | `STATEMENT_TIMEOUT_MS`        | `5000`              | 否       | 单条 SQL 超时                                                                                                                                         |
 | `LOCK_TIMEOUT_MS`             | `3000`              | 否       | 锁等待超时                                                                                                                                            |
 | `JWT_SECRET`                  | 无                  | 是       | 签名密钥；生产需至少 32 字符且不能是示例值（`openssl rand -hex 32`）                                                                                  |
+| `JWT_ALGORITHM`               | `HS256`             | 否       | 签名算法，除迁移场景外不建议修改                                                                                                                      |
+| `JWT_ISSUER`                  | `boxia-agent`       | 否       | 令牌签发方，会写入并校验 `iss`                                                                                                                        |
+| `JWT_AUDIENCE`                | `boxia-admin`       | 否       | 令牌受众，会写入并校验 `aud`                                                                                                                          |
 | `ACCESS_TOKEN_MINUTES`        | `30`                | 否       | 访问令牌有效期                                                                                                                                        |
 | `REFRESH_TOKEN_DAYS`          | `14`                | 否       | 刷新令牌有效期                                                                                                                                        |
 | `BCRYPT_ROUNDS`               | `12`                | 否       | 密码哈希成本因子                                                                                                                                      |
 | `LOGIN_MAX_ATTEMPTS`          | `5`                 | 否       | 连续失败几次后锁定                                                                                                                                    |
 | `LOGIN_LOCK_MINUTES`          | `15`                | 否       | 锁定时长（分钟）                                                                                                                                      |
-| `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 留空时回退 `localhost`，其余环境未配置会拒绝启动，见 6.4 |
+| `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）即可免 DNS 验证 `*.localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
 | `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
 | `DEFAULT_TENANT_CODE`         | 空                  | 否       | 访问根域名时默认进入的租户；留空则拒绝根域名访问                                                                                                      |
@@ -773,6 +780,16 @@ boxia-agent/
 
 > 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
 
+以下变量只在部署配置（`ops/.env.*`，需自行创建）中使用，本地 `backend/.env` 不需要：
+
+| 变量                                                       | 默认值               | 说明                                                         |
+|------------------------------------------------------------|----------------------|--------------------------------------------------------------|
+| `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`      | 示例 `boxia` / `boxia` | 初始化数据库容器；密码必须与 `DATABASE_URL` 中的完全一致     |
+| `HTTP_PORT`                                                | `80`                 | 前端容器映射到宿主机的端口                                   |
+| `PYTHON_IMAGE` / `NODE_IMAGE` / `NGINX_IMAGE`              | 官方镜像             | 构建阶段的基础镜像，国内网络受限时可替换，见 14.7            |
+
+> `ENV_FILE`、`HTTP_PORT`、`WEB_CONCURRENCY` 和上述镜像变量由 Compose 在启动时插值读取，**不会**从 `env_file` 注入容器，因此启动时需用 `--env-file` 或导出到当前 shell，见 14.4。
+
 ### 6.3 环境启动校验
 
 后端启动前会按 `APP_ENV` 检查多租户配置，不合格直接拒绝启动，避免带病运行或静默回退到产品级平台：
@@ -782,7 +799,7 @@ boxia-agent/
   - 必须配置 `ROOT_DOMAIN`，且不能是 `localhost`、`*.localhost` 或 IP 地址；
   - 禁止开启 `ALLOW_TENANT_HEADER`，部署环境只认二级域名。
 - `production` 额外要求：
-  - `JWT_SECRET` 至少 32 字符，且不能使用模板里的示例值；
+  - `JWT_SECRET` 至少 32 字符，且不能使用示例占位值；
   - `CORS_ORIGINS` 不允许 `*`；
   - 启用 `USER_API_TOKEN` 时长度至少 32 字符。
 
@@ -826,7 +843,7 @@ boxia-agent/
 
 1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口；开发/测试环境分别解析 `*.dev.example.com`、`*.test.example.com`。
 2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
-3. 环境变量：在 `ops/.env.production` 设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境使用对应的 `.env.development` / `.env.test`。
+3. 环境变量：按 14.3 创建 `ops/.env.production`，设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境对应使用 `.env.development` / `.env.test`。
 4. 若前后端分离部署，`CORS_ORIGINS` 需要列出实际使用的平台与租户域名。
 
 **数据隔离规则**
@@ -904,7 +921,7 @@ boxia-agent/
 ### 7.5 密码与密钥安全约定
 
 - 仓库**不包含任何默认账号或默认密码**，第一个管理员必须手动创建。
-- `backend/.env`、`ops/.env.production` 不进入 Git；仓库只保留 `.example` 模板。
+- `backend/.env`、`ops/.env.*` 不进入 Git；仓库只保留 `backend/.env.example` 模板。
 - 生产环境的示例 `JWT_SECRET` 会被校验拒绝，必须换成随机值（`openssl rand -hex 32`）。
 - CI 中的 E2E 测试密码在运行时随机生成，不写死在仓库里。
 - `backend/tests/`、`frontend/admin/e2e/` 里的固定口令只用于一次性测试数据库，不是真实凭据。
@@ -1586,7 +1603,7 @@ Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个
    │ HTTPS 443
    ▼
 TLS 终止层（云负载均衡 / 宿主机 Nginx / Caddy）
-   │ HTTP 127.0.0.1:8080
+   │ HTTP 127.0.0.1:8080（HTTP_PORT）
    ▼
 frontend 容器（Nginx，静态文件 + /api 反代）
    │ 内部网络
@@ -1613,45 +1630,45 @@ backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
 
 ### 14.3 准备环境变量与密钥
 
-```bash
-cp ops/.env.production.example ops/.env.production
-chmod 600 ops/.env.production
-```
-
-开发/测试环境同理使用 `ops/.env.development.example`、`ops/.env.test.example`，启动时通过 `ENV_FILE` 指定（默认读 `.env.production`）：
+`ops/` 下没有模板文件，直接新建生产配置：
 
 ```bash
-cd ops
-ENV_FILE=.env.development docker compose up -d
-```
+cat > ops/.env.production <<'EOF'
+# ===== 必填 =====
+# 数据库：POSTGRES_* 用于初始化容器，DATABASE_URL 中的账号密码库名必须与之一致
+POSTGRES_DB=boxia
+POSTGRES_USER=boxia
+POSTGRES_PASSWORD=CHANGE_ME_STRONG_DB_PASSWORD
+DATABASE_URL=postgresql+psycopg://boxia:CHANGE_ME_STRONG_DB_PASSWORD@db:5432/boxia
 
-每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
+# JWT 签名密钥：执行 openssl rand -hex 32 生成，至少 32 字符
+JWT_SECRET=CHANGE_ME_64_HEX_CHARACTERS
 
-至少修改：
-
-```bash
-# 数据库密码：使用强随机值
-POSTGRES_PASSWORD=<强随机密码>
-DATABASE_URL=postgresql+psycopg://<数据库用户>:<同样的密码>@db:5432/<数据库名>
-
-# JWT 签名密钥：32 字节随机值的十六进制
-JWT_SECRET=<openssl rand -hex 32 的输出>
-
-# 生产必须
-APP_ENV=production
-DOCS_ENABLED=false
-CORS_ORIGINS=
-# 租户根域名，未配置会拒绝启动
+# 租户根域名：未配置或不是完整域名会拒绝启动
 ROOT_DOMAIN=example.com
+
+# ===== 按部署形态确认 =====
+APP_ENV=production
 # 产品级平台子域名前缀，最终为 adminsystem.example.com
 PLATFORM_ADMIN_SUBDOMAIN=adminsystem
+PLATFORM_NAME=Agent运营管理平台
 # 部署环境只按域名识别租户；生产开启该项会拒绝启动
 ALLOW_TENANT_HEADER=false
+DOCS_ENABLED=false
+CORS_ORIGINS=
 # 可选：访问根域名时默认进入的租户编码，留空则根域名返回 404
 # DEFAULT_TENANT_CODE=acme
 
+# ===== Compose 插值 =====
 # 对外端口（前面有 TLS 终止层时可改为 127.0.0.1:8080）
 HTTP_PORT=80
+WEB_CONCURRENCY=2
+
+# ===== 可选 =====
+LOG_LEVEL=INFO
+LOG_JSON=true
+EOF
+chmod 600 ops/.env.production
 ```
 
 生成随机值：
@@ -1660,25 +1677,38 @@ HTTP_PORT=80
 openssl rand -hex 32
 ```
 
+开发/测试环境同样在 `ops/` 下新建 `.env.development`、`.env.test`，把 `APP_ENV` 改为 `development` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），端口建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
+
+启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.production`），并把同一份文件交给 `--env-file` 供 Compose 插值：
+
+```bash
+cd ops
+ENV_FILE=.env.development docker compose --env-file .env.development up -d
+```
+
 注意事项：
 
 - `POSTGRES_PASSWORD` 和 `DATABASE_URL` 里的密码必须一致。
 - `CORS_ORIGINS` 同源部署留空；前后端分离时填管理端域名，禁止 `*`。
-- `.env.production` 含密钥，权限设为 600，不要提交 Git，也不要贴到聊天工具。
+- `ops/.env.*` 含密钥，权限设为 600，不要提交 Git，也不要贴到聊天工具。
 
 ### 14.4 构建并启动
 
 ```bash
-docker compose -f ops/docker-compose.yml up -d --build
-docker compose -f ops/docker-compose.yml ps
+# 在仓库根目录执行；--env-file 让 HTTP_PORT、WEB_CONCURRENCY 等插值变量生效
+docker compose -f ops/docker-compose.yml --env-file ops/.env.production up -d --build
+docker compose -f ops/docker-compose.yml --env-file ops/.env.production ps
 ```
 
 开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.production`）：
 
 ```bash
-ENV_FILE=.env.development docker compose -f ops/docker-compose.yml up -d --build
-ENV_FILE=.env.test docker compose -f ops/docker-compose.yml up -d --build
+cd ops
+ENV_FILE=.env.development docker compose --env-file .env.development up -d --build
+ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 ```
+
+> `ENV_FILE` 只决定 `db` / `migrate` / `backend` 容器读取哪个 env_file。`HTTP_PORT`（端口映射）、`WEB_CONCURRENCY`（compose 的 `environment`）和镜像变量属于 Compose 自身的插值，只写进 env_file 不会生效，必须像上面这样用 `--env-file` 提供；也可以把这些变量导出到当前 shell。
 
 服务说明：
 
@@ -1775,7 +1805,7 @@ docker compose -f ops/docker-compose.yml build
 # 1. 容器状态：都应 healthy 或正常退出（migrate 为 exited 0）
 docker compose -f ops/docker-compose.yml ps
 
-# 2. 前端 Nginx 存活
+# 2. 前端 Nginx 存活（端口按 HTTP_PORT，示例为 TLS 前的 127.0.0.1:8080）
 curl -fsS http://127.0.0.1:8080/healthz
 
 # 3. 后端就绪（数据库连通 + 迁移版本一致）
@@ -1805,7 +1835,7 @@ docker compose -f ops/docker-compose.yml logs migrate
 
 1. 先备份数据库（见 14.10）。
 2. 拉取新代码。
-3. 重新构建并启动：`docker compose -f ops/docker-compose.yml up -d --build`。
+3. 重新构建并启动：`docker compose -f ops/docker-compose.yml --env-file ops/.env.production up -d --build`。
 4. `migrate` 服务自动执行迁移，`backend` 等它成功后才启动。
 5. 按 14.8 验证。
 
@@ -1850,7 +1880,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 
 - [ ] 防火墙只开放 22、80、443；数据库和后端端口不对外
 - [ ] SSH 只允许密钥登录，禁用 root 远程登录
-- [ ] `ops/.env.production` 权限 600，密钥随机且未出现在 Git 历史中
+- [ ] `ops/.env.*` 权限 600，密钥随机且未出现在 Git 历史中
 - [ ] `APP_ENV=production`、`DOCS_ENABLED=false`
 - [ ] HTTPS 使用 TLS 1.2/1.3，证书自动续期
 - [ ] 容器非 root、只读根文件系统、`cap_drop: ALL`、`no-new-privileges`
@@ -1885,7 +1915,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 ### 15.1 健康检查
 
 ```bash
-curl -s http://127.0.0.1:8080/healthz       # 前端 Nginx 存活
+curl -s http://127.0.0.1:8080/healthz       # 前端 Nginx 存活（端口为 HTTP_PORT）
 
 docker compose -f ops/docker-compose.yml exec backend \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
@@ -1963,7 +1993,7 @@ git diff --cached --stat
 git diff --cached | grep -iE "password|secret|token"
 ```
 
-仓库已经配置了 `.gitignore` 和 pre-commit 的私钥检测；真实配置只放在 `.env` 和 `ops/.env.production` 中，这两个文件不会进入 Git。
+仓库已经配置了 `.gitignore` 和 pre-commit 的私钥检测；真实配置只放在 `backend/.env` 和 `ops/.env.*` 中，这些文件不会进入 Git。
 
 **Q9：不同租户可以有同名资源或同名账号吗**
 

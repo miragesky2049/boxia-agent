@@ -230,7 +230,7 @@ frontend/*/.env.local
 !frontend/*/.env.*.example
 
 # 跨端运维本地文件
-ops/.env.production
+ops/.env.*
 ops/backups/
 
 # 前端测试与质量产物
