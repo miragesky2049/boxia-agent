@@ -208,7 +208,10 @@ Copy-Item .env.example .env
 **2）安装后端依赖**
 
 ```bash
-uv sync
+# 推荐指定python版本3.12.10
+uv sync --python 3.12.10
+# 不指定python
+# uv sync
 ```
 
 第一次执行会下载依赖（必要时自动下载 Python），可能需要几分钟。成功后 `backend/.venv/` 目录会出现。
@@ -219,7 +222,18 @@ uv sync
 uv run alembic upgrade head
 ```
 
-这条命令把数据库结构升级到最新版本。看到若干 `Running upgrade ...` 日志即成功。
+这条命令把数据库结构升级到最新版本。输出分两种情况：
+
+- **有迁移需要执行**：打印若干 `Running upgrade 0001_baseline -> 0002_auth_hardening` 这样的日志，最后一条指向最新版本。
+- **数据库已经是最新版本**：只打印 `Context impl PostgresqlImpl.` 和 `Will assume transactional DDL.` 两行连接信息，然后直接退出。这同样表示成功，不是报错。
+
+无论哪种情况，都可以用下面的命令确认当前库版本。输出末尾带 `(head)` 就表示已是最新：
+
+```bash
+uv run alembic current
+```
+
+> 迁移日志输出到 **stderr** 而不是 stdout。如果重定向到文件（如 `uv run alembic upgrade head > log.txt`），需要写成 `... > log.txt 2>&1` 才能收集到这些日志。
 
 **4）创建第一个管理员**
 
@@ -523,6 +537,29 @@ docker ps --filter "publish=5432"
 
 - 如果是别的容器，先停止它。
 - 如果本机安装了 PostgreSQL 服务，可以停止该服务（Windows 在“服务”中停止 `postgresql-x64-*`），或者修改 `backend/docker/docker-compose.yml` 的端口映射，同时修改 `backend/.env` 里的 `DATABASE_URL` 端口。
+
+---
+
+### 4.12 执行 `alembic upgrade head` 没看到 `Running upgrade` 日志
+
+这通常说明**数据库已经是最新版本**，没有迁移需要执行。`upgrade head` 是幂等的：数据库版本等于代码 head 时会直接跳过，只打印两行连接信息就退出，退出码为 0，属于成功。
+
+确认办法：
+
+```bash
+cd backend
+uv run alembic current     # 输出形如 0003_search_trgm (head)
+uv run alembic heads       # 与 current 一致即表示已是最新
+```
+
+另外，alembic 的日志输出到 **stderr**。如果只用 `> log.txt` 重定向 stdout，日志会被漏掉，需要写成 `2>&1`。
+
+想在本地看清 `Running upgrade` 的完整输出，可以先降一级再升回来（会真实回滚数据库，只在本地开发库执行）：
+
+```bash
+uv run alembic downgrade -1
+uv run alembic upgrade head
+```
 
 ---
 
@@ -855,6 +892,7 @@ uv run alembic upgrade head        # 升级到最新
 uv run alembic check               # 检查模型和迁移是否一致
 uv run alembic downgrade -1        # 回滚一个版本
 uv run alembic history             # 查看迁移历史
+uv run alembic current             # 查看数据库当前版本（带 (head) 即最新）
 ```
 
 - **全新数据库**：直接 `alembic upgrade head`。
