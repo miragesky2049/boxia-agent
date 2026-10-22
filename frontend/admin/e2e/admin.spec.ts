@@ -14,7 +14,7 @@ const VIEWER_NEW_PASSWORD = 'Portal-Read-5678'
 async function login(
   page: Page,
   username = ADMIN_USERNAME,
-  password = ADMIN_PASSWORD,
+  password = ADMIN_PASSWORD!,
   expectSuccess = true,
 ) {
   await page.goto('/login')
