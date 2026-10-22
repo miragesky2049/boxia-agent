@@ -672,7 +672,6 @@ boxia-agent/
 │   │   └── infrastructure/      # 配置、ORM、仓储、安全、日志、中间件、链路追踪
 │   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户）
 │   ├── scripts/                 # create_admin / seed_demo / wait_for_db
-│   ├── db/                      # 早期手工 SQL（仅本地参考，不再使用）
 │   ├── tests/                   # 后端接口测试
 │   └── Dockerfile
 ├── frontend/
@@ -1137,10 +1136,8 @@ uv run alembic current             # 查看数据库当前版本（带 (head) �
 ```
 
 - **全新数据库**：直接 `alembic upgrade head`。
-- **早期手工初始化过的数据库**（执行过 `db/001_schema.sql`）：先 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
+- **早期手工初始化过的数据库**（表结构已与基线一致）：先 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
 - **生产环境**：由 Compose 中的一次性 `migrate` 服务自动执行，`backend` 等它成功后才启动。
-
-> `backend/db/*.sql` 是早期的本地演示脚本，不再是数据来源，也不包含任何默认账号。生产环境不要使用。
 
 ### 9.3 初始化与演示数据
 
@@ -1977,7 +1974,7 @@ uv run alembic check
 
 **Q6：历史数据库如何接入 Alembic**
 
-先确认表结构与 `0001_baseline` 一致，执行 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。不要重复执行 `db/001_schema.sql`。
+先确认表结构与 `0001_baseline` 一致，执行 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
 
 **Q7：如何修改用户端接口令牌**
 
