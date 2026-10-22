@@ -67,10 +67,19 @@ async function loginPlatform(page: Page) {
   await page.waitForURL(/\/(agents|change-password)$/)
 }
 
+/** 产品级登录页通过作用域下拉框切换到租户级。 */
 async function switchToTenant(page: Page) {
   await page.locator('.login-card__scope-select').click()
   await page.locator('.ant-select-item-option').filter({ hasText: TENANT_NAME }).click()
   await expect(page.locator('.login-card__scope')).toContainText(TENANT_NAME)
+  // 租户级不再提供作用域下拉框
+  await expect(page.getByRole('combobox')).toHaveCount(0)
+}
+
+/** 租户级切换作用域只能通过 URL 上的 tenant 参数。 */
+async function openScopeByUrl(page: Page, code: string, expectedText: string) {
+  await page.goto(`/login?tenant=${code}`)
+  await expect(page.locator('.login-card__scope')).toContainText(expectedText)
 }
 
 async function submitLogin(page: Page, password: string) {
@@ -96,7 +105,8 @@ async function loginTenant(page: Page, request: APIRequestContext, token: string
     await page.getByRole('button', { name: '确认修改' }).click()
     await expect(page).toHaveURL(/\/login/)
 
-    await switchToTenant(page)
+    await openScopeByUrl(page, TENANT_CODE, TENANT_NAME)
+    await expect(page.getByRole('combobox')).toHaveCount(0)
     await submitLogin(page, TENANT_NEW_PASSWORD)
   }
   await expect(page).toHaveURL(/\/agents$/)
@@ -113,7 +123,31 @@ test.describe('多租户', () => {
     await expect(page.getByRole('row', { name: new RegExp(TENANT_CODE) })).toBeVisible()
   })
 
-  test('开发态切换租户后，租户管理员只能进入租户作用域', async ({ page, request }) => {
+  test('本地子域名直接进入租户作用域', async ({ page, request }) => {
+    const token = await adminToken(request)
+    await ensureTenant(request, token)
+
+    await page.goto(`http://${TENANT_CODE}.localhost:5173/login`)
+    await expect(page.locator('.login-card__scope')).toContainText(TENANT_NAME)
+    await expect(page.locator('.login-card__hint')).toContainText('按域名解析作用域')
+    // 子域名模式不再提供作用域下拉框
+    await expect(page.getByRole('combobox')).toHaveCount(0)
+  })
+
+  test('租户级作用域只能通过 URL 参数切换', async ({ page, request }) => {
+    const token = await adminToken(request)
+    await ensureTenant(request, token)
+
+    await page.goto('/login')
+    // 产品级登录页提供作用域下拉框
+    await expect(page.getByRole('combobox')).toHaveCount(1)
+    await switchToTenant(page)
+
+    await openScopeByUrl(page, 'platform', '产品级')
+    await expect(page.getByRole('combobox')).toHaveCount(1)
+  })
+
+  test('本地切换租户后，租户管理员只能进入租户作用域', async ({ page, request }) => {
     const token = await adminToken(request)
     await loginTenant(page, request, token)
 

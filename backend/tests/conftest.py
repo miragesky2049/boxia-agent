@@ -19,7 +19,8 @@ os.environ["USER_API_TOKEN"] = "test-user-token-0123456789abcdef"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["ROOT_DOMAIN"] = "example.com"
 os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "adminsystem"
-os.environ["ALLOW_TENANT_HEADER"] = "true"
+# 部署环境只按域名识别租户；集成用例统一使用 tenant_client 的子域名访问
+os.environ["ALLOW_TENANT_HEADER"] = "false"
 
 PLATFORM_HOST = "adminsystem.example.com"
 TENANT_HEADER = "X-Tenant-Code"

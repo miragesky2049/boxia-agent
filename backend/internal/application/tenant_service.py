@@ -19,7 +19,7 @@ from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
-_RESERVED_CODES = {"www", "api", "admin", "static", "assets"}
+_RESERVED_CODES = {"www", "api", "admin", "static", "assets", "platform"}
 
 
 class TenantService:
@@ -35,7 +35,7 @@ class TenantService:
         return self._uow.tenants.search(keyword)
 
     def list_active(self) -> list[Tenant]:
-        """查询启用中的租户（开发态租户切换使用）。"""
+        """查询启用中的租户（本地调试切换作用域使用）。"""
         return self._uow.tenants.list_active()
 
     def get(self, tenant_id: int) -> Tenant:

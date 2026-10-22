@@ -26,11 +26,18 @@ const ROLE_LABELS = {
   viewer: '只读',
 }
 
+const ENV_LABELS = {
+  local: '本地',
+  development: '开发',
+  test: '测试',
+  production: '线上',
+} as const
+
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, signOut, isSuperAdmin, mustChangePassword } = useAuth()
-  const { platformName, scopeLabel, isPlatform } = useTenant()
+  const { platformName, scopeLabel, isPlatform, context } = useTenant()
 
   useEffect(() => {
     if (mustChangePassword) {
@@ -81,7 +88,12 @@ export default function AdminLayout() {
           <span className="admin-sider__logo">B</span>
           <span className="admin-sider__title">
             {platformName}
-            <small>{scopeLabel}</small>
+            <small>
+              {scopeLabel}
+              {context && context.app_env !== 'production'
+                ? ` · ${ENV_LABELS[context.app_env]}环境`
+                : ''}
+            </small>
           </span>
         </div>
         <Menu

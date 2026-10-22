@@ -11,6 +11,8 @@
 | 要把项目部署到生产环境 | 第 14–15 章，含服务器准备、上线、回滚、备份和监控 |
 
 > 建议在 **Git Bash**（Windows）、macOS 或 Linux 终端中执行本文命令。仓库中的 `ops/*.sh` 脚本需要 Bash；Windows 安装 [Git for Windows](https://git-scm.com/download/win) 即可获得 Git Bash。
+>
+> ⚠️ PowerShell 里的 `bash` 指向 WSL（`C:\Windows\System32\bash.exe`），而 Docker Desktop 自带的默认发行版 `docker-desktop` 没有 `/bin/bash`，直接执行会报 `execvpe(/bin/bash) failed: No such file or directory`。请改用 Git Bash，或显式指定 Git Bash 路径：`& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh`。详见 [4.13](#413-windows-powershell-下运行-opssh-报-binbash-no-such-file-or-directory)。
 
 ---
 
@@ -49,8 +51,9 @@
 ```text
 你的浏览器
 │
-├── 管理端  http://localhost:5173   ← 运营/管理员使用（React）
-├── 用户端  http://localhost:5174   ← 最终用户使用（目前是骨架页）
+├── 管理端  http://localhost:5173    ← 运营/管理员使用（React）
+│           http://*.localhost:5173  ← 本地验证平台/租户子域名
+├── 用户端  http://localhost:5174    ← 最终用户使用（目前是骨架页）
 │
 └──────────────┬───────────────────
                ▼
@@ -292,7 +295,7 @@ uv run python -m scripts.create_admin
 - 角色：`superadmin`
 - 首次登录必须改密
 
-默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`，本地为 `localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
+默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`；本地为 `localhost:5173` 或 `adminsystem.localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
 
 **密码规则**（不符合会直接报错）：
 
@@ -365,6 +368,8 @@ pnpm run dev
 - [ ] `http://localhost:5173` 能用 `admin` 登录
 - [ ] 登录后能看到“智能体列表”页面
 - [ ] 能进入任一资源页面（如“技能”），成功新建一条记录
+- [ ] `http://adminsystem.localhost:5173` 能打开产品级登录页
+- [ ] 创建租户后，`http://<租户编码>.localhost:5173` 能打开对应租户的登录页
 
 全部通过，说明本地环境已经可用。
 
@@ -384,11 +389,21 @@ pnpm run dev     # http://localhost:5174
 
 先回到仓库根目录。如果数据库已经在运行，并且能使用 Git Bash，可以一条命令启动后端（含自动迁移）和管理端：
 
+Git Bash / macOS / Linux：
+
 ```bash
-bash ops/dev.sh
+./ops/dev.sh
 ```
 
-> 仓库中的 `.sh` 脚本在 Windows 上通常没有可执行权限，所以统一用 `bash 脚本名` 运行。
+PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh`，那会调用 WSL 的 bash）：
+
+```powershell
+& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh
+```
+
+> 仓库中的 `.sh` 脚本在 Windows 上通常没有可执行权限，所以也可以统一用 `bash 脚本名` 运行（仅在 Git Bash 终端内有效）。
+>
+> 仓库根目录的 `.gitattributes` 已声明 `*.sh text eol=lf`，正常情况下脚本不会被 checkout 成 CRLF；若从旧版本更新后仍报 `$'\r': command not found`，执行 `sed -i 's/\r$//' ops/*.sh` 转换一次即可。
 
 它会：
 
@@ -413,7 +428,9 @@ bash ops/dev.sh
 
 | 服务 | 地址 | 说明 |
 | --- | --- | --- |
-| 管理端 | <http://localhost:5173> | 管理后台 |
+| 管理端 | <http://localhost:5173> | 管理后台（本地回环，可用请求头切换作用域） |
+| 管理端（平台子域名） | <http://adminsystem.localhost:5173> | 本地验证产品级平台域名解析 |
+| 管理端（租户子域名） | `http://<租户编码>.localhost:5173` | 本地验证租户域名解析，需先创建租户 |
 | 用户端 | <http://localhost:5174> | 用户门户（骨架） |
 | 后端 | <http://127.0.0.1:8000/> | 返回服务名和版本 |
 | 健康检查 | `http://127.0.0.1:8000/health/live`、`/health/ready` | 存活 / 就绪 |
@@ -602,6 +619,35 @@ uv run alembic downgrade -1
 uv run alembic upgrade head
 ```
 
+### 4.13 Windows PowerShell 下运行 `ops/*.sh` 报 `/bin/bash: No such file or directory`
+
+完整报错类似：
+
+```text
+WSL (109097 - Relay) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed: No such file or directory
+```
+
+原因：PowerShell 的 `bash` 解析到 `C:\Windows\System32\bash.exe`（WSL），而本机默认 WSL 发行版是 Docker Desktop 的 `docker-desktop`，其中没有 `/bin/bash`。可用 `wsl -l -v` 确认：
+
+```text
+  NAME              STATE           VERSION
+* docker-desktop    Running         2
+```
+
+解决办法（任选其一）：
+
+1. **用 Git Bash 运行**（推荐）：开始菜单打开 Git Bash，进入仓库根目录后执行 `./ops/dev.sh`。
+2. **在 PowerShell 中显式指定 Git Bash**：
+   ```powershell
+   & "C:\Program Files\Git\bin\bash.exe" ops/dev.sh
+   ```
+3. 如果确实希望 PowerShell 里的 `bash` 可用，安装一个带 Bash 的 WSL 发行版并设为默认：
+   ```powershell
+   wsl --install -d Ubuntu
+   wsl --set-default Ubuntu
+   ```
+   但 `ops/dev.sh` 只调用 Windows 侧的 `uv` / `pnpm`，用 Git Bash 更直接。
+
 ---
 
 ## 5. 目录结构与代码分层
@@ -614,7 +660,7 @@ boxia-agent/
 │   ├── web/                     # HTTP 层：路由、请求/响应模型、异常处理
 │   │   ├── app.py               # 应用装配入口：中间件、异常、健康检查、指标、路由
 │   │   ├── api_v1.py            # /api/v1 路由汇总（含 /api 兼容别名）
-│   │   ├── public.py            # 匿名作用域信息、开发态租户列表
+│   │   ├── public.py            # 匿名作用域信息、本地调试租户列表
 │   │   ├── admin/               # 管理端接口（含租户管理、作用域信息）
 │   │   ├── user/                # 用户端接口（骨架）
 │   │   └── deps/                # 数据库、服务、鉴权、租户作用域依赖
@@ -636,8 +682,10 @@ boxia-agent/
 │   ├── user/                    # 用户端（端口 5174，骨架）
 │   └── scripts/                 # 前端一键启停脚本
 ├── ops/                         # 跨端运维入口
-│   ├── docker-compose.yml       # 生产编排：db / migrate / backend / frontend
+│   ├── docker-compose.yml       # 多环境编排：db / migrate / backend / frontend（ENV_FILE 选择配置）
 │   ├── .env.production.example  # 生产环境变量模板
+│   ├── .env.development.example # 开发环境变量模板
+│   ├── .env.test.example        # 测试环境变量模板
 │   ├── dev.sh                   # 本地一键启动
 │   ├── check.sh                 # 本地质量门禁（与 CI 基本一致）
 │   ├── backup.sh                # 数据库备份
@@ -683,15 +731,17 @@ boxia-agent/
 ### 6.1 配置文件从哪来
 
 - 本地开发：复制 `backend/.env.example` 为 `backend/.env` 后修改。
+- 开发部署：复制 `ops/.env.development.example` 为 `ops/.env.development` 后修改。
+- 测试部署：复制 `ops/.env.test.example` 为 `ops/.env.test` 后修改。
 - 生产部署：复制 `ops/.env.production.example` 为 `ops/.env.production` 后修改。
 
-两个真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。仓库里只保留 `.example` 模板。
+真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。仓库里只保留 `.example` 模板。
 
 ### 6.2 变量一览
 
 | 变量 | 默认值 | 必填 | 说明 |
 | --- | --- | --- | --- |
-| `APP_ENV` | `development` | 否 | `development` / `test` / `production` |
+| `APP_ENV` | `local` | 否 | `local`（本机调试）/ `development` / `test` / `production` |
 | `DATABASE_URL` | 无 | 是 | 形如 `postgresql+psycopg://user:pass@host:5432/db` |
 | `DATABASE_POOL_SIZE` | `10` | 否 | 连接池大小 |
 | `DATABASE_MAX_OVERFLOW` | `10` | 否 | 池溢出连接数 |
@@ -705,11 +755,11 @@ boxia-agent/
 | `BCRYPT_ROUNDS` | `12` | 否 | 密码哈希成本因子 |
 | `LOGIN_MAX_ATTEMPTS` | `5` | 否 | 连续失败几次后锁定 |
 | `LOGIN_LOCK_MINUTES` | `15` | 否 | 锁定时长（分钟） |
-| `ROOT_DOMAIN` | 空 | 生产必填 | 租户根域名，如 `example.com`；生产必须配置，见 6.4 |
+| `ROOT_DOMAIN` | 空 | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 留空时回退 `localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN` | `adminsystem` | 否 | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>` |
 | `PLATFORM_NAME` | `Agent运营管理平台` | 否 | 管理端展示的平台名称 |
 | `DEFAULT_TENANT_CODE` | 空 | 否 | 访问根域名时默认进入的租户；留空则拒绝根域名访问 |
-| `ALLOW_TENANT_HEADER` | 非生产开启 | 否 | 是否允许 `X-Tenant-Code` 请求头识别租户，仅用于开发/测试 |
+| `ALLOW_TENANT_HEADER` | `false` | 否 | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**，开发/测试/生产开启会拒绝启动 |
 | `CORS_ORIGINS` | 空 | 否 | 逗号分隔的允许来源；生产禁止 `*` |
 | `DOCS_ENABLED` | 生产关闭 | 否 | 是否暴露 Swagger 文档 |
 | `LEGACY_API_ENABLED` | `true` | 否 | 是否保留 `/api` 兼容别名 |
@@ -723,16 +773,20 @@ boxia-agent/
 
 > 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
 
-### 6.3 生产环境的硬性校验
+### 6.3 环境启动校验
 
-当 `APP_ENV=production` 时，后端启动前会检查配置，不合格直接拒绝启动：
+后端启动前会按 `APP_ENV` 检查多租户配置，不合格直接拒绝启动，避免带病运行或静默回退到产品级平台：
 
-- `JWT_SECRET` 少于 32 字符，或使用了模板里的示例值
-- `CORS_ORIGINS` 包含 `*`
-- 启用 `USER_API_TOKEN` 但长度不足 32 字符
-- 未配置 `ROOT_DOMAIN` 或 `PLATFORM_ADMIN_SUBDOMAIN`（多租户域名解析依赖这两项）
+- 所有环境：`PLATFORM_ADMIN_SUBDOMAIN` 必须是一级域名标签（字母、数字、连字符）。
+- `development` / `test` / `production`：
+  - 必须配置 `ROOT_DOMAIN`，且不能是 `localhost`、`*.localhost` 或 IP 地址；
+  - 禁止开启 `ALLOW_TENANT_HEADER`，部署环境只认二级域名。
+- `production` 额外要求：
+  - `JWT_SECRET` 至少 32 字符，且不能使用模板里的示例值；
+  - `CORS_ORIGINS` 不允许 `*`；
+  - 启用 `USER_API_TOKEN` 时长度至少 32 字符。
 
-这些检查是为了避免“复制示例配置直接上线”导致的安全问题。
+这些检查是为了避免“复制示例配置直接上线”或漏配域名时把请求放进最高权限的产品级平台。
 
 ### 6.4 多租户域名与使用方式
 
@@ -744,13 +798,35 @@ boxia-agent/
 | `acme.example.com` | 租户 `acme` | 维护本租户账号与资源；可使用产品级资源，但不能修改 |
 | `example.com` | 根域名 | 配置了 `DEFAULT_TENANT_CODE` 则进入该租户，否则返回 404 |
 
-后端按请求的 `Host` 解析租户。生产环境必须配置 `ROOT_DOMAIN`；`X-Tenant-Code` 请求头在生产默认被忽略（`ALLOW_TENANT_HEADER=false`），仅用于本地开发。
+**域名是作用域的唯一事实来源。** 部署环境必须配置 `ROOT_DOMAIN`，只能通过二级域名（`adminsystem.<根域名>` 或 `<租户编码>.<根域名>`）访问；部署环境中的 `localhost`、回环地址、未知域名与多级子域名一律返回 404，**不再静默回退到产品级平台**。`X-Tenant-Code` 请求头与 `?tenant=` 参数只在 `local` 环境、且 `ALLOW_TENANT_HEADER=true` 时生效，并且只在回环/本机主机上生效；访问 `acme.localhost` 时即使带了其他租户的请求头，也以域名为准。
 
-**生产部署**
+本地不配置 `ROOT_DOMAIN` 时自动回退 `localhost`，因此可以直接验证真实子域名：
 
-1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口。
+| 本地访问地址 | 作用域 | 解析方式 |
+| --- | --- | --- |
+| `http://localhost:5173` | 产品级平台（无请求头时） | 默认兜底 `resolution=default` |
+| `http://localhost:5173/login?tenant=acme` | 租户 `acme` | 请求头模式 `resolution=header` |
+| `http://adminsystem.localhost:5173` | 产品级平台 | 域名 `resolution=host` |
+| `http://acme.localhost:5173` | 租户 `acme` | 域名 `resolution=host` |
+
+**多环境策略**
+
+| 环境 | `APP_ENV` | 根域名 | 平台地址 | 租户地址 | 租户切换方式 |
+| --- | --- | --- | --- | --- | --- |
+| 本地调试 | `local` | 可留空（回退 `localhost`） | `adminsystem.localhost:5173` | `acme.localhost:5173` | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
+| 开发环境部署 | `development` | 必填，如 `dev.example.com` | `adminsystem.dev.example.com` | `acme.dev.example.com` | 仅二级域名 |
+| 测试环境部署 | `test` | 必填，如 `test.example.com` | `adminsystem.test.example.com` | `acme.test.example.com` | 仅二级域名 |
+| 线上环境 | `production` | 必填，如 `example.com` | `adminsystem.example.com` | `acme.example.com` | 仅二级域名 |
+
+部署环境只认域名：前端在服务端报告 `tenant_switch_mode=none` 时会清掉本地残留的租户覆盖值；`?tenant=` 参数会被直接忽略并移出地址栏，不会误清登录态。开发/测试环境如确需临时联调请求头切换，仍需把 `APP_ENV` 改为 `local`，不要在生产打开该能力。
+
+`/public/context` 与 `/admin/context` 会返回 `app_env`、`tenant_resolution`（`host` / `header` / `default`）、`tenant_switch_mode`（`none` / `header` / `host`）与 `platform_admin_host`，登录页和管理端侧边栏会展示环境与解析来源，便于排查“为什么进了错误租户”。
+
+**部署配置（以生产为例）**
+
+1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口；开发/测试环境分别解析 `*.dev.example.com`、`*.test.example.com`。
 2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
-3. 环境变量：在 `ops/.env.production` 设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`。
+3. 环境变量：在 `ops/.env.production` 设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境使用对应的 `.env.development` / `.env.test`。
 4. 若前后端分离部署，`CORS_ORIGINS` 需要列出实际使用的平台与租户域名。
 
 **数据隔离规则**
@@ -770,7 +846,12 @@ boxia-agent/
 
 **本地开发**
 
-`backend/.env` 不配置 `ROOT_DOMAIN` 时，默认进入产品级平台；登录页会出现作用域下拉框，可在产品级与已有租户之间切换。也可以直接访问 `http://localhost:5173/login?tenant=acme`，或给接口加请求头 `X-Tenant-Code: acme`（产品级用 `platform`）。
+`backend/.env` 使用 `APP_ENV=local`（`.env.example` 默认值）时有两种本地调试方式：
+
+1. **请求头模式**：`ROOT_DOMAIN` 可留空（回退 `localhost`），保持 `ALLOW_TENANT_HEADER=true`。访问 `http://localhost:5173` 默认进入产品级平台；产品级登录页提供作用域下拉框，也可用 `?tenant=acme`（产品级用 `?tenant=platform`）或接口请求头 `X-Tenant-Code: acme` 切换。进入租户级后下拉框隐藏，只展示当前租户名称。
+2. **真实子域名模式**：直接访问 `http://adminsystem.localhost:5173` 或 `http://<租户编码>.localhost:5173`。Vite 会透传原始 `Host`，后端按域名解析；此时 `X-Tenant-Code` 不生效，切换租户由前端跳转到对应子域名。
+
+若关闭 `ALLOW_TENANT_HEADER`，请求头与 `?tenant=` 都会失效，只能使用子域名方式访问。
 
 ---
 
@@ -875,7 +956,19 @@ Authorization: Bearer <access_token>
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/public/context` | 按当前域名返回产品级/租户级模式与平台名称 |
-| GET | `/public/tenants` | 开发/测试环境返回可选租户列表；生产不可用 |
+| GET | `/public/tenants` | 仅 `local` 环境返回可选租户列表；开发/测试/线上返回 403 |
+
+`/public/context` 与 `/admin/context` 的关键字段：
+
+| 字段 | 说明 |
+| --- | --- |
+| `scope` | `platform`（产品级）或 `tenant`（租户级） |
+| `tenant` | 当前租户信息；产品级为 `null` |
+| `app_env` | `local` / `development` / `test` / `production` |
+| `tenant_resolution` | 作用域来源：`host`（域名）/ `header`（本地请求头）/ `default`（本地兜底） |
+| `tenant_switch_mode` | 前端切换方式：`none`（仅域名）/ `header`（请求头）/ `host`（子域名跳转） |
+| `platform_admin_host` | 产品级平台完整主机名，如 `adminsystem.dev.example.com` |
+| `root_domain`、`platform_admin_subdomain`、`platform_name` | 当前环境的根域名、平台子域名与展示名称 |
 
 ### 8.3 资源接口
 
@@ -954,14 +1047,15 @@ curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"剧本生成","description":"示例","content":"生成剧本","config":{}}'
 
-# 本地开发：按租户作用域登录（产品级用 platform；生产环境忽略该请求头）
+# 本地开发：按租户作用域登录（产品级用 platform；部署环境忽略该请求头）
+# 需要 APP_ENV=local 且 ALLOW_TENANT_HEADER=true
 # acme-admin 是创建租户时填写的管理员用户名，实际使用时替换成你的账号
 TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
   -H 'X-Tenant-Code: acme' -H 'Content-Type: application/json' \
   -d '{"username":"acme-admin","password":"你的密码"}')
 ```
 
-> 作用域由 `Host` 决定；本地访问 `127.0.0.1` 时回退到产品级平台，想操作租户数据必须带 `X-Tenant-Code`（或使用租户子域名）。
+> 域名优先：访问 `<code>.localhost` 或部署环境子域名时，`X-Tenant-Code` 会被忽略。只有本地回环主机（`localhost` / `127.0.0.1` 等）才允许用请求头切换作用域。
 
 > PowerShell 中 `curl` 是别名，请改用 `curl.exe`。
 
@@ -1048,7 +1142,7 @@ uv run python -m scripts.seed_demo
 
 | 模块 | 能力 |
 | --- | --- |
-| 登录 | 账号密码登录、开发态作用域切换（产品级/租户）、锁定提示、登录后回跳、首次登录强制改密 |
+| 登录 | 账号密码登录、本地作用域切换（回环主机用下拉框/`?tenant=`，子域名主机跳转对应域名；部署环境仅域名）、环境与解析来源标识、锁定提示、登录后回跳、首次登录强制改密 |
 | 会话 | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销 |
 | 智能体管理 | 搜索、状态筛选、分页、新建、配置、启用/停用、删除 |
 | 智能体配置 | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件 |
@@ -1138,9 +1232,17 @@ E2E_PASSWORD="$E2E_PASSWORD" pnpm run e2e
 2. Vite 会由测试自动启动（默认 `http://localhost:5173`）。
 3. 前端目录是 `frontend/admin`，后端目录是 `backend`，两个目录同级。
 
+本地跑 E2E 时，后端需以本地调试配置启动（`DATABASE_URL`、`JWT_SECRET` 仍从 `backend/.env` 读取）：
+
+```bash
+cd backend
+APP_ENV=local ROOT_DOMAIN=localhost ALLOW_TENANT_HEADER=true \
+  uv run uvicorn web.app:app --host 127.0.0.1 --port 8000
+```
+
 覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
 
-多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并在登录页切换作用域，因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需保持开发态（允许 `X-Tenant-Code`）。用例覆盖：平台租户管理、租户管理员作用域限制、产品级资源在租户内只读。
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
 
 ### 11.4 CI 与提交前检查
 
@@ -1180,18 +1282,19 @@ uv run pre-commit install   # 钩子安装在仓库根目录
 ```text
 请求进入
   ▼
-web/deps/tenant.py 读取 Host（去掉端口）
-  ├─ 本地/回环地址（localhost、127.0.0.1、testserver）
-  │    ├─ 开发态：允许 X-Tenant-Code 指定作用域（platform 表示产品级）
-  │    └─ 未指定：回退产品级平台
-  ├─ adminsystem.<ROOT_DOMAIN> → 产品级平台（tenant_id = NULL）
-  ├─ <code>.<ROOT_DOMAIN>      → 按 code 查询租户
+web/deps/tenant.py 读取 Host（去端口、转小写、去尾点）
+  ├─ local + 回环/本机主机（localhost、127.0.0.1、任意 IP、testserver）
+  │    ├─ ALLOW_TENANT_HEADER=true 且带 X-Tenant-Code → 按请求头（platform 表示产品级）
+  │    └─ 未指定 → DEFAULT_TENANT_CODE 或产品级平台（resolution=default）
+  ├─ adminsystem.<ROOT_DOMAIN> → 产品级平台（resolution=host）
+  ├─ <code>.<ROOT_DOMAIN>      → 按 code 查询租户（域名优先于请求头，resolution=host）
   │    ├─ 不存在 → 404；已停用 → 403
   │    └─ 存在 → 租户作用域（tenant_id = 该租户）
-  └─ 根域名 → DEFAULT_TENANT_CODE 对应租户；未配置则 404
+  ├─ 根域名 → DEFAULT_TENANT_CODE 对应租户；未配置则 404
+  └─ 其他 Host → 404（绝不静默回退产品级平台）
   ▼
-RequestContext（scope、tenant）
-  ├─ /public/context：登录页据此展示产品级/租户级模式与平台名称
+RequestContext（scope、tenant、resolution）
+  ├─ /public/context：返回 app_env、tenant_resolution、tenant_switch_mode、platform_admin_host
   ├─ 登录/刷新：账号只在当前作用域查找，JWT 携带 tid
   └─ 鉴权：令牌 tid、账号归属、当前作用域三者任一不一致 → 401
 ```
@@ -1374,7 +1477,7 @@ alembic upgrade head
    - 同一套代码按二级域名区分产品级与租户级，不需要为每个租户部署一套服务。
    - 作用域在请求入口解析一次，贯穿认证、RBAC、仓储三层校验，令牌跨作用域直接拒绝。
    - 产品级资源对所有租户只读复用；租户之间的数据、账号、审计完全隔离，同名资源按作用域唯一。
-   - 开发态支持请求头/登录页切换作用域，生产态只认域名，避免多一个越权入口。
+   - 仅本地回环主机保留请求头切换作为调试逃生口；开发/测试/线上只认域名，配置错误启动即失败。
 
 ### 13.6 难点与取舍
 
@@ -1515,6 +1618,15 @@ cp ops/.env.production.example ops/.env.production
 chmod 600 ops/.env.production
 ```
 
+开发/测试环境同理使用 `ops/.env.development.example`、`ops/.env.test.example`，启动时通过 `ENV_FILE` 指定（默认读 `.env.production`）：
+
+```bash
+cd ops
+ENV_FILE=.env.development docker compose up -d
+```
+
+每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
+
 至少修改：
 
 ```bash
@@ -1533,6 +1645,8 @@ CORS_ORIGINS=
 ROOT_DOMAIN=example.com
 # 产品级平台子域名前缀，最终为 adminsystem.example.com
 PLATFORM_ADMIN_SUBDOMAIN=adminsystem
+# 部署环境只按域名识别租户；生产开启该项会拒绝启动
+ALLOW_TENANT_HEADER=false
 # 可选：访问根域名时默认进入的租户编码，留空则根域名返回 404
 # DEFAULT_TENANT_CODE=acme
 
@@ -1557,6 +1671,13 @@ openssl rand -hex 32
 ```bash
 docker compose -f ops/docker-compose.yml up -d --build
 docker compose -f ops/docker-compose.yml ps
+```
+
+开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.production`）：
+
+```bash
+ENV_FILE=.env.development docker compose -f ops/docker-compose.yml up -d --build
+ENV_FILE=.env.test docker compose -f ops/docker-compose.yml up -d --build
 ```
 
 服务说明：
@@ -1750,7 +1871,11 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 | 磁盘占满 | 检查数据库 volume、备份目录和容器日志轮转 |
 | 时间不对导致令牌异常 | 检查服务器 NTP 时间同步 |
 | 租户子域名返回 404 / 403 | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用 |
-| 所有子域名都进入平台作用域 | 反向代理或网关没有透传原始 `Host` 头 |
+| 未知域名也返回 404 | 这是预期行为：部署环境只认 `adminsystem.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
+| 启动失败：`必须配置 ROOT_DOMAIN` | 除 `local` 外，`development` / `test` / `production` 都必须配置完整域名 |
+| 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机 |
+| 所有子域名都进入平台作用域 | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名 |
+| 本地 `acme.localhost` 打不开 | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理） |
 | 登录提示账号不属于该租户 | 账号只能登录其所属作用域：产品级账号走 `adminsystem`，租户账号走本租户子域名 |
 
 ---
@@ -1857,13 +1982,13 @@ TENANT_CODE=acme uv run python -m scripts.create_admin
 
 **Q11：本地没有配 DNS，怎么验证多租户**
 
-本地访问 `localhost` / `127.0.0.1` 时默认是产品级作用域，可以用三种方式切到租户：
+`APP_ENV=local` 且 `ROOT_DOMAIN` 留空（自动回退 `localhost`）时，可以直接用 RFC 6761 规定的 `*.localhost` 验证真实子域名，无需配置 DNS：
 
-- 登录页的作用域下拉框（开发态自动出现）；
-- 地址加参数：`http://localhost:5173/login?tenant=acme`；
-- 调接口时加请求头：`X-Tenant-Code: acme`（产品级用 `platform`）。
+- `http://adminsystem.localhost:5173` → 产品级平台；
+- `http://acme.localhost:5173` → 租户 `acme`（需先创建该租户）；
+- `http://localhost:5173` → 回环主机，设置 `ALLOW_TENANT_HEADER=true` 后可继续用登录页下拉框、`?tenant=acme` 或 `X-Tenant-Code: acme`（产品级用 `platform`）切换。
 
-生产环境默认忽略 `X-Tenant-Code`，只按域名解析。
+`X-Tenant-Code` 只在回环/本机主机上生效，访问子域名时以域名为准。部署到开发/测试/线上环境时 `ALLOW_TENANT_HEADER` 必须关闭（开启会导致启动失败），只按二级域名解析租户；`?tenant=` 链接不会切换作用域，前端会移除该参数并保持当前登录态。
 
 ---
 

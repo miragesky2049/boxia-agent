@@ -3,17 +3,25 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
 import { fetchPublicContext, fetchPublicTenants } from '../api/tenant'
-import type { PublicContext, Tenant } from '../api/types'
+import type { PublicContext, Tenant, TenantSwitchMode } from '../api/types'
 import { clearSession } from '../auth/tokenStore'
 import PageLoading from '../components/PageLoading'
-import { PLATFORM_TENANT_CODE, applyTenantFromUrl, getTenantCode, setTenantCode } from './scope'
+import {
+  PLATFORM_TENANT_CODE,
+  buildTenantUrl,
+  clearTenantParam,
+  getTenantCode,
+  getTenantParam,
+  setTenantCode,
+} from './scope'
 
 interface TenantContextValue {
   context: PublicContext | null
   loading: boolean
   error: string
   isPlatform: boolean
-  devTenants: Tenant[]
+  switchMode: TenantSwitchMode
+  selectableTenants: Tenant[]
   platformName: string
   scopeLabel: string
   switchTenant: (code: string) => void
@@ -25,54 +33,101 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [context, setContext] = useState<PublicContext | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [devTenants, setDevTenants] = useState<Tenant[]>([])
+  const [selectableTenants, setSelectableTenants] = useState<Tenant[]>([])
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (): Promise<PublicContext | null> => {
     setLoading(true)
     setError('')
     try {
       const result = await fetchPublicContext()
       setContext(result)
-      if (result.dev_tenant_switch) {
+      // 只有产品级平台需要在页面切换作用域，租户级只展示当前租户名称
+      if (result.tenant_switch_mode !== 'none' && result.scope === 'platform') {
         fetchPublicTenants()
-          .then(setDevTenants)
-          .catch(() => setDevTenants([]))
+          .then(setSelectableTenants)
+          .catch(() => setSelectableTenants([]))
+      } else {
+        setSelectableTenants([])
       }
+      return result
     } catch (err) {
       setContext(null)
       setError(err instanceof ApiError ? err.message : '无法识别当前访问域名')
+      return null
     } finally {
       setLoading(false)
     }
   }, [])
 
   useEffect(() => {
-    if (typeof window === 'undefined') {
-      void load()
-      return
-    }
-    if (applyTenantFromUrl()) {
-      // 切换作用域后旧令牌不再适用，清理地址栏参数并回到登录页重新认证。
-      clearSession()
-      const url = new URL(window.location.href)
-      url.searchParams.delete('tenant')
-      window.history.replaceState({}, '', `${url.pathname}${url.search}`)
-      if (url.pathname !== '/login') {
-        window.location.assign(`${url.pathname}${url.search}`)
+    let active = true
+    const urlTenant = getTenantParam()
+
+    const bootstrap = async () => {
+      const result = await load()
+      if (!active || urlTenant === null || result === null) return
+
+      clearTenantParam()
+      if (result.tenant_switch_mode === 'none') {
+        // 部署环境由二级域名识别租户，URL 参数不生效；顺带清理本地残留的覆盖值
+        setTenantCode('')
         return
       }
+
+      if (result.tenant_switch_mode === 'host') {
+        // 本地子域名模式：作用域只由域名决定，跳转到目标域名而不是复用请求头
+        setTenantCode('')
+        const targetUrl = buildTenantUrl(urlTenant || PLATFORM_TENANT_CODE, result)
+        if (!targetUrl) return
+        if (new URL(targetUrl).host !== window.location.host) {
+          clearSession()
+          window.location.assign(targetUrl)
+        }
+        return
+      }
+
+      const target = urlTenant || PLATFORM_TENANT_CODE
+      if (target === (getTenantCode() || PLATFORM_TENANT_CODE)) return
+
+      setTenantCode(urlTenant)
+      // 切换作用域后旧令牌不再适用，回到登录页重新认证
+      clearSession()
+      if (window.location.pathname !== '/login') {
+        window.location.assign('/login')
+        return
+      }
+      await load()
     }
-    void load()
+
+    void bootstrap()
+    return () => {
+      active = false
+    }
   }, [load])
 
-  const switchTenant = useCallback((code: string) => {
-    if (code === (getTenantCode() || PLATFORM_TENANT_CODE)) return
-    setTenantCode(code === PLATFORM_TENANT_CODE ? PLATFORM_TENANT_CODE : code)
-    clearSession()
-    if (typeof window !== 'undefined') {
+  const switchTenant = useCallback(
+    (code: string) => {
+      const mode = context?.tenant_switch_mode ?? 'none'
+      if (!context || mode === 'none') return
+
+      if (mode === 'host') {
+        const targetUrl = buildTenantUrl(code, context)
+        if (!targetUrl) return
+        setTenantCode('')
+        clearSession()
+        if (new URL(targetUrl).host !== window.location.host) {
+          window.location.assign(targetUrl)
+        }
+        return
+      }
+
+      if (code === (getTenantCode() || PLATFORM_TENANT_CODE)) return
+      setTenantCode(code === PLATFORM_TENANT_CODE ? PLATFORM_TENANT_CODE : code)
+      clearSession()
       window.location.assign('/login')
-    }
-  }, [])
+    },
+    [context],
+  )
 
   const value = useMemo<TenantContextValue>(() => {
     const isPlatform = context?.scope === 'platform'
@@ -81,12 +136,13 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       loading,
       error,
       isPlatform,
-      devTenants,
+      switchMode: context?.tenant_switch_mode ?? 'none',
+      selectableTenants,
       platformName: context?.platform_name ?? 'Agent运营管理平台',
       scopeLabel: isPlatform ? '产品级运营管理平台' : (context?.tenant?.name ?? '租户'),
       switchTenant,
     }
-  }, [context, loading, error, devTenants, switchTenant])
+  }, [context, loading, error, selectableTenants, switchTenant])
 
   return <TenantContext.Provider value={value}>{children}</TenantContext.Provider>
 }

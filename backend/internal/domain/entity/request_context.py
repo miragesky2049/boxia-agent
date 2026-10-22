@@ -1,11 +1,13 @@
 """请求作用域上下文：产品级平台或某个租户。"""
 
 from dataclasses import dataclass
+from typing import Literal
 
 from internal.domain.entity.tenant import Tenant
 
 PLATFORM_SCOPE = "platform"
 TENANT_SCOPE = "tenant"
+TenantResolution = Literal["host", "header", "default"]
 
 
 @dataclass(frozen=True)
@@ -15,6 +17,8 @@ class RequestContext:
     scope: str
     tenant: Tenant | None
     host: str
+    # 作用域解析来源：host=域名，header=本地调试请求头，default=本地兜底
+    resolution: TenantResolution = "host"
 
     @property
     def is_platform(self) -> bool:

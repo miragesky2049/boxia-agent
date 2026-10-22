@@ -9,6 +9,12 @@ export type AdminRole = 'superadmin' | 'admin' | 'viewer'
 
 export type Scope = 'platform' | 'tenant'
 
+export type AppEnv = 'local' | 'development' | 'test' | 'production'
+
+export type TenantResolution = 'host' | 'header' | 'default'
+
+export type TenantSwitchMode = 'none' | 'header' | 'host'
+
 export interface Tenant {
   id: number
   code: string
@@ -21,18 +27,25 @@ export interface Tenant {
 export interface PublicContext {
   scope: Scope
   tenant: Tenant | null
+  app_env: AppEnv
+  tenant_resolution: TenantResolution
+  tenant_switch_mode: TenantSwitchMode
   root_domain: string
   platform_admin_subdomain: string
+  platform_admin_host: string
   platform_name: string
-  dev_tenant_switch: boolean
 }
 
 export interface AdminContext {
   scope: Scope
   tenant: Tenant | null
   user: AdminUser
+  app_env: AppEnv
+  tenant_resolution: TenantResolution
+  tenant_switch_mode: TenantSwitchMode
   root_domain: string
   platform_admin_subdomain: string
+  platform_admin_host: string
   platform_name: string
 }
 

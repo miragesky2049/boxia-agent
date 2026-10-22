@@ -1,5 +1,7 @@
 """应用配置：基于 pydantic-settings 分层加载并校验环境变量。"""
 
+import ipaddress
+import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -8,6 +10,22 @@ from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 BACKEND_DIR = Path(__file__).resolve().parents[3]
+# 一级子域名标签：租户编码与平台子域名共用同一格式约束
+_LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+_DOMAIN_PATTERN = re.compile(
+    r"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$"
+)
+
+
+def _is_ip_literal(value: str) -> bool:
+    """判断字符串是否为 IP 地址字面量。"""
+    try:
+        ipaddress.ip_address(value)
+    except ValueError:
+        return False
+    return True
+
+
 INSECURE_SECRETS = {
     "change-me",
     "change-me-in-production",
@@ -28,7 +46,8 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    app_env: Literal["development", "test", "production"] = "development"
+    # local=本机调试，development=开发环境部署，test=测试环境部署，production=线上
+    app_env: Literal["local", "development", "test", "production"] = "local"
     app_name: str = "boxia-agent"
     app_version: str = "1.0.0"
     platform_name: str = "Agent运营管理平台"
@@ -52,13 +71,13 @@ class Settings(BaseSettings):
     login_max_attempts: int = Field(default=5, ge=1, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
 
-    # 多租户域名配置：根域名如 example.com，产品级平台固定使用 adminsystem 子域名。
-    # 留空时仅通过 X-Tenant-Code（开发/测试）识别租户，未提供则进入产品级平台。
+    # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
+    # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
     root_domain: str = ""
     platform_admin_subdomain: str = "adminsystem"
     default_tenant_code: str = ""
-    # 是否允许用请求头识别租户；留空时生产环境关闭、其他环境开启。
-    allow_tenant_header: bool | None = None
+    # 仅 local 环境允许用 X-Tenant-Code 请求头覆盖作用域；开发/测试/线上启动时禁止开启。
+    allow_tenant_header: bool = False
 
     cors_origins: str = ""
     log_level: str = "INFO"
@@ -77,6 +96,11 @@ class Settings(BaseSettings):
         return self.app_env == "production"
 
     @property
+    def is_local(self) -> bool:
+        """是否本机调试环境。"""
+        return self.app_env == "local"
+
+    @property
     def cors_origin_list(self) -> list[str]:
         """解析逗号分隔的 CORS 白名单。"""
         return [item.strip() for item in self.cors_origins.split(",") if item.strip()]
@@ -92,20 +116,42 @@ class Settings(BaseSettings):
         return not self.is_production if self.docs_enabled is None else self.docs_enabled
 
     @property
-    def tenant_header_enabled(self) -> bool:
-        """是否允许 X-Tenant-Code 请求头识别租户。"""
-        if self.allow_tenant_header is None:
-            return not self.is_production
-        return self.allow_tenant_header
+    def normalized_root_domain(self) -> str:
+        """规范化根域名；local 留空时回退 localhost，便于直接访问 *.localhost。"""
+        domain = self.root_domain.strip().lower().strip(".")
+        if not domain and self.is_local:
+            return "localhost"
+        return domain
 
     @property
-    def normalized_root_domain(self) -> str:
-        """规范化根域名（小写、去除首尾点）。"""
-        return self.root_domain.strip().lower().strip(".")
+    def platform_admin_host(self) -> str:
+        """产品级平台主机名（不含端口）。"""
+        subdomain = self.platform_admin_subdomain.strip().lower()
+        root = self.normalized_root_domain
+        return f"{subdomain}.{root}" if root else subdomain
 
     @model_validator(mode="after")
-    def _validate_production(self) -> "Settings":
-        """生产环境启动硬校验，避免带病上线。"""
+    def _validate_environment(self) -> "Settings":
+        """按环境校验租户域名配置，避免带病启动或静默回退产品级平台。"""
+        subdomain = self.platform_admin_subdomain.strip().lower()
+        if not _LABEL_PATTERN.match(subdomain):
+            raise ValueError("PLATFORM_ADMIN_SUBDOMAIN 必须是一级子域名标签")
+
+        root = self.normalized_root_domain
+        if self.is_local:
+            if root and not _DOMAIN_PATTERN.match(root):
+                raise ValueError("ROOT_DOMAIN 格式不正确，例如 example.com 或 localhost")
+            return self
+
+        if not root:
+            raise ValueError(f"{self.app_env} 环境必须配置 ROOT_DOMAIN 以启用子域名租户隔离")
+        if "." not in root or root == "localhost" or root.endswith(".localhost"):
+            raise ValueError("部署环境 ROOT_DOMAIN 必须是完整域名，例如 dev.example.com")
+        if _is_ip_literal(root):
+            raise ValueError("部署环境 ROOT_DOMAIN 不能是 IP 地址")
+        if self.allow_tenant_header:
+            raise ValueError("仅 local 环境允许开启 ALLOW_TENANT_HEADER")
+
         if not self.is_production:
             return self
 
@@ -116,10 +162,6 @@ class Settings(BaseSettings):
             raise ValueError("生产环境 CORS_ORIGINS 不允许通配符")
         if self.user_api_token and len(self.user_api_token.get_secret_value()) < 32:
             raise ValueError("生产环境 USER_API_TOKEN 至少 32 字符")
-        if not self.normalized_root_domain:
-            raise ValueError("生产环境必须配置 ROOT_DOMAIN 以启用子域名租户隔离")
-        if not self.platform_admin_subdomain.strip():
-            raise ValueError("生产环境必须配置 PLATFORM_ADMIN_SUBDOMAIN")
         return self
 
 

@@ -13,6 +13,19 @@ interface LoginFormValues {
   password: string
 }
 
+const ENV_LABELS = {
+  local: '本地',
+  development: '开发',
+  test: '测试',
+  production: '线上',
+} as const
+
+const RESOLUTION_LABELS = {
+  host: '按域名解析作用域',
+  header: '按请求头切换作用域',
+  default: '使用默认作用域',
+} as const
+
 function safeNextPath(search: string, fallback: string): string {
   const next = new URLSearchParams(search).get('next')
   if (!next || !next.startsWith('/') || next.startsWith('//') || next === '/login') {
@@ -23,7 +36,8 @@ function safeNextPath(search: string, fallback: string): string {
 
 export default function LoginPage() {
   const { user, signIn } = useAuth()
-  const { context, platformName, scopeLabel, isPlatform, devTenants, switchTenant } = useTenant()
+  const { context, platformName, scopeLabel, isPlatform, selectableTenants, switchTenant } =
+    useTenant()
   const navigate = useNavigate()
   const location = useLocation()
   const [submitting, setSubmitting] = useState(false)
@@ -32,8 +46,10 @@ export default function LoginPage() {
   const currentScopeCode = isPlatform ? PLATFORM_TENANT_CODE : (context?.tenant?.code ?? '')
   const scopeOptions = [
     { label: '产品级运营管理平台', value: PLATFORM_TENANT_CODE },
-    ...devTenants.map((tenant) => ({ label: tenant.name, value: tenant.code })),
+    ...selectableTenants.map((tenant) => ({ label: tenant.name, value: tenant.code })),
   ]
+  // 部署环境只认域名（none）；本地回环主机走 header，本地子域名走域名跳转
+  const canSwitchScope = context?.tenant_switch_mode !== 'none' && isPlatform
 
   if (user) {
     return <Navigate to={user.must_change_password ? '/change-password' : '/agents'} replace />
@@ -87,17 +103,25 @@ export default function LoginPage() {
       <section className="login-panel">
         <div className="login-card">
           <div className="login-card__scope">
-            <Tag color={isPlatform ? 'geekblue' : 'green'}>{scopeLabel}</Tag>
+            <span>
+              <Tag color={isPlatform ? 'geekblue' : 'green'}>{scopeLabel}</Tag>
+              {context && context.app_env !== 'production' && (
+                <Tag color="orange">{ENV_LABELS[context.app_env]}</Tag>
+              )}
+            </span>
             {context?.root_domain && (
               <span className="login-card__domain">{context.root_domain}</span>
             )}
           </div>
+          {context && (
+            <p className="login-card__hint">{RESOLUTION_LABELS[context.tenant_resolution]}</p>
+          )}
           <h2>欢迎回来</h2>
           <p className="login-card__subtitle">
             {isPlatform ? '登录产品级运营管理平台，维护全部租户' : '登录本租户运营管理平台'}
           </p>
 
-          {context?.dev_tenant_switch && (
+          {canSwitchScope && (
             <Select
               className="login-card__scope-select"
               value={currentScopeCode}

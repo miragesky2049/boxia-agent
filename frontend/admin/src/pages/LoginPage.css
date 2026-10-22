@@ -129,6 +129,12 @@
   font-size: 12px;
 }
 
+.login-card__hint {
+  margin: -8px 0 16px;
+  color: #86909c;
+  font-size: 12px;
+}
+
 .login-card__scope-select {
   width: 100%;
   margin-bottom: 20px;

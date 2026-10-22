@@ -1,8 +1,21 @@
 """多租户隔离测试：子域名识别、账号隔离与产品级资源只读复用。"""
 
+from datetime import datetime
+
+import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
+from starlette.requests import Request
+
+from internal.application.errors import NotFoundError
+from internal.domain.entity.request_context import PLATFORM_SCOPE, TENANT_SCOPE
+from internal.domain.entity.tenant import Tenant
+from internal.infrastructure.config.settings import Settings
+from web.deps import tenant as tenant_deps
+from web.deps.tenant import get_request_context
 
 TENANT_ADMIN_PASSWORD = "Tenant-password-123"
+TENANT_HEADER = "X-Tenant-Code"
 TENANT_A = "acme"
 TENANT_B = "globex"
 
@@ -46,8 +59,12 @@ def test_platform_context(client: TestClient) -> None:
     body = response.json()
     assert body["scope"] == "platform"
     assert body["tenant"] is None
+    assert body["app_env"] == "test"
+    assert body["tenant_resolution"] == "host"
+    assert body["tenant_switch_mode"] == "none"
     assert body["root_domain"] == "example.com"
     assert body["platform_admin_subdomain"] == "adminsystem"
+    assert body["platform_admin_host"] == "adminsystem.example.com"
     assert body["platform_name"] == "Agent运营管理平台"
 
 
@@ -291,6 +308,134 @@ def test_tenant_login_failure_audited_in_tenant_scope(
     assert logs.json()["total"] == 1
 
 
+def _build_settings(**overrides) -> Settings:
+    """构造独立 Settings，避免受进程级环境变量与 .env 影响。"""
+    values = {
+        "app_env": "test",
+        "root_domain": "example.com",
+        "database_url": "postgresql+psycopg://localhost/boxia_agent",
+        "jwt_secret": "unit-test-secret-0123456789abcdef0123456789abcdef",
+        "allow_tenant_header": False,
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def _fake_tenant(code: str) -> Tenant:
+    """构造租户实体，避免单元测试依赖数据库。"""
+    now = datetime(2026, 1, 1)
+    return Tenant(
+        id=1,
+        code=code,
+        name=f"{code} 公司",
+        is_active=True,
+        created_at=now,
+        updated_at=now,
+    )
+
+
+def _request(host: str, headers: dict[str, str] | None = None) -> Request:
+    raw_headers = [(b"host", host.encode())]
+    for key, value in (headers or {}).items():
+        # ASGI 服务器下发的小写头部名；Starlette 不额外做大小写归一
+        raw_headers.append((key.lower().encode(), value.encode()))
+    return Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/",
+            "query_string": b"",
+            "headers": raw_headers,
+            "server": (host.split(":")[0], 8000),
+            "scheme": "http",
+        }
+    )
+
+
+def _patch_tenant_loader(monkeypatch: pytest.MonkeyPatch, tenants: dict[str, Tenant]) -> None:
+    """替换数据库加载，让单元测试只校验作用域解析分支。"""
+
+    def _load(code: str) -> Tenant:
+        tenant = tenants.get(code)
+        if tenant is None:
+            raise NotFoundError(f"租户不存在：{code}")
+        return tenant
+
+    monkeypatch.setattr(tenant_deps, "_load_tenant", _load)
+
+
+def test_local_defaults_to_platform_without_root_domain(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本地不配置 ROOT_DOMAIN 时，localhost 默认进入产品级平台。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    context = get_request_context(_request("localhost:5173"))
+
+    assert context.scope == PLATFORM_SCOPE
+    assert context.tenant is None
+    assert context.resolution == "default"
+
+
+def test_deployed_environment_ignores_tenant_header_by_default(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """部署环境默认关闭请求头覆盖，作用域只由二级域名决定。"""
+    settings = _build_settings(
+        app_env="test",
+        root_domain="example.com",
+        allow_tenant_header=False,
+    )
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    request = _request("adminsystem.example.com", {"X-Tenant-Code": "acme"})
+
+    context = get_request_context(request)
+
+    assert context.scope == PLATFORM_SCOPE
+    assert context.tenant is None
+    assert context.resolution == "host"
+
+
+def test_production_requires_root_domain() -> None:
+    """生产环境未配置 ROOT_DOMAIN 时拒绝启动。"""
+    with pytest.raises(ValidationError, match="ROOT_DOMAIN"):
+        _build_settings(app_env="production", root_domain="")
+
+
+def test_production_forbids_tenant_header() -> None:
+    """生产环境必须通过二级域名识别租户，不允许开启请求头切换。"""
+    with pytest.raises(ValidationError, match="ALLOW_TENANT_HEADER"):
+        _build_settings(
+            app_env="production",
+            root_domain="example.com",
+            allow_tenant_header=True,
+        )
+
+
+def test_production_rejects_localhost_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产环境使用 localhost 等非子域名 Host 时拒绝访问。"""
+    settings = _build_settings(app_env="production", root_domain="example.com")
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    with pytest.raises(NotFoundError):
+        get_request_context(_request("localhost:5173"))
+
+
+def test_production_requires_subdomain(monkeypatch: pytest.MonkeyPatch) -> None:
+    """生产环境访问根域名（未配置默认租户）时要求改用二级域名。"""
+    settings = _build_settings(
+        app_env="production",
+        root_domain="example.com",
+        default_tenant_code="",
+    )
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    with pytest.raises(NotFoundError, match="租户子域名"):
+        get_request_context(_request("example.com"))
+
+
 def test_disabled_tenant_blocked(
     client: TestClient, auth_headers: dict[str, str], tenant_client
 ) -> None:
@@ -309,3 +454,161 @@ def test_disabled_tenant_blocked(
         acme.get("/api/v1/admin/auth/me", headers=_bearer(tokens["access_token"])).status_code
         == 403
     )
+
+
+def test_local_subdomain_resolves_tenant(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本地 acme.localhost 按域名进入租户作用域。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {TENANT_A: _fake_tenant(TENANT_A)})
+
+    context = get_request_context(_request("acme.localhost:5173"))
+
+    assert context.scope == TENANT_SCOPE
+    assert context.tenant is not None
+    assert context.tenant.code == TENANT_A
+    assert context.resolution == "host"
+
+
+def test_local_subdomain_wins_over_tenant_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """域名优先：访问 acme.localhost 时请求头不能切到其他租户。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(
+        monkeypatch,
+        {TENANT_A: _fake_tenant(TENANT_A), TENANT_B: _fake_tenant(TENANT_B)},
+    )
+
+    context = get_request_context(_request("acme.localhost:5173", {TENANT_HEADER: TENANT_B}))
+
+    assert context.tenant is not None
+    assert context.tenant.code == TENANT_A
+    assert context.resolution == "host"
+
+
+def test_local_bootstrap_host_allows_header_switch(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本地回环主机保留请求头切换，用于快速调试。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {TENANT_B: _fake_tenant(TENANT_B)})
+
+    context = get_request_context(_request("localhost:5173", {TENANT_HEADER: TENANT_B}))
+
+    assert context.scope == TENANT_SCOPE
+    assert context.tenant is not None
+    assert context.tenant.code == TENANT_B
+    assert context.resolution == "header"
+
+
+def test_local_bootstrap_host_allows_platform_header(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本地通过 platform 请求头值切回产品级平台。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    context = get_request_context(_request("localhost:5173", {TENANT_HEADER: "platform"}))
+
+    assert context.scope == PLATFORM_SCOPE
+    assert context.tenant is None
+    assert context.resolution == "header"
+
+
+def test_local_default_tenant_code_applies_to_localhost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """本地回环主机无请求头时回退到默认租户。"""
+    settings = _build_settings(
+        app_env="local",
+        root_domain="",
+        allow_tenant_header=True,
+        default_tenant_code=TENANT_A,
+    )
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {TENANT_A: _fake_tenant(TENANT_A)})
+
+    context = get_request_context(_request("localhost:5173"))
+
+    assert context.scope == TENANT_SCOPE
+    assert context.tenant is not None
+    assert context.tenant.code == TENANT_A
+    assert context.resolution == "default"
+
+
+def test_local_unknown_subdomain_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """本地访问不存在的租户子域名直接 404，不回退平台。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {})
+
+    with pytest.raises(NotFoundError):
+        get_request_context(_request("unknown.localhost:5173"))
+
+
+def test_tenant_switch_mode_by_host(monkeypatch: pytest.MonkeyPatch) -> None:
+    """切换模式：本地回环主机=header，本地子域名=host，部署环境=none。"""
+    local_settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: local_settings)
+    _patch_tenant_loader(monkeypatch, {TENANT_A: _fake_tenant(TENANT_A)})
+
+    bootstrap_context = get_request_context(_request("localhost:5173"))
+    subdomain_context = get_request_context(_request("acme.localhost:5173"))
+
+    assert tenant_deps.tenant_switch_mode(local_settings, bootstrap_context) == "header"
+    assert tenant_deps.tenant_switch_mode(local_settings, subdomain_context) == "host"
+
+    deployed_settings = _build_settings()
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: deployed_settings)
+    deployed_context = get_request_context(_request("adminsystem.example.com"))
+    assert tenant_deps.tenant_switch_mode(deployed_settings, deployed_context) == "none"
+
+
+def test_non_local_unknown_host_not_found(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署环境未知域名与多级子域名均 404，不静默回退产品级平台。"""
+    settings = _build_settings()
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {})
+
+    with pytest.raises(NotFoundError):
+        get_request_context(_request("unknown.example.com"))
+    with pytest.raises(NotFoundError):
+        get_request_context(_request("a.b.example.com"))
+
+
+def test_host_normalized_with_case_port_and_trailing_dot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Host 的大小写、端口与尾点不影响作用域解析。"""
+    settings = _build_settings()
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+
+    context = get_request_context(_request("ADMINSYSTEM.Example.COM.:443"))
+
+    assert context.scope == PLATFORM_SCOPE
+    assert context.tenant is None
+    assert context.resolution == "host"
+
+
+def test_development_requires_root_domain() -> None:
+    """开发环境未配置 ROOT_DOMAIN 时拒绝启动。"""
+    with pytest.raises(ValidationError, match="ROOT_DOMAIN"):
+        _build_settings(app_env="development", root_domain="")
+
+
+def test_development_forbids_tenant_header() -> None:
+    """开发/测试环境只认域名，开启请求头切换即启动失败。"""
+    with pytest.raises(ValidationError, match="ALLOW_TENANT_HEADER"):
+        _build_settings(
+            app_env="development",
+            root_domain="dev.example.com",
+            allow_tenant_header=True,
+        )
+    with pytest.raises(ValidationError, match="ALLOW_TENANT_HEADER"):
+        _build_settings(
+            app_env="test",
+            root_domain="test.example.com",
+            allow_tenant_header=True,
+        )
+
+
+def test_public_tenant_list_hidden_outside_local(client: TestClient) -> None:
+    """部署环境登录页不暴露租户列表。"""
+    assert client.get("/api/v1/public/tenants").status_code == 403

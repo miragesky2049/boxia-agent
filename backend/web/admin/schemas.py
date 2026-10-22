@@ -1,7 +1,7 @@
 """管理端通用请求/响应模型。"""
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -129,14 +129,23 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+AppEnv = Literal["local", "development", "test", "production"]
+TenantResolution = Literal["host", "header", "default"]
+TenantSwitchMode = Literal["none", "header", "host"]
+
+
 class AdminContextOut(BaseModel):
     """当前管理端作用域上下文。"""
 
     scope: str
     tenant: TenantOut | None
     user: AdminUserOut
+    app_env: AppEnv
+    tenant_resolution: TenantResolution
+    tenant_switch_mode: TenantSwitchMode
     root_domain: str
     platform_admin_subdomain: str
+    platform_admin_host: str
     platform_name: str
 
 
@@ -145,10 +154,13 @@ class PublicContextOut(BaseModel):
 
     scope: str
     tenant: TenantOut | None
+    app_env: AppEnv
+    tenant_resolution: TenantResolution
+    tenant_switch_mode: TenantSwitchMode
     root_domain: str
     platform_admin_subdomain: str
+    platform_admin_host: str
     platform_name: str
-    dev_tenant_switch: bool
 
 
 class PageOut(BaseModel, Generic[T]):
