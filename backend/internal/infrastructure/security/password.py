@@ -7,8 +7,6 @@ import bcrypt
 from internal.application.errors import ValidationError
 from internal.infrastructure.config.settings import get_settings
 
-MIN_PASSWORD_LENGTH = 12
-MAX_PASSWORD_BYTES = 72
 _COMMON_PASSWORDS = {
     "123456789012",
     "password1234",
@@ -43,10 +41,13 @@ def dummy_password_hash() -> str:
 
 def validate_password_strength(password: str, username: str) -> None:
     """校验密码策略：长度、字符类别、常见弱口令与用户名包含。"""
-    if len(password) < MIN_PASSWORD_LENGTH:
-        raise ValidationError(f"密码长度至少 {MIN_PASSWORD_LENGTH} 位")
-    if len(password.encode("utf-8")) > MAX_PASSWORD_BYTES:
-        raise ValidationError(f"密码不能超过 {MAX_PASSWORD_BYTES} 字节")
+    settings = get_settings()
+    min_length = settings.password_min_length
+    max_bytes = settings.password_max_bytes
+    if len(password) < min_length:
+        raise ValidationError(f"密码长度至少 {min_length} 位")
+    if len(password.encode("utf-8")) > max_bytes:
+        raise ValidationError(f"密码不能超过 {max_bytes} 字节")
     if password.lower() in _COMMON_PASSWORDS:
         raise ValidationError("密码过于常见，请更换更复杂的密码")
 
@@ -58,7 +59,9 @@ def validate_password_strength(password: str, username: str) -> None:
             any(not char.isalnum() for char in password),
         )
     )
-    if categories < 3:
-        raise ValidationError("密码需包含大小写字母、数字、符号中的至少三类")
+    if categories < settings.password_min_categories:
+        raise ValidationError(
+            f"密码需包含大小写字母、数字、符号中的至少 {settings.password_min_categories} 类"
+        )
     if username and username.lower() in password.lower():
         raise ValidationError("密码不能包含用户名")

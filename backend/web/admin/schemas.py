@@ -5,6 +5,8 @@ from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from internal.infrastructure.config.settings import Settings
+
 T = TypeVar("T")
 
 
@@ -53,14 +55,15 @@ class ChangePasswordRequest(BaseModel):
     """修改密码请求。"""
 
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=12, max_length=128)
+    # 长度策略由 Settings 在服务层统一校验，避免请求模型与配置各写一份
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class AdminUserCreateRequest(BaseModel):
     """创建管理员请求；tenant_id 仅产品级平台可指定。"""
 
     username: str = Field(min_length=3, max_length=64)
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     role: str = Field(default="admin", max_length=16)
     tenant_id: int | None = Field(default=None, ge=1)
@@ -77,7 +80,7 @@ class AdminUserUpdateRequest(BaseModel):
 class AdminUserResetPasswordRequest(BaseModel):
     """重置管理员密码请求。"""
 
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class AuditLogOut(BaseModel):
@@ -118,7 +121,7 @@ class TenantCreateRequest(BaseModel):
     code: str = Field(min_length=1, max_length=63)
     name: str = Field(min_length=1, max_length=100)
     admin_username: str = Field(min_length=3, max_length=64)
-    admin_password: str = Field(min_length=12, max_length=128)
+    admin_password: str = Field(min_length=1, max_length=128)
     admin_display_name: str = Field(default="", max_length=64)
 
 
@@ -134,6 +137,23 @@ TenantResolution = Literal["host", "header", "default"]
 TenantSwitchMode = Literal["none", "header", "host"]
 
 
+class PasswordPolicyOut(BaseModel):
+    """密码策略，前端表单与后端校验共用同一份配置。"""
+
+    min_length: int
+    max_bytes: int
+    min_categories: int
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "PasswordPolicyOut":
+        """从进程配置构造，避免各接口重复映射字段。"""
+        return cls(
+            min_length=settings.password_min_length,
+            max_bytes=settings.password_max_bytes,
+            min_categories=settings.password_min_categories,
+        )
+
+
 class AdminContextOut(BaseModel):
     """当前管理端作用域上下文。"""
 
@@ -147,6 +167,7 @@ class AdminContextOut(BaseModel):
     platform_admin_subdomain: str
     platform_admin_host: str
     platform_name: str
+    password_policy: PasswordPolicyOut
 
 
 class PublicContextOut(BaseModel):
@@ -161,6 +182,7 @@ class PublicContextOut(BaseModel):
     platform_admin_subdomain: str
     platform_admin_host: str
     platform_name: str
+    password_policy: PasswordPolicyOut
 
 
 class PageOut(BaseModel, Generic[T]):

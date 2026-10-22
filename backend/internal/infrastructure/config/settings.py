@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     login_max_attempts: int = Field(default=5, ge=1, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
 
+    # 密码策略唯一定义点：后端校验与前端表单均由此下发，禁止在业务代码中硬编码。
+    # bcrypt 只处理前 72 字节，PASSWORD_MAX_BYTES 不允许超过 72。
+    password_min_length: int = Field(default=12, ge=8, le=64)
+    password_max_bytes: int = Field(default=72, ge=32, le=72)
+    password_min_categories: int = Field(default=3, ge=1, le=4)
+
     # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
     # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
     root_domain: str = ""
@@ -136,6 +142,9 @@ class Settings(BaseSettings):
         subdomain = self.platform_admin_subdomain.strip().lower()
         if not _LABEL_PATTERN.match(subdomain):
             raise ValueError("PLATFORM_ADMIN_SUBDOMAIN 必须是一级子域名标签")
+
+        if self.password_min_length > self.password_max_bytes:
+            raise ValueError("PASSWORD_MIN_LENGTH 不能大于 PASSWORD_MAX_BYTES")
 
         root = self.normalized_root_domain
         if self.is_local:

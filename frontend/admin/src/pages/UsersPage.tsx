@@ -8,6 +8,7 @@ import type { AdminRole, AdminUser, Tenant } from '../api/types'
 import { createUser, listUsers, resetUserPassword, updateUser } from '../api/users'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
+import { passwordRule } from '../utils/password'
 
 const ROLE_META: Record<AdminRole, { label: string; color: string }> = {
   superadmin: { label: '超级管理员', color: 'red' },
@@ -40,7 +41,7 @@ interface ResetFormValues {
 
 export default function UsersPage() {
   const { user: currentUser } = useAuth()
-  const { isPlatform } = useTenant()
+  const { isPlatform, context } = useTenant()
   const { message } = App.useApp()
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [items, setItems] = useState<AdminUser[]>([])
@@ -347,7 +348,7 @@ export default function UsersPage() {
             label="初始密码"
             rules={[
               { required: true, message: '请输入初始密码' },
-              { min: 12, message: '密码至少 12 位' },
+              passwordRule(context?.password_policy),
             ]}
             extra="管理员首次登录后必须修改密码。"
           >
@@ -418,7 +419,7 @@ export default function UsersPage() {
             label="新密码"
             rules={[
               { required: true, message: '请输入新密码' },
-              { min: 12, message: '密码至少 12 位' },
+              passwordRule(context?.password_policy),
             ]}
             extra="重置后该账号需在下次登录时再次修改密码。"
           >

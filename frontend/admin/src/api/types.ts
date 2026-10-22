@@ -24,6 +24,12 @@ export interface Tenant {
   updated_at: string
 }
 
+export interface PasswordPolicy {
+  min_length: number
+  max_bytes: number
+  min_categories: number
+}
+
 export interface PublicContext {
   scope: Scope
   tenant: Tenant | null
@@ -34,6 +40,7 @@ export interface PublicContext {
   platform_admin_subdomain: string
   platform_admin_host: string
   platform_name: string
+  password_policy: PasswordPolicy
 }
 
 export interface AdminContext {
@@ -47,6 +54,7 @@ export interface AdminContext {
   platform_admin_subdomain: string
   platform_admin_host: string
   platform_name: string
+  password_policy: PasswordPolicy
 }
 
 export interface TenantCreatePayload {

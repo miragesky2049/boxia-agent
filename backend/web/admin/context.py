@@ -3,7 +3,7 @@
 from fastapi import APIRouter
 
 from internal.infrastructure.config.settings import get_settings
-from web.admin.schemas import AdminContextOut, AdminUserOut, TenantOut
+from web.admin.schemas import AdminContextOut, AdminUserOut, PasswordPolicyOut, TenantOut
 from web.deps.auth import AdminAuthDep
 from web.deps.services import AuthServiceDep
 from web.deps.tenant import RequestContextDep, tenant_switch_mode
@@ -31,4 +31,5 @@ def get_admin_context(
         platform_admin_subdomain=settings.platform_admin_subdomain.strip().lower(),
         platform_admin_host=settings.platform_admin_host,
         platform_name=settings.platform_name,
+        password_policy=PasswordPolicyOut.from_settings(settings),
     )

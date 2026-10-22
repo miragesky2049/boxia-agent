@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from internal.application.errors import ForbiddenError
 from internal.infrastructure.config.settings import get_settings
-from web.admin.schemas import PublicContextOut, TenantOut
+from web.admin.schemas import PasswordPolicyOut, PublicContextOut, TenantOut
 from web.deps.services import TenantServiceDep
 from web.deps.tenant import RequestContextDep, tenant_switch_mode
 
@@ -25,6 +25,7 @@ def get_public_context(context: RequestContextDep) -> PublicContextOut:
         platform_admin_subdomain=settings.platform_admin_subdomain.strip().lower(),
         platform_admin_host=settings.platform_admin_host,
         platform_name=settings.platform_name,
+        password_policy=PasswordPolicyOut.from_settings(settings),
     )
 
 

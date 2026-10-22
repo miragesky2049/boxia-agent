@@ -298,10 +298,11 @@ uv run python -m scripts.create_admin
 
 默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`；本地为 `localhost:5173` 或 `adminsystem.localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
 
-**密码规则**（不符合会直接报错）：
+**密码规则**（统一读取 `backend/.env` 的 `PASSWORD_*` 配置，后端校验与前端表单同时生效，不符合会直接报错）：
 
-- 至少 12 位
-- 大写字母、小写字母、数字、符号，至少包含其中三类
+- 长度不少于 `PASSWORD_MIN_LENGTH`（默认 12 位）
+- 大写字母、小写字母、数字、符号，至少包含其中 `PASSWORD_MIN_CATEGORIES` 类（默认 3 类）
+- UTF-8 编码不超过 `PASSWORD_MAX_BYTES` 字节（默认 72，即 bcrypt 的处理上限）
 - 不能包含用户名（默认用户名是 `admin`，所以密码里不能出现 `admin`）
 - 不能是常见弱口令，例如 `password1234`
 
@@ -497,8 +498,8 @@ docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
 
 按 3.2 的密码规则重新输入。最常见的原因：
 
-- 长度不足 12 位
-- 只有字母或只有数字，字符类别不足三类
+- 长度不足 `PASSWORD_MIN_LENGTH`（默认 12 位）
+- 只有字母或只有数字，字符类别不足 `PASSWORD_MIN_CATEGORIES`（默认 3 类）
 - 密码里包含用户名 `admin`
 - 使用了常见弱口令
 
@@ -762,6 +763,9 @@ boxia-agent/
 | `BCRYPT_ROUNDS`               | `12`                | 否       | 密码哈希成本因子                                                                                                                                      |
 | `LOGIN_MAX_ATTEMPTS`          | `5`                 | 否       | 连续失败几次后锁定                                                                                                                                    |
 | `LOGIN_LOCK_MINUTES`          | `15`                | 否       | 锁定时长（分钟）                                                                                                                                      |
+| `PASSWORD_MIN_LENGTH`         | `12`                | 否       | 密码最小长度（字符数，8-64）；改动后后端校验与前端表单同时生效                                                                                        |
+| `PASSWORD_MAX_BYTES`          | `72`                | 否       | 密码最大字节数（UTF-8，32-72）；bcrypt 只处理前 72 字节                                                                                               |
+| `PASSWORD_MIN_CATEGORIES`     | `3`                 | 否       | 至少包含的字符类别数（1-4：大写字母、小写字母、数字、符号）                                                                                           |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）即可免 DNS 验证 `*.localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
 | `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
@@ -986,6 +990,7 @@ Authorization: Bearer <access_token>
 | `tenant_switch_mode`                                       | 前端切换方式：`none`（仅域名）/ `header`（请求头）/ `host`（子域名跳转）  |
 | `platform_admin_host`                                      | 产品级平台完整主机名，如 `adminsystem.dev.example.com`                    |
 | `root_domain`、`platform_admin_subdomain`、`platform_name` | 当前环境的根域名、平台子域名与展示名称                                    |
+| `password_policy`                                          | 密码策略 `{min_length, max_bytes, min_categories}`，前端表单按此动态校验 |
 
 ### 8.3 资源接口
 

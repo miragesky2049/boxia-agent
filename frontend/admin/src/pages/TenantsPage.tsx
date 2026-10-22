@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { createTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant } from '../api/types'
 import { useTenant } from '../tenant/TenantContext'
+import { passwordRule } from '../utils/password'
 
 interface CreateFormValues {
   code: string
@@ -232,7 +233,7 @@ export default function TenantsPage() {
             label="管理员初始密码"
             rules={[
               { required: true, message: '请输入初始密码' },
-              { min: 12, message: '密码至少 12 位' },
+              passwordRule(context?.password_policy),
             ]}
             extra="租户管理员首次登录后必须修改密码。"
           >
