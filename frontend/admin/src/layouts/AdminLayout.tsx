@@ -1,4 +1,5 @@
 import {
+  ApartmentOutlined,
   AppstoreOutlined,
   FileTextOutlined,
   KeyOutlined,
@@ -14,6 +15,7 @@ import type { MenuProps } from 'antd'
 import { useEffect } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
 import './AdminLayout.css'
 
 const { Header, Sider, Content } = Layout
@@ -24,10 +26,18 @@ const ROLE_LABELS = {
   viewer: '只读',
 }
 
+const ENV_LABELS = {
+  local: '本地',
+  dev: '开发',
+  test: '测试',
+  prod: '线上',
+} as const
+
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, signOut, isSuperAdmin, mustChangePassword } = useAuth()
+  const { platformName, scopeLabel, isPlatform, context } = useTenant()
 
   useEffect(() => {
     if (mustChangePassword) {
@@ -42,6 +52,9 @@ export default function AdminLayout() {
     { key: '/components', icon: <AppstoreOutlined />, label: '组件管理' },
     { key: '/prompts', icon: <FileTextOutlined />, label: '提示词管理' },
     ...(isSuperAdmin ? [{ key: '/users', icon: <TeamOutlined />, label: '管理员管理' }] : []),
+    ...(isSuperAdmin && isPlatform
+      ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: '租户管理' }]
+      : []),
   ]
 
   const selectedKey =
@@ -74,8 +87,13 @@ export default function AdminLayout() {
         <div className="admin-sider__brand" onClick={() => navigate('/agents')}>
           <span className="admin-sider__logo">B</span>
           <span className="admin-sider__title">
-            Boxia Agent
-            <small>开发中心</small>
+            {platformName}
+            <small>
+              {scopeLabel}
+              {context && context.app_env !== 'prod'
+                ? ` · ${ENV_LABELS[context.app_env]}环境`
+                : ''}
+            </small>
           </span>
         </div>
         <Menu
@@ -89,7 +107,12 @@ export default function AdminLayout() {
 
       <Layout>
         <Header className="admin-header">
-          <div className="admin-header__crumb">管理后台</div>
+          <div className="admin-header__crumb">
+            <Tag color={isPlatform ? 'geekblue' : 'green'} bordered={false}>
+              {isPlatform ? '产品级' : '租户级'}
+            </Tag>
+            {scopeLabel}
+          </div>
           <Dropdown menu={{ items: userMenu }} placement="bottomRight" trigger={['click']}>
             <button type="button" className="admin-header__user">
               <Avatar size={30} icon={<UserOutlined />} />

@@ -8,26 +8,63 @@ from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Agent, Component, Prompt, Skill, Tool
+from internal.domain.entity.tenant import Tenant
 
 TResource = TypeVar("TResource")
+
+
+class TenantRepository(Protocol):
+    """租户仓储。"""
+
+    def get_by_code(self, code: str) -> Tenant | None:
+        """按租户编码（子域名）查询。"""
+
+    def get_by_id(self, tenant_id: int) -> Tenant | None:
+        """按主键查询。"""
+
+    def list_all(self) -> list[Tenant]:
+        """查询全部租户。"""
+
+    def list_active(self) -> list[Tenant]:
+        """查询启用中的租户。"""
+
+    def search(self, keyword: str | None) -> list[Tenant]:
+        """按关键字查询租户。"""
+
+    def create(self, values: dict[str, Any]) -> Tenant:
+        """创建租户。"""
+
+    def update(self, tenant_id: int, values: dict[str, Any]) -> Tenant | None:
+        """更新租户。"""
+
+    def code_exists(self, code: str) -> bool:
+        """租户编码是否已存在。"""
+
+    def name_exists(self, name: str) -> bool:
+        """租户名称是否已存在。"""
 
 
 class AdminUserRepository(Protocol):
     """管理员账号仓储。"""
 
-    def get_by_username(self, username: str) -> AdminUser | None:
-        """按用户名查询。"""
+    def get_by_username(self, username: str, tenant_id: int | None) -> AdminUser | None:
+        """按用户名与所属租户查询。"""
 
-    def get_by_username_for_update(self, username: str) -> AdminUser | None:
-        """按用户名加行锁查询，用于登录失败计数。"""
+    def get_by_username_for_update(self, username: str, tenant_id: int | None) -> AdminUser | None:
+        """按用户名与所属租户加行锁查询，用于登录失败计数。"""
 
     def get_by_id(self, user_id: int) -> AdminUser | None:
         """按主键查询。"""
 
     def list_page(
-        self, page: int, page_size: int, keyword: str | None
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        tenant_id: int | None,
+        all_tenants: bool = False,
     ) -> tuple[list[AdminUser], int]:
-        """分页查询管理员。"""
+        """分页查询管理员；all_tenants 为真时跨租户。"""
 
     def create(self, values: dict[str, Any]) -> AdminUser:
         """创建管理员。"""
@@ -93,8 +130,9 @@ class AuditLogRepository(Protocol):
         page_size: int,
         action: str | None,
         actor_id: int | None,
+        tenant_id: int | None = None,
     ) -> tuple[list[AuditLog], int]:
-        """分页查询审计记录。"""
+        """分页查询审计记录；tenant_id 为 None 时查询全部（产品级）。"""
 
 
 class ResourceRepository(Protocol[TResource]):
@@ -159,6 +197,8 @@ class AgentRepository(Protocol):
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
+    tenant_id: int | None
+    tenants: TenantRepository
     admin_users: AdminUserRepository
     refresh_tokens: RefreshTokenRepository
     audit_logs: AuditLogRepository

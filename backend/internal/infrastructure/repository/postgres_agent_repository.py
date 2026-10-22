@@ -12,8 +12,31 @@ from internal.infrastructure.model.agent import AgentModel, agent_skills, agent_
 class PostgresAgentRepository:
     """基于 SQLAlchemy 的智能体仓储。"""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, tenant_id: int | None = None):
         self._session = session
+        self._tenant_id = tenant_id
+
+    def _visible(self, stmt):
+        """读可见范围：租户可见本租户 + 产品级智能体；产品级只可见产品级。"""
+        if self._tenant_id is None:
+            return stmt.where(AgentModel.tenant_id.is_(None))
+        return stmt.where(
+            or_(AgentModel.tenant_id == self._tenant_id, AgentModel.tenant_id.is_(None))
+        )
+
+    def _owned(self, stmt):
+        """写归属范围。"""
+        if self._tenant_id is None:
+            return stmt.where(AgentModel.tenant_id.is_(None))
+        return stmt.where(AgentModel.tenant_id == self._tenant_id)
+
+    def _owned_row(self, agent_id: int) -> AgentModel | None:
+        row = self._session.get(AgentModel, agent_id)
+        if row is None:
+            return None
+        if self._tenant_id is None:
+            return row if row.tenant_id is None else None
+        return row if row.tenant_id == self._tenant_id else None
 
     def list_page(
         self,
@@ -23,7 +46,7 @@ class PostgresAgentRepository:
         is_enabled: bool | None,
     ) -> tuple[list[Agent], int]:
         """分页查询（列表不加载关联 id）。"""
-        stmt = select(AgentModel)
+        stmt = self._visible(select(AgentModel))
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -41,8 +64,10 @@ class PostgresAgentRepository:
         return [self._to_entity(row) for row in rows], int(total)
 
     def get(self, agent_id: int) -> Agent | None:
-        """查询详情（含工具/技能关联）。"""
-        row = self._session.get(AgentModel, agent_id)
+        """查询详情（含工具/技能关联，限定可见范围）。"""
+        row = self._session.scalar(
+            self._visible(select(AgentModel)).where(AgentModel.id == agent_id)
+        )
         if row is None:
             return None
         return self._to_entity(
@@ -52,8 +77,9 @@ class PostgresAgentRepository:
         )
 
     def create(self, values: dict[str, Any]) -> Agent:
-        """创建智能体并在同一事务内写入关联。"""
+        """创建智能体并在同一事务内写入关联，归属当前作用域。"""
         payload = dict(values)
+        payload["tenant_id"] = self._tenant_id
         tool_ids = _unique_ids(payload.pop("tool_ids", []))
         skill_ids = _unique_ids(payload.pop("skill_ids", []))
 
@@ -66,8 +92,8 @@ class PostgresAgentRepository:
         return self._to_entity(row, tool_ids, skill_ids)
 
     def update(self, agent_id: int, values: dict[str, Any]) -> Agent | None:
-        """全量更新并替换关联。"""
-        row = self._session.get(AgentModel, agent_id)
+        """全量更新并替换关联，仅限当前作用域自有智能体。"""
+        row = self._owned_row(agent_id)
         if row is None:
             return None
 
@@ -83,8 +109,8 @@ class PostgresAgentRepository:
         return self._to_entity(row, tool_ids, skill_ids)
 
     def delete(self, agent_id: int) -> bool:
-        """删除智能体（关联表由外键级联删除）。"""
-        row = self._session.get(AgentModel, agent_id)
+        """删除当前作用域自有的智能体（关联表由外键级联删除）。"""
+        row = self._owned_row(agent_id)
         if row is None:
             return False
         self._session.delete(row)
@@ -92,8 +118,10 @@ class PostgresAgentRepository:
         return True
 
     def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
-        """名称是否已被占用（忽略大小写）。"""
-        stmt = select(AgentModel.id).where(func.lower(AgentModel.name) == name.strip().lower())
+        """名称在当前归属范围内是否已被占用（忽略大小写）。"""
+        stmt = self._owned(select(AgentModel.id)).where(
+            func.lower(AgentModel.name) == name.strip().lower()
+        )
         if exclude_id is not None:
             stmt = stmt.where(AgentModel.id != exclude_id)
         return self._session.scalar(stmt) is not None
@@ -133,6 +161,7 @@ class PostgresAgentRepository:
             updated_at=row.updated_at,
             tool_ids=tool_ids or [],
             skill_ids=skill_ids or [],
+            tenant_id=row.tenant_id,
         )
 
 

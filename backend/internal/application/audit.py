@@ -16,10 +16,12 @@ def record_audit(
     ip: str | None = None,
     user_agent: str | None = None,
     detail: dict[str, Any] | None = None,
+    tenant_id: int | None = None,
 ) -> None:
     """写入一条审计记录（与调用方共享事务）。"""
     uow.audit_logs.record(
         {
+            "tenant_id": tenant_id,
             "actor_id": actor_id,
             "actor_username": actor_username,
             "action": action,

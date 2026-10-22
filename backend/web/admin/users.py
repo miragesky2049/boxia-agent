@@ -31,9 +31,15 @@ def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
+    tenant_id: int | None = Query(None, ge=1),
+    all_tenants: bool = Query(False),
 ) -> PageOut[AdminUserOut]:
-    """分页查询管理员。"""
-    result = service.list(page, page_size, keyword)
+    """分页查询管理员：租户只查本租户，产品级可跨租户查询。"""
+    result = (
+        service.list_all_tenants(page, page_size, keyword)
+        if all_tenants
+        else service.list(page, page_size, keyword, tenant_id)
+    )
     return PageOut[AdminUserOut](
         items=[AdminUserOut.model_validate(item) for item in result.items],
         total=result.total,
@@ -56,6 +62,7 @@ def create_user(
         password=payload.password,
         display_name=payload.display_name,
         role=payload.role,
+        tenant_id=payload.tenant_id,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,

@@ -7,6 +7,69 @@ export interface PageResult<T> {
 
 export type AdminRole = 'superadmin' | 'admin' | 'viewer'
 
+export type Scope = 'platform' | 'tenant'
+
+export type AppEnv = 'local' | 'dev' | 'test' | 'prod'
+
+export type TenantResolution = 'host' | 'header' | 'default'
+
+export type TenantSwitchMode = 'none' | 'header' | 'host'
+
+export interface Tenant {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PasswordPolicy {
+  min_length: number
+  max_bytes: number
+  min_categories: number
+}
+
+export interface PublicContext {
+  scope: Scope
+  tenant: Tenant | null
+  app_env: AppEnv
+  tenant_resolution: TenantResolution
+  tenant_switch_mode: TenantSwitchMode
+  root_domain: string
+  platform_admin_subdomain: string
+  platform_admin_host: string
+  platform_name: string
+  password_policy: PasswordPolicy
+}
+
+export interface AdminContext {
+  scope: Scope
+  tenant: Tenant | null
+  user: AdminUser
+  app_env: AppEnv
+  tenant_resolution: TenantResolution
+  tenant_switch_mode: TenantSwitchMode
+  root_domain: string
+  platform_admin_subdomain: string
+  platform_admin_host: string
+  platform_name: string
+  password_policy: PasswordPolicy
+}
+
+export interface TenantCreatePayload {
+  code: string
+  name: string
+  admin_username: string
+  admin_password: string
+  admin_display_name?: string
+}
+
+export interface TenantUpdatePayload {
+  name?: string
+  is_active?: boolean
+}
+
 export interface AdminUser {
   id: number
   username: string
@@ -14,6 +77,8 @@ export interface AdminUser {
   role: AdminRole
   is_active: boolean
   must_change_password: boolean
+  tenant_id: number | null
+  is_platform: boolean
   created_at: string
   updated_at: string
 }
@@ -32,6 +97,7 @@ export interface AdminUserCreatePayload {
   password: string
   display_name: string
   role: AdminRole
+  tenant_id?: number | null
 }
 
 export interface AdminUserUpdatePayload {
@@ -59,6 +125,8 @@ export interface ResourceBase {
   name: string
   description: string
   is_enabled: boolean
+  tenant_id: number | null
+  is_platform: boolean
   created_at: string
   updated_at: string
 }

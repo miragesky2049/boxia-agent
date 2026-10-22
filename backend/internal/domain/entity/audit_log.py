@@ -20,3 +20,4 @@ class AuditLog:
     user_agent: str | None
     detail: dict[str, Any]
     created_at: datetime
+    tenant_id: int | None = None

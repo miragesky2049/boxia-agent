@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, DateTime, Index, String, func
+from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, String, func
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,9 +18,14 @@ class AuditLogModel(Base):
         Index("ix_audit_logs_created_at", "created_at"),
         Index("ix_audit_logs_actor", "actor_id", "created_at"),
         Index("ix_audit_logs_action", "action", "created_at"),
+        Index("ix_audit_logs_tenant", "tenant_id", "created_at"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    # NULL 表示产品级平台操作；非空表示租户内操作。
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    )
     actor_id: Mapped[int | None] = mapped_column(BigInteger)
     actor_username: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     action: Mapped[str] = mapped_column(String(64), nullable=False)

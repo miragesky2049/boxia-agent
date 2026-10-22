@@ -5,6 +5,7 @@ import {
   setAccessToken,
   setRefreshToken,
 } from '../auth/tokenStore'
+import { getTenantCode } from '../tenant/scope'
 
 const DEFAULT_API_BASE_URL = '/api/v1'
 const REQUEST_TIMEOUT_MS = 15_000
@@ -122,6 +123,8 @@ function buildHeaders(init: RequestInit, options: RequestOptions): Headers {
   if (hasBody && !isFormData && !headers.has('Content-Type')) {
     headers.set('Content-Type', 'application/json')
   }
+  const tenantCode = getTenantCode()
+  if (tenantCode) headers.set('X-Tenant-Code', tenantCode)
   if (!options.skipAuth) {
     const token = getAccessToken()
     if (token) headers.set('Authorization', `Bearer ${token}`)
@@ -183,11 +186,15 @@ async function performRefresh(): Promise<RefreshResult> {
   const refreshToken = getRefreshToken()
   if (!refreshToken) return 'invalid'
   let response: Response
+  // 刷新令牌与登录作用域绑定，必须沿用同一作用域头，否则会被判为跨作用域会话
+  const init: RequestInit = {
+    method: 'POST',
+    body: JSON.stringify({ refresh_token: refreshToken }),
+  }
   try {
     response = await send(`${apiBaseUrl()}/admin/auth/refresh`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-      body: JSON.stringify({ refresh_token: refreshToken }),
+      ...init,
+      headers: buildHeaders(init, { skipAuth: true }),
     })
   } catch {
     return 'unavailable'

@@ -1,9 +1,11 @@
 """管理端通用请求/响应模型。"""
 
 from datetime import datetime
-from typing import Any, Generic, TypeVar
+from typing import Any, Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from internal.infrastructure.config.settings import Settings
 
 T = TypeVar("T")
 
@@ -26,6 +28,8 @@ class AdminUserOut(BaseModel):
     role: str
     is_active: bool
     must_change_password: bool
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -51,16 +55,18 @@ class ChangePasswordRequest(BaseModel):
     """修改密码请求。"""
 
     current_password: str = Field(min_length=1, max_length=128)
-    new_password: str = Field(min_length=12, max_length=128)
+    # 长度策略由 Settings 在服务层统一校验，避免请求模型与配置各写一份
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class AdminUserCreateRequest(BaseModel):
-    """创建管理员请求。"""
+    """创建管理员请求；tenant_id 仅产品级平台可指定。"""
 
     username: str = Field(min_length=3, max_length=64)
-    password: str = Field(min_length=12, max_length=128)
+    password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     role: str = Field(default="admin", max_length=16)
+    tenant_id: int | None = Field(default=None, ge=1)
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -74,7 +80,7 @@ class AdminUserUpdateRequest(BaseModel):
 class AdminUserResetPasswordRequest(BaseModel):
     """重置管理员密码请求。"""
 
-    new_password: str = Field(min_length=12, max_length=128)
+    new_password: str = Field(min_length=1, max_length=128)
 
 
 class AuditLogOut(BaseModel):
@@ -92,7 +98,91 @@ class AuditLogOut(BaseModel):
     ip: str | None
     user_agent: str | None
     detail: dict[str, Any]
+    tenant_id: int | None = None
     created_at: datetime
+
+
+class TenantOut(BaseModel):
+    """租户信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    code: str
+    name: str
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+
+class TenantCreateRequest(BaseModel):
+    """创建租户请求，同时初始化租户级超级管理员。"""
+
+    code: str = Field(min_length=1, max_length=63)
+    name: str = Field(min_length=1, max_length=100)
+    admin_username: str = Field(min_length=3, max_length=64)
+    admin_password: str = Field(min_length=1, max_length=128)
+    admin_display_name: str = Field(default="", max_length=64)
+
+
+class TenantUpdateRequest(BaseModel):
+    """更新租户请求。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=100)
+    is_active: bool | None = None
+
+
+AppEnv = Literal["local", "dev", "test", "prod"]
+TenantResolution = Literal["host", "header", "default"]
+TenantSwitchMode = Literal["none", "header", "host"]
+
+
+class PasswordPolicyOut(BaseModel):
+    """密码策略，前端表单与后端校验共用同一份配置。"""
+
+    min_length: int
+    max_bytes: int
+    min_categories: int
+
+    @classmethod
+    def from_settings(cls, settings: Settings) -> "PasswordPolicyOut":
+        """从进程配置构造，避免各接口重复映射字段。"""
+        return cls(
+            min_length=settings.password_min_length,
+            max_bytes=settings.password_max_bytes,
+            min_categories=settings.password_min_categories,
+        )
+
+
+class AdminContextOut(BaseModel):
+    """当前管理端作用域上下文。"""
+
+    scope: str
+    tenant: TenantOut | None
+    user: AdminUserOut
+    app_env: AppEnv
+    tenant_resolution: TenantResolution
+    tenant_switch_mode: TenantSwitchMode
+    root_domain: str
+    platform_admin_subdomain: str
+    platform_admin_host: str
+    platform_name: str
+    password_policy: PasswordPolicyOut
+
+
+class PublicContextOut(BaseModel):
+    """登录页等匿名场景使用的作用域上下文。"""
+
+    scope: str
+    tenant: TenantOut | None
+    app_env: AppEnv
+    tenant_resolution: TenantResolution
+    tenant_switch_mode: TenantSwitchMode
+    root_domain: str
+    platform_admin_subdomain: str
+    platform_admin_host: str
+    platform_name: str
+    password_policy: PasswordPolicyOut
 
 
 class PageOut(BaseModel, Generic[T]):
@@ -125,6 +215,8 @@ class SkillOut(SkillPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -142,6 +234,8 @@ class ToolOut(ToolPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -159,6 +253,8 @@ class ComponentOut(ComponentPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime
 
@@ -177,5 +273,7 @@ class PromptOut(PromptPayload):
     model_config = ConfigDict(from_attributes=True)
 
     id: int
+    tenant_id: int | None = None
+    is_platform: bool = False
     created_at: datetime
     updated_at: datetime

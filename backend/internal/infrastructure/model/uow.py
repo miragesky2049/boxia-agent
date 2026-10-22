@@ -9,6 +9,7 @@ from internal.domain.repository.protocols import (
     AuditLogRepository,
     RefreshTokenRepository,
     ResourceRepository,
+    TenantRepository,
 )
 from internal.infrastructure.model.database import get_session_factory
 from internal.infrastructure.repository.postgres_admin_user_repository import (
@@ -27,21 +28,29 @@ from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresSkillRepository,
     PostgresToolRepository,
 )
+from internal.infrastructure.repository.postgres_tenant_repository import (
+    PostgresTenantRepository,
+)
 
 
 class SqlAlchemyUnitOfWork:
     """请求级工作单元，应用服务通过它提交业务事务。"""
 
-    def __init__(self) -> None:
+    def __init__(self, tenant_id: int | None = None) -> None:
+        # tenant_id 为 None 表示产品级平台上下文，非空表示租户级上下文。
+        self.tenant_id = tenant_id
         self.session: Session = get_session_factory()()
+        self.tenants: TenantRepository = PostgresTenantRepository(self.session)
         self.admin_users: AdminUserRepository = PostgresAdminUserRepository(self.session)
         self.refresh_tokens: RefreshTokenRepository = PostgresRefreshTokenRepository(self.session)
         self.audit_logs: AuditLogRepository = PostgresAuditLogRepository(self.session)
-        self.agents: AgentRepository = PostgresAgentRepository(self.session)
-        self.skills: ResourceRepository[Skill] = PostgresSkillRepository(self.session)
-        self.tools: ResourceRepository[Tool] = PostgresToolRepository(self.session)
-        self.components: ResourceRepository[Component] = PostgresComponentRepository(self.session)
-        self.prompts: ResourceRepository[Prompt] = PostgresPromptRepository(self.session)
+        self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
+        self.skills: ResourceRepository[Skill] = PostgresSkillRepository(self.session, tenant_id)
+        self.tools: ResourceRepository[Tool] = PostgresToolRepository(self.session, tenant_id)
+        self.components: ResourceRepository[Component] = PostgresComponentRepository(
+            self.session, tenant_id
+        )
+        self.prompts: ResourceRepository[Prompt] = PostgresPromptRepository(self.session, tenant_id)
 
     def commit(self) -> None:
         """提交当前事务。"""
