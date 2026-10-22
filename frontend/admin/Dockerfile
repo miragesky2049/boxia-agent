@@ -3,15 +3,16 @@ FROM ${NODE_IMAGE} AS build
 
 WORKDIR /app
 
-COPY package.json package-lock.json ./
-RUN npm ci
+COPY package.json pnpm-lock.yaml ./
+ENV COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+RUN corepack enable && pnpm install --frozen-lockfile
 
 COPY . .
 
 ARG VITE_API_BASE_URL=/api/v1
 ENV VITE_API_BASE_URL=$VITE_API_BASE_URL
 
-RUN npm run build
+RUN pnpm run build
 
 ARG NGINX_IMAGE=nginxinc/nginx-unprivileged:1.27-alpine
 FROM ${NGINX_IMAGE}

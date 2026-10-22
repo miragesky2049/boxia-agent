@@ -28,12 +28,12 @@ repos:
         pass_filenames: false
       - id: frontend-oxlint
         name: frontend oxlint
-        entry: npx --prefix frontend/admin oxlint src
+        entry: pnpm --dir frontend/admin exec oxlint src
         language: system
         files: ^frontend/admin/src/.*\.(ts|tsx)$
         pass_filenames: false
       - id: frontend-prettier
         name: frontend prettier check
-        entry: npx --prefix frontend/admin prettier --check
+        entry: pnpm --dir frontend/admin run format:check
         language: system
         files: ^frontend/admin/.*\.(ts|tsx|css|json)$

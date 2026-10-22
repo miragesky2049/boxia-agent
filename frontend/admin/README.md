@@ -7,24 +7,24 @@ React 19 + TypeScript + Vite + Ant Design 5 实现的管理后台，默认开发
 ## 开发
 
 ```bash
-npm ci
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
 开发环境通过 Vite 将 `/api` 代理到 `http://127.0.0.1:8000`，可通过环境变量 `VITE_PROXY_TARGET` 覆盖。
 
 ## 常用命令
 
-| 命令                              | 说明                           |
-| --------------------------------- | ------------------------------ |
-| `npm run dev`                     | 启动开发服务器                 |
-| `npm run typecheck`               | TypeScript 严格模式类型检查    |
-| `npm run lint`                    | oxlint 静态检查                |
-| `npm run format` / `format:check` | Prettier 格式化 / 校验         |
-| `npm run test` / `test:coverage`  | Vitest 单元测试 / 覆盖率       |
-| `npm run e2e`                     | Playwright 端到端测试          |
-| `npm run build`                   | 类型检查 + 生产构建（`dist/`） |
-| `npm run preview`                 | 预览构建产物                   |
+| 命令                               | 说明                           |
+| ---------------------------------- | ------------------------------ |
+| `pnpm run dev`                     | 启动开发服务器                 |
+| `pnpm run typecheck`               | TypeScript 严格模式类型检查    |
+| `pnpm run lint`                    | oxlint 静态检查                |
+| `pnpm run format` / `format:check` | Prettier 格式化 / 校验         |
+| `pnpm run test` / `test:coverage`  | Vitest 单元测试 / 覆盖率       |
+| `pnpm run e2e`                     | Playwright 端到端测试          |
+| `pnpm run build`                   | 类型检查 + 生产构建（`dist/`） |
+| `pnpm run preview`                 | 预览构建产物                   |
 
 ## 认证与会话
 

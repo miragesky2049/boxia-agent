@@ -125,7 +125,7 @@
 | Python | 3.12 或更高 | 运行后端 | `python --version` |
 | uv | 最新版 | 管理 Python 依赖和虚拟环境 | `uv --version` |
 | Node.js | `^20.19.0` 或 `>=22.12.0` | 运行前端 | `node --version` |
-| npm | 10 或更高（随 Node 安装） | 安装前端依赖 | `npm --version` |
+| pnpm | 11 或更高 | 安装前端依赖 | `pnpm --version` |
 | Docker Desktop | 最新版 | 启动本地 PostgreSQL 数据库 | `docker --version` 和 `docker compose version` |
 
 安装参考：
@@ -136,10 +136,16 @@
 winget install astral-sh.uv
 # 或者
 pip install uv
+
+# pnpm：Node 自带的 corepack 可直接启用
+corepack enable pnpm
+# 或者
+npm install -g pnpm@11
 ```
 
 - **Python 可以不用手动装**：`uv sync` 发现系统没有 Python 3.12 时会自动下载一个。
 - Node.js 建议安装 LTS 版本（22 或 24）。
+- 前端依赖用 pnpm 管理；`frontend/admin/.npmrc`、`frontend/user/.npmrc` 已配置国内镜像源。
 - **Windows 安装 Docker Desktop 需要开启 WSL 2**，按安装向导提示操作即可。
 - Docker Desktop 安装后需要先启动，任务栏出现 Docker 图标、`docker ps` 不报错才算就绪。
 - 安装完后**重新打开终端**，再执行检查命令。
@@ -302,12 +308,12 @@ uv run uvicorn web.app:app --reload
 
 ```bash
 cd frontend/admin
-npm ci
-npm run dev
+pnpm install
+pnpm run dev
 ```
 
-- `npm ci` 会严格按照 `package-lock.json` 安装依赖；第一次较慢，之后可以重复执行。
-- `npm run dev` 启动开发服务器，成功后终端会显示访问地址。
+- `pnpm install` 会严格按照 `pnpm-lock.yaml` 安装依赖；首次较慢，之后复用全局 store，安装基本是秒级。
+- `pnpm run dev` 启动开发服务器，成功后终端会显示访问地址。
 
 打开 <http://localhost:5173>：
 
@@ -333,8 +339,8 @@ npm run dev
 
 ```bash
 cd frontend/user
-npm ci
-npm run dev     # http://localhost:5174
+pnpm install
+pnpm run dev     # http://localhost:5174
 ```
 
 用户端目前是骨架页面，只用于验证前端工程和接口链路。它的接口需要后端配置 `USER_API_TOKEN`（见第 6 节），未配置时会返回“暂不可用”。
@@ -363,7 +369,7 @@ bash ops/dev.sh
 | 服务 | 停止方式 |
 | --- | --- |
 | 后端 | 在后端终端按 `Ctrl + C` |
-| 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或回到仓库根目录执行 `cd frontend && npm run stop` |
+| 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或回到仓库根目录执行 `cd frontend && pnpm run stop` |
 | 数据库 | 执行 `docker compose -f backend/docker/docker-compose.yml down` |
 
 > `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
@@ -391,10 +397,10 @@ docker compose -f backend/docker/docker-compose.yml up -d
 cd backend && uv run uvicorn web.app:app --reload
 
 # 启动管理端（控制台 2）
-cd frontend/admin && npm run dev
+cd frontend/admin && pnpm run dev
 
 # 启动两个前端（控制台 2，可选）
-cd frontend && npm run dev
+cd frontend && pnpm run dev
 
 # 执行数据库迁移
 cd backend && uv run alembic upgrade head
@@ -406,7 +412,7 @@ cd backend && uv run python -m scripts.create_admin
 cd backend && uv run pytest
 
 # 运行前端单元测试
-cd frontend/admin && npm test
+cd frontend/admin && pnpm test
 ```
 
 ---
@@ -456,7 +462,7 @@ docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
 
 ```bash
 cd frontend
-npm run stop
+pnpm run stop
 ```
 
 后端 8000 端口在 Windows 下可以这样排查：
@@ -968,11 +974,11 @@ uv run alembic check                # 迁移漂移检查
 ```bash
 cd frontend/admin
 
-npm run typecheck
-npm run lint
-npm run format:check
-npm run test:coverage
-npm run build
+pnpm run typecheck
+pnpm run lint
+pnpm run format:check
+pnpm run test:coverage
+pnpm run build
 ```
 
 ### 11.3 端到端（Playwright）
@@ -993,13 +999,13 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD="$E2E_PASSWORD" \
 
 ```bash
 cd ../frontend/admin
-npx playwright install chromium
-E2E_PASSWORD="$E2E_PASSWORD" npm run e2e
+pnpm exec playwright install chromium
+E2E_PASSWORD="$E2E_PASSWORD" pnpm run e2e
 ```
 
 如果你是在新的终端里操作，请从仓库根目录执行 `cd frontend/admin`。
 
-> PowerShell 不支持 `变量=值 命令` 这种写法。请先执行 `$env:E2E_PASSWORD="Boxia-2026-E2e!"`，再直接运行 `npm run e2e`。
+> PowerShell 不支持 `变量=值 命令` 这种写法。请先执行 `$env:E2E_PASSWORD="Boxia-2026-E2e!"`，再直接运行 `pnpm run e2e`。
 
 前置条件：
 

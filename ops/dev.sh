@@ -18,5 +18,5 @@ BACKEND_PID=$!
 trap 'kill "$BACKEND_PID" 2>/dev/null || true' EXIT
 
 cd "$ROOT/frontend/admin"
-[ -d node_modules ] || npm ci
-npm run dev
+[ -d node_modules ] || pnpm install --frozen-lockfile
+pnpm run dev

@@ -64,23 +64,26 @@ jobs:
         working-directory: frontend/admin
     steps:
       - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/admin/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/admin/package-lock.json
+          cache: pnpm
+          cache-dependency-path: frontend/admin/pnpm-lock.yaml
       - name: Install dependencies
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Typecheck
-        run: npm run typecheck
+        run: pnpm run typecheck
       - name: Lint
-        run: npm run lint
+        run: pnpm run lint
       - name: Format check
-        run: npm run format:check
+        run: pnpm run format:check
       - name: Unit tests
-        run: npm run test:coverage
+        run: pnpm run test:coverage
       - name: Build
-        run: npm run build
+        run: pnpm run build
 
   e2e:
     name: Playwright E2E
@@ -113,11 +116,14 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/admin/package.json
       - uses: actions/setup-node@v4
         with:
           node-version: '24'
-          cache: npm
-          cache-dependency-path: frontend/admin/package-lock.json
+          cache: pnpm
+          cache-dependency-path: frontend/admin/pnpm-lock.yaml
       - name: Install backend dependencies
         working-directory: backend
         run: uv sync --frozen
@@ -151,15 +157,15 @@ jobs:
           exit 1
       - name: Install frontend dependencies
         working-directory: frontend/admin
-        run: npm ci
+        run: pnpm install --frozen-lockfile
       - name: Install Playwright browser
         working-directory: frontend/admin
-        run: npx playwright install --with-deps chromium
+        run: pnpm exec playwright install --with-deps chromium
       - name: Run Playwright
         working-directory: frontend/admin
         env:
           E2E_PASSWORD: ${{ steps.creds.outputs.password }}
-        run: npm run e2e
+        run: pnpm run e2e
       - name: Upload reports
         if: failure()
         uses: actions/upload-artifact@v4

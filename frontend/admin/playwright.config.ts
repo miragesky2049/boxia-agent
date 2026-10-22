@@ -19,7 +19,7 @@ export default defineConfig({
   webServer: process.env.E2E_SKIP_WEBSERVER
     ? undefined
     : {
-        command: 'npm run dev',
+        command: 'pnpm run dev',
         url: BASE_URL,
         reuseExistingServer: true,
         timeout: 120_000,

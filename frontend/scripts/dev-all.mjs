@@ -39,7 +39,7 @@ process.on('SIGINT', () => shutdown(0))
 process.on('SIGTERM', () => shutdown(0))
 
 for (const site of SITES) {
-  const command = isWindows ? 'npm run --silent dev' : 'npm'
+  const command = isWindows ? 'pnpm run --silent dev' : 'pnpm'
   const args = isWindows ? [] : ['run', '--silent', 'dev']
   const child = spawn(command, args, {
     cwd: path.join(rootDir, site.dir),
