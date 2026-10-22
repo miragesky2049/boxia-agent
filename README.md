@@ -1,180 +1,290 @@
-# boxia-agent
+# boxia-agent 项目手册
 
-基于大语言模型的智能体开发与运营平台，采用前后端分离架构：
+基于大语言模型的**智能体开发与运营平台**：管理员在后台创建智能体、配置模型与提示词、挂载技能和工具；后端提供登录鉴权、资源管理和审计能力；用户端预留最终用户的对话入口。
 
-- **后端**：Python 3.12 + FastAPI + PostgreSQL，DDD 分层，提供管理端（admin）与用户端（user）接口
-- **管理端前端**：React 19 + TypeScript + Ant Design 5，覆盖登录、智能体、技能、工具、组件、提示词与管理员管理
-- **用户端前端**：React + TypeScript，面向最终用户（当前为骨架）
-- **交付形态**：Docker Compose + Nginx 一键部署，Alembic 版本化迁移，GitHub Actions 质量门禁
+本手册同时服务三类读者，可以按目的跳读：
 
-管理端已按生产标准完成工程化：短时效 Access Token + 可撤销 Refresh Token、RBAC、登录防爆破、审计日志、统一错误模型、请求追踪、结构化日志、Prometheus 指标、健康检查、数据库迁移与备份恢复。
+| 你的目的 | 建议阅读 |
+| --- | --- |
+| 第一次接触项目，想把它跑起来 | 第 1–4 章，照着做即可 |
+| 准备面试，需要讲清架构和亮点 | 第 12–13 章，含流程串联、技术选型和高频问答 |
+| 要把项目部署到生产环境 | 第 14–15 章，含服务器准备、上线、回滚、备份和监控 |
+
+> 建议在 **Git Bash**（Windows）、macOS 或 Linux 终端中执行本文命令。仓库中的 `ops/*.sh` 脚本需要 Bash；Windows 安装 [Git for Windows](https://git-scm.com/download/win) 即可获得 Git Bash。
 
 ---
 
 ## 目录
 
-- [1. 技术栈](#1-技术栈)
-- [2. 项目结构](#2-项目结构)
-- [3. 本地开发](#3-本地开发)
-- [4. 配置说明](#4-配置说明)
-- [5. 认证与权限](#5-认证与权限)
-- [6. 接口说明](#6-接口说明)
-- [7. 数据库与迁移](#7-数据库与迁移)
-- [8. 管理端功能](#8-管理端功能)
-- [9. 测试与质量门禁](#9-测试与质量门禁)
-- [10. 生产部署](#10-生产部署)
-- [11. 运维手册](#11-运维手册)
-- [12. 安全验收清单](#12-安全验收清单)
-- [13. 常见问题](#13-常见问题)
+- [1. 项目是什么](#1-项目是什么)
+- [2. 准备软件](#2-准备软件)
+- [3. 第一次启动](#3-第一次启动)
+- [4. 新手常见问题](#4-新手常见问题)
+- [5. 目录结构与代码分层](#5-目录结构与代码分层)
+- [6. 配置说明](#6-配置说明)
+- [7. 登录、权限与安全](#7-登录权限与安全)
+- [8. 接口手册](#8-接口手册)
+- [9. 数据库与迁移](#9-数据库与迁移)
+- [10. 管理端功能](#10-管理端功能)
+- [11. 测试与质量门禁](#11-测试与质量门禁)
+- [12. 系统运行流程](#12-系统运行流程)
+- [13. 面试讲解指南](#13-面试讲解指南)
+- [14. 生产环境落地部署](#14-生产环境落地部署)
+- [15. 日常运维](#15-日常运维)
+- [16. 更多问题](#16-更多问题)
+- [17. 许可证](#17-许可证)
 
 ---
 
-## 1. 技术栈
+## 1. 项目是什么
 
-| 层级 | 技术 | 说明 |
-| --- | --- | --- |
-| 后端语言 | Python 3.12+ | 依赖与虚拟环境由 `uv` 管理 |
-| Web 框架 | FastAPI + Uvicorn | 同步 ORM，配合 FastAPI 线程池 |
-| 持久化 | PostgreSQL 17 + SQLAlchemy 2.0 + psycopg3 | 智能体配置使用 JSONB |
-| 数据库迁移 | Alembic | 基线 + 增量迁移，启动就绪检查校验版本 |
-| 认证 | PyJWT（HS256）+ bcrypt | Access Token + 数据库持久化 Refresh Token |
-| 可观测性 | 结构化日志、request_id、OpenTelemetry、Prometheus | 访问日志、链路追踪、HTTP/业务指标 |
-| 管理端 | React 19 + TypeScript + Vite 8 + Ant Design 5 | `react-router-dom` 7，按路由懒加载 |
-| 测试 | pytest + httpx；Vitest + Testing Library；Playwright | 接口、组件、端到端全链路 |
+### 1.1 一句话定位
 
----
+**一个面向企业内部的 AI 智能体配置与运营平台。** 管理员不用写代码，就能在后台组合模型、提示词、技能、工具和知识库，快速发布一个可用的 AI 助手。
 
-## 2. 项目结构
+### 1.2 系统组成
+
+项目由三块组成，彼此独立开发、通过 HTTP 接口通信：
 
 ```text
-boxia-agent/
-├── backend/
-│   ├── web/                          # HTTP 层
-│   │   ├── app.py                    # 应用工厂：中间件、异常处理、健康检查、指标、路由
-│   │   ├── api_v1.py                 # /api/v1 路由聚合（legacy /api 别名）
-│   │   ├── errors.py                 # 统一异常处理与错误响应
-│   │   ├── health.py                 # /health/live、/health/ready
-│   │   ├── admin/                    # 管理端接口与请求/响应模型
-│   │   │   ├── auth.py               # 登录、刷新、登出、改密、当前用户
-│   │   │   ├── users.py              # 管理员管理（superadmin）
-│   │   │   ├── audit_logs.py         # 审计查询（superadmin）
-│   │   │   ├── agents.py             # 智能体 CRUD
-│   │   │   ├── skills.py             # 技能 CRUD
-│   │   │   ├── tools.py              # 工具 CRUD
-│   │   │   ├── components.py         # 组件 CRUD
-│   │   │   ├── prompts.py            # 提示词 CRUD
-│   │   │   ├── schemas.py            # 通用契约
-│   │   │   └── agent_schema.py       # 智能体配置契约
-│   │   ├── user/                     # 用户端接口（骨架）
-│   │   └── deps/                     # 数据库 UoW、服务、鉴权依赖
-│   ├── internal/                     # 内部实现（DDD）
-│   │   ├── domain/                   # 实体、分页对象、仓储协议
-│   │   ├── application/              # 用例服务、统一业务异常
-│   │   └── infrastructure/
-│   │       ├── config/               # pydantic-settings 配置与生产校验
-│   │       ├── model/                # SQLAlchemy 引擎、ORM、UnitOfWork
-│   │       ├── repository/           # PostgreSQL 仓储实现
-│   │       ├── security/             # JWT、密码哈希与强度校验
-│   │       ├── observability/        # 日志、request_id、指标
-│   │       └── middleware/           # 访问日志、安全头、审计、请求 ID
-│   ├── migrations/                   # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引）
-│   ├── scripts/                      # create_admin / seed_demo / wait_for_db
-│   ├── db/                           # 历史手工 SQL（仅本地演示，非事实来源）
-│   ├── tests/                        # pytest 接口测试
-│   ├── Dockerfile                    # 非 root、多阶段、健康检查
-│   ├── alembic.ini
-│   ├── pyproject.toml
-│   └── .env.example
-├── frontend/
-│   ├── admin/                        # 管理端（开发端口 5173）
-│   │   ├── src/
-│   │   │   ├── api/                  # 请求封装、刷新队列、类型
-│   │   │   ├── auth/                 # 登录态、令牌存储、路由守卫
-│   │   │   ├── components/           # 错误边界、通用资源列表等
-│   │   │   ├── layouts/              # 管理后台布局
-│   │   │   ├── pages/                # 登录、改密、用户、资源、智能体配置
-│   │   │   └── router.tsx            # 懒加载路由与 404
-│   │   ├── e2e/                      # Playwright 端到端用例
-│   │   ├── nginx/                    # 生产 Nginx 配置（SPA、反代、限流、安全头）
-│   │   └── Dockerfile                # Node 构建 + nginx-unprivileged 运行
-│   └── user/                         # 用户端（骨架，端口 5174）
-├── ops/                              # 跨端运维入口（本地开发 + 生产部署）
-│   ├── docker-compose.yml            # 生产编排：db / migrate / backend / frontend
-│   ├── .env.production.example       # 生产环境变量模板
-│   ├── dev.sh                        # 本地一键启动（后端热重载 + Vite）
-│   ├── check.sh                      # 本地质量门禁（与 CI 一致）
-│   ├── backup.sh                     # pg_dump custom 格式备份
-│   └── restore.sh                    # 二次确认恢复
-├── .github/workflows/                # CI、镜像构建与 GHCR 发布
-├── .pre-commit-config.yaml           # Git 钩子（必须在仓库根目录）
-└── README.md
+你的浏览器
+│
+├── 管理端  http://localhost:5173   ← 运营/管理员使用（React）
+├── 用户端  http://localhost:5174   ← 最终用户使用（目前是骨架页）
+│
+└──────────────┬───────────────────
+               ▼
+        后端 API  http://127.0.0.1:8000   ← 登录、数据、业务规则（Python）
+               │
+               ▼
+          PostgreSQL 数据库               ← 所有数据保存在这里
 ```
 
-根目录文件说明：
+- **后端**：Python 3.12 + FastAPI，负责登录鉴权、数据读写、业务规则。
+- **管理端**：React 19 + TypeScript + Ant Design，负责智能体、资源、管理员和审计管理。
+- **用户端**：React + TypeScript，面向最终用户的对话门户，目前只有骨架页面。
+- **数据库**：PostgreSQL 17。开发时用 Docker 启动，不需要单独安装。
 
-| 路径 | 用途 | 为什么在根目录 |
-| --- | --- | --- |
-| `backend/`、`frontend/` | 两个可独立构建的应用 | 业务代码按端拆分 |
-| `ops/` | 跨端的开发、检查、部署与备份脚本 | 不属于某一个端 |
-| `.github/workflows/` | CI 与镜像发布 | GitHub 固定读取路径 |
-| `.pre-commit-config.yaml` | 提交前质量钩子 | pre-commit 默认只从仓库根目录发现配置 |
+### 1.3 核心能力
 
-### 关键约定
+| 模块 | 能力 |
+| --- | --- |
+| 智能体管理 | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
+| 资源管理 | 技能、工具、组件、提示词四类资源的增删改查、搜索、分页、启用/停用 |
+| 认证与会话 | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步 |
+| 权限控制 | `superadmin` / `admin` / `viewer` 三级角色，接口级 RBAC |
+| 安全防护 | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流 |
+| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标 |
+| 工程化交付 | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本 |
 
-1. **前后端完全分离**：开发环境由 Vite 代理 `/api`，生产环境由 Nginx 反向代理。
-2. **接口分区**：管理端在 `backend/web/admin/`，用户端在 `backend/web/user/`；`web/admin/router.py` 统一挂载 `require_admin`，新增管理端路由默认受保护。
-3. **分层原则**：Web 层只做参数校验与协议转换，业务规则在 `internal/application`，持久化在 `internal/infrastructure/repository`。
-4. **事务边界**：仓储只 `flush()` 不提交，应用服务在用例结束前统一 `uow.commit()`；审计与业务同事务。
+### 1.4 名词解释
+
+第一次看可能不懂的词，先看这张表：
+
+| 名词 | 用大白话解释 |
+| --- | --- |
+| 智能体（Agent） | 一个配置好的 AI 助手。比如“陪练剧本生成助手”，它有自己的人设、模型、欢迎语和可用能力 |
+| 技能（Skill） | 智能体会的一项本领，比如“根据业务信息生成剧本” |
+| 工具（Tool） | 智能体可以调用的外部接口，比如“查询天气”“创建工单” |
+| 组件（Component） | 对话页面上的展示模块，比如欢迎语卡片、常见问题列表 |
+| 提示词（Prompt） | 写给 AI 模型的指令模板，决定它怎么理解和回答 |
+| 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步 |
+| Token | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁 |
+| RBAC | 基于角色的权限控制。不同角色能做的事不一样 |
+
+### 1.5 账号角色
+
+| 角色 | 能读资源 | 能改资源 | 能管管理员 | 能看审计 |
+| --- | --- | --- | --- | --- |
+| `superadmin`（超级管理员） | 是 | 是 | 是 | 是 |
+| `admin`（管理员） | 是 | 是 | 否 | 否 |
+| `viewer`（只读） | 是 | 否 | 否 | 否 |
+
+> 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
+
+### 1.6 技术栈速览
+
+| 部分 | 主要技术 |
+| --- | --- |
+| 后端 | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17、Alembic、PyJWT + bcrypt |
+| 管理端 | React 19、TypeScript、Vite、Ant Design 5 |
+| 用户端 | React 19、TypeScript、Vite |
+| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标 |
+| 测试 | pytest + httpx、Vitest + Testing Library、Playwright |
+| 部署 | Docker Compose、Nginx、GitHub Actions |
 
 ---
 
-## 3. 本地开发
+## 2. 准备软件
 
-### 3.0 环境准备
+### 2.1 安装清单
+
+| 软件 | 版本要求 | 用途 | 检查命令 |
+| --- | --- | --- | --- |
+| Git | 最新版 | 下载代码 | `git --version` |
+| Python | 3.12 或更高 | 运行后端 | `python --version` |
+| uv | 最新版 | 管理 Python 依赖和虚拟环境 | `uv --version` |
+| Node.js | `^20.19.0` 或 `>=22.12.0` | 运行前端 | `node --version` |
+| npm | 10 或更高（随 Node 安装） | 安装前端依赖 | `npm --version` |
+| Docker Desktop | 最新版 | 启动本地 PostgreSQL 数据库 | `docker --version` 和 `docker compose version` |
+
+安装参考：
 
 ```bash
-python --version   # 3.12+
-uv --version       # 未安装：winget install astral-sh.uv 或 pip install uv
-node --version     # ^20.19.0 或 >=22.12.0
-npm --version      # 10+
-docker --version   # 用于启动本地 PostgreSQL
+# Git：Windows 下载 Git for Windows，安装后自带 Git Bash
+# uv：Windows 可用 winget，也可以 pip install uv
+winget install astral-sh.uv
+# 或者
+pip install uv
 ```
 
-### 3.1 启动数据库
+- **Python 可以不用手动装**：`uv sync` 发现系统没有 Python 3.12 时会自动下载一个。
+- Node.js 建议安装 LTS 版本（22 或 24）。
+- **Windows 安装 Docker Desktop 需要开启 WSL 2**，按安装向导提示操作即可。
+- Docker Desktop 安装后需要先启动，任务栏出现 Docker 图标、`docker ps` 不报错才算就绪。
+- 安装完后**重新打开终端**，再执行检查命令。
+
+### 2.2 获取代码
 
 ```bash
-# 仓库根目录执行
+# 方式一：HTTPS（没有配置 SSH 密钥时用这个）
+git clone https://github.com/miragesky2049/boxia-agent.git
+
+# 方式二：SSH（已经配置好 GitHub SSH 密钥时用这个）
+# git clone git@github.com:miragesky2049/boxia-agent.git
+
+cd boxia-agent
+```
+
+> 克隆私有仓库时，HTTPS 方式会要求输入 GitHub 用户名和 Token（不是登录密码）；SSH 方式要求本机已生成并上传 SSH 公钥。
+
+后面的命令默认都在**仓库根目录**执行；需要切换目录时文中会注明 `cd`。如果不确定自己在哪，执行 `pwd` 查看当前目录。
+
+> 不用 Docker 也可以：本地安装 PostgreSQL 17，然后把 `backend/.env` 里的 `DATABASE_URL` 改成你自己的连接串即可。其他步骤不变。
+
+---
+
+## 3. 第一次启动
+
+整个过程分三步：启动数据库 → 启动后端 → 启动管理端。
+
+### 3.1 第一步：启动数据库
+
+在仓库根目录执行：
+
+```bash
 docker compose -f backend/docker/docker-compose.yml up -d
-docker exec postgres pg_isready -U postgres -d boxia_agent
 ```
 
-### 3.2 初始化后端
+这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。
+
+确认它真的起来了：
+
+```bash
+docker ps
+```
+
+看到 `postgres` 且状态是 `Up ... (healthy)` 就表示成功了。
+
+> 如果镜像拉取失败，看 [4.2](#42-docker-拉取镜像失败)；如果提示 Docker daemon 连不上，看 [4.10](#410-docker-报-cannot-connect-to-the-docker-daemon)。
+
+### 3.2 第二步：初始化并启动后端
+
+**1）进入后端目录，准备配置文件**
 
 ```bash
 cd backend
+cp .env.example .env
+```
 
-cp .env.example .env     # Windows: copy .env.example .env
+Windows PowerShell 用户把 `cp` 换成：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+`.env` 是本地配置文件，**不要提交到 Git**（`.gitignore` 已经忽略它）。示例配置里的数据库连接正好对应上一步启动的 PostgreSQL，所以本地开发不用改。
+
+**2）安装后端依赖**
+
+```bash
 uv sync
+```
+
+第一次执行会下载依赖（必要时自动下载 Python），可能需要几分钟。成功后 `backend/.venv/` 目录会出现。
+
+**3）创建数据库表**
+
+```bash
 uv run alembic upgrade head
+```
 
-# 创建管理员（默认强制首次登录改密）
-ADMIN_USERNAME=admin ADMIN_PASSWORD='请替换为合规强密码' uv run python -m scripts.create_admin
+这条命令把数据库结构升级到最新版本。看到若干 `Running upgrade ...` 日志即成功。
 
-# 可选：写入本地演示资源
-uv run python -m scripts.seed_demo
+**4）创建第一个管理员**
 
+```bash
+uv run python -m scripts.create_admin
+```
+
+终端会提示：
+
+```text
+管理员密码:
+```
+
+输入密码时**屏幕不会显示字符**，这是正常的。输入完按回车。默认会创建：
+
+- 用户名：`admin`
+- 角色：`superadmin`
+- 首次登录必须改密
+
+**密码规则**（不符合会直接报错）：
+
+- 至少 12 位
+- 大写字母、小写字母、数字、符号，至少包含其中三类
+- 不能包含用户名（默认用户名是 `admin`，所以密码里不能出现 `admin`）
+- 不能是常见弱口令，例如 `password1234`
+
+可以用这个示例：`Boxia-2026-Root!`
+
+推荐用交互方式输入密码，这样密码不会留在命令历史里。如果你确实需要非交互方式（比如自动化脚本）：
+
+```bash
+ADMIN_USERNAME=admin ADMIN_PASSWORD='Boxia-2026-Root!' uv run python -m scripts.create_admin
+```
+
+PowerShell 写法：
+
+```powershell
+$env:ADMIN_USERNAME="admin"; $env:ADMIN_PASSWORD="Boxia-2026-Root!"; uv run python -m scripts.create_admin
+```
+
+> 同一命令可以重复执行。用户名已存在时会重置该账号的密码，不会创建重复账号；重置后同样会要求下次登录改密。
+
+**5）启动后端**
+
+```bash
 uv run uvicorn web.app:app --reload
 ```
 
-启动成功后：
+这个终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。后端地址是 `http://127.0.0.1:8000`。
 
-- 存活检查 <http://127.0.0.1:8000/health/live>
-- 就绪检查 <http://127.0.0.1:8000/health/ready>（数据库连通且迁移版本一致）
-- Swagger <http://127.0.0.1:8000/docs>（非生产默认开启）
+**6）验证后端**
 
-密码策略：至少 12 位，包含大小写字母、数字、符号中的至少三类，且不能包含用户名。
+保持后端终端运行，用浏览器依次打开：
 
-### 3.3 启动管理端
+| 地址 | 应该看到 |
+| --- | --- |
+| <http://127.0.0.1:8000/health/live> | `{"status":"ok"}` |
+| <http://127.0.0.1:8000/health/ready> | `status` 为 `ok`，表示数据库已连通且表结构是最新的 |
+| <http://127.0.0.1:8000/docs> | Swagger 接口文档（开发环境自动开启） |
+
+如果 `/health/ready` 返回 503，看 [4.6](#46-healthready-返回-503-migration_outdated)。
+
+### 3.3 第三步：启动管理端
+
+**另开一个终端**（后端终端不要关）。先回到仓库根目录（如果当前还在 `backend`，执行 `cd ..`），然后执行：
 
 ```bash
 cd frontend/admin
@@ -182,9 +292,30 @@ npm ci
 npm run dev
 ```
 
-打开 <http://localhost:5173>，使用上一步创建的管理员登录。首次登录会跳转 `/change-password`，修改密码后重新登录。
+- `npm ci` 会严格按照 `package-lock.json` 安装依赖；第一次较慢，之后可以重复执行。
+- `npm run dev` 启动开发服务器，成功后终端会显示访问地址。
 
-### 3.4 启动用户端（可选）
+打开 <http://localhost:5173>：
+
+1. 账号填 `admin`，密码填你在 3.2 第 4 步设置的密码。
+2. **首次登录会强制跳转到改密页面**，按提示设置新密码。
+3. 改密后会自动回到登录页，用新密码重新登录，即可进入管理后台。
+
+### 3.4 第四步：确认一切正常
+
+逐项打勾：
+
+- [ ] `http://127.0.0.1:8000/health/ready` 返回 `ok`
+- [ ] `http://127.0.0.1:8000/docs` 能打开
+- [ ] `http://localhost:5173` 能用 `admin` 登录
+- [ ] 登录后能看到“智能体列表”页面
+- [ ] 能进入任一资源页面（如“技能”），成功新建一条记录
+
+全部通过，说明本地环境已经可用。
+
+### 3.5 第五步（可选）：启动用户端
+
+再开一个终端，回到仓库根目录后执行：
 
 ```bash
 cd frontend/user
@@ -192,154 +323,468 @@ npm ci
 npm run dev     # http://localhost:5174
 ```
 
-### 3.5 一键启动
+用户端目前是骨架页面，只用于验证前端工程和接口链路。它的接口需要后端配置 `USER_API_TOKEN`（见第 6 节），未配置时会返回“暂不可用”。
+
+### 3.6 懒人版一键启动
+
+先回到仓库根目录。如果数据库已经在运行，并且能使用 Git Bash，可以一条命令启动后端（含自动迁移）和管理端：
 
 ```bash
-# 仓库根目录；基于 Git Bash，自动迁移并同时启动前后端
-./ops/dev.sh
+bash ops/dev.sh
 ```
 
-### 3.6 服务地址
+> 仓库中的 `.sh` 脚本在 Windows 上通常没有可执行权限，所以统一用 `bash 脚本名` 运行。
+
+它会：
+
+1. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
+2. 执行 `uv sync` 和数据库迁移
+3. 后台启动后端 `127.0.0.1:8000`
+4. 启动管理端 Vite `localhost:5173`
+
+注意：它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
+
+### 3.7 如何停止服务
+
+| 服务 | 停止方式 |
+| --- | --- |
+| 后端 | 在后端终端按 `Ctrl + C` |
+| 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或回到仓库根目录执行 `cd frontend && npm run stop` |
+| 数据库 | 执行 `docker compose -f backend/docker/docker-compose.yml down` |
+
+> `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
+
+### 3.8 端口速查
 
 | 服务 | 地址 | 说明 |
 | --- | --- | --- |
-| 管理端 | <http://localhost:5173> | 登录后进入管理后台 |
-| 用户端 | <http://localhost:5174> | Agent Chat（骨架） |
-| 后端 | <http://127.0.0.1:8000/> | 欢迎信息（含 trace_id） |
-| 健康检查 | `/health/live`、`/health/ready` | 存活 / 就绪 |
-| Swagger | <http://127.0.0.1:8000/docs> | 开发环境在线调试 |
+| 管理端 | <http://localhost:5173> | 管理后台 |
+| 用户端 | <http://localhost:5174> | 用户门户（骨架） |
+| 后端 | <http://127.0.0.1:8000/> | 返回服务名和版本 |
+| 健康检查 | `http://127.0.0.1:8000/health/live`、`/health/ready` | 存活 / 就绪 |
+| 接口文档 | <http://127.0.0.1:8000/docs> | 开发环境在线调试 |
+| 数据库 | `127.0.0.1:5432` | 仅本机可访问 |
+
+### 3.9 常用命令速查
+
+```bash
+# 以下命令都在仓库根目录执行
+
+# 启动数据库
+docker compose -f backend/docker/docker-compose.yml up -d
+
+# 启动后端（控制台 1）
+cd backend && uv run uvicorn web.app:app --reload
+
+# 启动管理端（控制台 2）
+cd frontend/admin && npm run dev
+
+# 启动两个前端（控制台 2，可选）
+cd frontend && npm run dev
+
+# 执行数据库迁移
+cd backend && uv run alembic upgrade head
+
+# 创建/重置管理员
+cd backend && uv run python -m scripts.create_admin
+
+# 运行后端测试
+cd backend && uv run pytest
+
+# 运行前端单元测试
+cd frontend/admin && npm test
+```
 
 ---
 
-## 4. 配置说明
+## 4. 新手常见问题
 
-后端通过 `pydantic-settings` 加载 `backend/.env`，进程环境变量优先级更高。生产环境启动时会执行硬校验，配置不合法直接失败。
+### 4.1 提示 `uv: command not found`
+
+先安装 uv 并重新打开终端：
+
+```bash
+winget install astral-sh.uv
+# 或
+pip install uv
+```
+
+### 4.2 Docker 拉取镜像失败
+
+如果拉取 `postgres:17-alpine` 超时，可以使用国内镜像源（以 daocloud 为例）：
+
+```bash
+docker pull docker.m.daocloud.io/library/postgres:17-alpine
+docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
+```
+
+然后重新执行 3.1 的命令。生产镜像的加速方式见 [14.7](#147-docker-hub-访问受限时)。
+
+### 4.3 创建管理员提示“密码不符合策略”
+
+按 3.2 的密码规则重新输入。最常见的原因：
+
+- 长度不足 12 位
+- 只有字母或只有数字，字符类别不足三类
+- 密码里包含用户名 `admin`
+- 使用了常见弱口令
+
+### 4.4 登录提示“用户名或密码错误”
+
+- 本项目**没有默认密码**，必须先执行过 `uv run python -m scripts.create_admin`。
+- 忘记了密码：重新执行同一条命令即可重置（用户名已存在时会更新密码）。
+- 首次登录后修改过密码，请使用**新密码**登录。
+- 连续输错 5 次会锁定 15 分钟，等待后再试，或让超级管理员重置。
+
+### 4.5 端口被占用（8000 / 5173 / 5174）
+
+前端可以一键停止两个开发服务器：
+
+```bash
+cd frontend
+npm run stop
+```
+
+后端 8000 端口在 Windows 下可以这样排查：
+
+```powershell
+netstat -ano | findstr :8000
+taskkill /PID <上一步查到的PID> /F
+```
+
+macOS / Linux：
+
+```bash
+lsof -i :8000
+kill <PID>
+```
+
+### 4.6 `/health/ready` 返回 503 `migration_outdated`
+
+代码版本比数据库新，执行：
+
+```bash
+cd backend
+uv run alembic upgrade head
+```
+
+如果用的是生产 Compose，检查一次性 `migrate` 服务的日志。
+
+### 4.7 Windows 下环境变量设置不生效
+
+`ADMIN_USERNAME=admin ...` 这种写法只在 Bash 中有效。PowerShell 请先进入 `backend` 目录，再使用：
+
+```powershell
+cd backend
+$env:ADMIN_USERNAME="admin"
+$env:ADMIN_PASSWORD="你的密码"
+uv run python -m scripts.create_admin
+```
+
+或者干脆不加环境变量，直接在 `backend` 目录运行 `uv run python -m scripts.create_admin`，按提示输入。
+
+### 4.8 启动前端提示 Node 版本过低
+
+升级 Node.js 到 `20.19+` 或 `22.12+`。安装新版本后重新打开终端，用 `node --version` 确认。
+
+### 4.9 想彻底重置本地数据库
+
+如果数据库被改乱、迁移对不上，可以删掉本地数据重新开始：
+
+> 警告：下面的命令会**删除本地数据库中的所有数据**，只适合本地开发环境，千万不要在生产服务器执行。
+
+```bash
+# 回到仓库根目录
+docker compose -f backend/docker/docker-compose.yml down -v
+docker compose -f backend/docker/docker-compose.yml up -d
+
+cd backend
+uv run alembic upgrade head
+uv run python -m scripts.create_admin
+```
+
+### 4.10 Docker 报 `Cannot connect to the Docker daemon`
+
+说明 Docker Desktop 没有启动，或者 WSL 2 没有配置好：
+
+1. 打开 Docker Desktop，等待左下角显示引擎已运行。
+2. Windows 上如果提示 WSL 2 相关错误，按 Docker Desktop 的提示安装/升级 WSL 2，然后重启电脑。
+3. 重新执行 `docker ps`，能正常输出空列表（或已有容器）就说明好了。
+
+### 4.11 启动数据库时报 5432 端口被占用
+
+通常是本机已经装了 PostgreSQL，或者另一个 PostgreSQL 容器占用了端口。
+
+先确认占用者：
+
+```bash
+docker ps --filter "publish=5432"
+```
+
+- 如果是别的容器，先停止它。
+- 如果本机安装了 PostgreSQL 服务，可以停止该服务（Windows 在“服务”中停止 `postgresql-x64-*`），或者修改 `backend/docker/docker-compose.yml` 的端口映射，同时修改 `backend/.env` 里的 `DATABASE_URL` 端口。
+
+---
+
+## 5. 目录结构与代码分层
+
+### 5.1 目录树
+
+```text
+boxia-agent/
+├── backend/                     # 后端（Python）
+│   ├── web/                     # HTTP 层：路由、请求/响应模型、异常处理
+│   │   ├── app.py               # 应用装配入口：中间件、异常、健康检查、指标、路由
+│   │   ├── api_v1.py            # /api/v1 路由汇总（含 /api 兼容别名）
+│   │   ├── admin/               # 管理端接口
+│   │   ├── user/                # 用户端接口（骨架）
+│   │   └── deps/                # 数据库、服务、鉴权依赖
+│   ├── internal/                # 业务实现
+│   │   ├── domain/              # 实体、分页对象、仓储协议
+│   │   ├── application/         # 用例服务、统一业务异常
+│   │   └── infrastructure/      # 配置、ORM、仓储、安全、日志、中间件、链路追踪
+│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引）
+│   ├── scripts/                 # create_admin / seed_demo / wait_for_db
+│   ├── db/                      # 早期手工 SQL（仅本地参考，不再使用）
+│   ├── tests/                   # 后端接口测试
+│   └── Dockerfile
+├── frontend/
+│   ├── admin/                   # 管理端（端口 5173）
+│   │   ├── src/                 # api / auth / components / layouts / pages / router
+│   │   ├── e2e/                 # Playwright 端到端用例
+│   │   ├── nginx/               # 生产 Nginx 配置（SPA、反代、限流、安全头）
+│   │   └── Dockerfile           # Node 构建 + nginx-unprivileged 运行
+│   ├── user/                    # 用户端（端口 5174，骨架）
+│   └── scripts/                 # 前端一键启停脚本
+├── ops/                         # 跨端运维入口
+│   ├── docker-compose.yml       # 生产编排：db / migrate / backend / frontend
+│   ├── .env.production.example  # 生产环境变量模板
+│   ├── dev.sh                   # 本地一键启动
+│   ├── check.sh                 # 本地质量门禁（与 CI 基本一致）
+│   ├── backup.sh                # 数据库备份
+│   └── restore.sh               # 数据库恢复（二次确认）
+├── .github/workflows/           # CI 与镜像发布
+├── .pre-commit-config.yaml      # 提交前自动检查
+└── README.md
+```
+
+### 5.2 根目录文件为什么这样放
+
+| 路径 | 用途 | 为什么在根目录 |
+| --- | --- | --- |
+| `backend/`、`frontend/` | 两个可独立构建的应用 | 按端拆分，互不依赖 |
+| `ops/` | 跨端的开发、检查、部署、备份脚本 | 不属于任何一个端 |
+| `.github/workflows/` | CI 与镜像发布 | GitHub 固定读取这个路径 |
+| `.pre-commit-config.yaml` | 提交前质量钩子 | pre-commit 默认只从仓库根目录读取 |
+
+### 5.3 代码分层约定
+
+1. **Web 层只做“翻译”**：参数校验、协议转换，不写业务规则。
+2. **业务规则在 `internal/application`**：用例服务负责编排。
+3. **数据库操作在 `internal/infrastructure/repository`**：仓储只负责读写。
+4. **事务统一提交**：仓储内部只 `flush()`，应用服务在用例结束时统一 `commit()`；审计日志和业务数据在同一个事务里。
+5. **新增管理端接口默认受保护**：`web/admin/router.py` 统一挂载了管理员鉴权。
+
+### 5.4 想改某个功能，应该动哪里
+
+| 需求 | 通常要改的文件 |
+| --- | --- |
+| 新增一个管理端接口 | `backend/web/admin/xxx.py`（路由和请求响应模型）→ `backend/internal/application/xxx_service.py`（业务）→ `backend/internal/infrastructure/repository/postgres_xxx_repository.py`（SQL） |
+| 新增一张表 | `backend/internal/infrastructure/model/xxx.py`（ORM 模型）→ `backend/internal/domain/entity/xxx.py`（领域实体）→ 生成 Alembic 迁移 |
+| 新增一个管理端页面 | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装） |
+| 调整权限 | `backend/web/deps/auth.py`、`backend/web/admin/router.py`、前端 `RequireRole` |
+| 调整登录/令牌逻辑 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`、前端 `src/api/client.ts`、`src/auth/AuthContext.tsx` |
+| 调整数据库结构 | 修改 ORM 模型 → `uv run alembic revision --autogenerate -m "说明"` → 检查生成的迁移 → `uv run alembic upgrade head` |
+
+---
+
+## 6. 配置说明
+
+### 6.1 配置文件从哪来
+
+- 本地开发：复制 `backend/.env.example` 为 `backend/.env` 后修改。
+- 生产部署：复制 `ops/.env.production.example` 为 `ops/.env.production` 后修改。
+
+两个真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。仓库里只保留 `.example` 模板。
+
+### 6.2 变量一览
 
 | 变量 | 默认值 | 必填 | 说明 |
 | --- | --- | --- | --- |
 | `APP_ENV` | `development` | 否 | `development` / `test` / `production` |
-| `DATABASE_URL` | 无 | **是** | `postgresql+psycopg://user:pass@host:5432/db` |
+| `DATABASE_URL` | 无 | 是 | 形如 `postgresql+psycopg://user:pass@host:5432/db` |
 | `DATABASE_POOL_SIZE` | `10` | 否 | 连接池大小 |
 | `DATABASE_MAX_OVERFLOW` | `10` | 否 | 池溢出连接数 |
 | `DATABASE_POOL_TIMEOUT` | `10` | 否 | 获取连接超时（秒） |
 | `DATABASE_POOL_RECYCLE` | `1800` | 否 | 连接回收周期（秒） |
 | `STATEMENT_TIMEOUT_MS` | `5000` | 否 | 单条 SQL 超时 |
 | `LOCK_TIMEOUT_MS` | `3000` | 否 | 锁等待超时 |
-| `JWT_SECRET` | 无 | **是** | 生产至少 32 字符且不得为示例值（`openssl rand -hex 32`） |
-| `ACCESS_TOKEN_MINUTES` | `30` | 否 | Access Token 有效期 |
-| `REFRESH_TOKEN_DAYS` | `14` | 否 | Refresh Token 有效期 |
-| `BCRYPT_ROUNDS` | `12` | 否 | bcrypt 成本因子 |
-| `LOGIN_MAX_ATTEMPTS` | `5` | 否 | 连续失败锁定阈值 |
-| `LOGIN_LOCK_MINUTES` | `15` | 否 | 锁定时长 |
-| `CORS_ORIGINS` | 空 | 否 | 逗号分隔白名单；生产禁止 `*` |
-| `DOCS_ENABLED` | 生产关闭 | 否 | 是否暴露 Swagger/OpenAPI |
-| `LEGACY_API_ENABLED` | `true` | 否 | 保留 `/api` 兼容别名（下一版本周期移除） |
-| `USER_API_TOKEN` | 空 | 否 | 用户端骨架令牌；生产启用时至少 32 字符 |
+| `JWT_SECRET` | 无 | 是 | 签名密钥；生产需至少 32 字符且不能是示例值（`openssl rand -hex 32`） |
+| `ACCESS_TOKEN_MINUTES` | `30` | 否 | 访问令牌有效期 |
+| `REFRESH_TOKEN_DAYS` | `14` | 否 | 刷新令牌有效期 |
+| `BCRYPT_ROUNDS` | `12` | 否 | 密码哈希成本因子 |
+| `LOGIN_MAX_ATTEMPTS` | `5` | 否 | 连续失败几次后锁定 |
+| `LOGIN_LOCK_MINUTES` | `15` | 否 | 锁定时长（分钟） |
+| `CORS_ORIGINS` | 空 | 否 | 逗号分隔的允许来源；生产禁止 `*` |
+| `DOCS_ENABLED` | 生产关闭 | 否 | 是否暴露 Swagger 文档 |
+| `LEGACY_API_ENABLED` | `true` | 否 | 是否保留 `/api` 兼容别名 |
+| `USER_API_TOKEN` | 空 | 否 | 用户端骨架令牌；启用时生产要求至少 32 字符 |
 | `LOG_LEVEL` | `INFO` | 否 | 日志级别 |
 | `LOG_JSON` | 生产默认 `true` | 否 | 是否输出 JSON 日志 |
-| `OTEL_EXPORTER_OTLP_ENDPOINT` | 空 | 否 | 配置后上报 OTLP；生产未配置则不导出 |
+| `OTEL_EXPORTER_OTLP_ENDPOINT` | 空 | 否 | 链路数据上报地址，不配则不上报 |
 | `OTEL_SERVICE_NAME` | `boxia-agent` | 否 | 链路服务名 |
-| `OTEL_TRACES_SAMPLER_RATIO` | `1.0` | 否 | 采样率 |
-| `WEB_CONCURRENCY` | `2`（镜像） | 否 | Uvicorn worker 数 |
+| `OTEL_TRACES_SAMPLER_RATIO` | `1.0` | 否 | 链路采样率 |
+| `WEB_CONCURRENCY` | `2`（镜像） | 否 | 后端 worker 数 |
 
-> `.env` 与 `ops/.env.production` 均不应提交到 Git。
+> 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
+
+### 6.3 生产环境的硬性校验
+
+当 `APP_ENV=production` 时，后端启动前会检查配置，不合格直接拒绝启动：
+
+- `JWT_SECRET` 少于 32 字符，或使用了模板里的示例值
+- `CORS_ORIGINS` 包含 `*`
+- 启用 `USER_API_TOKEN` 但长度不足 32 字符
+
+这些检查是为了避免“复制示例配置直接上线”导致的安全问题。
 
 ---
 
-## 5. 认证与权限
+## 7. 登录、权限与安全
 
-### 5.1 令牌模型
+### 7.1 两种令牌，通俗理解
 
-- **Access Token**：JWT（HS256，默认 30 分钟），仅存前端内存，不落 localStorage。
-- **Refresh Token**：`bxt_` + 随机串，默认 14 天；数据库仅保存 SHA-256 哈希。
-- 刷新采用**单次轮换**：旧令牌立即失效并签发同族新令牌；检测到已轮换/已撤销令牌重放时，撤销整族并要求重新登录。
-- 登出撤销当前会话族；改密、禁用、删除用户会递增 `token_version` 并撤销全部令牌，Access Token 立即失效。
-- 前端刷新使用 Web Locks 单飞 + 请求排队重放，避免多标签页并发刷新；`BroadcastChannel` 同步跨标签页登录/登出。
+登录成功后服务器返回两个令牌：
 
-### 5.2 登录防护
+- **Access Token（访问令牌）**：短期的“临时通行证”，默认 30 分钟。前端只放在内存里，刷新页面后会用 Refresh Token 重新换取，不需要重新登录。
+- **Refresh Token（刷新令牌）**：长期的“续期凭证”，默认 14 天。数据库只保存它的哈希值，不保存明文。
 
-- 未知用户名执行固定 bcrypt 校验，避免用户名枚举与时序差异。
-- 连续 5 次密码错误锁定 15 分钟，返回 `429` + `Retry-After` + `ACCOUNT_LOCKED`。
-- 登录成功清零失败计数。
-- Nginx 对登录接口限制 `10r/m`，普通 API `30r/s`，超限返回 429。
+安全机制：
 
-### 5.3 RBAC
+- 刷新令牌**用过一次就作废**，同时发一个新的（单次轮换）。
+- 如果旧的刷新令牌被再次使用，系统会认为可能被盗用，撤销整条会话链，要求重新登录。
+- 登出、改密、禁用或删除管理员时，该账号已有令牌立即失效。
+- 前端多标签页之间会同步登录和登出状态。
 
-| 角色 | 资源读 | 资源写 | 管理员管理 | 审计查询 |
+### 7.2 登录保护
+
+- 不存在的用户名也会执行一次密码校验，防止攻击者通过响应速度判断用户名是否存在。
+- 连续 5 次密码错误锁定 15 分钟，返回 `429` 和 `Retry-After`。
+- 登录成功后失败次数清零。
+- Nginx 在生产环境对登录接口限流（`10 次/分钟`），普通接口 `30 次/秒`。
+
+### 7.3 权限（RBAC）
+
+| 角色 | 读资源 | 写资源 | 管理员管理 | 审计查询 |
 | --- | --- | --- | --- | --- |
 | `superadmin` | 是 | 是 | 是 | 是 |
 | `admin` | 是 | 是 | 否 | 否 |
 | `viewer` | 是 | 否 | 否 | 否 |
 
-每次请求以数据库中的实时角色与状态为准，不信任令牌内的角色快照。
+每次请求都以数据库中的实时角色和状态为准，不信任令牌里的旧角色信息。
 
-### 5.4 审计
+### 7.4 审计日志
 
-登录成功/失败、登出、改密、资源写操作、管理员管理均写入 `audit_logs`，包含操作者、动作、资源、`request_id`、IP、User-Agent 与详情。业务审计与业务写入同事务；认证失败使用独立短事务。
+以下操作都会写入 `audit_logs`：
+
+- 登录成功 / 失败、登出、改密
+- 资源的创建、修改、删除
+- 管理员的创建、修改、重置密码
+
+每条记录包含操作者、动作、资源、`request_id`、IP、User-Agent 和详情，便于追溯。
+
+### 7.5 密码与密钥安全约定
+
+- 仓库**不包含任何默认账号或默认密码**，第一个管理员必须手动创建。
+- `backend/.env`、`ops/.env.production` 不进入 Git；仓库只保留 `.example` 模板。
+- 生产环境的示例 `JWT_SECRET` 会被校验拒绝，必须换成随机值（`openssl rand -hex 32`）。
+- CI 中的 E2E 测试密码在运行时随机生成，不写死在仓库里。
+- `backend/tests/`、`frontend/admin/e2e/` 里的固定口令只用于一次性测试数据库，不是真实凭据。
+
+### 7.6 上线安全验收清单
+
+- [ ] 弱口令被拒绝（长度、字符类别、常见口令、包含用户名）
+- [ ] 连续 5 次登录失败触发 15 分钟锁定，返回 429 与 `Retry-After`
+- [ ] Refresh Token 重放会撤销整条会话链
+- [ ] 登出后 Access / Refresh Token 均立即失效
+- [ ] 改密后所有旧会话失效
+- [ ] viewer 调用写接口返回 403，管理端隐藏写按钮
+- [ ] `/admin/users`、`/admin/audit-logs` 仅 superadmin 可访问
+- [ ] 错误响应不含堆栈，500 只返回通用文案
+- [ ] 日志与审计不含密码、令牌等敏感信息
+- [ ] 生产环境无默认账号，`JWT_SECRET` 不是示例值
+- [ ] 响应包含安全头（nosniff、DENY、Referrer-Policy、CSP）
+- [ ] 登录相关响应带 `Cache-Control: no-store`
+- [ ] 后端、数据库端口未对外暴露，`/metrics` 外部不可访问
+- [ ] 容器以非 root 运行、根文件系统只读、`cap_drop: ALL`
 
 ---
 
-## 6. 接口说明
+## 8. 接口手册
 
-统一前缀 `/api/v1`。为兼容现有调用，`LEGACY_API_ENABLED=true` 时同时注册 `/api` 别名（不进入 OpenAPI）。除登录、刷新外，管理端接口均需：
+### 8.1 基本约定
+
+- 统一前缀：`/api/v1`
+- 兼容别名：`LEGACY_API_ENABLED=true` 时同时注册 `/api`（不进入文档）
+- 除登录、刷新外，管理端接口都需要请求头：
 
 ```http
 Authorization: Bearer <access_token>
 ```
 
-### 6.1 认证接口
+### 8.2 认证接口
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| POST | `/admin/auth/login` | 返回 access/refresh、有效期与用户信息（含 `must_change_password`） |
-| POST | `/admin/auth/refresh` | 轮换 refresh，返回新的 access/refresh |
-| POST | `/admin/auth/logout` | 撤销当前会话族，204 |
-| POST | `/admin/auth/password` | 修改密码并撤销全部会话，204 |
+| POST | `/admin/auth/login` | 登录，返回 access/refresh、有效期和用户信息 |
+| POST | `/admin/auth/refresh` | 用 refresh 换新令牌 |
+| POST | `/admin/auth/logout` | 登出并撤销当前会话，返回 204 |
+| POST | `/admin/auth/password` | 修改密码并撤销全部会话，返回 204 |
 | GET | `/admin/auth/me` | 当前管理员信息（含角色） |
 
-### 6.2 资源接口
+### 8.3 资源接口
 
-`{resource}` 为 `agents` / `skills` / `tools` / `components` / `prompts`：
+`{resource}` 可以是 `agents`、`skills`、`tools`、`components`、`prompts`：
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/admin/{resource}` | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled` |
-| POST | `/admin/{resource}` | 创建，201（viewer 403） |
+| POST | `/admin/{resource}` | 创建，返回 201（viewer 返回 403） |
 | GET | `/admin/{resource}/{id}` | 详情 |
-| PUT | `/admin/{resource}/{id}` | 全量更新（viewer 403） |
-| DELETE | `/admin/{resource}/{id}` | 删除，204（viewer 403） |
+| PUT | `/admin/{resource}/{id}` | 全量更新（viewer 返回 403） |
+| DELETE | `/admin/{resource}/{id}` | 删除，返回 204（viewer 返回 403） |
 
-分页响应：
+分页响应格式：
 
 ```json
 { "items": [], "total": 0, "page": 1, "page_size": 20 }
 ```
 
-智能体额外字段：
+智能体的特殊字段：
 
-- 创建/更新可传 `config`（对象）、`tool_ids`、`skill_ids`；关联 ID 自动去重并校验存在性。
-- 列表返回摘要（不含 `config` / 关联 ID），详情返回全量配置与关联。
-- `config` 未提供的子项由后端补默认值。
+- 创建/更新时可以传 `config`（对象）、`tool_ids`、`skill_ids`；后端会去重并校验关联是否存在。
+- 列表只返回摘要（不含 `config` 和关联 ID），详情返回完整配置。
+- `config` 中缺失的子项由后端补默认值。
 
-### 6.3 管理员与审计（superadmin）
+### 8.4 管理员与审计（仅 superadmin）
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
 | GET | `/admin/users` | 管理员列表（关键字搜索、分页） |
-| POST | `/admin/users` | 创建管理员，201 |
-| PATCH | `/admin/users/{id}` | 修改角色/显示名/启用状态 |
-| POST | `/admin/users/{id}/password` | 重置密码，204 |
-| GET | `/admin/audit-logs` | 审计日志查询（时间/用户/动作筛选） |
+| POST | `/admin/users` | 创建管理员，返回 201 |
+| PATCH | `/admin/users/{id}` | 修改角色 / 显示名 / 启用状态 |
+| POST | `/admin/users/{id}/password` | 重置密码，返回 204 |
+| GET | `/admin/audit-logs` | 审计查询（按时间、用户、动作筛选） |
 
-### 6.4 运维端点
+### 8.5 运维端点
 
 | 方法 | 路径 | 说明 |
 | --- | --- | --- |
-| GET | `/health/live` | 进程存活 |
-| GET | `/health/ready` | 数据库连通 + `alembic_version` 与代码 head 一致；失败 503 |
-| GET | `/metrics` | Prometheus 文本格式；生产由 Nginx 拒绝外部访问 |
+| GET | `/health/live` | 进程是否存活 |
+| GET | `/health/ready` | 数据库连通且迁移版本与代码一致；失败返回 503 |
+| GET | `/metrics` | Prometheus 指标；生产由 Nginx 拒绝外部访问 |
 
-### 6.5 调用示例
+### 8.6 调用示例（Git Bash）
 
 ```bash
 # 登录
@@ -348,17 +793,19 @@ LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
   -d '{"username":"admin","password":"你的密码"}')
 TOKEN=$(echo "$LOGIN" | python -c "import sys,json;print(json.load(sys.stdin)['access_token'])")
 
-# 查询智能体
+# 查询智能体列表
 curl -H "Authorization: Bearer $TOKEN" \
   "http://127.0.0.1:8000/api/v1/admin/agents?page=1&page_size=10"
 
-# 创建技能
+# 创建一条技能
 curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
   -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"name":"剧本生成","description":"示例","content":"生成剧本","config":{}}'
 ```
 
-### 6.6 错误响应
+> PowerShell 中 `curl` 是别名，请改用 `curl.exe`。
+
+### 8.7 错误响应
 
 ```json
 { "detail": "错误说明", "code": "ERROR_CODE", "request_id": "..." }
@@ -367,79 +814,79 @@ curl -X POST http://127.0.0.1:8000/api/v1/admin/skills \
 | 状态码 | code | 含义 |
 | --- | --- | --- |
 | 400 | `BAD_REQUEST` | 请求不合法 |
-| 401 | `UNAUTHORIZED` | 未登录、令牌无效/过期/已撤销 |
+| 401 | `UNAUTHORIZED` | 未登录，或令牌无效/过期/已撤销 |
 | 403 | `FORBIDDEN` | 角色不足或账号被禁用 |
 | 404 | `NOT_FOUND` | 资源不存在 |
 | 409 | `CONFLICT` | 名称重复或唯一约束冲突 |
 | 422 | `VALIDATION_ERROR` | 参数或业务校验失败（含 `errors` 明细） |
 | 429 | `ACCOUNT_LOCKED` / `RATE_LIMITED` | 登录锁定或触发限流，含 `Retry-After` |
-| 500 | `INTERNAL_ERROR` | 服务异常，仅返回通用文案，堆栈只进日志 |
+| 500 | `INTERNAL_ERROR` | 服务异常，只返回通用文案，堆栈只进日志 |
 | 503 | `SERVICE_UNAVAILABLE` | 依赖不可用（如就绪检查失败） |
 
 ---
 
-## 7. 数据库与迁移
+## 9. 数据库与迁移
 
-### 7.1 表结构
+### 9.1 表结构
 
 | 表 | 说明 |
 | --- | --- |
 | `admin_users` | 管理员账号、角色、锁定状态、`token_version`、首登改密标记 |
-| `admin_refresh_tokens` | Refresh Token 哈希、会话族、轮换/撤销状态、IP/UA |
-| `audit_logs` | 审计日志（操作者、动作、资源、request_id、详情 JSONB） |
+| `admin_refresh_tokens` | Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA |
+| `audit_logs` | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB） |
 | `agents` | 智能体，`config` 为 JSONB 完整配置 |
-| `skills` / `tools` / `components` / `prompts` | 五类资源 |
-| `agent_tools` / `agent_skills` | 智能体关联表，级联删除 |
-| `alembic_version` | 迁移版本 |
+| `skills` / `tools` / `components` / `prompts` | 四类资源表 |
+| `agent_tools` / `agent_skills` | 智能体与工具/技能的关联表，级联删除 |
+| `alembic_version` | 当前迁移版本 |
 
 约定：
 
-- 五张资源表名称忽略大小写唯一（`lower(name)` 唯一索引），重名返回 409。
-- 所有表含 `created_at` / `updated_at`，`updated_at` 由触发器维护。
-- 列表统一按 `updated_at DESC, id DESC` 排序。
-- 资源名称/描述启用 `pg_trgm` GIN 索引，支持模糊搜索。
+- 资源名称忽略大小写唯一（`lower(name)` 唯一索引），重名返回 409。
+- 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
+- 列表默认按 `updated_at DESC, id DESC` 排序。
+- 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
 
-### 7.2 迁移命令
+### 9.2 迁移命令
 
 ```bash
 cd backend
 
-uv run alembic upgrade head        # 应用全部迁移
-uv run alembic check               # 检查模型与迁移是否漂移
+uv run alembic upgrade head        # 升级到最新
+uv run alembic check               # 检查模型和迁移是否一致
 uv run alembic downgrade -1        # 回滚一个版本
-uv run alembic history             # 查看历史
+uv run alembic history             # 查看迁移历史
 ```
 
 - **全新数据库**：直接 `alembic upgrade head`。
-- **历史手工初始化库**（曾执行 `db/001_schema.sql`）：先 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
-- 生产 Compose 中由一次性 `migrate` 服务自动执行迁移，`backend` 等待其成功后再启动。
+- **早期手工初始化过的数据库**（执行过 `db/001_schema.sql`）：先 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
+- **生产环境**：由 Compose 中的一次性 `migrate` 服务自动执行，`backend` 等它成功后才启动。
 
-> `backend/db/*.sql` 为早期本地演示脚本，不再是事实来源；不要在生产使用。
+> `backend/db/*.sql` 是早期的本地演示脚本，不再是数据来源，也不包含任何默认账号。生产环境不要使用。
 
-### 7.3 初始化与演示数据
+### 9.3 初始化与演示数据
 
 ```bash
-# 生产/测试管理员（默认强制首登改密）
-ADMIN_USERNAME=admin ADMIN_PASSWORD='强密码' uv run python -m scripts.create_admin
+# 创建或重置管理员（默认首次登录强制改密）
+uv run python -m scripts.create_admin
 
-# 自动化环境可关闭首登改密
-ADMIN_MUST_CHANGE_PASSWORD=false ADMIN_PASSWORD='强密码' uv run python -m scripts.create_admin
+# 自动化环境可跳过首登改密（仅测试/演示）
+ADMIN_MUST_CHANGE_PASSWORD=false uv run python -m scripts.create_admin
 
-# 本地演示资源（幂等）
+# 写入本地演示资源（幂等，可重复执行）
 uv run python -m scripts.seed_demo
 ```
 
 ---
 
-## 8. 管理端功能
+## 10. 管理端功能
 
 | 模块 | 能力 |
 | --- | --- |
-| 登录 | 账号密码登录、锁定提示、`next` 回跳、首次登录强制改密 |
-| 会话 | Access Token 内存存储、刷新令牌自动续期、跨标签页同步、退出登录调用后端撤销 |
-| 智能体管理 | 列表搜索/状态筛选/分页、新建、配置、启用停用、删除 |
+| 登录 | 账号密码登录、锁定提示、登录后回跳、首次登录强制改密 |
+| 会话 | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销 |
+| 智能体管理 | 搜索、状态筛选、分页、新建、配置、启用/停用、删除 |
 | 智能体配置 | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件 |
-| 技能/工具/组件/提示词 | CRUD、搜索、状态筛选、分页；viewer 只读 |
+| 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读 |
 | 管理员管理 | 列表、创建、角色/状态调整、重置密码（仅 superadmin） |
 | 健壮性 | 路由懒加载、错误边界、404 页面、请求超时与重试 |
 
@@ -458,23 +905,27 @@ uv run python -m scripts.seed_demo
 
 ---
 
-## 9. 测试与质量门禁
+## 11. 测试与质量门禁
 
-### 9.1 后端
+### 11.1 后端
 
 ```bash
 cd backend
 
-uv run ruff check .
-uv run ruff format --check .
-uv run mypy internal web
+uv run ruff check .                 # 代码规范
+uv run ruff format --check .        # 格式检查
+uv run mypy internal web            # 类型检查
 uv run pytest --cov=internal --cov=web --cov-report=term-missing --cov-fail-under=80
-uv run alembic check
+uv run alembic check                # 迁移漂移检查
 ```
 
-测试使用独立数据库 `boxia_agent_test`，首次运行自动创建并执行迁移；每个用例前清理数据，互不影响。覆盖登录/刷新/撤销/锁定、RBAC、审计、五类资源 CRUD、智能体配置、错误模型、健康检查等。
+> 运行测试前，先确认本地 PostgreSQL 已经启动（即 3.1 的 Docker 容器处于运行状态）。
 
-### 9.2 管理端
+测试会自动创建独立数据库 `boxia_agent_test`，每次会话重建并执行全部迁移，每个用例前清理数据，互不影响。测试默认连接 `postgres:postgres@127.0.0.1:5432`，且账号需要有建库权限；如果你的本地配置不同，需要修改 `backend/tests/conftest.py` 顶部的连接配置。
+
+覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、错误模型、健康检查等。
+
+### 11.2 管理端
 
 ```bash
 cd frontend/admin
@@ -482,20 +933,19 @@ cd frontend/admin
 npm run typecheck
 npm run lint
 npm run format:check
-npm run test:coverage     # Vitest + jsdom + Testing Library
+npm run test:coverage
 npm run build
 ```
 
-### 9.3 端到端（Playwright）
+### 11.3 端到端（Playwright）
 
-前置条件：
+E2E 需要一个**不需要改密**的管理员，并通过环境变量 `E2E_PASSWORD` 提供密码。仓库里没有默认密码，缺少该变量时测试会直接报错。
 
-1. 后端已启动，数据库已迁移。
-2. 存在 E2E 管理员（默认账号 `admin`），密码自行设置并通过 `E2E_PASSWORD` 传入；未设置该变量时 e2e 会直接报错。
-3. 管理员 `must_change_password=false`，例如：
+准备测试管理员：
 
 ```bash
-export E2E_PASSWORD='<符合密码策略的强密码>'
+export E2E_PASSWORD='Boxia-2026-E2e!'
+cd backend
 ADMIN_USERNAME=admin ADMIN_PASSWORD="$E2E_PASSWORD" \
   ADMIN_MUST_CHANGE_PASSWORD=false ADMIN_ROLE=superadmin \
   uv run python -m scripts.create_admin
@@ -504,66 +954,473 @@ ADMIN_USERNAME=admin ADMIN_PASSWORD="$E2E_PASSWORD" \
 运行：
 
 ```bash
-cd frontend/admin
+cd ../frontend/admin
 npx playwright install chromium
 E2E_PASSWORD="$E2E_PASSWORD" npm run e2e
 ```
 
-套件默认连接 `http://localhost:5173`，会自动启动 Vite；后端需监听 `127.0.0.1:8000`。覆盖：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密与 viewer 只读。
+如果你是在新的终端里操作，请从仓库根目录执行 `cd frontend/admin`。
 
-### 9.4 CI 与本地检查
+> PowerShell 不支持 `变量=值 命令` 这种写法。请先执行 `$env:E2E_PASSWORD="Boxia-2026-E2e!"`，再直接运行 `npm run e2e`。
 
-- `.github/workflows/ci.yml`：后端 lint/类型/测试/迁移漂移；前端类型/Lint/格式/单测/构建；Playwright E2E；Docker 构建 + Trivy 扫描。
-- `.github/workflows/docker-publish.yml`：main/tag 推送 GHCR。
-- 本地一键检查：`./ops/check.sh`
-- 提交前钩子：`pre-commit install`（ruff、prettier、oxlint、空白/YAML/TOML/私钥检查）。
+前置条件：
+
+1. 后端已启动在 `127.0.0.1:8000`，数据库已迁移。
+2. Vite 会由测试自动启动（默认 `http://localhost:5173`）。
+3. 前端目录是 `frontend/admin`，后端目录是 `backend`，两个目录同级。
+
+覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
+
+### 11.4 CI 与提交前检查
+
+- `.github/workflows/ci.yml`：后端 lint / 类型 / 测试 / 迁移漂移；前端类型 / Lint / 格式 / 单测 / 构建；Playwright E2E；Docker 构建 + Trivy 漏洞扫描。
+- `.github/workflows/docker-publish.yml`：main 分支或 tag 推送时发布镜像到 GHCR。
+- E2E 测试密码在 CI 运行时随机生成并脱敏输出，不依赖仓库中的固定值。
+- 本地一键检查（与 CI 基本一致）：
+
+```bash
+bash ops/check.sh
+```
+
+- 安装提交前钩子（ruff、prettier、oxlint、空白/YAML/TOML/私钥检查）：
+
+```bash
+cd backend
+uv run pre-commit install   # 钩子安装在仓库根目录
+```
 
 ---
 
-## 10. 生产部署
+## 12. 系统运行流程
 
-### 10.1 准备环境变量
+这一章把各个模块串起来，面试讲解时可以按这里的顺序展开。
+
+### 12.1 启动流程
+
+1. `docker compose` 启动 PostgreSQL。
+2. 后端启动时读取环境变量，校验配置；生产环境还会校验密钥强度。
+3. 后端装配中间件：请求 ID → 访问日志 → 审计 → 安全响应头 → CORS。
+4. 注册路由：`/health/*`、`/api/v1/*`（可选 `/api/*` 兼容别名）、`/metrics`。
+5. 启动 Uvicorn，多个 worker 同时监听 8000。
+6. 管理端构建后由 Nginx 提供静态文件，并把 `/api/` 反向代理到后端。
+
+### 12.2 一次登录请求的完整旅程
+
+```text
+浏览器
+  │ POST /api/v1/admin/auth/login
+  ▼
+Nginx（生产，限流 10r/m）
+  ▼
+FastAPI 中间件（request_id、访问日志、审计、安全头）
+  ▼
+web/admin/auth.py（参数校验）
+  ▼
+application/auth_service.py
+  ├─ 查询管理员（repository）
+  ├─ 账号不存在：执行一次固定 bcrypt 校验（防用户名枚举）
+  ├─ 校验锁定状态 / 密码
+  ├─ 成功：清零失败次数
+  ├─ 生成 Access Token（JWT，30 分钟）
+  ├─ 生成 Refresh Token（随机串，数据库只存 SHA-256 哈希）
+  └─ 写审计日志（与业务同事务）
+  ▼
+返回 access_token / refresh_token / 用户信息
+  ▼
+前端：access 放内存，refresh 放 localStorage
+```
+
+### 12.3 一次资源查询/写入的旅程
+
+```text
+GET/POST /api/v1/admin/agents
+  ▼
+web/admin/router.py（统一管理员鉴权）
+  ▼
+web/deps/auth.py
+  ├─ 解析 Bearer Token
+  ├─ 校验签名、过期时间、token_version
+  ├─ 查询数据库中的账号状态与角色
+  └─ 写操作的接口再校验角色（viewer 拒绝）
+  ▼
+web/admin/agents.py（请求/响应模型）
+  ▼
+application/agent_service.py（业务规则、默认值、关联校验）
+  ▼
+infrastructure/repository/postgres_agent_repository.py
+  ▼
+UnitOfWork.commit()
+  ├─ 业务数据
+  └─ 审计日志（同一事务）
+```
+
+### 12.4 刷新令牌的轮换流程
+
+```text
+前端发现 Access Token 过期（401）
+  ▼
+调用 /admin/auth/refresh
+  ▼
+后端校验 Refresh Token 哈希与会话状态
+  ├─ 正常：旧令牌标记已轮换 → 签发新 refresh → 签发新 access
+  ├─ 已轮换的旧令牌再次出现：判定为重放 → 撤销整族会话
+  └─ 已撤销/过期：返回 401，要求重新登录
+  ▼
+前端更新内存中的 access 和 localStorage 中的 refresh
+  ▼
+重放刚才失败的请求（仅一次）
+```
+
+多个标签页同时刷新时，前端使用 Web Locks 保证只有一个标签页真正发起刷新，其他标签页等待结果。
+
+### 12.5 数据库迁移流程
+
+```text
+修改 ORM 模型
+  ▼
+alembic revision --autogenerate
+  ▼
+人工检查生成的迁移脚本（自动生成不一定完全正确）
+  ▼
+alembic upgrade head
+  ▼
+/health/ready 校验 alembic_version 与代码 head 一致
+  ▼
+应用发布
+```
+
+生产 Compose 中由一次性 `migrate` 服务执行迁移，`backend` 等它成功后才启动，避免“代码已经更新、表结构还没更新”的窗口。
+
+---
+
+## 13. 面试讲解指南
+
+这一章不是功能文档，而是帮你把项目讲清楚。建议先自己运行一遍，再按下面的顺序准备。
+
+### 13.1 30 秒介绍模板
+
+> 这是一个 AI 智能体配置与运营平台。管理端用 React 做后台，可以创建智能体、配置模型和提示词、挂载技能与工具；后端用 FastAPI 提供登录鉴权和资源管理；数据存在 PostgreSQL。项目重点不在“调模型”，而在工程化：完整的认证会话、RBAC、审计、数据库迁移、可观测性、容器化部署和 CI 质量门禁。
+
+### 13.2 2 分钟介绍模板
+
+1. **背景和目标**：企业内部需要快速配置和发布 AI 助手，但配置项多、权限复杂，需要一个统一平台。
+2. **系统组成**：管理端、用户端、后端 API、PostgreSQL，前后端分离，Nginx 反向代理。
+3. **核心流程**：管理员登录 → 创建智能体 → 配置模型/提示词/技能/工具 → 启用发布。
+4. **工程重点**：短 Access Token + 可撤销 Refresh Token、RBAC、审计日志、统一错误模型、迁移与就绪检查、结构化日志与指标、容器安全加固。
+5. **个人贡献/亮点**：选 1–2 个你最熟的点展开，比如“刷新令牌的轮换与重放检测”或“审计与业务同事务”。
+
+### 13.3 架构怎么讲
+
+```text
+┌──────────────────────────────┐
+│  管理端（React + Nginx）      │
+│  登录 / 智能体 / 资源 / 用户  │
+└───────────────┬──────────────┘
+                │ HTTPS + /api
+┌───────────────▼──────────────┐
+│  后端（FastAPI）              │
+│  web → application → domain   │
+│  infrastructure（ORM/仓储）   │
+└───────────────┬──────────────┘
+                │ SQL
+┌───────────────▼──────────────┐
+│  PostgreSQL（JSONB + 索引）   │
+└──────────────────────────────┘
+```
+
+讲解时强调三点：
+
+1. **前后端完全分离**：开发时 Vite 代理 `/api`，生产时 Nginx 反代，前端不直接连数据库。
+2. **后端分层**：Web 层做协议转换，Application 层做业务编排，Domain 层放实体和仓储协议，Infrastructure 层实现数据库与安全。
+3. **事务边界**：仓储只 `flush`，应用服务统一 `commit`，审计与业务同事务。
+
+### 13.4 技术选型与理由
+
+| 选择 | 理由 | 代价/替代方案 |
+| --- | --- | --- |
+| FastAPI | 类型提示 + Pydantic 自动校验、自动生成 OpenAPI、开发效率高 | 同步 ORM 需要线程池；纯高并发 IO 场景可换 async 或 Go |
+| PostgreSQL | JSONB 适合存智能体这类结构多变的配置；事务、索引、`pg_trgm` 模糊搜索都成熟 | 比 MySQL 运维门槛略高 |
+| SQLAlchemy 2.0 | 成熟、类型友好、迁移生态完善 | 同步模型在极高并发下需要调连接池 |
+| DDD 分层 | 业务规则与 HTTP/ORM 解耦，便于测试和演进 | 文件数量增加，小项目可能显得重 |
+| 短 Access + 可撤销 Refresh | 兼顾性能和可撤销性；Access 不落 localStorage，降低 XSS 风险 | Refresh 仍存 localStorage，需要 CSP、轮换和重放检测兜底 |
+| Nginx 做前端与反代 | 静态资源、SPA 回退、限流、安全头一次解决 | 多一层需要维护 |
+| Docker Compose | 小团队部署成本低，服务边界清晰 | 大规模编排可迁移到 Kubernetes |
+
+### 13.5 五个可讲的亮点
+
+1. **会话安全**
+   - Access Token 只存内存，Refresh Token 数据库只存 SHA-256 哈希。
+   - 单次轮换 + 重放检测：旧 refresh 再次使用会撤销整族会话。
+   - `token_version` 让登出、改密、禁用、删除立即失效。
+   - 多标签页用 Web Locks 单飞刷新，避免并发刷新导致令牌互相失效。
+
+2. **防爆力破解与用户名枚举**
+   - 未知用户名也执行固定 bcrypt 校验，响应时间接近。
+   - 连续失败锁定，Nginx 再叠加限流。
+   - 统一错误模型，不泄露内部细节。
+
+3. **事务与审计一致性**
+   - 仓储不提交事务，应用服务统一提交。
+   - 审计日志与业务写入同事务，避免“业务成功但审计丢失”。
+   - 认证失败使用独立短事务记录，避免影响主流程。
+
+4. **数据库工程化**
+   - Alembic 版本化迁移，CI 中执行 `alembic check` 防止模型和迁移漂移。
+   - 迁移前加 advisory lock，避免多个实例并发迁移。
+   - 就绪检查同时验证数据库连通性和迁移版本，部署时能快速发现“代码新、库旧”。
+
+5. **可观测性与交付**
+   - 每个请求有 `request_id`，并支持 W3C `traceparent` 传播。
+   - 结构化日志、OpenTelemetry 链路、Prometheus 指标。
+   - 容器非 root、只读根文件系统、`cap_drop: ALL`，CI 中用 Trivy 扫描镜像漏洞。
+
+### 13.6 难点与取舍
+
+| 难点 | 做法 | 取舍 |
+| --- | --- | --- |
+| 令牌既要安全又要无感刷新 | 短 Access + 轮换 Refresh + 请求排队重放 | 实现复杂，前端需要处理并发刷新 |
+| 事务边界清晰 | UnitOfWork + 仓储只 flush | 代码层级增多 |
+| 迁移安全 | advisory lock + 就绪检查 + CI 漂移检查 | 上线流程要求先迁移后启动 |
+| 权限实时生效 | 每次请求查数据库校验角色/状态 | 每个请求多一次查询，用索引和连接池控制成本 |
+| 前后端分离部署 | Nginx 同源反代 `/api` | 需要维护 Nginx 配置和 SPA 回退 |
+
+### 13.7 高频面试问答
+
+**Q1：为什么用 FastAPI，不用 Django/Spring？**
+
+FastAPI 类型提示友好、Pydantic 校验和 OpenAPI 文档开箱即用，适合以 API 为主的项目；团队是 Python 技术栈。Django 更适合全家桶式业务，Spring 更重但生态成熟。选型主要看团队和交付速度。
+
+**Q2：为什么做 DDD 分层，会不会过度设计？**
+
+这个项目除了 CRUD，还有登录会话、RBAC、审计、资源关联等规则，放一起会很快失控。分层让业务规则可测试、可替换；代价是文件多。如果只是纯 CRUD 小工具，确实可以更简单。
+
+**Q3：Access Token 和 Refresh Token 怎么设计？**
+
+Access 用 JWT（HS256），默认 30 分钟，前端只存内存；Refresh 是随机串，数据库只存 SHA-256 哈希，默认 14 天。刷新时轮换，旧令牌立即失效；检测到旧令牌重放就撤销整条会话链。
+
+**Q4：为什么 Refresh Token 存数据库？**
+
+为了可撤销。JWT 本身无状态，签发后无法主动失效；把 refresh 存库并维护会话状态，才能在登出、改密、禁用时立即让会话失效。
+
+**Q5：怎么防止 Refresh Token 被盗用？**
+
+轮换 + 重放检测 + 短有效期 + 前端 CSP + 登录/改密时撤销全部会话。检测到已轮换令牌再次出现时，认为可能被盗，撤销整族并要求重新登录。
+
+**Q6：怎么防暴力破解和用户名枚举？**
+
+未知用户名也做一次固定 bcrypt 校验，避免响应时间差；连续失败锁定 15 分钟；Nginx 对登录接口限流；错误文案统一，不区分“用户不存在”和“密码错误”。
+
+**Q7：RBAC 怎么实现？**
+
+角色存数据库，每次请求解析令牌后查实时账号和角色；路由层统一挂管理员鉴权，写接口再校验 `admin`/`superadmin`，管理员管理和审计只允许 `superadmin`。不信任令牌里的角色快照，避免改角色后旧令牌继续生效。
+
+**Q8：审计日志怎么保证不丢？**
+
+业务审计和业务写入在同一个数据库事务里提交；登录失败这类没有业务事务的场景，用独立短事务写入，避免影响主流程。
+
+**Q9：数据库迁移怎么保证安全？**
+
+用 Alembic 版本化；迁移脚本进入代码评审；CI 跑 `alembic check` 检查模型漂移；迁移时加 advisory lock 防止并发；就绪检查校验迁移版本；生产由一次性 `migrate` 服务先执行，后端等成功后再启动。
+
+**Q10：可观测性怎么做的？**
+
+请求 ID 贯穿 Nginx、后端和审计；结构化日志带 `trace_id`/`span_id`；OpenTelemetry 上报链路；Prometheus 暴露 HTTP 和业务指标；健康和就绪检查用于容器编排。
+
+**Q11：前端无感刷新怎么实现？**
+
+Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个刷新请求，其他请求排队；刷新成功后重放一次原请求；刷新失败清理会话并跳转登录。
+
+**Q12：生产环境做了哪些安全加固？**
+
+配置启动校验、无默认账号、CORS 白名单、登录限流、安全响应头、Swagger 生产关闭；容器非 root、只读根文件系统、`cap_drop: ALL`、数据库不对外发布；CI 做镜像漏洞扫描；备份和恢复有脚本和演练流程。
+
+**Q13：性能瓶颈可能在哪，怎么扩展？**
+
+后端是无状态的，可以水平扩 worker 或实例；瓶颈通常在 PostgreSQL。可以通过连接池、索引（`pg_trgm`、唯一索引）、分页和避免 N+1 查询优化；再往上可以加只读副本、缓存热点配置，或把长任务拆到消息队列。
+
+**Q14：为什么测试用真实 PostgreSQL，不用 mock？**
+
+迁移、JSONB、唯一索引、触发器这些行为 mock 不出来；用真实数据库能验证迁移和 SQL 是否正确。代价是测试环境依赖数据库，CI 用 service 容器解决。
+
+**Q15：如果继续演进，你会做什么？**
+
+用户端接入真实用户体系和多租户隔离；RBAC 细化到资源级；热点配置加缓存；长任务异步化；完善指标看板和告警；按需引入消息队列做事件通知。注意区分“已实现”和“规划中”，面试时不要夸大。
+
+### 13.8 面试时打开哪些文件
+
+| 想讲的内容 | 打开 |
+| --- | --- |
+| 应用装配、中间件顺序 | `backend/web/app.py` |
+| 登录、刷新、撤销 | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py` |
+| 鉴权与 RBAC | `backend/web/deps/auth.py`、`backend/web/admin/router.py` |
+| 事务与仓储 | `backend/internal/infrastructure/model/uow.py`、`backend/internal/infrastructure/repository/` |
+| 迁移与就绪检查 | `backend/migrations/env.py`、`backend/web/health.py` |
+| 前端无感刷新 | `frontend/admin/src/api/client.ts`、`frontend/admin/src/auth/AuthContext.tsx` |
+| 生产反代与限流 | `frontend/admin/nginx/default.conf` |
+| 生产编排与容器安全 | `ops/docker-compose.yml`、`backend/Dockerfile` |
+
+### 13.9 面试演示建议
+
+1. 提前启动好数据库、后端和管理端，避免现场等依赖安装。
+2. 演示路径：登录 → 首次改密 → 创建技能 → 创建智能体并关联技能 → 查看审计日志（superadmin）。
+3. 准备一个 viewer 账号，演示写接口返回 403。
+4. 打开 `/docs` 展示 OpenAPI，再打开日志展示 `request_id`。
+5. 如果允许看代码，按 13.8 的顺序讲 2–3 个点即可，不要试图讲完所有文件。
+
+---
+
+## 14. 生产环境落地部署
+
+> 本节命令用于 **Linux 生产服务器**。本地开发不需要看这一节。执行前请先在服务器安装 Docker Engine 与 Docker Compose v2，并克隆代码。
+
+### 14.1 推荐部署架构
+
+```text
+用户浏览器
+   │ HTTPS 443
+   ▼
+TLS 终止层（云负载均衡 / 宿主机 Nginx / Caddy）
+   │ HTTP 127.0.0.1:8080
+   ▼
+frontend 容器（Nginx，静态文件 + /api 反代）
+   │ 内部网络
+   ▼
+backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
+```
+
+- 只暴露 443（以及 80 用于跳转 HTTPS）。
+- `backend`、`db` 不发布端口，只走 Compose 内部网络。
+- `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
+
+### 14.2 服务器准备
+
+| 项目 | 建议 |
+| --- | --- |
+| 操作系统 | Ubuntu 22.04 / 24.04 LTS 或同类 Linux |
+| CPU / 内存 | 最低 2 核 4 GB；建议 4 核 8 GB |
+| 磁盘 | 40 GB 以上，数据库单独规划增长 |
+| 软件 | Docker Engine 24+、Docker Compose v2、Git |
+| 网络 | 安全组/防火墙只开放 22、80、443；22 建议限制来源 IP |
+| 域名 | 准备一个域名并解析到服务器公网 IP |
+| 时间同步 | 开启 NTP，避免令牌和日志时间异常 |
+
+### 14.3 准备环境变量与密钥
 
 ```bash
 cp ops/.env.production.example ops/.env.production
+chmod 600 ops/.env.production
 ```
 
 至少修改：
 
-- `POSTGRES_PASSWORD` 与 `DATABASE_URL` 中的密码保持一致
-- `JWT_SECRET`（`openssl rand -hex 32`）
-- `CORS_ORIGINS`（同源部署可留空，禁止 `*`）
-- `HTTP_PORT`（默认 80；建议前置 TLS 或改为本机反代端口）
+```bash
+# 数据库密码：使用强随机值
+POSTGRES_PASSWORD=<强随机密码>
+DATABASE_URL=postgresql+psycopg://<数据库用户>:<同样的密码>@db:5432/<数据库名>
 
-### 10.2 构建与启动
+# JWT 签名密钥：32 字节随机值的十六进制
+JWT_SECRET=<openssl rand -hex 32 的输出>
+
+# 生产必须
+APP_ENV=production
+DOCS_ENABLED=false
+CORS_ORIGINS=
+
+# 对外端口（前面有 TLS 终止层时可改为 127.0.0.1:8080）
+HTTP_PORT=80
+```
+
+生成随机值：
+
+```bash
+openssl rand -hex 32
+```
+
+注意事项：
+
+- `POSTGRES_PASSWORD` 和 `DATABASE_URL` 里的密码必须一致。
+- `CORS_ORIGINS` 同源部署留空；前后端分离时填管理端域名，禁止 `*`。
+- `.env.production` 含密钥，权限设为 600，不要提交 Git，也不要贴到聊天工具。
+
+### 14.4 构建并启动
 
 ```bash
 docker compose -f ops/docker-compose.yml up -d --build
 docker compose -f ops/docker-compose.yml ps
 ```
 
-编排行为：
+服务说明：
 
-- `db`：PostgreSQL 17，不发布端口，仅内部网络
-- `migrate`：一次性执行 `alembic upgrade head`，成功后才启动后端
-- `backend`：非 root、只读根文件系统、`cap_drop: ALL`、不发布端口
-- `frontend`：Nginx 静态站点 + `/api` 反代，暴露 `${HTTP_PORT}:8080`
-- 所有服务带健康检查、日志轮转与内存限制
+| 服务 | 作用 | 对外 |
+| --- | --- | --- |
+| `db` | PostgreSQL 17，数据存 volume | 否 |
+| `migrate` | 一次性执行 `alembic upgrade head`，成功后退出 | 否 |
+| `backend` | FastAPI，非 root、只读根文件系统 | 否 |
+| `frontend` | Nginx 静态站点 + `/api` 反代 | 是（`HTTP_PORT:8080`） |
 
-### 10.3 创建首个管理员
+除一次性执行的 `migrate` 外，其他服务都配置了健康检查；所有服务都有日志轮转和内存上限。
+
+> CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend`、`ghcr.io/<owner>/<repo>-frontend`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
+
+### 14.5 创建首个管理员
+
+交互方式（推荐）：
+
+```bash
+docker compose -f ops/docker-compose.yml run --rm -it \
+  backend python -m scripts.create_admin
+```
+
+> Windows Git Bash 如果提示 `the input device is not a TTY`，改用下面的非交互方式。
+
+非交互方式：
 
 ```bash
 docker compose -f ops/docker-compose.yml run --rm \
   -e ADMIN_USERNAME=admin \
-  -e ADMIN_PASSWORD='强密码' \
+  -e ADMIN_PASSWORD='<符合密码策略的强密码>' \
   backend python -m scripts.create_admin
 ```
 
 首次登录会强制改密。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
 
-### 10.4 Docker Hub 访问受限时
+> 非交互方式会把密码留在 shell 历史和进程列表中，生产环境优先用交互方式；如果必须非交互，执行后清理历史记录。
 
-镜像源不可直连时，可通过构建参数替换基础镜像（示例为 daocloud 镜像源，按实际可用源调整）：
+### 14.6 配置 HTTPS
+
+推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再转发到 `frontend` 容器。
+
+宿主机 Nginx 示例（证书可用 Let's Encrypt 申请）：
+
+```nginx
+server {
+    listen 80;
+    server_name agent.example.com;
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name agent.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/agent.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/agent.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+```
+
+对应地把 `.env.production` 的 `HTTP_PORT` 改为 `127.0.0.1:8080`，让容器端口只绑定本机。
+
+### 14.7 Docker Hub 访问受限时
+
+镜像拉取失败时，可以通过构建参数替换基础镜像（示例为 daocloud，按实际可用源调整）：
 
 ```bash
 PYTHON_IMAGE=docker.m.daocloud.io/library/python:3.12-slim \
@@ -572,133 +1429,198 @@ NGINX_IMAGE=docker.m.daocloud.io/nginxinc/nginx-unprivileged:1.27-alpine \
 docker compose -f ops/docker-compose.yml build
 ```
 
-### 10.5 上线检查
+也可以给 Docker 配置 `registry-mirrors` 后重新拉取。
 
-- [ ] `ops/.env.production` 已填写且权限仅运维可读
-- [ ] `JWT_SECRET` 为随机值，数据库密码为强密码
-- [ ] `APP_ENV=production`、`DOCS_ENABLED=false`（默认）
-- [ ] 迁移由 `migrate` 服务执行成功，`/health/ready` 返回 200
-- [ ] 已创建管理员并完成首次改密
-- [ ] 前置 HTTPS（TLS 1.2/1.3），后端与数据库端口未对外发布
-- [ ] `/metrics` 外部不可访问
-- [ ] 备份任务已接入计划任务并验证过恢复
-- [ ] 已验证 Nginx 登录限流与 429 响应
+### 14.8 上线验证
+
+按顺序检查：
+
+```bash
+# 1. 容器状态：都应 healthy 或正常退出（migrate 为 exited 0）
+docker compose -f ops/docker-compose.yml ps
+
+# 2. 前端 Nginx 存活
+curl -fsS http://127.0.0.1:8080/healthz
+
+# 3. 后端就绪（数据库连通 + 迁移版本一致）
+docker compose -f ops/docker-compose.yml exec backend \
+  python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
+
+# 4. 查看迁移服务日志
+docker compose -f ops/docker-compose.yml logs migrate
+```
+
+然后在浏览器中：
+
+- [ ] 通过 HTTPS 打开管理端
+- [ ] 使用首个管理员登录并完成改密
+- [ ] 创建一条技能，再创建一个智能体并关联该技能
+- [ ] 用 viewer 账号验证写接口返回 403
+- [ ] 用 superadmin 查看审计日志
+- [ ] 确认 `/docs` 在生产不可访问（`DOCS_ENABLED=false`）
+- [ ] 确认 `/metrics` 从外部不可访问
+
+### 14.9 升级与回滚
+
+**升级流程：**
+
+1. 先备份数据库（见 14.10）。
+2. 拉取新代码。
+3. 重新构建并启动：`docker compose -f ops/docker-compose.yml up -d --build`。
+4. `migrate` 服务自动执行迁移，`backend` 等它成功后才启动。
+5. 按 14.8 验证。
+
+**回滚流程：**
+
+1. 镜像按 tag 发布时，切回上一个 tag 重新 `up -d`。
+2. 如果新版本包含数据库迁移，回滚前确认迁移是否可逆；可逆时使用 `alembic downgrade <revision>`，不可逆时用备份恢复。
+3. 恢复后重新检查 `/health/ready` 和业务日志。
+
+> 建议数据库变更遵循“先加字段、再写数据、最后删旧字段”的渐进式策略，降低回滚难度。
+
+### 14.10 备份、恢复与演练
+
+```bash
+# 备份（custom 格式，默认保留 14 天）
+bash ops/backup.sh
+
+# 恢复（需要输入 RESTORE 二次确认，会覆盖现有数据）
+bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
+```
+
+建议：
+
+1. 把备份加入 cron，例如每天凌晨 3 点：
+   ```cron
+   0 3 * * * cd /opt/boxia-agent && bash ops/backup.sh >> /var/log/boxia-backup.log 2>&1
+   ```
+2. 备份目录同步到独立存储（对象存储或另一台机器），避免和数据库同盘。
+3. **定期做恢复演练**：在测试环境用最新备份恢复一次，确认能启动并通过 `/health/ready`。没有演练过的备份不算可靠备份。
+
+### 14.11 监控与日志
+
+- **健康检查**：Compose 已配置容器健康检查；外部监控建议探测 `https://你的域名/healthz` 和登录页。
+- **日志**：生产默认 JSON 日志，包含 `request_id`、`trace_id`、路径、状态码、耗时。查看实时日志：
+  ```bash
+  docker compose -f ops/docker-compose.yml logs -f backend
+  ```
+- **指标**：`/metrics` 为 Prometheus 格式，默认只允许内部访问。需要采集时，在内部网络部署 Prometheus 或通过 sidecar 抓取。
+- **告警建议**：容器重启次数、`/health/ready` 失败、5xx 比例、登录 429 数量、数据库连接数、磁盘使用率、备份失败。
+
+### 14.12 安全加固清单
+
+- [ ] 防火墙只开放 22、80、443；数据库和后端端口不对外
+- [ ] SSH 只允许密钥登录，禁用 root 远程登录
+- [ ] `ops/.env.production` 权限 600，密钥随机且未出现在 Git 历史中
+- [ ] `APP_ENV=production`、`DOCS_ENABLED=false`
+- [ ] HTTPS 使用 TLS 1.2/1.3，证书自动续期
+- [ ] 容器非 root、只读根文件系统、`cap_drop: ALL`、`no-new-privileges`
+- [ ] `/metrics` 和 `/health/*` 不对外暴露
+- [ ] 定期轮换 JWT 密钥和数据库密码（轮换前评估会话失效影响）
+- [ ] 依赖和镜像定期扫描（CI 已有 Trivy，生产镜像也建议定期扫描）
+- [ ] 备份加密并异地保存，恢复演练通过
+
+### 14.13 生产常见问题
+
+| 现象 | 排查方向 |
+| --- | --- |
+| 访问域名 502 | `frontend` 容器是否健康；`backend` 是否启动；Nginx 日志 |
+| `/health/ready` 返回 503 `migration_outdated` | 查看 `migrate` 服务日志，确认迁移是否成功 |
+| 登录返回 429 | 触发登录限流或账号锁定；查看 `Retry-After` |
+| 容器启动后立即退出 | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库连不上 |
+| 只读文件系统报错 | 应用需要写入临时目录时，确认 Compose 已挂载 `tmpfs` |
+| 磁盘占满 | 检查数据库 volume、备份目录和容器日志轮转 |
+| 时间不对导致令牌异常 | 检查服务器 NTP 时间同步 |
 
 ---
 
-## 11. 运维手册
+## 15. 日常运维
 
-### 11.1 健康与指标
+### 15.1 健康检查
 
 ```bash
-curl -s http://127.0.0.1/healthz       # Nginx 自身存活
+curl -s http://127.0.0.1:8080/healthz       # 前端 Nginx 存活
+
 docker compose -f ops/docker-compose.yml exec backend \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
+
 docker compose -f ops/docker-compose.yml exec backend \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/metrics').read().decode())"
 ```
 
-`/health/*` 与 `/metrics` 仅在后端容器内访问，不对外暴露。
+`/health/ready` 返回 503 时，查看响应里的 `components.database`：
 
-`/health/ready` 会校验数据库连通性与迁移版本；返回 `503` 时查看响应中的 `components.database`（`database_unavailable` / `migration_outdated`）。
+- `database_unavailable`：数据库连不上
+- `migration_outdated`：代码比数据库新，需要执行迁移
 
-### 11.2 日志
+### 15.2 日志
 
-- 生产默认 JSON 日志，包含 `ts/level/logger/message/request_id/trace_id/span_id/method/path/status/duration_ms/client_ip`。
-- 每个响应返回 `X-Request-ID`，可据此串联 Nginx、后端与审计日志。
-- 日志不记录密码、令牌、Cookie 与请求体。
+- 生产默认 JSON 日志，包含时间、级别、`request_id`、`trace_id`、方法、路径、状态码、耗时、客户端 IP。
+- 每个响应都带 `X-Request-ID`，可以用它把 Nginx、后端和审计记录串起来。
+- 日志不会记录密码、令牌、Cookie 和请求体。
 
-### 11.3 备份与恢复
+### 15.3 发布与回滚
+
+见 [14.9](#149-升级与回滚)。
+
+---
+
+## 16. 更多问题
+
+**Q1：接口返回 401**
+
+确认请求带的是 Access Token 且未过期。令牌过期时前端会自动刷新并重试；登出、改密、禁用后旧令牌立即失效，需要重新登录。
+
+**Q2：接口返回 409**
+
+名称重复（忽略大小写唯一），换一个名称或编辑已有记录。
+
+**Q3：生产页面刷新后 404**
+
+生产环境依赖 Nginx 的 SPA 回退（`try_files $uri $uri/ /index.html`），仓库中的 `frontend/admin/nginx/default.conf` 已配置好。
+
+**Q4：`alembic check` 报模型与迁移不一致**
+
+新增或修改了 ORM 模型，但没有生成迁移文件。执行：
 
 ```bash
-# 备份（custom 格式，默认保留 14 天）
-./ops/backup.sh
-
-# 恢复（输入 RESTORE 二次确认，会覆盖现有数据）
-./ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
+cd backend
+uv run alembic revision --autogenerate -m "描述本次变更"
+uv run alembic upgrade head
+uv run alembic check
 ```
 
-建议将 `ops/backup.sh` 加入 cron，并把备份目录同步到独立存储。
+**Q5：运行 pytest 提示无法创建测试库**
 
-### 11.4 发布与回滚
-
-1. 发布前执行备份与 `alembic upgrade head`（Compose 自动完成）。
-2. 镜像按 tag 发布；回滚时切换到上一个 tag 重新 `up -d`。
-3. 如需回滚数据库，使用 `alembic downgrade <revision>`，并确认备份可用。
-
----
-
-## 12. 安全验收清单
-
-- [ ] 弱口令被拒绝（长度、字符类别、常见口令、包含用户名）
-- [ ] 连续 5 次登录失败触发 15 分钟锁定，返回 429 与 `Retry-After`
-- [ ] Refresh Token 重放会撤销整族会话
-- [ ] 登出后 Access/Refresh Token 均立即失效
-- [ ] 改密后所有旧会话失效
-- [ ] viewer 写接口返回 403，管理端隐藏写操作入口
-- [ ] `/admin/users`、`/admin/audit-logs` 仅 superadmin 可访问
-- [ ] 错误响应不含堆栈，500 仅返回通用文案
-- [ ] 日志与审计不含密码、令牌等敏感信息
-- [ ] 生产环境无默认账号、`JWT_SECRET` 非示例值
-- [ ] 响应包含安全头（nosniff、DENY、Referrer-Policy、CSP）
-- [ ] 认证响应带 `Cache-Control: no-store`
-- [ ] 后端、数据库端口未对外暴露，`/metrics` 外部不可达
-- [ ] 容器以非 root 运行、只读根文件系统、`cap_drop: ALL`
-
----
-
-## 13. 常见问题
-
-**Q1：提示 `uv: command not found`**
-
-执行 `winget install astral-sh.uv` 或 `pip install uv`，安装后重新打开终端。
-
-**Q2：后端启动报配置错误**
-
-`DATABASE_URL`、`JWT_SECRET` 为必填。生产环境还会校验密钥长度、CORS 通配符等，按报错修正 `backend/.env` 或进程环境变量。
-
-**Q3：登录提示「用户名或密码错误」**
-
-本地需先执行 `scripts.create_admin` 创建管理员（历史种子脚本不再预置任何默认账号）。忘记密码可重新执行该脚本重置。
-
-**Q4：登录返回 429 / `ACCOUNT_LOCKED`**
-
-连续密码错误触发锁定，等待 `Retry-After` 指定时间后重试；或由 superadmin 通过管理员管理重置密码/调整状态。
-
-**Q5：`/health/ready` 返回 `migration_outdated`**
-
-代码版本比数据库新，执行 `uv run alembic upgrade head`（Compose 中检查 `migrate` 服务日志）。
+`boxia_agent_test` 由测试自动创建，数据库账号需要有建库权限。本地默认的 `postgres` 账号即可；如果是自定义账号，请授权 `CREATEDB`。
 
 **Q6：历史数据库如何接入 Alembic**
 
-先确认结构与 `0001_baseline` 一致，执行 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。不要重复执行 `db/001_schema.sql`。
+先确认表结构与 `0001_baseline` 一致，执行 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。不要重复执行 `db/001_schema.sql`。
 
-**Q7：页面刷新后 404**
+**Q7：如何修改用户端接口令牌**
 
-生产环境依赖 Nginx SPA 回退（`try_files $uri $uri/ /index.html`），仓库内 `frontend/admin/nginx/default.conf` 已配置。
+在 `backend/.env` 中设置 `USER_API_TOKEN`（生产环境至少 32 字符），请求时带：
 
-**Q8：接口返回 401**
+```http
+Authorization: Bearer <USER_API_TOKEN>
+```
 
-确认使用 Access Token 且未过期；令牌过期时前端会自动刷新并重放请求。登出/改密/禁用后旧令牌立即失效，需要重新登录。
+未配置时，用户端接口返回“服务端未配置 USER_API_TOKEN，暂不可用”。
 
-**Q9：接口返回 409**
+**Q8：怎样确认自己没有把密码提交到 Git**
 
-名称重复（忽略大小写唯一），请更换名称或编辑已有记录。
+提交前先看暂存区：
 
-**Q10：Docker 镜像拉取失败**
+```bash
+git diff --cached --stat
+git diff --cached | grep -iE "password|secret|token"
+```
 
-Docker Hub 访问受限时使用 [10.4](#104-docker-hub-访问受限时) 的构建参数替换基础镜像。
-
-**Q11：Playwright 提示管理员密码不合规**
-
-测试管理员密码同样受密码策略约束，且不能包含用户名。通过 `E2E_PASSWORD` 指定合规密码，并用 `ADMIN_MUST_CHANGE_PASSWORD=false` 初始化。
-
-**Q12：运行 pytest 时报无法创建测试库**
-
-`boxia_agent_test` 由测试自动创建，需要 PostgreSQL 账号具备建库权限；使用默认 `postgres` 超级用户即可。
+仓库已经配置了 `.gitignore` 和 pre-commit 的私钥检测；真实配置只放在 `.env` 和 `ops/.env.production` 中，这两个文件不会进入 Git。
 
 ---
 
-## 14. 许可证
+## 17. 许可证
 
 本项目采用 [Apache License 2.0](LICENSE)。
