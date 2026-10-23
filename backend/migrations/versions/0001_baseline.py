@@ -1,4 +1,4 @@
-"""baseline schema（等价 db/001_schema.sql）
+"""baseline schema（初始表结构基线）
 
 Revision ID: 0001_baseline
 Revises:
