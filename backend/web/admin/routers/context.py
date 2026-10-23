@@ -3,7 +3,9 @@
 from fastapi import APIRouter
 
 from internal.infrastructure.config.settings import get_settings
-from web.admin.schemas import AdminContextOut, AdminUserOut, PasswordPolicyOut, TenantOut
+from web.admin.schemas.auth import AdminUserOut
+from web.admin.schemas.context import AdminContextOut
+from web.admin.schemas.tenant import PasswordPolicyOut, TenantOut
 from web.deps.auth import AdminAuthDep
 from web.deps.services import AuthServiceDep
 from web.deps.tenant import RequestContextDep, tenant_switch_mode

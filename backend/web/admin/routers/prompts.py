@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Prompt
-from web.admin.schemas import PageOut, PromptOut, PromptPayload
+from web.admin.schemas.common import PageOut
+from web.admin.schemas.resource import PromptOut, PromptPayload
 from web.deps.auth import require_editor
 from web.deps.services import PromptServiceDep
 

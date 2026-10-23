@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Skill
-from web.admin.schemas import PageOut, SkillOut, SkillPayload
+from web.admin.schemas.common import PageOut
+from web.admin.schemas.resource import SkillOut, SkillPayload
 from web.deps.auth import require_editor
 from web.deps.services import SkillServiceDep
 

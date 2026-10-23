@@ -90,9 +90,7 @@ export default function AdminLayout() {
             {platformName}
             <small>
               {scopeLabel}
-              {context && context.app_env !== 'prod'
-                ? ` · ${ENV_LABELS[context.app_env]}环境`
-                : ''}
+              {context && context.app_env !== 'prod' ? ` · ${ENV_LABELS[context.app_env]}环境` : ''}
             </small>
           </span>
         </div>

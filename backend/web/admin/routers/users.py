@@ -2,13 +2,13 @@
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
-from web.admin.schemas import (
+from web.admin.schemas.auth import (
     AdminUserCreateRequest,
     AdminUserOut,
     AdminUserResetPasswordRequest,
     AdminUserUpdateRequest,
-    PageOut,
 )
+from web.admin.schemas.common import PageOut
 from web.deps.auth import AdminAuthDep, require_superadmin
 from web.deps.services import AdminUserServiceDep
 

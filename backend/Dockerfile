@@ -11,6 +11,10 @@ RUN pip install --no-cache-dir "uv>=0.8,<1"
 
 WORKDIR /app
 
+# 站点入口：admin / user 共用构建上下文，按构建参数切换 uvicorn 应用
+ARG APP_MODULE=web.app_admin:app
+ENV APP_MODULE=${APP_MODULE}
+
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
 
@@ -27,4 +31,4 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)"]
 
-CMD ["sh", "-c", "exec uvicorn web.app:app --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2} --proxy-headers --forwarded-allow-ips='*'"]
+CMD ["sh", "-c", "exec uvicorn ${APP_MODULE} --host 0.0.0.0 --port 8000 --workers ${WEB_CONCURRENCY:-2} --proxy-headers --forwarded-allow-ips='*'"]

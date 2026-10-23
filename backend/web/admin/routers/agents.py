@@ -4,8 +4,8 @@ from fastapi import APIRouter, Depends, Query, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Agent
-from web.admin.agent_schema import AgentOut, AgentPayload, AgentSummaryOut
-from web.admin.schemas import PageOut
+from web.admin.schemas.agent import AgentOut, AgentPayload, AgentSummaryOut
+from web.admin.schemas.common import PageOut
 from web.deps.auth import require_editor
 from web.deps.services import AgentServiceDep
 
