@@ -123,6 +123,31 @@ test.describe('多租户', () => {
     await expect(page.getByRole('row', { name: new RegExp(TENANT_CODE) })).toBeVisible()
   })
 
+  test('产品级平台可编辑租户名称', async ({ page, request }) => {
+    const token = await adminToken(request)
+    const tenantId = await ensureTenant(request, token)
+    const auth = { Authorization: `Bearer ${token}` }
+    const editedName = `${TENANT_NAME}-改`
+
+    await loginPlatform(page)
+    await page.goto('/tenants')
+    await expect(page.getByRole('row', { name: new RegExp(TENANT_CODE) })).toBeVisible()
+
+    const row = page.getByRole('row', { name: new RegExp(TENANT_CODE) })
+    try {
+      await row.getByRole('button', { name: '编辑' }).click()
+      const dialog = page.getByRole('dialog', { name: '编辑租户' })
+      await dialog.getByLabel('租户名称').fill(editedName)
+      await dialog.getByRole('button', { name: '保存' }).click()
+      await expect(page.getByRole('cell', { name: editedName })).toBeVisible()
+    } finally {
+      await request.patch(`/api/v1/admin/tenants/${tenantId}`, {
+        headers: auth,
+        data: { name: TENANT_NAME },
+      })
+    }
+  })
+
   test('本地子域名直接进入租户作用域', async ({ page, request }) => {
     const token = await adminToken(request)
     await ensureTenant(request, token)
