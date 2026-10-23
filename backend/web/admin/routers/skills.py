@@ -1,13 +1,20 @@
 """技能管理接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Body, Depends, Query, Response, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Skill
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.resource import SkillOut, SkillPayload
+from web.admin.schemas.skill_package import (
+    SkillCloneRequest,
+    SkillFileListOut,
+    SkillFileMetaOut,
+    SkillFileOut,
+    SkillFileWriteRequest,
+)
 from web.deps.auth import require_editor
-from web.deps.services import SkillServiceDep
+from web.deps.services import SkillPackageServiceDep, SkillServiceDep
 
 router = APIRouter(prefix="/skills", tags=["admin-skills"])
 
@@ -54,8 +61,108 @@ def update_skill(skill_id: int, payload: SkillPayload, service: SkillServiceDep)
     dependencies=[Depends(require_editor)],
 )
 def delete_skill(skill_id: int, service: SkillServiceDep) -> None:
-    """删除技能。"""
+    """删除技能（包内文件随外键级联删除）。"""
     service.delete(skill_id)
+
+
+@router.get("/{skill_id}/files", response_model=SkillFileListOut)
+def list_skill_files(
+    skill_id: int,
+    service: SkillPackageServiceDep,
+    prefix: str | None = Query(None, max_length=512),
+) -> SkillFileListOut:
+    """列出技能包内文件（不含正文）。"""
+    files = service.list_files(skill_id, prefix)
+    items = [SkillFileMetaOut.model_validate(file) for file in files]
+    return SkillFileListOut(
+        items=items,
+        total=len(items),
+        total_bytes=sum(file.size_bytes for file in files),
+    )
+
+
+@router.get("/{skill_id}/files/content", response_model=SkillFileOut)
+def read_skill_file(
+    skill_id: int,
+    service: SkillPackageServiceDep,
+    path: str = Query(..., min_length=1, max_length=512),
+) -> SkillFileOut:
+    """读取技能包内单个文件。"""
+    return SkillFileOut.model_validate(service.read_file(skill_id, path))
+
+
+@router.put(
+    "/{skill_id}/files",
+    response_model=SkillFileOut,
+    dependencies=[Depends(require_editor)],
+)
+def write_skill_file(
+    skill_id: int,
+    payload: SkillFileWriteRequest,
+    service: SkillPackageServiceDep,
+) -> SkillFileOut:
+    """新增或覆盖技能包文件；写 SKILL.md 会同步技能入口内容。"""
+    file = service.write_file(
+        skill_id,
+        path=payload.path,
+        content=payload.content,
+        expected_hash=payload.expected_hash,
+    )
+    return SkillFileOut.model_validate(file)
+
+
+@router.delete(
+    "/{skill_id}/files",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_editor)],
+)
+def delete_skill_file(
+    skill_id: int,
+    service: SkillPackageServiceDep,
+    path: str = Query(..., min_length=1, max_length=512),
+) -> None:
+    """删除技能包文件。"""
+    service.delete_file(skill_id, path)
+
+
+@router.post(
+    "/{skill_id}/import",
+    response_model=list[SkillFileMetaOut],
+    dependencies=[Depends(require_editor)],
+)
+def import_skill_package(
+    skill_id: int,
+    service: SkillPackageServiceDep,
+    body: bytes = Body(..., media_type="application/zip"),
+) -> list[SkillFileMetaOut]:
+    """上传 zip 技能包并全量替换包内文件。"""
+    return [SkillFileMetaOut.model_validate(file) for file in service.import_zip(skill_id, body)]
+
+
+@router.get("/{skill_id}/export")
+def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Response:
+    """导出技能包为 zip。"""
+    data = service.export_zip(skill_id)
+    return Response(
+        content=data,
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="skill-{skill_id}.zip"'},
+    )
+
+
+@router.post(
+    "/{skill_id}/clone",
+    response_model=SkillOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_editor)],
+)
+def clone_skill(
+    skill_id: int,
+    payload: SkillCloneRequest,
+    service: SkillPackageServiceDep,
+) -> SkillOut:
+    """把可见的平台级技能克隆到当前租户，生成独立副本。"""
+    return SkillOut.model_validate(service.clone_to_current_tenant(skill_id, payload.name))
 
 
 def _to_page_out(result: Page[Skill]) -> PageOut[SkillOut]:

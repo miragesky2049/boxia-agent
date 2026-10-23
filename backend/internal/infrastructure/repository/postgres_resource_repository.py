@@ -121,6 +121,15 @@ class PostgresResourceRepository(Generic[TResource]):
             stmt = stmt.where(self.model.id != exclude_id)
         return self._session.scalar(stmt) is not None
 
+    def get_by_name(self, name: str) -> TResource | None:
+        """按名称在当前归属范围内精确查询（忽略大小写）。"""
+        row = self._session.scalar(
+            self._owned(select(self.model)).where(
+                func.lower(self.model.name) == name.strip().lower()
+            )
+        )
+        return self._to_entity(row) if row else None
+
     def ids_exist(self, ids: list[int]) -> set[int]:
         """返回可见范围内真实存在的 id 集合。"""
         if not ids:

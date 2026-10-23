@@ -3,7 +3,18 @@
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, String, Text, func
+from sqlalchemy import (
+    CHAR,
+    BigInteger,
+    Boolean,
+    DateTime,
+    ForeignKey,
+    Integer,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -25,6 +36,27 @@ class SkillModel(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class SkillFileModel(Base):
+    """skill_files 表：技能包虚拟目录，平台级/租户级随所属 skill 隔离。"""
+
+    __tablename__ = "skill_files"
+    __table_args__ = (UniqueConstraint("skill_id", "path", name="ux_skill_files_path"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    skill_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("skills.id", ondelete="CASCADE"), nullable=False
+    )
+    path: Mapped[str] = mapped_column(String(512), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_hash: Mapped[str] = mapped_column(CHAR(64), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer, nullable=False)
+    media_type: Mapped[str] = mapped_column(String(100), nullable=False, default="text/plain")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -1054,6 +1054,38 @@ Authorization: Bearer <access_token>
 - 列表只返回摘要（不含 `config` 和关联 ID），详情返回完整配置。
 - `config` 中缺失的子项由后端补默认值。
 
+### 8.3.1 技能包文件接口
+
+管理端入口：**技能管理 → 列表行「技能包」**。抽屉内可查看/编辑文件、导入和导出 zip；租户查看平台级技能时可一键克隆到本租户。
+
+技能在存储上是一个虚拟目录：每个技能由若干文本文件组成，`SKILL.md` 为入口文件，其余文件（如 `references/**`、脚本说明等）按相对路径存放。文件内容只存在 `skill_files` 表，`skills.content` 是 `SKILL.md` 的镜像，供列表与搜索使用。
+
+平台级与租户级技能不做物理目录区分，归属完全由 `skills.tenant_id` 决定：
+
+- `tenant_id = NULL`：平台级技能，所有租户可见只读，仅产品级平台可维护。
+- `tenant_id = 当前租户`：租户级技能，仅本租户可见可维护。
+- 租户若需修改平台级技能，必须调用克隆接口生成独立副本，不建立跨租户引用。
+- 后续若迁移到对象存储，key 约定为 `skills/platform/{skill_id}/{path}` 与 `skills/tenants/{tenant_id}/{skill_id}/{path}`，与应用层路径规则一致。
+
+| 方法   | 路径                                  | 说明                                                       |
+|--------|---------------------------------------|------------------------------------------------------------|
+| GET    | `/admin/skills/{id}/files`            | 文件清单（不含正文），支持 `prefix` 前缀过滤                |
+| GET    | `/admin/skills/{id}/files/content`    | 读取单文件，参数 `path`                                     |
+| PUT    | `/admin/skills/{id}/files`            | 新增或覆盖文件；写 `SKILL.md` 同步入口内容                  |
+| DELETE | `/admin/skills/{id}/files`            | 删除文件，参数 `path`；删除 `SKILL.md` 清空入口内容         |
+| POST   | `/admin/skills/{id}/import`           | 上传 `application/zip` 全量替换；自动去掉压缩包公共根目录    |
+| GET    | `/admin/skills/{id}/export`           | 导出确定性 zip（固定时间戳，便于比对）                      |
+| POST   | `/admin/skills/{id}/clone`            | 把可见技能克隆到当前租户，返回 201 与新技能                 |
+
+写入约束：
+
+- 路径必须是相对路径，统一 `/` 分隔；拒绝 `..`、绝对路径、反斜杠、控制字符与 `: * ? " < > |` 等不可移植字符。
+- 仅接受 UTF-8 文本，拒绝含 NUL 的二进制内容。
+- 配额默认 200 个文件、单文件 1 MiB、整包 8 MiB，对应 `SKILL_PACKAGE_MAX_FILES` / `SKILL_PACKAGE_MAX_FILE_BYTES` / `SKILL_PACKAGE_MAX_TOTAL_BYTES`。
+- `PUT` 支持 `expected_hash`：与当前文件 SHA-256 不一致返回 409，避免多人同时编辑互相覆盖。
+- 全量替换（导入/目录导入）在单个事务内完成，失败不会留下半包数据。
+- 删除技能时 `skill_files` 随外键级联删除。
+
 ### 8.4 管理员与审计（仅 superadmin）
 
 | 方法  | 路径                         | 说明                               |
@@ -1161,6 +1193,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
 | `agents`                                      | 智能体，`config` 为 JSONB 完整配置                                                       |
 | `skills` / `tools` / `components` / `prompts` | 四类资源表                                                                               |
+| `skill_files`                                 | 技能包内文本文件；`(skill_id, path)` 唯一，随技能级联删除，归属由所属技能决定              |
 | `agent_tools` / `agent_skills`                | 智能体与工具/技能的关联表，级联删除                                                      |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
@@ -1202,6 +1235,13 @@ ADMIN_MUST_CHANGE_PASSWORD=false uv run python -m scripts.create_admin
 
 # 写入本地演示资源（幂等，可重复执行；写入的是产品级资源，所有租户可见只读）
 uv run python -m scripts.seed_demo
+
+# 技能包运维：目录导入 / 导出 / 克隆到租户 / 列文件
+uv run python -m scripts.skill_package import --dir ../skills/foo --name "技能名"
+uv run python -m scripts.skill_package import --dir ./foo --name "技能名" --tenant acme --replace
+uv run python -m scripts.skill_package export --id 3 --output ./exported
+uv run python -m scripts.skill_package clone --id 3 --tenant acme --name "技能副本"
+uv run python -m scripts.skill_package list --id 3
 ```
 
 ---
@@ -1215,6 +1255,7 @@ uv run python -m scripts.seed_demo
 | 智能体管理                  | 搜索、状态筛选、分页、新建、配置、启用/停用、删除                                                                                                               |
 | 智能体配置                  | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件                                                        |
 | 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读                                                                                                                     |
+| 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 管理员管理                  | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号                                                                            |
 | 租户管理                    | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin）                                                                                                        |
 | 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |

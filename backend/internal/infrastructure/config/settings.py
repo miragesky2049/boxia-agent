@@ -77,6 +77,11 @@ class Settings(BaseSettings):
     password_max_bytes: int = Field(default=72, ge=32, le=72)
     password_min_categories: int = Field(default=3, ge=1, le=4)
 
+    # 技能包限制：文本类技能包，按文件数/单文件/总大小三重配额防止滥用。
+    skill_package_max_files: int = Field(default=200, ge=1, le=2000)
+    skill_package_max_file_bytes: int = Field(default=1_048_576, ge=1024, le=16_777_216)
+    skill_package_max_total_bytes: int = Field(default=8_388_608, ge=1024, le=67_108_864)
+
     # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
     # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
     root_domain: str = ""
