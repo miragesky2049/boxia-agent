@@ -2,7 +2,7 @@
 
 from typing import Any, Generic, TypeVar
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.resource import Component, Prompt, Skill, Tool
@@ -12,6 +12,12 @@ from internal.infrastructure.model.resource import (
     SkillModel,
     ToolModel,
 )
+from internal.infrastructure.repository.grant_filters import (
+    has_any_grant,
+    platform_resource_visible,
+    tenant_grant_exists,
+    tenant_resource_visible,
+)
 
 TResource = TypeVar("TResource")
 
@@ -20,21 +26,49 @@ class PostgresResourceRepository(Generic[TResource]):
     """通用资源仓储基类。"""
 
     model: type[Any]
+    resource_type: str
 
-    def __init__(self, session: Session, tenant_id: int | None = None):
+    def __init__(
+        self,
+        session: Session,
+        tenant_id: int | None = None,
+        role_ids: tuple[int, ...] = (),
+        apply_role_filter: bool = True,
+    ):
         self._session = session
         self._tenant_id = tenant_id
+        self._role_ids = tuple(role_ids)
+        self._apply_role_filter = apply_role_filter
 
     def _to_entity(self, row: Any) -> TResource:
         raise NotImplementedError
 
     def _visible(self, stmt):
-        """读可见范围：租户可见本租户资源 + 产品级资源；产品级只可见产品级。"""
+        """读可见范围：平台视角仅产品级；租户视角按归属与授权过滤。"""
         if self._tenant_id is None:
             return stmt.where(self.model.tenant_id.is_(None))
-        return stmt.where(
-            or_(self.model.tenant_id == self._tenant_id, self.model.tenant_id.is_(None))
+        tenant_owned = and_(
+            self.model.tenant_id == self._tenant_id,
+            tenant_resource_visible(
+                self.resource_type,
+                self.model.id,
+                self._tenant_id,
+                self._role_ids,
+                self._apply_role_filter,
+            ),
         )
+        platform_resource = and_(
+            self.model.tenant_id.is_(None),
+            platform_resource_visible(
+                self.resource_type,
+                self.model.id,
+                self.model.agent_id,
+                self._tenant_id,
+                self._role_ids,
+                self._apply_role_filter,
+            ),
+        )
+        return stmt.where(or_(tenant_owned, platform_resource))
 
     def _owned(self, stmt):
         """写归属范围：只能维护当前作用域自有的资源。"""
@@ -56,9 +90,29 @@ class PostgresResourceRepository(Generic[TResource]):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
+        agent_id: int | None = None,
+        manageable_only: bool = False,
+        grant_state: str | None = None,
+        grant_tenant_id: int | None = None,
     ) -> tuple[list[TResource], int]:
-        """分页查询，关键字模糊匹配名称与描述。"""
-        stmt = self._visible(select(self.model))
+        """分页查询，关键字模糊匹配名称与描述。
+
+        manageable_only 仅返回当前作用域可授权的资源；grant_state 按直接授权记录筛选。
+        """
+        stmt = (
+            self._owned(select(self.model))
+            if manageable_only
+            else self._visible(select(self.model))
+        )
+        if grant_state is not None:
+            condition = (
+                has_any_grant(self.resource_type, self.model.id)
+                if grant_tenant_id is None
+                else tenant_grant_exists(self.resource_type, self.model.id, grant_tenant_id)
+            )
+            stmt = stmt.where(condition if grant_state == "granted" else ~condition)
+        if agent_id is not None:
+            stmt = stmt.where(self.model.agent_id == agent_id)
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -130,12 +184,78 @@ class PostgresResourceRepository(Generic[TResource]):
         )
         return self._to_entity(row) if row else None
 
-    def ids_exist(self, ids: list[int]) -> set[int]:
+    def list_for_agent(
+        self, agent_id: int, is_enabled: bool | None = None
+    ) -> list[TResource]:
+        """读取归属于指定智能体的可见资源（用户端运行时使用）。"""
+        stmt = self._visible(select(self.model)).where(self.model.agent_id == agent_id)
+        if is_enabled is not None:
+            stmt = stmt.where(self.model.is_enabled.is_(is_enabled))
+        rows = self._session.scalars(stmt.order_by(self.model.id.asc())).all()
+        return [self._to_entity(row) for row in rows]
+
+    def ids_exist(self, ids: list[int], agent_id: int | None = None) -> set[int]:
         """返回可见范围内真实存在的 id 集合。"""
         if not ids:
             return set()
+        stmt = self._visible(select(self.model.id)).where(self.model.id.in_(ids))
+        if agent_id is not None:
+            stmt = stmt.where(self.model.agent_id == agent_id)
+        rows = self._session.scalars(stmt).all()
+        return {int(item) for item in rows}
+
+    def ids_owned(self, ids: list[int]) -> set[int]:
+        """返回给定 id 中归属于当前作用域的部分（授权写操作校验）。"""
+        if not ids:
+            return set()
         rows = self._session.scalars(
-            self._visible(select(self.model.id)).where(self.model.id.in_(ids))
+            self._owned(select(self.model.id)).where(self.model.id.in_(ids))
+        ).all()
+        return {int(item) for item in rows}
+
+    def _grantable(self, stmt):
+        """角色授权候选范围：租户自有资源 + 平台资源。"""
+        if self._tenant_id is None:
+            return stmt.where(self.model.tenant_id.is_(None))
+        return stmt.where(
+            or_(
+                self.model.tenant_id == self._tenant_id,
+                self.model.tenant_id.is_(None),
+            )
+        )
+
+    def list_grantable(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        ids: list[int] | None = None,
+    ) -> tuple[list[TResource], int]:
+        """分页查询可向本租户角色授权的资源。"""
+        stmt = self._grantable(select(self.model))
+        if ids is not None:
+            if not ids:
+                return [], 0
+            stmt = stmt.where(self.model.id.in_(ids))
+        if keyword and keyword.strip():
+            pattern = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(self.model.name.ilike(pattern), self.model.description.ilike(pattern))
+            )
+        total = self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = self._session.scalars(
+            stmt.order_by(self.model.updated_at.desc(), self.model.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        return [self._to_entity(row) for row in rows], int(total)
+
+    def ids_grantable(self, ids: list[int]) -> set[int]:
+        """返回给定 id 中可向本租户角色授权的部分。"""
+        if not ids:
+            return set()
+        rows = self._session.scalars(
+            self._grantable(select(self.model.id)).where(self.model.id.in_(ids))
         ).all()
         return {int(item) for item in rows}
 
@@ -144,6 +264,7 @@ class PostgresSkillRepository(PostgresResourceRepository[Skill]):
     """技能仓储。"""
 
     model = SkillModel
+    resource_type = "skill"
 
     def _to_entity(self, row: SkillModel) -> Skill:
         return Skill(
@@ -156,6 +277,7 @@ class PostgresSkillRepository(PostgresResourceRepository[Skill]):
             created_at=row.created_at,
             updated_at=row.updated_at,
             tenant_id=row.tenant_id,
+            agent_id=row.agent_id,
         )
 
 
@@ -163,6 +285,7 @@ class PostgresToolRepository(PostgresResourceRepository[Tool]):
     """工具仓储。"""
 
     model = ToolModel
+    resource_type = "tool"
 
     def _to_entity(self, row: ToolModel) -> Tool:
         return Tool(
@@ -175,6 +298,7 @@ class PostgresToolRepository(PostgresResourceRepository[Tool]):
             created_at=row.created_at,
             updated_at=row.updated_at,
             tenant_id=row.tenant_id,
+            agent_id=row.agent_id,
         )
 
 
@@ -182,6 +306,7 @@ class PostgresComponentRepository(PostgresResourceRepository[Component]):
     """组件仓储。"""
 
     model = ComponentModel
+    resource_type = "component"
 
     def _to_entity(self, row: ComponentModel) -> Component:
         return Component(
@@ -194,6 +319,7 @@ class PostgresComponentRepository(PostgresResourceRepository[Component]):
             created_at=row.created_at,
             updated_at=row.updated_at,
             tenant_id=row.tenant_id,
+            agent_id=row.agent_id,
         )
 
 
@@ -201,6 +327,7 @@ class PostgresPromptRepository(PostgresResourceRepository[Prompt]):
     """提示词仓储。"""
 
     model = PromptModel
+    resource_type = "prompt"
 
     def _to_entity(self, row: PromptModel) -> Prompt:
         return Prompt(
@@ -214,4 +341,5 @@ class PostgresPromptRepository(PostgresResourceRepository[Prompt]):
             created_at=row.created_at,
             updated_at=row.updated_at,
             tenant_id=row.tenant_id,
+            agent_id=row.agent_id,
         )

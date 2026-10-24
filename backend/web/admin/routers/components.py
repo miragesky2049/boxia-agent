@@ -1,12 +1,17 @@
 """组件管理接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.common import Page  # noqa: F401  (用于类型可读性)
 from internal.domain.entity.resource import Component
 from web.admin.schemas.common import PageOut
-from web.admin.schemas.resource import ComponentOut, ComponentPayload
-from web.deps.auth import require_editor
+from web.admin.schemas.resource import (
+    ComponentOut,
+    ComponentPayload,
+    ResourceCloneRequest,
+)
+from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.http import client_meta
 from web.deps.services import ComponentServiceDep
 
 router = APIRouter(prefix="/components", tags=["admin-components"])
@@ -19,9 +24,10 @@ def list_components(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
+    agent_id: int | None = Query(None, ge=1),
 ) -> PageOut[ComponentOut]:
-    """分页查询组件。"""
-    result = service.list(page, page_size, keyword, is_enabled)
+    """分页查询组件；agent_id 限定所属智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled, agent_id)
     return _to_page_out(result)
 
 
@@ -64,6 +70,32 @@ def update_component(
 def delete_component(component_id: int, service: ComponentServiceDep) -> None:
     """删除组件。"""
     service.delete(component_id)
+
+
+@router.post(
+    "/{component_id}/clone",
+    response_model=ComponentOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def clone_component(
+    component_id: int,
+    payload: ResourceCloneRequest,
+    principal: EditorAuthDep,
+    request: Request,
+    service: ComponentServiceDep,
+) -> ComponentOut:
+    """把组件克隆到目标智能体，生成独立副本。"""
+    ip, user_agent = client_meta(request)
+    clone = service.clone_to_agent(
+        component_id,
+        agent_id=payload.agent_id,
+        name=payload.name,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return ComponentOut.model_validate(clone)
 
 
 def _to_page_out(result: Page[Component]) -> PageOut[ComponentOut]:

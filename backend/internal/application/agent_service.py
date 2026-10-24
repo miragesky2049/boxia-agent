@@ -1,5 +1,7 @@
 """智能体管理用例。"""
 
+from __future__ import annotations
+
 from internal.application.errors import (
     ConflictError,
     ForbiddenError,
@@ -26,11 +28,14 @@ class AgentService:
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
+        authorized: bool = False,
     ) -> Page[Agent]:
-        """分页查询。"""
+        """分页查询；authorized 仅产品级视角用于筛选已授权智能体。"""
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        items, total = self._uow.agents.list_page(page, page_size, keyword, is_enabled)
+        items, total = self._uow.agents.list_page(
+            page, page_size, keyword, is_enabled, authorized=authorized
+        )
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     def get(self, agent_id: int) -> Agent:
@@ -70,8 +75,19 @@ class AgentService:
         if existing is None:
             raise NotFoundError("智能体不存在")
         self._ensure_manageable(existing)
+        resource_repositories = (
+            ("skill", self._uow.skills),
+            ("tool", self._uow.tools),
+            ("component", self._uow.components),
+            ("prompt", self._uow.prompts),
+        )
+        for resource_type, repository in resource_repositories:
+            resource_ids = [item.id for item in repository.list_for_agent(agent_id)]
+            if resource_ids:
+                self._uow.resource_grants.delete_for_resources(resource_type, resource_ids)
         if not self._uow.agents.delete(agent_id):
             raise NotFoundError("智能体不存在")
+        self._uow.resource_grants.delete_for_resource("agent", agent_id)
         self._uow.commit()
 
     def _ensure_manageable(self, agent: Agent) -> None:

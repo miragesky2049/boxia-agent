@@ -1,12 +1,13 @@
 """提示词管理接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Prompt
 from web.admin.schemas.common import PageOut
-from web.admin.schemas.resource import PromptOut, PromptPayload
-from web.deps.auth import require_editor
+from web.admin.schemas.resource import PromptOut, PromptPayload, ResourceCloneRequest
+from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.http import client_meta
 from web.deps.services import PromptServiceDep
 
 router = APIRouter(prefix="/prompts", tags=["admin-prompts"])
@@ -19,9 +20,10 @@ def list_prompts(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
+    agent_id: int | None = Query(None, ge=1),
 ) -> PageOut[PromptOut]:
-    """分页查询提示词。"""
-    result = service.list(page, page_size, keyword, is_enabled)
+    """分页查询提示词；agent_id 限定所属智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled, agent_id)
     return _to_page_out(result)
 
 
@@ -60,6 +62,32 @@ def update_prompt(prompt_id: int, payload: PromptPayload, service: PromptService
 def delete_prompt(prompt_id: int, service: PromptServiceDep) -> None:
     """删除提示词。"""
     service.delete(prompt_id)
+
+
+@router.post(
+    "/{prompt_id}/clone",
+    response_model=PromptOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def clone_prompt(
+    prompt_id: int,
+    payload: ResourceCloneRequest,
+    principal: EditorAuthDep,
+    request: Request,
+    service: PromptServiceDep,
+) -> PromptOut:
+    """把提示词克隆到目标智能体，生成独立副本。"""
+    ip, user_agent = client_meta(request)
+    clone = service.clone_to_agent(
+        prompt_id,
+        agent_id=payload.agent_id,
+        name=payload.name,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return PromptOut.model_validate(clone)
 
 
 def _to_page_out(result: Page[Prompt]) -> PageOut[PromptOut]:

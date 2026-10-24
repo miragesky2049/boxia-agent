@@ -19,9 +19,10 @@ def list_agents(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
+    authorized: bool = Query(False),
 ) -> PageOut[AgentSummaryOut]:
-    """分页查询智能体。"""
-    result = service.list(page, page_size, keyword, is_enabled)
+    """分页查询智能体；authorized 仅保留已有租户授权的平台智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled, authorized)
     return _to_page_out(result)
 
 

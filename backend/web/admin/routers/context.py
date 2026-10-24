@@ -6,11 +6,21 @@ from internal.infrastructure.config.settings import get_settings
 from web.admin.schemas.auth import AdminUserOut
 from web.admin.schemas.context import AdminContextOut
 from web.admin.schemas.tenant import PasswordPolicyOut, TenantOut
-from web.deps.auth import AdminAuthDep
+from web.deps.auth import AdminAuthDep, AdminPrincipal
 from web.deps.services import AuthServiceDep
 from web.deps.tenant import RequestContextDep, tenant_switch_mode
 
 router = APIRouter(prefix="/context", tags=["admin-context"])
+
+
+def _menus(principal: AdminPrincipal) -> list[str]:
+    """按作用域与系统角色返回可见菜单 key，前端仅用于渲染。"""
+    menus = ["agents"]
+    if principal.system_role != "superadmin":
+        return menus
+    if principal.is_platform:
+        return [*menus, "grants", "admin-users", "tenants", "audit"]
+    return [*menus, "grants", "roles", "users", "admin-users", "audit"]
 
 
 @router.get("", response_model=AdminContextOut)
@@ -21,11 +31,15 @@ def get_admin_context(
 ) -> AdminContextOut:
     """返回当前登录账号所在作用域、租户、环境与域名配置。"""
     settings = get_settings()
-    profile = service.get_profile(principal.user_id)
+    profile = service.get_profile(principal.user_id, principal.tenant_id)
     return AdminContextOut(
         scope=context.scope,
         tenant=TenantOut.model_validate(context.tenant) if context.tenant else None,
         user=AdminUserOut.model_validate(profile),
+        role=principal.system_role,
+        system_role=principal.system_role,
+        permissions=sorted(principal.permissions),
+        menus=_menus(principal),
         app_env=settings.app_env,
         tenant_resolution=context.resolution,
         tenant_switch_mode=tenant_switch_mode(settings, context),

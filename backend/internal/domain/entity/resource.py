@@ -18,6 +18,7 @@ class Skill:
     created_at: datetime
     updated_at: datetime
     tenant_id: int | None = None
+    agent_id: int | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -53,6 +54,7 @@ class Tool:
     created_at: datetime
     updated_at: datetime
     tenant_id: int | None = None
+    agent_id: int | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -73,6 +75,7 @@ class Component:
     created_at: datetime
     updated_at: datetime
     tenant_id: int | None = None
+    agent_id: int | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -94,6 +97,7 @@ class Prompt:
     created_at: datetime
     updated_at: datetime
     tenant_id: int | None = None
+    agent_id: int | None = None
 
     @property
     def is_platform(self) -> bool:

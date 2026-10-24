@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import re
-from datetime import UTC, datetime
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -12,6 +11,7 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
+from internal.domain.entity.access import SYSTEM_ROLE_SEEDS
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
@@ -71,24 +71,41 @@ class TenantService:
         if self._uow.tenants.name_exists(normalized_name):
             raise ConflictError("租户名称已存在")
         username = admin_username.strip()
-        if self._uow.admin_users.get_by_username(username, None) is not None:
+        if self._uow.admin_users.get_by_username(username) is not None:
             raise ConflictError("管理员用户名已被产品级账号占用")
         validate_password_strength(admin_password, username)
 
         tenant = self._uow.tenants.create(
             {"code": normalized_code, "name": normalized_name, "is_active": True}
         )
-        self._uow.admin_users.create(
+        roles = {
+            code: self._uow.roles.create(
+                {
+                    "tenant_id": tenant.id,
+                    "code": code,
+                    "name": role_name,
+                    "description": description,
+                    "system_role": code,
+                    "is_system": True,
+                    "is_active": True,
+                }
+            )
+            for code, role_name, description in SYSTEM_ROLE_SEEDS
+        }
+        if self._uow.users.username_exists(tenant.id, username):
+            raise ConflictError("用户名已被租户用户占用")
+        admin_user = self._uow.users.create(
             {
                 "tenant_id": tenant.id,
                 "username": username,
                 "password_hash": hash_password(admin_password),
                 "display_name": admin_display_name.strip() or username,
-                "role": "superadmin",
                 "is_active": True,
-                "must_change_password": True,
-                "password_changed_at": datetime.now(UTC),
+                "role_id": roles["superadmin"].id,
             }
+        )
+        self._uow.users.replace_roles(
+            admin_user.id, tenant.id, [roles["superadmin"].id]
         )
         record_audit(
             self._uow,

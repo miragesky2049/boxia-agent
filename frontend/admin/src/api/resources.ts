@@ -12,11 +12,17 @@ import type {
   ToolPayload,
 } from './types'
 
+export interface ClonePayload {
+  agent_id: number
+  name?: string | null
+}
+
 export interface ResourceApi<TOut, TPayload> {
   list: (params: ListParams) => Promise<PageResult<TOut>>
   create: (payload: TPayload) => Promise<TOut>
   update: (id: number, payload: TPayload) => Promise<TOut>
   remove: (id: number) => Promise<void>
+  clone: (id: number, payload: ClonePayload) => Promise<TOut>
 }
 
 function createResourceApi<TOut, TPayload>(base: string): ResourceApi<TOut, TPayload> {
@@ -27,6 +33,7 @@ function createResourceApi<TOut, TPayload>(base: string): ResourceApi<TOut, TPay
       query.set('page_size', String(params.page_size ?? 20))
       if (params.keyword) query.set('keyword', params.keyword)
       if (params.is_enabled !== undefined) query.set('is_enabled', String(params.is_enabled))
+      if (params.agent_id !== undefined) query.set('agent_id', String(params.agent_id))
       return request<PageResult<TOut>>(`${base}?${query.toString()}`)
     },
     async create(payload) {
@@ -40,6 +47,12 @@ function createResourceApi<TOut, TPayload>(base: string): ResourceApi<TOut, TPay
     },
     async remove(id) {
       await request<void>(`${base}/${id}`, { method: 'DELETE' })
+    },
+    async clone(id, payload) {
+      return request<TOut>(`${base}/${id}/clone`, {
+        method: 'POST',
+        body: JSON.stringify({ agent_id: payload.agent_id, name: payload.name ?? null }),
+      })
     },
   }
 }

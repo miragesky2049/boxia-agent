@@ -13,11 +13,11 @@ interface RequireRoleProps {
 }
 
 export default function RequireRole({ role, platformOnly = false, children }: RequireRoleProps) {
-  const { user, loading } = useAuth()
+  const { user, systemRole, loading } = useAuth()
   const { isPlatform } = useTenant()
 
   if (loading) return <PageLoading />
-  if (!user || user.role !== role) return <Navigate to="/404" replace />
+  if (!user || systemRole !== role) return <Navigate to="/404" replace />
   if (platformOnly && !isPlatform) return <Navigate to="/404" replace />
 
   return <>{children}</>

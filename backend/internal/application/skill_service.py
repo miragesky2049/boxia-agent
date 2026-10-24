@@ -14,8 +14,9 @@ class SkillService(ResourceService[Skill]):
         """创建技能，content 非空时同步生成 SKILL.md。"""
         if self._repository.name_exists(values["name"]):
             raise ConflictError("技能名称已存在")
-        skill = self._repository.create(values)
-        content = values.get("content", "")
+        payload = self._with_validated_agent(values)
+        skill = self._repository.create(payload)
+        content = payload.get("content", "")
         if content:
             self._uow.skill_files.upsert(skill.id, ENTRY_PATH, content)
         self._uow.commit()
@@ -29,13 +30,22 @@ class SkillService(ResourceService[Skill]):
         self._ensure_manageable(existing)
         if self._repository.name_exists(values["name"], exclude_id=resource_id):
             raise ConflictError("技能名称已存在")
-        updated = self._repository.update(resource_id, values)
+        payload = self._with_validated_agent(values)
+        updated = self._repository.update(resource_id, payload)
         if updated is None:
             raise NotFoundError("技能不存在")
-        if "content" in values:
-            if values["content"]:
-                self._uow.skill_files.upsert(resource_id, ENTRY_PATH, values["content"])
+        if "content" in payload:
+            if payload["content"]:
+                self._uow.skill_files.upsert(resource_id, ENTRY_PATH, payload["content"])
             else:
                 self._uow.skill_files.delete(resource_id, ENTRY_PATH)
         self._uow.commit()
         return updated
+
+    def _after_clone(self, source: Skill, clone: Skill) -> None:
+        """克隆技能时同步复制技能包内全部文件。"""
+        files = self._uow.skill_files.list_by_skill(source.id, include_content=True)
+        if files:
+            self._uow.skill_files.replace_all(
+                clone.id, [(file.path, file.content) for file in files]
+            )

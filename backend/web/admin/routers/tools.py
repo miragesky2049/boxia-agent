@@ -1,10 +1,11 @@
 """工具管理接口。"""
 
-from fastapi import APIRouter, Depends, Query, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.common import PageOut
-from web.admin.schemas.resource import ToolOut, ToolPayload
-from web.deps.auth import require_editor
+from web.admin.schemas.resource import ResourceCloneRequest, ToolOut, ToolPayload
+from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.http import client_meta
 from web.deps.services import ToolServiceDep
 
 router = APIRouter(prefix="/tools", tags=["admin-tools"])
@@ -17,9 +18,10 @@ def list_tools(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
+    agent_id: int | None = Query(None, ge=1),
 ) -> PageOut[ToolOut]:
-    """分页查询工具。"""
-    result = service.list(page, page_size, keyword, is_enabled)
+    """分页查询工具；agent_id 限定所属智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled, agent_id)
     return PageOut[ToolOut](
         items=[ToolOut.model_validate(item) for item in result.items],
         total=result.total,
@@ -59,3 +61,29 @@ def update_tool(tool_id: int, payload: ToolPayload, service: ToolServiceDep) -> 
 def delete_tool(tool_id: int, service: ToolServiceDep) -> None:
     """删除工具。"""
     service.delete(tool_id)
+
+
+@router.post(
+    "/{tool_id}/clone",
+    response_model=ToolOut,
+    status_code=status.HTTP_201_CREATED,
+)
+def clone_tool(
+    tool_id: int,
+    payload: ResourceCloneRequest,
+    principal: EditorAuthDep,
+    request: Request,
+    service: ToolServiceDep,
+) -> ToolOut:
+    """把工具克隆到目标智能体，生成独立副本。"""
+    ip, user_agent = client_meta(request)
+    clone = service.clone_to_agent(
+        tool_id,
+        agent_id=payload.agent_id,
+        name=payload.name,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return ToolOut.model_validate(clone)
