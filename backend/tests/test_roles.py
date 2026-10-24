@@ -28,7 +28,6 @@ def test_tenant_roles_initialized_and_custom_crud(
             "code": "sales",
             "name": "销售",
             "description": "销售角色",
-            "system_role": "viewer",
         },
         headers=headers,
     )
@@ -36,10 +35,11 @@ def test_tenant_roles_initialized_and_custom_crud(
     role = created.json()
     assert role["is_system"] is False
     assert role["is_active"] is True
+    assert role["system_role"] == "viewer"
 
     duplicate = site.post(
         "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售二部", "system_role": "viewer"},
+        json={"code": "sales", "name": "销售二部"},
         headers=headers,
     )
     assert duplicate.status_code == 409
@@ -82,7 +82,7 @@ def test_referenced_role_cannot_be_deleted(
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     custom = site.post(
         "/api/v1/admin/roles",
-        json={"code": "support", "name": "客服", "system_role": "viewer"},
+        json={"code": "support", "name": "客服"},
         headers=headers,
     ).json()
     create_user(site, headers, role_id=custom["id"])
@@ -100,7 +100,6 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
             "code": "sales",
             "name": "销售",
             "description": "销售角色",
-            "system_role": "viewer",
         },
         headers=headers,
     ).json()
@@ -158,6 +157,38 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
     assert forbidden.status_code == 422
 
 
+def test_create_role_defaults_viewer_and_copy_inherits_base_permission(
+    client: TestClient, auth_headers, tenant_client
+) -> None:
+    create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+
+    created = site.post(
+        "/api/v1/admin/roles",
+        json={"code": "audit", "name": "审计"},
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+    # 创建时不再接收基础权限，默认只读
+    assert created.json()["system_role"] == "viewer"
+
+    rejected = site.patch(
+        f"/api/v1/admin/roles/{created.json()['id']}",
+        json={"system_role": "superadmin"},
+        headers=headers,
+    )
+    assert rejected.status_code == 422
+
+    admin_id = list_roles(site, headers)["admin"]["id"]
+    copied = site.post(
+        f"/api/v1/admin/roles/{admin_id}/copy",
+        json={"code": "ops-admin", "name": "运营管理员"},
+        headers=headers,
+    )
+    assert copied.status_code == 201, copied.text
+    assert copied.json()["system_role"] == "admin"
+
+
 def test_copy_role_is_tenant_isolated(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
@@ -168,7 +199,7 @@ def test_copy_role_is_tenant_isolated(
 
     acme_role = acme_site.post(
         "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        json={"code": "sales", "name": "销售"},
         headers=acme_headers,
     ).json()
     denied = globex_site.post(
@@ -186,11 +217,12 @@ def test_platform_manages_own_roles_only(
 
     created = client.post(
         "/api/v1/admin/roles",
-        json={"code": "ops", "name": "平台运营", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营"},
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
     assert created.json()["tenant_id"] is None
+    assert created.json()["system_role"] == "viewer"
 
     listed = client.get("/api/v1/admin/roles", headers=auth_headers)
     assert listed.status_code == 200
@@ -218,7 +250,7 @@ def test_roles_are_tenant_isolated(
 
     acme_site.post(
         "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        json={"code": "sales", "name": "销售"},
         headers=acme_headers,
     )
     assert "sales" in list_roles(acme_site, acme_headers)
@@ -261,7 +293,7 @@ def test_viewer_admin_can_read_but_not_manage_roles(
     assert site.get("/api/v1/admin/roles", headers=viewer_headers).status_code == 200
     denied = site.post(
         "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        json={"code": "sales", "name": "销售"},
         headers=viewer_headers,
     )
     assert denied.status_code == 403

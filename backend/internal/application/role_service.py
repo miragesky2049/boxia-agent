@@ -12,11 +12,12 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.domain.entity.access import RESOURCE_TYPES, Role
-from internal.domain.entity.admin_user import ROLES
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
+# 新建自定义角色默认只读基础权限；需要更高基础权限时通过复制现有角色继承
+_DEFAULT_SYSTEM_ROLE = "viewer"
 
 
 class RoleService:
@@ -52,13 +53,12 @@ class RoleService:
         code: str,
         name: str,
         description: str,
-        system_role: str,
         actor_id: int,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """创建当前作用域的自定义角色。"""
+        """创建当前作用域的自定义角色；基础权限固定为只读，需要更高权限时复制现有角色。"""
         tenant_id = self._management_scope()
         normalized_code = code.strip().lower()
         if not _CODE_PATTERN.match(normalized_code):
@@ -66,8 +66,6 @@ class RoleService:
         normalized_name = name.strip()
         if not normalized_name:
             raise ValidationError("角色名称不能为空")
-        if system_role not in ROLES:
-            raise ValidationError(f"基础权限必须是 {', '.join(ROLES)} 之一")
         if self._uow.roles.code_exists(tenant_id, normalized_code):
             raise ConflictError("角色编码已存在")
         if self._uow.roles.name_exists(tenant_id, normalized_name):
@@ -79,7 +77,7 @@ class RoleService:
                 "code": normalized_code,
                 "name": normalized_name,
                 "description": description.strip(),
-                "system_role": system_role,
+                "system_role": _DEFAULT_SYSTEM_ROLE,
                 "is_system": False,
                 "is_active": True,
             }
@@ -96,7 +94,7 @@ class RoleService:
             detail={
                 "code": normalized_code,
                 "name": normalized_name,
-                "system_role": system_role,
+                "system_role": _DEFAULT_SYSTEM_ROLE,
             },
             tenant_id=tenant_id,
         )
@@ -198,14 +196,13 @@ class RoleService:
         *,
         name: str | None,
         description: str | None,
-        system_role: str | None,
         is_active: bool | None,
         actor_id: int,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """更新角色；系统角色禁止变更基础权限。"""
+        """更新角色名称/描述/启停；基础权限不可修改，只能通过复制继承。"""
         tenant_id = self._management_scope()
         role = self._get_owned(role_id, tenant_id)
 
@@ -219,12 +216,6 @@ class RoleService:
             values["name"] = normalized_name
         if description is not None:
             values["description"] = description.strip()
-        if system_role is not None:
-            if role.is_system and system_role != role.system_role:
-                raise ValidationError("系统角色的基础权限不可变更")
-            if system_role not in ROLES:
-                raise ValidationError(f"基础权限必须是 {', '.join(ROLES)} 之一")
-            values["system_role"] = system_role
         if is_active is not None:
             if role.is_system and not is_active:
                 raise ValidationError("系统角色不可停用")

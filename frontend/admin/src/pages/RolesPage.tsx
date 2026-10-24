@@ -24,7 +24,7 @@ interface RoleFormValues {
   code: string
   name: string
   description?: string
-  system_role: AdminRole
+  system_role?: AdminRole
   is_active: boolean
 }
 
@@ -64,7 +64,6 @@ export default function RolesPage() {
       code: '',
       name: '',
       description: '',
-      system_role: 'viewer',
       is_active: true,
     })
     setModalOpen(true)
@@ -91,7 +90,6 @@ export default function RolesPage() {
       code: record.code,
       name: record.name,
       description: record.description,
-      system_role: record.system_role,
       is_active: record.is_active,
     })
     setModalOpen(true)
@@ -105,7 +103,6 @@ export default function RolesPage() {
         await rolesApi.update(editing.id, {
           name: values.name.trim(),
           description: values.description ?? '',
-          system_role: values.system_role,
           is_active: values.is_active,
         })
         message.success('角色已保存')
@@ -122,7 +119,6 @@ export default function RolesPage() {
           code: values.code.trim(),
           name: values.name.trim(),
           description: values.description ?? '',
-          system_role: values.system_role,
         }
         await rolesApi.create(payload)
         message.success('角色已创建')
@@ -319,17 +315,15 @@ export default function RolesPage() {
           <Form.Item name="description" label="描述">
             <Input.TextArea rows={2} maxLength={500} />
           </Form.Item>
-          <Form.Item
-            name="system_role"
-            label="基础权限"
-            rules={[{ required: true, message: '请选择基础权限' }]}
-            extra="基础权限控制管理端读写能力；系统角色不可修改该项。"
-          >
-            <Select
-              options={SYSTEM_ROLE_OPTIONS}
-              disabled={Boolean(editing?.is_system) || Boolean(copying)}
-            />
-          </Form.Item>
+          {copying && (
+            <Form.Item
+              name="system_role"
+              label="基础权限"
+              extra="复制角色会继承源角色的基础权限；如需其他基础权限，请复制对应角色。"
+            >
+              <Select options={SYSTEM_ROLE_OPTIONS} disabled />
+            </Form.Item>
+          )}
           {editing && !editing.is_system && (
             <Form.Item name="is_active" label="启用" valuePropName="checked">
               <Switch />
