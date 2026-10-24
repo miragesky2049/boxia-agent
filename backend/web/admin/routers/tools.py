@@ -2,7 +2,8 @@
 
 from fastapi import APIRouter, Depends, Query, status
 
-from web.admin.schemas import PageOut, ToolOut, ToolPayload
+from web.admin.schemas.common import PageOut
+from web.admin.schemas.resource import ToolOut, ToolPayload
 from web.deps.auth import require_editor
 from web.deps.services import ToolServiceDep
 

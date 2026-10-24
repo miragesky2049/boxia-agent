@@ -2,15 +2,15 @@
 
 from fastapi import APIRouter, Depends
 
-from web.admin.agents import router as agents_router
-from web.admin.audit_logs import router as audit_logs_router
-from web.admin.components import router as components_router
-from web.admin.context import router as context_router
-from web.admin.prompts import router as prompts_router
-from web.admin.skills import router as skills_router
-from web.admin.tenants import router as tenants_router
-from web.admin.tools import router as tools_router
-from web.admin.users import router as users_router
+from web.admin.routers.agents import router as agents_router
+from web.admin.routers.audit_logs import router as audit_logs_router
+from web.admin.routers.components import router as components_router
+from web.admin.routers.context import router as context_router
+from web.admin.routers.prompts import router as prompts_router
+from web.admin.routers.skills import router as skills_router
+from web.admin.routers.tenants import router as tenants_router
+from web.admin.routers.tools import router as tools_router
+from web.admin.routers.users import router as users_router
 from web.deps.auth import require_admin
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])

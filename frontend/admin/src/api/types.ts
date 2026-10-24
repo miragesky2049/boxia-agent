@@ -136,6 +136,30 @@ export interface Skill extends ResourceBase {
   config: Record<string, unknown>
 }
 
+export interface SkillFileMeta {
+  path: string
+  size_bytes: number
+  content_hash: string
+  media_type: string
+  updated_at: string
+}
+
+export interface SkillFile extends SkillFileMeta {
+  content: string
+}
+
+export interface SkillFileList {
+  items: SkillFileMeta[]
+  total: number
+  total_bytes: number
+}
+
+export interface SkillFileWritePayload {
+  path: string
+  content: string
+  expected_hash?: string
+}
+
 export interface Tool extends ResourceBase {
   type: string
   config: Record<string, unknown>

@@ -1,10 +1,11 @@
-"""匿名可访问的作用域信息接口（登录页、本地调试租户切换）。"""
+"""管理站点匿名接口：登录页作用域信息与本地调试租户切换。"""
 
 from fastapi import APIRouter
 
 from internal.application.errors import ForbiddenError
 from internal.infrastructure.config.settings import get_settings
-from web.admin.schemas import PasswordPolicyOut, PublicContextOut, TenantOut
+from web.admin.schemas.context import PublicContextOut
+from web.admin.schemas.tenant import PasswordPolicyOut, TenantOut
 from web.deps.services import TenantServiceDep
 from web.deps.tenant import RequestContextDep, tenant_switch_mode
 

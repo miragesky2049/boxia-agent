@@ -7,7 +7,7 @@ from uuid import UUID
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.refresh_token import RefreshToken
-from internal.domain.entity.resource import Agent, Component, Prompt, Skill, Tool
+from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
 from internal.domain.entity.tenant import Tenant
 
 TResource = TypeVar("TResource")
@@ -165,6 +165,33 @@ class ResourceRepository(Protocol[TResource]):
     def ids_exist(self, ids: list[int]) -> set[int]:
         """返回给定 id 中真实存在的部分。"""
 
+    def get_by_name(self, name: str) -> TResource | None:
+        """按名称在当前归属范围内精确查询（忽略大小写）。"""
+
+
+class SkillFileRepository(Protocol):
+    """技能包文件仓储，调用前必须由应用层完成所属技能的作用域校验。"""
+
+    def list_by_skill(
+        self, skill_id: int, prefix: str | None = None, include_content: bool = False
+    ) -> list[SkillFile]:
+        """按路径排序列出技能包文件；默认不加载正文。"""
+
+    def get(self, skill_id: int, path: str) -> SkillFile | None:
+        """按相对路径查询文件。"""
+
+    def upsert(self, skill_id: int, path: str, content: str) -> SkillFile:
+        """新增或覆盖文件，自动维护哈希、大小与媒体类型。"""
+
+    def delete(self, skill_id: int, path: str) -> bool:
+        """删除文件。"""
+
+    def replace_all(self, skill_id: int, files: list[tuple[str, str]]) -> list[SkillFile]:
+        """事务内全量替换技能包文件。"""
+
+    def stats(self, skill_id: int) -> tuple[int, int]:
+        """返回文件数与总字节数。"""
+
 
 class AgentRepository(Protocol):
     """智能体仓储。"""
@@ -204,6 +231,7 @@ class UnitOfWork(Protocol):
     audit_logs: AuditLogRepository
     agents: AgentRepository
     skills: ResourceRepository[Skill]
+    skill_files: SkillFileRepository
     tools: ResourceRepository[Tool]
     components: ResourceRepository[Component]
     prompts: ResourceRepository[Prompt]

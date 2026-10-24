@@ -13,7 +13,14 @@ if str(BACKEND_DIR) not in sys.path:
     sys.path.insert(0, str(BACKEND_DIR))
 
 from internal.infrastructure.config.settings import get_settings  # noqa: E402
-from internal.infrastructure.model import admin_user, agent, audit_log, refresh_token, resource  # noqa: E402,F401
+from internal.infrastructure.model import (  # noqa: E402,F401
+    admin_user,
+    agent,
+    audit_log,
+    refresh_token,
+    resource,
+    tenant,
+)
 from internal.infrastructure.model.base import Base  # noqa: E402
 
 config = context.config

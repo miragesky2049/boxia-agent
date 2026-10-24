@@ -2,12 +2,8 @@
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
-from web.admin.schemas import (
-    PageOut,
-    TenantCreateRequest,
-    TenantOut,
-    TenantUpdateRequest,
-)
+from web.admin.schemas.common import PageOut
+from web.admin.schemas.tenant import TenantCreateRequest, TenantOut, TenantUpdateRequest
 from web.deps.auth import PlatformSuperadminDep, require_platform_superadmin
 from web.deps.services import TenantServiceDep
 
