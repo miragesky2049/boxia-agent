@@ -53,7 +53,7 @@ export default function AppRouter() {
             <Route
               path="/roles"
               element={
-                <RequireRole role="superadmin" tenantOnly>
+                <RequireRole role="superadmin">
                   <RolesPage />
                 </RequireRole>
               }
@@ -61,7 +61,7 @@ export default function AppRouter() {
             <Route
               path="/roles/:id"
               element={
-                <RequireRole role="superadmin" tenantOnly>
+                <RequireRole role="superadmin">
                   <RoleDetailPage />
                 </RequireRole>
               }

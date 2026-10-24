@@ -53,6 +53,7 @@ export default function RoleDetailPage() {
   const [pendingIds, setPendingIds] = useState<number[]>([])
 
   const readonly = role?.system_role === 'superadmin'
+  const isPlatformRole = role?.tenant_id === null
 
   const loadRole = useCallback(async () => {
     if (!Number.isFinite(roleId)) {
@@ -194,7 +195,9 @@ export default function RoleDetailPage() {
             <h2 className="page-header__title">{role?.name ?? '角色授权'}</h2>
           </Space>
           <p className="page-header__desc">
-            按资源类型勾选该角色可访问的智能体、技能、工具、组件与提示词；未勾选的资源不可见。
+            {isPlatformRole
+              ? '按资源类型勾选该平台角色可访问的平台级智能体、技能、工具、组件与提示词；未勾选的资源对绑定该角色的平台账号不可见。'
+              : '按资源类型勾选该角色可访问的智能体、技能、工具、组件与提示词；未勾选的资源不可见。'}
           </p>
         </div>
       </div>
@@ -225,7 +228,11 @@ export default function RoleDetailPage() {
           type="info"
           showIcon
           style={{ marginBottom: 16 }}
-          message="超级管理员角色默认拥有本租户全部资源，授权页只读。"
+          message={
+            isPlatformRole
+              ? '超级管理员角色默认拥有全部平台级资源，授权页只读。'
+              : '超级管理员角色默认拥有本租户全部资源，授权页只读。'
+          }
         />
       )}
 

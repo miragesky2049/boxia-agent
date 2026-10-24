@@ -27,30 +27,23 @@ class RoleService:
         self._context = context
 
     def list(self, tenant_id: int | None = None, include_inactive: bool = False) -> list[Role]:
-        """查询角色：租户只能查本租户，平台必须显式指定租户。"""
+        """查询角色：平台只返回平台角色，租户只返回本租户角色。"""
+        target = self._management_scope()
         if self._context.is_platform:
-            if tenant_id is None:
-                raise ValidationError("产品级平台查询角色必须指定租户")
-            target = tenant_id
-        else:
-            tenant_target = self._context.tenant_id
-            if tenant_target is None:
-                raise ForbiddenError("缺少租户上下文")
-            if tenant_id is not None and tenant_id != tenant_target:
-                raise ForbiddenError("只能查询本租户角色")
-            target = tenant_target
+            if tenant_id is not None:
+                raise ForbiddenError("产品级平台不能查看租户角色")
+        elif tenant_id is not None and tenant_id != target:
+            raise ForbiddenError("只能查询本租户角色")
         return self._uow.roles.list_by_tenant(target, include_inactive)
 
     def get(self, role_id: int, tenant_id: int | None = None) -> Role:
-        """查询角色详情：租户只能查本租户，平台必须显式指定租户。"""
+        """查询角色详情：平台只返回平台角色，租户只返回本租户角色。"""
+        target = self._management_scope()
         if self._context.is_platform:
-            if tenant_id is None:
-                raise ValidationError("产品级平台查询角色必须指定租户")
-            target = tenant_id
-        else:
-            target = self._require_tenant_manageable()
-            if tenant_id is not None and tenant_id != target:
-                raise ForbiddenError("只能查询本租户角色")
+            if tenant_id is not None:
+                raise ForbiddenError("产品级平台不能查看租户角色")
+        elif tenant_id is not None and tenant_id != target:
+            raise ForbiddenError("只能查询本租户角色")
         return self._get_owned(role_id, target)
 
     def create(
@@ -65,8 +58,8 @@ class RoleService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """创建自定义租户角色。"""
-        tenant_id = self._require_tenant_manageable()
+        """创建当前作用域的自定义角色。"""
+        tenant_id = self._management_scope()
         normalized_code = code.strip().lower()
         if not _CODE_PATTERN.match(normalized_code):
             raise ValidationError("角色编码需为 2-64 位小写字母、数字、下划线或短横线")
@@ -124,7 +117,7 @@ class RoleService:
         user_agent: str | None = None,
     ) -> Role:
         """更新角色；系统角色禁止变更基础权限。"""
-        tenant_id = self._require_tenant_manageable()
+        tenant_id = self._management_scope()
         role = self._get_owned(role_id, tenant_id)
 
         values: dict = {}
@@ -176,7 +169,7 @@ class RoleService:
         user_agent: str | None = None,
     ) -> None:
         """删除角色；被账号或资源授权引用时拒绝。"""
-        tenant_id = self._require_tenant_manageable()
+        tenant_id = self._management_scope()
         role = self._get_owned(role_id, tenant_id)
         if role.is_system:
             raise ValidationError("系统角色不可删除")
@@ -200,12 +193,15 @@ class RoleService:
         )
         self._uow.commit()
 
-    def _require_tenant_manageable(self) -> int:
-        if self._context.is_platform or self._context.tenant_id is None:
-            raise ForbiddenError("角色仅可由租户超级管理员维护")
+    def _management_scope(self) -> int | None:
+        """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
+        if self._context.is_platform:
+            return None
+        if self._context.tenant_id is None:
+            raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 
-    def _get_owned(self, role_id: int, tenant_id: int) -> Role:
+    def _get_owned(self, role_id: int, tenant_id: int | None) -> Role:
         role = self._uow.roles.get_by_id(role_id)
         if role is None or role.tenant_id != tenant_id:
             raise NotFoundError("角色不存在")

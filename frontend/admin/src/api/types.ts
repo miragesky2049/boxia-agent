@@ -114,7 +114,7 @@ export interface AdminUserUpdatePayload {
 
 export interface Role {
   id: number
-  tenant_id: number
+  tenant_id: number | null
   code: string
   name: string
   description: string
@@ -170,7 +170,7 @@ export interface ResourceGrant {
   id: number
   resource_type: ResourceType
   resource_id: number
-  tenant_id: number
+  tenant_id: number | null
   role_id: number | null
   granted_by: number | null
   created_at: string

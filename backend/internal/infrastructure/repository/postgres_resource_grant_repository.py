@@ -2,7 +2,7 @@
 
 from typing import cast
 
-from sqlalchemy import delete, distinct, func, insert, or_, select, text
+from sqlalchemy import and_, delete, distinct, func, insert, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
@@ -108,10 +108,12 @@ class PostgresResourceGrantRepository:
         self._session.execute(
             text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": lock_key}
         )
+        # 平台资源同时存在“按租户授权”和“按平台角色授权”，这里只替换租户维度
         self._session.execute(
             delete(ResourceGrantModel).where(
                 ResourceGrantModel.resource_type == resource_type,
                 ResourceGrantModel.resource_id == resource_id,
+                ResourceGrantModel.tenant_id.is_not(None),
             )
         )
         if grants:
@@ -368,6 +370,119 @@ class PostgresResourceGrantRepository:
             CursorResult,
             self._session.execute(
                 delete(ResourceGrantModel).where(
+                    ResourceGrantModel.role_id == role_id,
+                    ResourceGrantModel.resource_type == resource_type,
+                    ResourceGrantModel.resource_id == resource_id,
+                )
+            ),
+        )
+        self._session.flush()
+        return bool(result.rowcount)
+
+    def list_platform_granted_resource_ids(
+        self, role_id: int, resource_type: str
+    ) -> set[int]:
+        """读取平台角色在某类平台资源上已获授权的资源 ID。"""
+        rows = self._session.scalars(
+            select(ResourceGrantModel.resource_id).where(
+                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.role_id == role_id,
+                ResourceGrantModel.resource_type == resource_type,
+            )
+        ).all()
+        return {int(item) for item in rows}
+
+    def count_platform_granted(self, role_id: int, resource_type: str) -> int:
+        """统计平台角色在某类平台资源上的有效授权数量。"""
+        count = self._session.scalar(
+            select(func.count(distinct(ResourceGrantModel.resource_id))).where(
+                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.role_id == role_id,
+                ResourceGrantModel.resource_type == resource_type,
+            )
+        )
+        return int(count or 0)
+
+    def replace_for_platform_role(
+        self,
+        role_id: int,
+        resource_type: str,
+        resource_ids: list[int],
+        granted_by: int | None,
+    ) -> None:
+        """整体替换平台角色在某类平台资源上的授权。"""
+        self._session.execute(
+            delete(ResourceGrantModel).where(
+                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.role_id == role_id,
+                ResourceGrantModel.resource_type == resource_type,
+            )
+        )
+        unique_ids = sorted({int(item) for item in resource_ids})
+        if unique_ids:
+            self._session.execute(
+                insert(ResourceGrantModel),
+                [
+                    {
+                        "resource_type": resource_type,
+                        "resource_id": resource_id,
+                        "tenant_id": None,
+                        "role_id": role_id,
+                        "granted_by": granted_by,
+                    }
+                    for resource_id in unique_ids
+                ],
+            )
+        self._session.flush()
+
+    def add_for_platform_role(
+        self,
+        role_id: int,
+        resource_type: str,
+        resource_ids: list[int],
+        granted_by: int | None,
+    ) -> int:
+        """追加平台角色授权，重复授权自动跳过。"""
+        unique_ids = sorted({int(item) for item in resource_ids})
+        if not unique_ids:
+            return 0
+        stmt = (
+            pg_insert(ResourceGrantModel)
+            .values(
+                [
+                    {
+                        "resource_type": resource_type,
+                        "resource_id": resource_id,
+                        "tenant_id": None,
+                        "role_id": role_id,
+                        "granted_by": granted_by,
+                    }
+                    for resource_id in unique_ids
+                ]
+            )
+            .on_conflict_do_nothing(
+                index_elements=["resource_type", "resource_id", "role_id"],
+                # 必须与 ux_resource_grants_platform_role 的部分索引谓词完全一致
+                index_where=and_(
+                    ResourceGrantModel.tenant_id.is_(None),
+                    ResourceGrantModel.role_id.is_not(None),
+                ),
+            )
+            .returning(ResourceGrantModel.id)
+        )
+        inserted = self._session.execute(stmt).scalars().all()
+        self._session.flush()
+        return len(inserted)
+
+    def remove_for_platform_role(
+        self, role_id: int, resource_type: str, resource_id: int
+    ) -> bool:
+        """删除平台角色对单个平台资源的授权。"""
+        result = cast(
+            CursorResult,
+            self._session.execute(
+                delete(ResourceGrantModel).where(
+                    ResourceGrantModel.tenant_id.is_(None),
                     ResourceGrantModel.role_id == role_id,
                     ResourceGrantModel.resource_type == resource_type,
                     ResourceGrantModel.resource_id == resource_id,

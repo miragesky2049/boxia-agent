@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { rolesApi } from '../api/access'
 import type { AdminRole, Role, RoleCreatePayload } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { useTenant } from '../tenant/TenantContext'
 
 const SYSTEM_ROLE_META: Record<AdminRole, { label: string; color: string }> = {
   superadmin: { label: '超级管理员', color: 'red' },
@@ -31,6 +32,7 @@ export default function RolesPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { canWrite } = useAuth()
+  const { isPlatform } = useTenant()
   const [items, setItems] = useState<Role[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -184,7 +186,9 @@ export default function RolesPage() {
                   disabled={record.system_role === 'superadmin'}
                   title={
                     record.system_role === 'superadmin'
-                      ? '超级管理员默认拥有本租户全部资源，无需授权'
+                      ? isPlatform
+                        ? '超级管理员默认拥有全部平台级资源，无需授权'
+                        : '超级管理员默认拥有本租户全部资源，无需授权'
                       : undefined
                   }
                   onClick={() => navigate(`/roles/${record.id}`)}
@@ -221,7 +225,9 @@ export default function RolesPage() {
         <div>
           <h2 className="page-header__title">角色管理</h2>
           <p className="page-header__desc">
-            为本租户配置自定义角色，角色决定可访问的智能体与资源范围。
+            {isPlatform
+              ? '维护产品级平台自有角色，与租户角色数据隔离；平台角色决定平台账号可访问的平台级资源。'
+              : '为本租户配置自定义角色，角色决定可访问的智能体与资源范围。'}
           </p>
         </div>
         {canWrite && (

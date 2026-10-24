@@ -276,16 +276,18 @@ class AgentRepository(Protocol):
 
 
 class RoleRepository(Protocol):
-    """租户角色仓储。"""
+    """角色仓储：tenant_id 为空表示平台角色。"""
 
     def get_by_id(self, role_id: int) -> Role | None:
         """按主键查询。"""
 
-    def get_by_code(self, tenant_id: int, code: str) -> Role | None:
-        """按租户与编码查询。"""
+    def get_by_code(self, tenant_id: int | None, code: str) -> Role | None:
+        """按作用域与编码查询。"""
 
-    def list_by_tenant(self, tenant_id: int, include_inactive: bool = False) -> list[Role]:
-        """查询租户角色列表。"""
+    def list_by_tenant(
+        self, tenant_id: int | None, include_inactive: bool = False
+    ) -> list[Role]:
+        """查询作用域内角色列表。"""
 
     def create(self, values: dict[str, Any]) -> Role:
         """创建角色。"""
@@ -296,11 +298,15 @@ class RoleRepository(Protocol):
     def delete(self, role_id: int) -> bool:
         """删除角色。"""
 
-    def code_exists(self, tenant_id: int, code: str, exclude_id: int | None = None) -> bool:
-        """租户内编码是否已存在。"""
+    def code_exists(
+        self, tenant_id: int | None, code: str, exclude_id: int | None = None
+    ) -> bool:
+        """作用域内编码是否已存在。"""
 
-    def name_exists(self, tenant_id: int, name: str, exclude_id: int | None = None) -> bool:
-        """租户内名称是否已存在。"""
+    def name_exists(
+        self, tenant_id: int | None, name: str, exclude_id: int | None = None
+    ) -> bool:
+        """作用域内名称是否已存在。"""
 
     def count_references(self, role_id: int) -> int:
         """统计管理员账号与最终用户的引用数。"""
@@ -507,6 +513,37 @@ class ResourceGrantRepository(Protocol):
 
     def remove_for_role(self, role_id: int, resource_type: str, resource_id: int) -> bool:
         """删除角色对单个资源的授权。"""
+
+    def list_platform_granted_resource_ids(
+        self, role_id: int, resource_type: str
+    ) -> set[int]:
+        """读取平台角色在某类平台资源上已获授权的资源 ID。"""
+
+    def count_platform_granted(self, role_id: int, resource_type: str) -> int:
+        """统计平台角色在某类平台资源上的授权数量。"""
+
+    def replace_for_platform_role(
+        self,
+        role_id: int,
+        resource_type: str,
+        resource_ids: list[int],
+        granted_by: int | None,
+    ) -> None:
+        """整体替换平台角色在某类平台资源上的授权。"""
+
+    def add_for_platform_role(
+        self,
+        role_id: int,
+        resource_type: str,
+        resource_ids: list[int],
+        granted_by: int | None,
+    ) -> int:
+        """追加平台角色授权，重复授权自动跳过，返回新增数量。"""
+
+    def remove_for_platform_role(
+        self, role_id: int, resource_type: str, resource_id: int
+    ) -> bool:
+        """删除平台角色对单个平台资源的授权。"""
 
 
 class UnitOfWork(Protocol):

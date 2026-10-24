@@ -15,6 +15,7 @@ from internal.infrastructure.model.resource import (
 from internal.infrastructure.repository.grant_filters import (
     has_any_grant,
     platform_resource_visible,
+    platform_role_grant_exists,
     tenant_grant_exists,
     tenant_resource_visible,
 )
@@ -44,9 +45,14 @@ class PostgresResourceRepository(Generic[TResource]):
         raise NotImplementedError
 
     def _visible(self, stmt):
-        """读可见范围：平台视角仅产品级；租户视角按归属与授权过滤。"""
+        """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按归属与授权过滤。"""
         if self._tenant_id is None:
-            return stmt.where(self.model.tenant_id.is_(None))
+            stmt = stmt.where(self.model.tenant_id.is_(None))
+            if self._apply_role_filter:
+                stmt = stmt.where(
+                    platform_role_grant_exists(self.resource_type, self.model.id, self._role_ids)
+                )
+            return stmt
         tenant_owned = and_(
             self.model.tenant_id == self._tenant_id,
             tenant_resource_visible(

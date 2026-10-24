@@ -10,8 +10,8 @@ from web.deps.db import UowDep
 
 
 def _admin_scope(principal: AdminPrincipal) -> tuple[tuple[int, ...], bool]:
-    """平台或租户超管不做角色过滤，其余管理角色按全部角色授权收敛。"""
-    if principal.is_platform or principal.system_role == "superadmin":
+    """超管不做角色过滤；平台与租户 admin/viewer 均按全部角色授权收敛。"""
+    if principal.system_role == "superadmin":
         return (), False
     return principal.role_ids, True
 

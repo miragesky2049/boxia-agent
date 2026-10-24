@@ -7,14 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class GrantOut(BaseModel):
-    """单条资源授权；role_id 为空表示授予整个租户。"""
+    """单条资源授权；tenant_id 为空表示平台角色授权。"""
 
     model_config = ConfigDict(from_attributes=True)
 
     id: int
     resource_type: str
     resource_id: int
-    tenant_id: int
+    tenant_id: int | None
     role_id: int | None = None
     granted_by: int | None = None
     created_at: datetime

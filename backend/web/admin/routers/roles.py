@@ -24,7 +24,7 @@ def list_roles(
     tenant_id: int | None = Query(None, ge=1),
     include_inactive: bool = Query(False),
 ) -> list[RoleOut]:
-    """查询角色；产品级平台需指定租户。"""
+    """查询角色；平台只返回平台角色，租户只返回本租户角色。"""
     return [RoleOut.model_validate(item) for item in service.list(tenant_id, include_inactive)]
 
 
@@ -35,7 +35,7 @@ def get_role(
     service: RoleServiceDep,
     tenant_id: int | None = Query(None, ge=1),
 ) -> RoleOut:
-    """查询角色详情；产品级平台需指定租户。"""
+    """查询角色详情；平台只返回平台角色，租户只返回本租户角色。"""
     return RoleOut.model_validate(service.get(role_id, tenant_id))
 
 
@@ -46,7 +46,7 @@ def create_role(
     request: Request,
     service: RoleServiceDep,
 ) -> RoleOut:
-    """创建租户自定义角色。"""
+    """创建当前作用域的自定义角色。"""
     ip, user_agent = client_meta(request)
     role = service.create(
         code=payload.code,
