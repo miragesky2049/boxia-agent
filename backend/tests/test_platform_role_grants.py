@@ -105,6 +105,41 @@ def test_platform_role_grant_controls_visibility(
     assert _agent_ids(client, auth_headers) == {granted_agent["id"], hidden_agent["id"]}
 
 
+def test_copy_platform_role_copies_grants(client: TestClient, auth_headers) -> None:
+    source = client.post(
+        ROLES_URL,
+        json={"code": "ops", "name": "平台运营", "system_role": "viewer"},
+        headers=auth_headers,
+    )
+    assert source.status_code == 201, source.text
+    source_role = source.json()
+    agent = create_agent(client, auth_headers, "平台运营智能体")
+    _grant(client, auth_headers, source_role["id"], [agent["id"]])
+
+    copied = client.post(
+        f"{ROLES_URL}/{source_role['id']}/copy",
+        json={"code": "ops-copy", "name": "平台运营副本"},
+        headers=auth_headers,
+    )
+    assert copied.status_code == 201, copied.text
+    copy = copied.json()
+    assert copy["tenant_id"] is None
+    assert copy["is_system"] is False
+    assert copy["system_role"] == "viewer"
+
+    summary = client.get(f"{ROLES_URL}/{copy['id']}/grants/summary", headers=auth_headers)
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["counts"]["agent"] == 1
+
+    grants = client.get(
+        f"{ROLES_URL}/{copy['id']}/grants",
+        params={"resource_type": "agent", "granted_only": True, "page_size": 100},
+        headers=auth_headers,
+    )
+    assert grants.status_code == 200, grants.text
+    assert [item["resource_id"] for item in grants.json()["items"]] == [agent["id"]]
+
+
 def test_platform_viewer_is_read_only(client: TestClient, auth_headers) -> None:
     roles = _roles_by_code(client, auth_headers)
     viewer_role_id = roles["viewer"]["id"]

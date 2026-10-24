@@ -1163,6 +1163,7 @@ Authorization: Bearer <access_token>
 |--------|-----------------------|------------------------------------------------------------|
 | GET    | `/admin/roles`        | 角色列表，参数 `include_inactive`                          |
 | POST   | `/admin/roles`        | 创建自定义角色，返回 201                                   |
+| POST   | `/admin/roles/{id}/copy` | 复制角色及显式授权关系，入参 `{code,name,description?}`，返回 201；`superadmin` 角色不支持复制 |
 | GET    | `/admin/roles/{id}`   | 角色详情                                                   |
 | PATCH  | `/admin/roles/{id}`   | 修改名称/描述/启停；系统角色不可改基础权限、不可停用       |
 | DELETE | `/admin/roles/{id}`   | 删除角色；被账号或授权引用时返回 409                       |

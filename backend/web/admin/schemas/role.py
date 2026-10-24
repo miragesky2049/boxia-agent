@@ -38,3 +38,11 @@ class RoleUpdateRequest(BaseModel):
     description: str | None = Field(default=None, max_length=500)
     system_role: str | None = Field(default=None, max_length=16)
     is_active: bool | None = None
+
+
+class RoleCopyRequest(BaseModel):
+    """复制角色请求；未填写描述时沿用源角色描述。"""
+
+    code: str = Field(min_length=2, max_length=64)
+    name: str = Field(min_length=1, max_length=64)
+    description: str | None = Field(default=None, max_length=500)

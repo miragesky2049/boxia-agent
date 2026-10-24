@@ -91,6 +91,94 @@ def test_referenced_role_cannot_be_deleted(
     assert deleted.status_code == 409
 
 
+def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client) -> None:
+    create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    role = site.post(
+        "/api/v1/admin/roles",
+        json={
+            "code": "sales",
+            "name": "销售",
+            "description": "销售角色",
+            "system_role": "viewer",
+        },
+        headers=headers,
+    ).json()
+    skill = site.post(
+        "/api/v1/admin/skills",
+        json={"name": "销售技能", "description": "", "content": "", "config": {}},
+        headers=headers,
+    ).json()
+    granted = site.post(
+        f"/api/v1/admin/roles/{role['id']}/grants/skill",
+        json={"resource_ids": [skill["id"]]},
+        headers=headers,
+    )
+    assert granted.status_code == 200, granted.text
+
+    copied = site.post(
+        f"/api/v1/admin/roles/{role['id']}/copy",
+        json={"code": "sales-copy", "name": "销售副本"},
+        headers=headers,
+    )
+    assert copied.status_code == 201, copied.text
+    copy = copied.json()
+    assert copy["is_system"] is False
+    assert copy["is_active"] is True
+    assert copy["system_role"] == "viewer"
+    assert copy["description"] == "销售角色"
+
+    summary = site.get(
+        f"/api/v1/admin/roles/{copy['id']}/grants/summary", headers=headers
+    )
+    assert summary.status_code == 200, summary.text
+    assert summary.json()["counts"]["skill"] == 1
+
+    grants = site.get(
+        f"/api/v1/admin/roles/{copy['id']}/grants",
+        params={"resource_type": "skill", "granted_only": True, "page_size": 100},
+        headers=headers,
+    )
+    assert grants.status_code == 200, grants.text
+    assert [item["resource_id"] for item in grants.json()["items"]] == [skill["id"]]
+
+    duplicate = site.post(
+        f"/api/v1/admin/roles/{role['id']}/copy",
+        json={"code": "sales-copy", "name": "销售副本二"},
+        headers=headers,
+    )
+    assert duplicate.status_code == 409
+
+    superadmin_id = list_roles(site, headers)["superadmin"]["id"]
+    forbidden = site.post(
+        f"/api/v1/admin/roles/{superadmin_id}/copy",
+        json={"code": "superadmin-copy", "name": "超管副本"},
+        headers=headers,
+    )
+    assert forbidden.status_code == 422
+
+
+def test_copy_role_is_tenant_isolated(
+    client: TestClient, auth_headers, tenant_client
+) -> None:
+    create_tenant(client, auth_headers, "acme", "Acme 公司")
+    create_tenant(client, auth_headers, "globex", "Globex 公司")
+    acme_site, acme_headers, _ = tenant_admin_client(tenant_client, "acme")
+    globex_site, globex_headers, _ = tenant_admin_client(tenant_client, "globex")
+
+    acme_role = acme_site.post(
+        "/api/v1/admin/roles",
+        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        headers=acme_headers,
+    ).json()
+    denied = globex_site.post(
+        f"/api/v1/admin/roles/{acme_role['id']}/copy",
+        json={"code": "sales-copy", "name": "销售副本"},
+        headers=globex_headers,
+    )
+    assert denied.status_code == 404
+
+
 def test_platform_manages_own_roles_only(
     client: TestClient, auth_headers, tenant_client
 ) -> None:

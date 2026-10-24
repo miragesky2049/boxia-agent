@@ -139,6 +139,12 @@ export interface RoleUpdatePayload {
   is_active?: boolean
 }
 
+export interface RoleCopyPayload {
+  code: string
+  name: string
+  description?: string
+}
+
 export interface User {
   id: number
   tenant_id: number
