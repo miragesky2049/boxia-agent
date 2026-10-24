@@ -31,11 +31,14 @@ def list_prompts(
     "",
     response_model=PromptOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
-def create_prompt(payload: PromptPayload, service: PromptServiceDep) -> PromptOut:
-    """创建提示词。"""
-    return PromptOut.model_validate(service.create(payload.model_dump()))
+def create_prompt(
+    payload: PromptPayload,
+    principal: EditorAuthDep,
+    service: PromptServiceDep,
+) -> PromptOut:
+    """创建提示词，并授权给创建者角色。"""
+    return PromptOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
 @router.get("/{prompt_id}", response_model=PromptOut)
@@ -84,6 +87,7 @@ def clone_prompt(
         name=payload.name,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        actor_role_ids=principal.role_ids,
         ip=ip,
         user_agent=user_agent,
     )

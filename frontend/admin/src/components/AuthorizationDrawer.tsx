@@ -48,7 +48,7 @@ export default function AuthorizationDrawer({
   const applyGrants = useCallback(
     (grants: ResourceGrant[]) => {
       if (grants.length === 0) {
-        setAccessMode(isPlatform ? 'none' : 'tenant')
+        setAccessMode('none')
         setSelectedRoles([])
         return
       }
@@ -65,7 +65,7 @@ export default function AuthorizationDrawer({
           .sort((left, right) => left - right),
       )
     },
-    [isPlatform],
+    [],
   )
 
   const loadAccess = useCallback(
@@ -95,7 +95,7 @@ export default function AuthorizationDrawer({
     setTenants([])
     setSelectedTenant(null)
     setRoles([])
-    setAccessMode(isPlatform ? 'none' : 'tenant')
+    setAccessMode('none')
     setSelectedRoles([])
     if (!isPlatform) {
       if (tenantId) void loadAccess(tenantId)
@@ -137,6 +137,7 @@ export default function AuthorizationDrawer({
       roles.map((role) => ({
         label: role.is_active ? role.name : `${role.name}（停用）`,
         value: role.id,
+        disabled: !role.is_active,
       })),
     [roles],
   )
@@ -151,8 +152,16 @@ export default function AuthorizationDrawer({
       message.error('请选择可访问角色')
       return
     }
+    if (
+      accessMode === 'roles' &&
+      roleIds.some((roleId) => !roles.find((role) => role.id === roleId)?.is_active)
+    ) {
+      message.error('已停用角色不可授权，请移除后再保存')
+      return
+    }
 
-    const mode = accessMode === 'roles' ? 'replace' : 'clear'
+    // 整个租户授权 = 替换为空角色列表；仅“不可见”才清空
+    const mode = accessMode === 'none' ? 'clear' : 'replace'
     const execute = async () => {
       setSaving(true)
       try {
@@ -176,9 +185,9 @@ export default function AuthorizationDrawer({
     if (mode === 'clear') {
       const description = isPlatform
         ? '该租户将无法再看到此资源，其他租户授权不受影响。'
-        : '将恢复为本租户全部角色可见。'
+        : '将清空本租户对该资源的授权，所有角色都将不可见。'
       modal.confirm({
-        title: isPlatform ? '确认移除该租户的访问权限？' : '确认恢复默认可见范围？',
+        title: isPlatform ? '确认移除该租户的访问权限？' : '确认清空本资源授权？',
         content: description,
         okText: '确认',
         cancelText: '取消',
@@ -198,7 +207,7 @@ export default function AuthorizationDrawer({
       ]
     }
     return [
-      { label: '全部角色可见（默认）', value: 'tenant' },
+      { label: '本租户不可见', value: 'none' },
       { label: '指定角色', value: 'roles' },
     ]
   }
@@ -223,7 +232,7 @@ export default function AuthorizationDrawer({
       <p style={{ color: '#666', marginTop: 0 }}>
         {isPlatform
           ? '平台级资源必须显式授权；保存后仅影响所选租户，其他租户授权保持不变。'
-          : '本租户自有资源未配置授权时默认对本租户全部角色可见；可指定角色以收紧范围。'}
+          : '角色只能访问显式授权的资源；可授权给整个租户、指定角色，或清空授权。'}
       </p>
 
       {isPlatform && (

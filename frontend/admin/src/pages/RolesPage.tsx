@@ -3,6 +3,7 @@ import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Tab
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { rolesApi } from '../api/access'
 import type { AdminRole, Role, RoleCreatePayload } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -27,6 +28,7 @@ interface RoleFormValues {
 }
 
 export default function RolesPage() {
+  const navigate = useNavigate()
   const { message } = App.useApp()
   const { canWrite } = useAuth()
   const [items, setItems] = useState<Role[]>([])
@@ -173,9 +175,22 @@ export default function RolesPage() {
           {
             title: '操作',
             key: 'actions',
-            width: 140,
+            width: 170,
             render: (_: unknown, record: Role) => (
               <Space size={4}>
+                <Button
+                  type="link"
+                  size="small"
+                  disabled={record.system_role === 'superadmin'}
+                  title={
+                    record.system_role === 'superadmin'
+                      ? '超级管理员默认拥有本租户全部资源，无需授权'
+                      : undefined
+                  }
+                  onClick={() => navigate(`/roles/${record.id}`)}
+                >
+                  授权
+                </Button>
                 <Button type="link" size="small" onClick={() => openEdit(record)}>
                   编辑
                 </Button>

@@ -6,7 +6,7 @@ from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Agent
 from web.admin.schemas.agent import AgentOut, AgentPayload, AgentSummaryOut
 from web.admin.schemas.common import PageOut
-from web.deps.auth import require_editor
+from web.deps.auth import EditorAuthDep, require_editor
 from web.deps.services import AgentServiceDep
 
 router = APIRouter(prefix="/agents", tags=["admin-agents"])
@@ -30,11 +30,14 @@ def list_agents(
     "",
     response_model=AgentOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
-def create_agent(payload: AgentPayload, service: AgentServiceDep) -> AgentOut:
-    """创建智能体。"""
-    return AgentOut.model_validate(service.create(payload.model_dump()))
+def create_agent(
+    payload: AgentPayload,
+    principal: EditorAuthDep,
+    service: AgentServiceDep,
+) -> AgentOut:
+    """创建智能体，并授权给创建者角色。"""
+    return AgentOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
 @router.get("/{agent_id}", response_model=AgentOut)

@@ -1,20 +1,28 @@
 import { request } from './client'
 import type {
   GrantBatchPayload,
-  GrantInput,
-  GrantOverviewItem,
-  GrantState,
   PageResult,
   ResourceGrant,
   ResourceType,
   Role,
   RoleCreatePayload,
+  RoleGrantResource,
+  RoleGrantSummary,
   RoleUpdatePayload,
+  UserRoleAssignPayload,
 } from './types'
 
 export interface RoleListParams {
   tenant_id?: number
   include_inactive?: boolean
+}
+
+export interface RoleGrantListParams {
+  resource_type: ResourceType
+  page?: number
+  page_size?: number
+  keyword?: string
+  granted_only?: boolean
 }
 
 export const rolesApi = {
@@ -24,6 +32,10 @@ export const rolesApi = {
     if (params.include_inactive) query.set('include_inactive', 'true')
     const suffix = query.toString()
     return request<Role[]>(`/admin/roles${suffix ? `?${suffix}` : ''}`)
+  },
+  async get(id: number, tenantId?: number): Promise<Role> {
+    const suffix = tenantId !== undefined ? `?tenant_id=${tenantId}` : ''
+    return request<Role>(`/admin/roles/${id}${suffix}`)
   },
   async create(payload: RoleCreatePayload): Promise<Role> {
     return request<Role>('/admin/roles', { method: 'POST', body: JSON.stringify(payload) })
@@ -37,28 +49,46 @@ export const rolesApi = {
   async remove(id: number): Promise<void> {
     await request<void>(`/admin/roles/${id}`, { method: 'DELETE' })
   },
-}
-
-export interface GrantOverviewParams {
-  page?: number
-  page_size?: number
-  keyword?: string
-  grant_state?: GrantState
+  async grantSummary(id: number): Promise<RoleGrantSummary> {
+    return request<RoleGrantSummary>(`/admin/roles/${id}/grants/summary`)
+  },
+  async listGrants(
+    id: number,
+    params: RoleGrantListParams,
+  ): Promise<PageResult<RoleGrantResource>> {
+    const query = new URLSearchParams({
+      resource_type: params.resource_type,
+      page: String(params.page ?? 1),
+      page_size: String(params.page_size ?? 20),
+      granted_only: String(params.granted_only ?? false),
+    })
+    if (params.keyword) query.set('keyword', params.keyword)
+    return request<PageResult<RoleGrantResource>>(
+      `/admin/roles/${id}/grants?${query.toString()}`,
+    )
+  },
+  async addGrants(
+    id: number,
+    resourceType: ResourceType,
+    resourceIds: number[],
+  ): Promise<{ updated: number }> {
+    return request<{ updated: number }>(`/admin/roles/${id}/grants/${resourceType}`, {
+      method: 'POST',
+      body: JSON.stringify({ resource_ids: resourceIds }),
+    })
+  },
+  async removeGrant(
+    id: number,
+    resourceType: ResourceType,
+    resourceId: number,
+  ): Promise<void> {
+    await request<void>(`/admin/roles/${id}/grants/${resourceType}/${resourceId}`, {
+      method: 'DELETE',
+    })
+  },
 }
 
 export const grantsApi = {
-  async overview(
-    resourceType: ResourceType,
-    params: GrantOverviewParams = {},
-  ): Promise<PageResult<GrantOverviewItem>> {
-    const query = new URLSearchParams()
-    query.set('resource_type', resourceType)
-    query.set('page', String(params.page ?? 1))
-    query.set('page_size', String(params.page_size ?? 20))
-    if (params.keyword) query.set('keyword', params.keyword)
-    if (params.grant_state) query.set('grant_state', params.grant_state)
-    return request<PageResult<GrantOverviewItem>>(`/admin/grants/overview?${query.toString()}`)
-  },
   async list(
     resourceType: ResourceType,
     resourceId: number,
@@ -77,14 +107,10 @@ export const grantsApi = {
       body: JSON.stringify(payload),
     })
   },
-  async replace(
-    resourceType: ResourceType,
-    resourceId: number,
-    grants: GrantInput[],
-  ): Promise<ResourceGrant[]> {
-    return request<ResourceGrant[]>(
-      `/admin/grants?resource_type=${resourceType}&resource_id=${resourceId}`,
-      { method: 'PUT', body: JSON.stringify({ grants }) },
-    )
+  async assignUserRoles(payload: UserRoleAssignPayload): Promise<{ updated: number }> {
+    return request<{ updated: number }>('/admin/grants/users', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   },
 }

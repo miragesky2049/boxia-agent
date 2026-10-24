@@ -41,7 +41,6 @@ class ResourceGrantOverview:
     grant_count: int
     tenant_count: int
     role_count: int
-    is_default_visible: bool
 
 
 class GrantService:
@@ -333,7 +332,6 @@ class GrantService:
             grant_count=grant_count,
             tenant_count=summary.tenant_count if summary else 0,
             role_count=summary.role_count if summary else 0,
-            is_default_visible=resource.tenant_id is not None and grant_count == 0,
         )
 
     def _resource_repository(self, resource_type: str) -> Any:

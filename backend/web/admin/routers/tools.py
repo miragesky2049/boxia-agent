@@ -34,11 +34,14 @@ def list_tools(
     "",
     response_model=ToolOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
-def create_tool(payload: ToolPayload, service: ToolServiceDep) -> ToolOut:
-    """创建工具。"""
-    return ToolOut.model_validate(service.create(payload.model_dump()))
+def create_tool(
+    payload: ToolPayload,
+    principal: EditorAuthDep,
+    service: ToolServiceDep,
+) -> ToolOut:
+    """创建工具，并授权给创建者角色。"""
+    return ToolOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
 @router.get("/{tool_id}", response_model=ToolOut)
@@ -83,6 +86,7 @@ def clone_tool(
         name=payload.name,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        actor_role_ids=principal.role_ids,
         ip=ip,
         user_agent=user_agent,
     )

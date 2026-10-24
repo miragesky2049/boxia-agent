@@ -47,7 +47,6 @@ class GrantOverviewOut(BaseModel):
     grant_count: int
     tenant_count: int
     role_count: int
-    is_default_visible: bool
 
 
 class GrantBatchRequest(BaseModel):

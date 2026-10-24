@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import delete, func, insert, or_, select
+from sqlalchemy import and_, delete, func, insert, or_, select
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.resource import Agent
@@ -162,15 +162,15 @@ class PostgresAgentRepository:
         return {int(item) for item in rows}
 
     def _grantable(self, stmt):
-        """角色授权候选范围：租户自有智能体 + 平台智能体。"""
+        """角色授权候选范围：租户自有智能体 + 已对本租户可见的平台智能体。"""
         if self._tenant_id is None:
             return stmt.where(AgentModel.tenant_id.is_(None))
-        return stmt.where(
-            or_(
-                AgentModel.tenant_id == self._tenant_id,
-                AgentModel.tenant_id.is_(None),
-            )
+        tenant_owned = AgentModel.tenant_id == self._tenant_id
+        platform_entitled = and_(
+            AgentModel.tenant_id.is_(None),
+            agent_visible(AgentModel.id, self._tenant_id, (), False),
         )
+        return stmt.where(or_(tenant_owned, platform_entitled))
 
     def list_grantable(
         self,

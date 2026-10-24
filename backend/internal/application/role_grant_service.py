@@ -53,8 +53,8 @@ class RoleGrantService:
         repository = self._resource_repository(resource_type)
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        granted_ids = self._uow.resource_grants.list_granted_resource_ids(
-            role.id, resource_type
+        granted_ids = self._uow.resource_grants.list_effective_granted_resource_ids(
+            role.id, role.tenant_id, resource_type
         )
         ids = sorted(granted_ids) if granted_only else None
         items, total = repository.list_grantable(page, page_size, keyword, ids)
@@ -64,6 +64,16 @@ class RoleGrantService:
             page=page,
             page_size=page_size,
         )
+
+    def summary(self, role_id: int) -> dict[str, int]:
+        """按资源类型统计角色的有效授权数量。"""
+        role = self._require_role(role_id)
+        return {
+            resource_type: self._uow.resource_grants.count_effective_granted(
+                role.id, role.tenant_id, resource_type
+            )
+            for resource_type in RESOURCE_TYPES
+        }
 
     def replace(
         self,
@@ -77,9 +87,11 @@ class RoleGrantService:
         user_agent: str | None = None,
     ) -> int:
         """整体替换角色在某类资源上的授权。"""
-        role = self._require_role(role_id)
+        role = self._require_writable_role(role_id)
         repository = self._resource_repository(resource_type)
         ids = self._validate_ids(repository, resource_ids)
+        # 与平台侧按资源写入串行化，避免同一资源的并发替换相互覆盖
+        self._uow.resource_grants.lock_resources(resource_type, ids)
         self._uow.resource_grants.replace_for_role(
             role.id, role.tenant_id, resource_type, ids, actor_id
         )
@@ -107,14 +119,21 @@ class RoleGrantService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> int:
-        """为角色追加授权。"""
-        role = self._require_role(role_id)
+        """为角色追加授权；已整租户授权的资源无需重复写入。"""
+        role = self._require_writable_role(role_id)
         repository = self._resource_repository(resource_type)
         ids = self._validate_ids(repository, resource_ids)
         if not ids:
             raise ValidationError("请至少选择一个资源")
+        self._uow.resource_grants.lock_resources(resource_type, ids)
+        tenant_wide = self._uow.resource_grants.list_tenant_wide_resource_ids(
+            role.tenant_id, resource_type
+        )
+        pending = [resource_id for resource_id in ids if resource_id not in tenant_wide]
+        if not pending:
+            return 0
         added = self._uow.resource_grants.add_for_role(
-            role.id, role.tenant_id, resource_type, ids, actor_id
+            role.id, role.tenant_id, resource_type, pending, actor_id
         )
         self._record_audit(
             role,
@@ -140,10 +159,16 @@ class RoleGrantService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> None:
-        """移除角色对单个资源的授权。"""
-        role = self._require_role(role_id)
+        """移除角色对单个资源的授权；整租户授权会拆成其余角色的显式授权。"""
+        role = self._require_writable_role(role_id)
         self._ensure_resource_type(resource_type)
-        if not self._uow.resource_grants.remove_for_role(
+        # 先锁资源再判断整租户授权，避免并发取消时把已移除的角色重新写回
+        self._uow.resource_grants.lock_resources(resource_type, [resource_id])
+        if self._uow.resource_grants.has_tenant_wide(
+            resource_type, resource_id, role.tenant_id
+        ):
+            self._demote_tenant_wide(role, resource_type, resource_id, actor_id)
+        elif not self._uow.resource_grants.remove_for_role(
             role.id, resource_type, resource_id
         ):
             raise NotFoundError("授权不存在")
@@ -166,6 +191,25 @@ class RoleGrantService:
         if role is None or role.tenant_id != self._context.tenant_id:
             raise NotFoundError("角色不存在")
         return role
+
+    def _require_writable_role(self, role_id: int) -> Role:
+        role = self._require_role(role_id)
+        if role.system_role == "superadmin":
+            raise ValidationError("超级管理员角色默认拥有本租户全部资源，不可单独授权")
+        return role
+
+    def _demote_tenant_wide(
+        self, role: Role, resource_type: str, resource_id: int, actor_id: int
+    ) -> None:
+        """把整租户授权拆成除目标角色外其余角色的显式授权。"""
+        remaining = [
+            item.id
+            for item in self._uow.roles.list_by_tenant(role.tenant_id, include_inactive=True)
+            if item.id != role.id
+        ]
+        self._uow.resource_grants.replace_for_tenant(
+            resource_type, resource_id, role.tenant_id, remaining, actor_id
+        )
 
     @staticmethod
     def _ensure_resource_type(resource_type: str) -> None:
