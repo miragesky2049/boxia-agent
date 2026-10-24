@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import fields
 from typing import Any, Generic, Protocol, TypeVar, cast
 
@@ -71,12 +72,13 @@ class ResourceService(Generic[T]):
             raise NotFoundError(f"{self._label}不存在")
         return item
 
-    def create(self, values: dict) -> T:
-        """创建；所属智能体必须与资源同租户。"""
+    def create(self, values: dict, actor_role_ids: Sequence[int] = ()) -> T:
+        """创建；所属智能体必须与资源同租户，并授权给创建者角色。"""
         if self._repository.name_exists(values["name"]):
             raise ConflictError(f"{self._label}名称已存在")
         payload = self._with_validated_agent(values)
         item = self._repository.create(payload)
+        self._grant_actor(item, actor_role_ids)
         self._uow.commit()
         return item
 
@@ -114,6 +116,7 @@ class ResourceService(Generic[T]):
         name: str | None,
         actor_id: int,
         actor_username: str,
+        actor_role_ids: Sequence[int] = (),
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> T:
@@ -139,6 +142,7 @@ class ResourceService(Generic[T]):
         values["agent_id"] = agent.id
         clone = self._repository.create(values)
         self._copy_grants(source, clone)
+        self._grant_actor(clone, actor_role_ids)
         self._after_clone(source, clone)
         record_audit(
             self._uow,
@@ -164,12 +168,19 @@ class ResourceService(Generic[T]):
         clone_tenant = getattr(clone, "tenant_id", None)
         if source_tenant != clone_tenant or clone_tenant is None:
             return
-        grants = self._uow.resource_grants.list_for_resource(
-            self._resource_type, source.id
-        )
-        role_ids = sorted(
-            {grant.role_id for grant in grants if grant.tenant_id == clone_tenant and grant.role_id}
-        )
+        grants = [
+            grant
+            for grant in self._uow.resource_grants.list_for_resource(
+                self._resource_type, source.id
+            )
+            if grant.tenant_id == clone_tenant
+        ]
+        if any(grant.role_id is None for grant in grants):
+            self._uow.resource_grants.replace_for_tenant(
+                self._resource_type, clone.id, clone_tenant, None, None
+            )
+            return
+        role_ids = sorted({grant.role_id for grant in grants if grant.role_id})
         if role_ids:
             self._uow.resource_grants.replace_for_tenant(
                 self._resource_type,
@@ -177,6 +188,27 @@ class ResourceService(Generic[T]):
                 clone_tenant,
                 list(role_ids),
                 None,
+            )
+
+    def _grant_actor(self, item: T, actor_role_ids: Sequence[int]) -> None:
+        """把租户自有资源授权给创建者角色，保证创建者立即可见；平台资源不授权。"""
+        tenant_id = getattr(item, "tenant_id", None)
+        role_ids = sorted({int(role_id) for role_id in actor_role_ids})
+        if tenant_id is None or not role_ids:
+            return
+        # 克隆已复制授权时不再追加创建者角色，避免放大可见范围
+        existing = [
+            grant
+            for grant in self._uow.resource_grants.list_for_resource(
+                self._resource_type, item.id
+            )
+            if grant.tenant_id == tenant_id
+        ]
+        if existing:
+            return
+        for role_id in role_ids:
+            self._uow.resource_grants.add_for_role(
+                role_id, tenant_id, self._resource_type, [item.id], None
             )
 
     def _with_validated_agent(self, values: dict) -> dict:

@@ -35,11 +35,16 @@ def list_components(
     "",
     response_model=ComponentOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
-def create_component(payload: ComponentPayload, service: ComponentServiceDep) -> ComponentOut:
-    """创建组件。"""
-    return ComponentOut.model_validate(service.create(payload.model_dump()))
+def create_component(
+    payload: ComponentPayload,
+    principal: EditorAuthDep,
+    service: ComponentServiceDep,
+) -> ComponentOut:
+    """创建组件，并授权给创建者角色。"""
+    return ComponentOut.model_validate(
+        service.create(payload.model_dump(), principal.role_ids)
+    )
 
 
 @router.get("/{component_id}", response_model=ComponentOut)
@@ -92,6 +97,7 @@ def clone_component(
         name=payload.name,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        actor_role_ids=principal.role_ids,
         ip=ip,
         user_agent=user_agent,
     )

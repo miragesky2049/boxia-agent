@@ -22,6 +22,7 @@ import type { ResourceApi } from '../api/resources'
 import type { AgentSummary, ResourceBase, ResourceType } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
+import AuthorizationDrawer from './AuthorizationDrawer'
 
 export type FormFieldType = 'text' | 'textarea' | 'switch' | 'select' | 'tags' | 'json' | 'number'
 
@@ -111,6 +112,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   const [cloneSource, setCloneSource] = useState<T | null>(null)
   const [cloneAgents, setCloneAgents] = useState<AgentSummary[]>([])
   const [cloning, setCloning] = useState(false)
+  const [grantTarget, setGrantTarget] = useState<T | null>(null)
   const [cloneForm] = Form.useForm<{ agent_id: number; name?: string }>()
 
   const load = useCallback(async () => {
@@ -292,6 +294,11 @@ export default function ResourceListPage<T extends ResourceBase, P>({
               return (
                 <Space size={4} wrap>
                   {extraActions?.(record, { reload: load })}
+                  {isPlatform && resourceType && (
+                    <Button type="link" size="small" onClick={() => setGrantTarget(record)}>
+                      授权
+                    </Button>
+                  )}
                   {resourceType && enableClone && canWrite && (
                     <Button type="link" size="small" onClick={() => void openClone(record)}>
                       克隆
@@ -476,6 +483,17 @@ export default function ResourceListPage<T extends ResourceBase, P>({
           </Form.Item>
         </Form>
       </Modal>
+
+      {isPlatform && resourceType && grantTarget && (
+        <AuthorizationDrawer
+          open={grantTarget !== null}
+          onClose={() => setGrantTarget(null)}
+          onSaved={() => void load()}
+          resourceType={resourceType}
+          resourceId={grantTarget.id}
+          resourceName={grantTarget.name}
+        />
+      )}
     </div>
   )
 }

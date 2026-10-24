@@ -213,16 +213,30 @@ class PostgresResourceRepository(Generic[TResource]):
         ).all()
         return {int(item) for item in rows}
 
+    def list_ids_for_agent(self, agent_id: int) -> list[int]:
+        """按归属读取智能体下的全部资源 ID，忽略角色可见性过滤。"""
+        rows = self._session.scalars(
+            self._owned(select(self.model.id)).where(self.model.agent_id == agent_id)
+        ).all()
+        return [int(item) for item in rows]
+
     def _grantable(self, stmt):
-        """角色授权候选范围：租户自有资源 + 平台资源。"""
+        """角色授权候选范围：租户自有资源 + 已对本租户可见的平台资源。"""
         if self._tenant_id is None:
             return stmt.where(self.model.tenant_id.is_(None))
-        return stmt.where(
-            or_(
-                self.model.tenant_id == self._tenant_id,
-                self.model.tenant_id.is_(None),
-            )
+        tenant_owned = self.model.tenant_id == self._tenant_id
+        platform_entitled = and_(
+            self.model.tenant_id.is_(None),
+            platform_resource_visible(
+                self.resource_type,
+                self.model.id,
+                self.model.agent_id,
+                self._tenant_id,
+                (),
+                False,
+            ),
         )
+        return stmt.where(or_(tenant_owned, platform_entitled))
 
     def list_grantable(
         self,

@@ -12,12 +12,44 @@ from tests.helpers import (
     tenant_admin_client,
 )
 
+_LIST_PATHS = {
+    "agent": "agents",
+    "skill": "skills",
+    "tool": "tools",
+    "component": "components",
+    "prompt": "prompts",
+}
+
 
 def _skill_payload(name: str, agent_id: int | None = None) -> dict:
     payload: dict = {"name": name, "description": "", "content": "", "config": {}}
     if agent_id is not None:
         payload["agent_id"] = agent_id
     return payload
+
+
+def _tool_payload(name: str) -> dict:
+    return {"name": name, "description": "", "type": "http", "config": {}}
+
+
+def _component_payload(name: str) -> dict:
+    return {"name": name, "description": "", "type": "card", "config": {}}
+
+
+def _prompt_payload(name: str) -> dict:
+    return {
+        "name": name,
+        "description": "",
+        "content": "",
+        "variables": [],
+        "category": "",
+    }
+
+
+def _visible_ids(client: TestClient, headers: dict[str, str], path: str) -> set[int]:
+    response = client.get(f"/api/v1/admin/{path}", headers=headers)
+    assert response.status_code == 200, response.text
+    return {int(item["id"]) for item in response.json()["items"]}
 
 
 def _user_headers(user_tenant_client, username: str) -> dict[str, str]:
@@ -171,22 +203,54 @@ def test_platform_resource_inherits_agent_grant(
     )
 
 
-def test_tenant_owned_resource_role_filter(client: TestClient, auth_headers, tenant_client) -> None:
+def test_tenant_owned_resource_requires_explicit_grant(
+    client: TestClient, auth_headers, tenant_client, user_tenant_client
+) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
     viewer_admin = _create_admin_with_role(site, headers, "viewer-admin", roles["viewer"]["id"])
     admin_admin = _create_admin_with_role(site, headers, "admin-admin", roles["admin"]["id"])
+    create_user(site, headers, username="role-user", role_id=roles["admin"]["id"])
+    user_headers = _user_headers(user_tenant_client, "role-user")
 
+    agent = create_agent(site, headers, "租户技能智能体")
     skill = site.post("/api/v1/admin/skills", json=_skill_payload("租户技能"), headers=headers)
-    assert skill.status_code == 201, skill.text
+    tool = site.post(
+        "/api/v1/admin/tools",
+        json=_tool_payload("租户工具"),
+        headers=headers,
+    )
+    component = site.post(
+        "/api/v1/admin/components",
+        json=_component_payload("租户组件"),
+        headers=headers,
+    )
+    prompt = site.post(
+        "/api/v1/admin/prompts",
+        json=_prompt_payload("租户提示词"),
+        headers=headers,
+    )
+    for response in (skill, tool, component, prompt):
+        assert response.status_code == 201, response.text
     skill_id = skill.json()["id"]
-
-    # 无单独授权时，本租户全部角色可见
-    assert skill_id in [
-        item["id"] for item in site.get("/api/v1/admin/skills", headers=admin_admin).json()["items"]
+    resources = [
+        ("agent", agent["id"]),
+        ("skill", skill_id),
+        ("tool", tool.json()["id"]),
+        ("component", component.json()["id"]),
+        ("prompt", prompt.json()["id"]),
     ]
 
+    # 严格 RBAC：未显式授权的角色看不到租户自有资源
+    for resource_type, resource_id in resources:
+        assert resource_id not in _visible_ids(site, viewer_admin, _LIST_PATHS[resource_type])
+        assert resource_id not in _visible_ids(site, admin_admin, _LIST_PATHS[resource_type])
+
+    # 超管始终可见
+    assert skill_id in _visible_ids(site, headers, "skills")
+
+    # 授权给只读角色后，只读角色可见，管理员角色仍不可见
     grant_resource(
         site,
         headers,
@@ -194,11 +258,36 @@ def test_tenant_owned_resource_role_filter(client: TestClient, auth_headers, ten
         resource_id=skill_id,
         grants=[{"tenant_id": tenant["id"], "role_id": roles["viewer"]["id"]}],
     )
+    assert skill_id in _visible_ids(site, viewer_admin, "skills")
+    assert skill_id not in _visible_ids(site, admin_admin, "skills")
 
-    viewer_items = site.get("/api/v1/admin/skills", headers=viewer_admin).json()["items"]
-    admin_items = site.get("/api/v1/admin/skills", headers=admin_admin).json()["items"]
-    assert skill_id in [item["id"] for item in viewer_items]
-    assert skill_id not in [item["id"] for item in admin_items]
+    # 用户端同样按角色严格过滤
+    user_site = user_tenant_client("acme")
+    user_agent_ids = [
+        item["id"]
+        for item in user_site.get("/api/v1/user/agents", headers=user_headers).json()["items"]
+    ]
+    assert agent["id"] not in user_agent_ids
+    grant_resource(
+        site,
+        headers,
+        resource_type="agent",
+        resource_id=agent["id"],
+        grants=[{"tenant_id": tenant["id"], "role_id": roles["admin"]["id"]}],
+    )
+    user_agent_ids = [
+        item["id"]
+        for item in user_site.get("/api/v1/user/agents", headers=user_headers).json()["items"]
+    ]
+    assert agent["id"] in user_agent_ids
+
+    # 撤销授权后立即不可见
+    removed = site.delete(
+        f"/api/v1/admin/roles/{roles['viewer']['id']}/grants/skill/{skill_id}",
+        headers=headers,
+    )
+    assert removed.status_code == 204, removed.text
+    assert skill_id not in _visible_ids(site, viewer_admin, "skills")
 
 
 def test_grant_scope_restrictions(client: TestClient, auth_headers, tenant_client) -> None:
@@ -325,7 +414,6 @@ def test_overview_platform_scope_and_summary(
     assert granted["is_platform"] is True
     assert granted["grant_count"] == 2
     assert granted["tenant_count"] == 2
-    assert granted["is_default_visible"] is False
     assert by_id[agent_plain["id"]]["grant_count"] == 0
 
     granted_only = _overview(client, auth_headers, "agent", grant_state="granted")
@@ -340,20 +428,20 @@ def test_overview_platform_scope_and_summary(
     assert len(paged["items"]) == 1
 
 
-def test_overview_tenant_scope_default_and_roles(
+def test_overview_tenant_scope_summary(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
 
-    default_skill = site.post(
-        "/api/v1/admin/skills", json=_skill_payload("默认可见技能"), headers=headers
+    created_skill = site.post(
+        "/api/v1/admin/skills", json=_skill_payload("创建者角色技能"), headers=headers
     )
     limited_skill = site.post(
         "/api/v1/admin/skills", json=_skill_payload("限定角色技能"), headers=headers
     )
-    assert default_skill.status_code == 201, default_skill.text
+    assert created_skill.status_code == 201, created_skill.text
     assert limited_skill.status_code == 201, limited_skill.text
 
     platform_skill = client.post(
@@ -371,15 +459,17 @@ def test_overview_tenant_scope_default_and_roles(
 
     overview = _overview(site, headers, "skill")
     by_id = {item["resource_id"]: item for item in overview["items"]}
+    # 未下发给本租户的平台资源不可被本租户角色授权
     assert platform_skill.json()["id"] not in by_id
-    assert by_id[default_skill.json()["id"]]["is_default_visible"] is True
+    # 创建者角色自动授权
+    assert by_id[created_skill.json()["id"]]["grant_count"] == 1
     limited = by_id[limited_skill.json()["id"]]
-    assert limited["is_default_visible"] is False
     assert limited["grant_count"] == 1
     assert limited["role_count"] == 1
 
+    # 严格 RBAC 下不存在“无授权即默认可见”的资源
     ungranted = _overview(site, headers, "skill", grant_state="ungranted")
-    assert [item["resource_id"] for item in ungranted["items"]] == [default_skill.json()["id"]]
+    assert ungranted["items"] == []
 
 
 def test_list_grants_tenant_isolation(client: TestClient, auth_headers, tenant_client) -> None:
@@ -616,15 +706,21 @@ def test_batch_grant_validation(client: TestClient, auth_headers, tenant_client)
     assert cross_tenant_scope.status_code in {403, 404}
 
 
-def test_tenant_batch_clear_restores_default_visibility(
+def test_tenant_batch_clear_removes_role_visibility(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
+    viewer_headers = _create_admin_with_role(
+        site, headers, "viewer-admin", roles["viewer"]["id"]
+    )
     skill = site.post("/api/v1/admin/skills", json=_skill_payload("租户技能"), headers=headers)
     assert skill.status_code == 201, skill.text
     skill_id = skill.json()["id"]
+
+    # 严格 RBAC：新建资源只对创建者角色（此处为超管）可见
+    assert skill_id not in _visible_ids(site, viewer_headers, "skills")
 
     limited = _batch(
         site,
@@ -636,8 +732,7 @@ def test_tenant_batch_clear_restores_default_visibility(
         role_ids=[roles["viewer"]["id"]],
     )
     assert limited.status_code == 200, limited.text
-    overview = _overview(site, headers, "skill")
-    assert overview["items"][0]["is_default_visible"] is False
+    assert skill_id in _visible_ids(site, viewer_headers, "skills")
 
     cleared = _batch(
         site,
@@ -648,8 +743,9 @@ def test_tenant_batch_clear_restores_default_visibility(
         tenant_id=tenant["id"],
     )
     assert cleared.status_code == 200, cleared.text
-    overview = _overview(site, headers, "skill")
-    assert overview["items"][0]["is_default_visible"] is True
+    # 清空后角色不可见，超管仍可管理
+    assert skill_id not in _visible_ids(site, viewer_headers, "skills")
+    assert skill_id in _visible_ids(site, headers, "skills")
 
 
 def test_non_superadmin_cannot_manage_grants(
@@ -677,12 +773,15 @@ def test_non_superadmin_cannot_manage_grants(
     assert batch.status_code == 403
 
 
-def test_admin_context_menus_include_grants(
+def test_admin_context_menus_scope_grants(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     platform_context = client.get("/api/v1/admin/context", headers=auth_headers)
     assert platform_context.status_code == 200, platform_context.text
-    assert "grants" in platform_context.json()["menus"]
+    platform_menus = platform_context.json()["menus"]
+    # 平台侧不再提供资源授权菜单，租户侧 grants 表示给用户分配角色
+    assert "grants" not in platform_menus
+    assert "tenants" in platform_menus
 
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")

@@ -1,5 +1,7 @@
 """技能用例：通用 CRUD 之上保持 skills.content 与包内 SKILL.md 一致。"""
 
+from collections.abc import Sequence
+
 from internal.application.errors import ConflictError, NotFoundError
 from internal.application.resource_service import ResourceService
 from internal.domain.entity.resource import Skill
@@ -10,8 +12,8 @@ ENTRY_PATH = "SKILL.md"
 class SkillService(ResourceService[Skill]):
     """技能 CRUD；content 是入口文件的镜像，文件表是包内容的唯一来源。"""
 
-    def create(self, values: dict) -> Skill:
-        """创建技能，content 非空时同步生成 SKILL.md。"""
+    def create(self, values: dict, actor_role_ids: Sequence[int] = ()) -> Skill:
+        """创建技能，content 非空时同步生成 SKILL.md，并授权给创建者角色。"""
         if self._repository.name_exists(values["name"]):
             raise ConflictError("技能名称已存在")
         payload = self._with_validated_agent(values)
@@ -19,6 +21,7 @@ class SkillService(ResourceService[Skill]):
         content = payload.get("content", "")
         if content:
             self._uow.skill_files.upsert(skill.id, ENTRY_PATH, content)
+        self._grant_actor(skill, actor_role_ids)
         self._uow.commit()
         return skill
 

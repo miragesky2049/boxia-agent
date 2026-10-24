@@ -41,6 +41,18 @@ class RoleService:
             target = tenant_target
         return self._uow.roles.list_by_tenant(target, include_inactive)
 
+    def get(self, role_id: int, tenant_id: int | None = None) -> Role:
+        """查询角色详情：租户只能查本租户，平台必须显式指定租户。"""
+        if self._context.is_platform:
+            if tenant_id is None:
+                raise ValidationError("产品级平台查询角色必须指定租户")
+            target = tenant_id
+        else:
+            target = self._require_tenant_manageable()
+            if tenant_id is not None and tenant_id != target:
+                raise ForbiddenError("只能查询本租户角色")
+        return self._get_owned(role_id, target)
+
     def create(
         self,
         *,

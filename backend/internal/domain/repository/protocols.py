@@ -179,6 +179,9 @@ class ResourceRepository(Protocol[TResource]):
     ) -> list[TResource]:
         """读取归属于指定智能体的可见资源。"""
 
+    def list_ids_for_agent(self, agent_id: int) -> list[int]:
+        """按归属读取智能体下全部资源 ID，忽略角色可见性过滤（删除清理用）。"""
+
     def ids_exist(self, ids: list[int], agent_id: int | None = None) -> set[int]:
         """返回给定 id 中真实存在的部分。"""
 
@@ -195,7 +198,7 @@ class ResourceRepository(Protocol[TResource]):
         keyword: str | None,
         ids: list[int] | None = None,
     ) -> tuple[list[TResource], int]:
-        """分页查询可向本租户角色授权的资源：租户自有 + 平台资源。"""
+        """分页查询可向本租户角色授权的资源：租户自有 + 已对本租户可见的平台资源。"""
 
     def ids_grantable(self, ids: list[int]) -> set[int]:
         """返回给定 id 中可向本租户角色授权的部分。"""
@@ -458,6 +461,24 @@ class ResourceGrantRepository(Protocol):
 
     def list_granted_resource_ids(self, role_id: int, resource_type: str) -> set[int]:
         """读取角色在某类资源上已获授权的资源 ID。"""
+
+    def list_effective_granted_resource_ids(
+        self, role_id: int, tenant_id: int, resource_type: str
+    ) -> set[int]:
+        """读取角色的有效授权资源 ID：本角色显式授权或整租户授权。"""
+
+    def count_effective_granted(
+        self, role_id: int, tenant_id: int, resource_type: str
+    ) -> int:
+        """统计角色在某类资源上的有效授权数量。"""
+
+    def list_tenant_wide_resource_ids(
+        self, tenant_id: int, resource_type: str
+    ) -> set[int]:
+        """读取某租户整租户授权的资源 ID。"""
+
+    def has_tenant_wide(self, resource_type: str, resource_id: int, tenant_id: int) -> bool:
+        """资源是否存在对指定租户的整租户授权。"""
 
     def list_for_role(
         self, role_id: int, resource_type: str

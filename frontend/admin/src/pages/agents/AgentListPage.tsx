@@ -7,6 +7,7 @@ import { useNavigate } from 'react-router-dom'
 import { deleteAgent, listAgents, updateAgent, getAgent } from '../../api/agents'
 import type { AgentSummary } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
+import AuthorizationDrawer from '../../components/AuthorizationDrawer'
 import { useTenant } from '../../tenant/TenantContext'
 
 export default function AgentListPage() {
@@ -22,6 +23,7 @@ export default function AgentListPage() {
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>(undefined)
   const [authorizedOnly, setAuthorizedOnly] = useState(false)
   const [loading, setLoading] = useState(false)
+  const [grantTarget, setGrantTarget] = useState<AgentSummary | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -145,12 +147,17 @@ export default function AgentListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 210,
+      width: 260,
       render: (_: unknown, record: AgentSummary) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => navigate(`/agents/${record.id}/edit`)}>
             配置
           </Button>
+          {isPlatform && (
+            <Button type="link" size="small" onClick={() => setGrantTarget(record)}>
+              授权
+            </Button>
+          )}
           {canWrite && (isPlatform || !record.is_platform) && (
             <Popconfirm
               title="确认删除该智能体？"
@@ -248,6 +255,17 @@ export default function AgentListPage() {
           },
         }}
       />
+
+      {grantTarget && (
+        <AuthorizationDrawer
+          open={grantTarget !== null}
+          onClose={() => setGrantTarget(null)}
+          onSaved={() => void load()}
+          resourceType="agent"
+          resourceId={grantTarget.id}
+          resourceName={grantTarget.name}
+        />
+      )}
     </div>
   )
 }

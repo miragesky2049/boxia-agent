@@ -14,12 +14,15 @@ router = APIRouter(prefix="/context", tags=["admin-context"])
 
 
 def _menus(principal: AdminPrincipal) -> list[str]:
-    """按作用域与系统角色返回可见菜单 key，前端仅用于渲染。"""
+    """按作用域与系统角色返回可见菜单 key，前端仅用于渲染。
+
+    平台侧不再提供资源授权菜单；租户侧 grants 表示给用户分配角色。
+    """
     menus = ["agents"]
     if principal.system_role != "superadmin":
         return menus
     if principal.is_platform:
-        return [*menus, "grants", "admin-users", "tenants", "audit"]
+        return [*menus, "admin-users", "tenants", "audit"]
     return [*menus, "grants", "roles", "users", "admin-users", "audit"]
 
 

@@ -2,7 +2,7 @@
 
 from typing import cast
 
-from sqlalchemy import delete, distinct, func, insert, select, text
+from sqlalchemy import delete, distinct, func, insert, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
@@ -219,6 +219,67 @@ class PostgresResourceGrantRepository:
         ).all()
         return {int(item) for item in rows}
 
+    def list_effective_granted_resource_ids(
+        self, role_id: int, tenant_id: int, resource_type: str
+    ) -> set[int]:
+        """读取角色有效授权的资源 ID：本角色显式授权或整租户授权。"""
+        rows = self._session.scalars(
+            select(ResourceGrantModel.resource_id).where(
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.resource_type == resource_type,
+                or_(
+                    ResourceGrantModel.role_id == role_id,
+                    ResourceGrantModel.role_id.is_(None),
+                ),
+            )
+        ).all()
+        return {int(item) for item in rows}
+
+    def count_effective_granted(
+        self, role_id: int, tenant_id: int, resource_type: str
+    ) -> int:
+        """统计角色在某类资源上的有效授权数量。"""
+        count = self._session.scalar(
+            select(func.count(distinct(ResourceGrantModel.resource_id))).where(
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.resource_type == resource_type,
+                or_(
+                    ResourceGrantModel.role_id == role_id,
+                    ResourceGrantModel.role_id.is_(None),
+                ),
+            )
+        )
+        return int(count or 0)
+
+    def list_tenant_wide_resource_ids(
+        self, tenant_id: int, resource_type: str
+    ) -> set[int]:
+        """读取某租户整租户授权的资源 ID。"""
+        rows = self._session.scalars(
+            select(ResourceGrantModel.resource_id).where(
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.resource_type == resource_type,
+                ResourceGrantModel.role_id.is_(None),
+            )
+        ).all()
+        return {int(item) for item in rows}
+
+    def has_tenant_wide(
+        self, resource_type: str, resource_id: int, tenant_id: int
+    ) -> bool:
+        """资源是否存在对指定租户的整租户授权。"""
+        row = self._session.scalar(
+            select(ResourceGrantModel.id)
+            .where(
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.resource_type == resource_type,
+                ResourceGrantModel.resource_id == resource_id,
+                ResourceGrantModel.role_id.is_(None),
+            )
+            .limit(1)
+        )
+        return row is not None
+
     def list_for_role(self, role_id: int, resource_type: str) -> list[ResourceGrant]:
         """读取角色在某类资源上的全部授权明细。"""
         rows = self._session.scalars(
@@ -294,10 +355,12 @@ class PostgresResourceGrantRepository:
                 index_elements=["resource_type", "resource_id", "tenant_id", "role_id"],
                 index_where=ResourceGrantModel.role_id.is_not(None),
             )
+            .returning(ResourceGrantModel.id)
         )
-        result = cast(CursorResult, self._session.execute(stmt))
+        # Rowcount 在批量 INSERT ... ON CONFLICT 下不可靠，改用 RETURNING 统计实际写入
+        inserted = self._session.execute(stmt).scalars().all()
         self._session.flush()
-        return int(result.rowcount or 0)
+        return len(inserted)
 
     def remove_for_role(self, role_id: int, resource_type: str, resource_id: int) -> bool:
         """删除角色对单个资源的授权。"""

@@ -32,13 +32,14 @@ def test_user_login_requires_tenant_subdomain(client: TestClient, user_client) -
     assert response.status_code == 403
 
 
-def test_tenant_owned_agent_visible_by_default(
+def test_tenant_owned_agent_requires_explicit_grant(
     client: TestClient, auth_headers, tenant_client, user_tenant_client
 ) -> None:
-    create_tenant(client, auth_headers)
+    tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
-    create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
+    viewer_role_id = roles["viewer"]["id"]
+    create_user(site, headers, username="alice", role_id=viewer_role_id)
 
     agent = create_agent(site, headers, "租户智能体")
     skill = site.post(
@@ -47,27 +48,55 @@ def test_tenant_owned_agent_visible_by_default(
         headers=headers,
     )
     assert skill.status_code == 201, skill.text
+    skill_id = skill.json()["id"]
 
     user_site = user_tenant_client("acme")
     login = _login(user_site, "alice")
     assert login.status_code == 200, login.text
     user_headers = _headers(login.json()["access_token"])
 
+    # 严格 RBAC：未显式授权的资源对最终用户不可见
+    assert user_site.get("/api/v1/user/agents", headers=user_headers).json()["total"] == 0
+    assert (
+        user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers).status_code
+        == 404
+    )
+
+    for resource_type, resource_id in (("agent", agent["id"]), ("skill", skill_id)):
+        grant_resource(
+            site,
+            headers,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            grants=[{"tenant_id": tenant["id"], "role_id": viewer_role_id}],
+        )
+
     listed = user_site.get("/api/v1/user/agents", headers=user_headers)
     assert [item["id"] for item in listed.json()["items"]] == [agent["id"]]
 
     detail = user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers)
     assert detail.status_code == 200
-    assert [item["id"] for item in detail.json()["skills"]] == [skill.json()["id"]]
+    assert [item["id"] for item in detail.json()["skills"]] == [skill_id]
+
+    # 撤销技能授权后用户端立即不可见
+    revoked = site.delete(
+        f"/api/v1/admin/roles/{viewer_role_id}/grants/skill/{skill_id}",
+        headers=headers,
+    )
+    assert revoked.status_code == 204, revoked.text
+    detail = user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers)
+    assert detail.status_code == 200
+    assert detail.json()["skills"] == []
 
 
 def test_disabled_agent_and_resource_hidden_from_user(
     client: TestClient, auth_headers, tenant_client, user_tenant_client
 ) -> None:
-    create_tenant(client, auth_headers)
+    tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
-    create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
+    viewer_role_id = roles["viewer"]["id"]
+    create_user(site, headers, username="alice", role_id=viewer_role_id)
 
     agent = create_agent(site, headers, "租户智能体")
     skill = site.post(
@@ -88,6 +117,19 @@ def test_disabled_agent_and_resource_hidden_from_user(
         headers=headers,
     )
     assert disabled_skill.status_code == 201
+
+    for resource_type, resource_id in (
+        ("agent", agent["id"]),
+        ("skill", skill["id"]),
+        ("skill", disabled_skill.json()["id"]),
+    ):
+        grant_resource(
+            site,
+            headers,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            grants=[{"tenant_id": tenant["id"], "role_id": viewer_role_id}],
+        )
 
     user_site = user_tenant_client("acme")
     login = _login(user_site, "alice")

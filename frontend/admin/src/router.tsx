@@ -12,9 +12,10 @@ const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
 const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
-const GrantsPage = lazy(() => import('./pages/grants/GrantsPage'))
+const UserGrantsPage = lazy(() => import('./pages/grants/UserGrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
+const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 
 export default function AppRouter() {
   return (
@@ -44,16 +45,24 @@ export default function AppRouter() {
             <Route
               path="/grants"
               element={
-                <RequireRole role="superadmin">
-                  <GrantsPage />
+                <RequireRole role="superadmin" tenantOnly>
+                  <UserGrantsPage />
                 </RequireRole>
               }
             />
             <Route
               path="/roles"
               element={
-                <RequireRole role="superadmin">
+                <RequireRole role="superadmin" tenantOnly>
                   <RolesPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/roles/:id"
+              element={
+                <RequireRole role="superadmin" tenantOnly>
+                  <RoleDetailPage />
                 </RequireRole>
               }
             />

@@ -38,11 +38,14 @@ def list_skills(
     "",
     response_model=SkillOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
-def create_skill(payload: SkillPayload, service: SkillServiceDep) -> SkillOut:
-    """创建技能。"""
-    return SkillOut.model_validate(service.create(payload.model_dump()))
+def create_skill(
+    payload: SkillPayload,
+    principal: EditorAuthDep,
+    service: SkillServiceDep,
+) -> SkillOut:
+    """创建技能，并授权给创建者角色。"""
+    return SkillOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
 @router.get("/{skill_id}", response_model=SkillOut)
@@ -168,7 +171,9 @@ def clone_skill(
     """指定 agent_id 时克隆到目标智能体；否则克隆到当前租户。"""
     if payload.agent_id is None:
         return SkillOut.model_validate(
-            package_service.clone_to_current_tenant(skill_id, payload.name)
+            package_service.clone_to_current_tenant(
+                skill_id, payload.name, principal.role_ids
+            )
         )
     ip, user_agent = client_meta(request)
     clone = service.clone_to_agent(
@@ -177,6 +182,7 @@ def clone_skill(
         name=payload.name,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        actor_role_ids=principal.role_ids,
         ip=ip,
         user_agent=user_agent,
     )

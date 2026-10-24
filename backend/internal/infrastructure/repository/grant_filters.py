@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import and_, exists, or_
+from sqlalchemy import and_, exists, or_, true
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -61,6 +61,13 @@ def tenant_grant_exists(
     )
 
 
+def tenant_grant_absent(
+    resource_type: str, resource_id_col: Any, tenant_id: int
+) -> ColumnElement[bool]:
+    """资源是否未对指定租户直接授权，用于产品级资源继承所属智能体。"""
+    return ~tenant_grant_exists(resource_type, resource_id_col, tenant_id)
+
+
 def agent_visible(
     agent_id_col: Any,
     tenant_id: int,
@@ -69,16 +76,16 @@ def agent_visible(
 ) -> ColumnElement[bool]:
     """资源所属智能体对当前租户是否可见。
 
-    租户自有智能体：无授权即可见，有授权则按角色收敛；
-    产品级智能体：必须存在对当前租户的授权。
+    严格 RBAC：租户自有智能体必须显式授权；管理端超级管理员全量可见。
+    产品级智能体必须存在对当前租户的授权。
     """
-    tenant_owned = and_(
-        _VisibleAgent.tenant_id == tenant_id,
-        or_(
-            ~has_any_grant("agent", _VisibleAgent.id),
-            grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, apply_role_filter),
-        ),
-    )
+    if apply_role_filter:
+        tenant_owned = and_(
+            _VisibleAgent.tenant_id == tenant_id,
+            grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
+        )
+    else:
+        tenant_owned = _VisibleAgent.tenant_id == tenant_id
     platform_granted = and_(
         _VisibleAgent.tenant_id.is_(None),
         grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, apply_role_filter),
@@ -96,11 +103,10 @@ def tenant_resource_visible(
     role_ids: tuple[int, ...],
     apply_role_filter: bool,
 ) -> ColumnElement[bool]:
-    """租户自有资源：无授权默认全角色可见，有授权则按角色收敛。"""
-    return or_(
-        ~has_any_grant(resource_type, resource_id_col),
-        grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter),
-    )
+    """租户自有资源：必须显式授权；管理端超级管理员全量可见。"""
+    if not apply_role_filter:
+        return true()
+    return grant_exists(resource_type, resource_id_col, tenant_id, role_ids, True)
 
 
 def platform_resource_visible(
@@ -111,10 +117,10 @@ def platform_resource_visible(
     role_ids: tuple[int, ...],
     apply_role_filter: bool,
 ) -> ColumnElement[bool]:
-    """产品级资源：直接授权命中，或无直接授权时继承所属智能体授权。"""
+    """产品级资源：直接授权命中，或本租户无直接授权时继承所属智能体授权。"""
     direct = grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter)
     inherited = and_(
-        ~has_any_grant(resource_type, resource_id_col),
+        tenant_grant_absent(resource_type, resource_id_col, tenant_id),
         agent_id_col.is_not(None),
         agent_visible(agent_id_col, tenant_id, role_ids, apply_role_filter),
     )

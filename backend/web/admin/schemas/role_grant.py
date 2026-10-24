@@ -35,3 +35,9 @@ class RoleGrantUpdateOut(BaseModel):
     """角色授权变更结果。"""
 
     updated: int
+
+
+class RoleGrantSummaryOut(BaseModel):
+    """角色有效授权汇总，按资源类型返回数量。"""
+
+    counts: dict[str, int] = Field(default_factory=dict)

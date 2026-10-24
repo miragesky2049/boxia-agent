@@ -176,28 +176,9 @@ export interface ResourceGrant {
   created_at: string
 }
 
-export interface GrantInput {
-  tenant_id: number
-  role_id: number | null
-}
-
 export type ResourceType = 'agent' | 'skill' | 'tool' | 'component' | 'prompt'
 
-export type GrantState = 'granted' | 'ungranted'
 export type GrantBatchMode = 'merge' | 'replace' | 'clear'
-
-export interface GrantOverviewItem {
-  resource_id: number
-  name: string
-  description: string
-  is_platform: boolean
-  is_enabled: boolean
-  updated_at: string
-  grant_count: number
-  tenant_count: number
-  role_count: number
-  is_default_visible: boolean
-}
 
 export interface GrantBatchPayload {
   resource_type: ResourceType
@@ -205,6 +186,26 @@ export interface GrantBatchPayload {
   mode: GrantBatchMode
   tenant_id?: number | null
   role_ids: number[]
+}
+
+export interface RoleGrantResource {
+  resource_id: number
+  name: string
+  description: string
+  is_platform: boolean
+  is_enabled: boolean
+  updated_at: string
+  is_granted: boolean
+}
+
+export interface RoleGrantSummary {
+  counts: Record<string, number>
+}
+
+export interface UserRoleAssignPayload {
+  user_ids: number[]
+  role_ids: number[]
+  tenant_id?: number | null
 }
 
 export interface AuditLog {

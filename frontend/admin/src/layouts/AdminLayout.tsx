@@ -28,7 +28,7 @@ const ROLE_LABELS = {
 
 const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   agents: { icon: <RobotOutlined />, label: '智能体管理' },
-  grants: { icon: <SafetyOutlined />, label: '授权管理' },
+  grants: { icon: <SafetyOutlined />, label: '用户授权' },
   roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
   users: { icon: <IdcardOutlined />, label: '用户管理' },
   'admin-users': { icon: <TeamOutlined />, label: '管理员账号' },

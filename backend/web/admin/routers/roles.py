@@ -8,6 +8,7 @@ from web.admin.schemas.role_grant import (
     RoleGrantAddRequest,
     RoleGrantReplaceRequest,
     RoleGrantResourceOut,
+    RoleGrantSummaryOut,
     RoleGrantUpdateOut,
 )
 from web.deps.auth import SuperadminAuthDep
@@ -25,6 +26,17 @@ def list_roles(
 ) -> list[RoleOut]:
     """查询角色；产品级平台需指定租户。"""
     return [RoleOut.model_validate(item) for item in service.list(tenant_id, include_inactive)]
+
+
+@router.get("/{role_id}", response_model=RoleOut)
+def get_role(
+    role_id: int,
+    principal: SuperadminAuthDep,
+    service: RoleServiceDep,
+    tenant_id: int | None = Query(None, ge=1),
+) -> RoleOut:
+    """查询角色详情；产品级平台需指定租户。"""
+    return RoleOut.model_validate(service.get(role_id, tenant_id))
 
 
 @router.post("", response_model=RoleOut, status_code=status.HTTP_201_CREATED)
@@ -89,6 +101,16 @@ def delete_role(
         ip=ip,
         user_agent=user_agent,
     )
+
+
+@router.get("/{role_id}/grants/summary", response_model=RoleGrantSummaryOut)
+def get_role_grant_summary(
+    role_id: int,
+    principal: SuperadminAuthDep,
+    service: RoleGrantServiceDep,
+) -> RoleGrantSummaryOut:
+    """按资源类型返回角色有效授权数量。"""
+    return RoleGrantSummaryOut(counts=service.summary(role_id))
 
 
 @router.get("/{role_id}/grants", response_model=PageOut[RoleGrantResourceOut])
