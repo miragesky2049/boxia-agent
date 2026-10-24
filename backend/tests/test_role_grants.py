@@ -91,14 +91,14 @@ def test_role_detail_and_grant_lifecycle(
     assert detail.status_code == 200, detail.text
     assert detail.json()["code"] == "viewer"
 
-    # 平台查询角色详情必须指定租户
-    assert client.get(f"/api/v1/admin/roles/{viewer_id}", headers=auth_headers).status_code == 422
+    # 平台不能查看租户角色：不带 tenant_id 视为不存在，带 tenant_id 直接拒绝
+    assert client.get(f"/api/v1/admin/roles/{viewer_id}", headers=auth_headers).status_code == 404
     platform_detail = client.get(
         f"/api/v1/admin/roles/{viewer_id}",
         params={"tenant_id": tenant["id"]},
         headers=auth_headers,
     )
-    assert platform_detail.status_code == 200, platform_detail.text
+    assert platform_detail.status_code == 403
 
     skill = _create_skill(site, headers, "角色授权技能")
     skill_id = skill["id"]
@@ -330,7 +330,7 @@ def test_role_grants_cross_tenant_isolation(
         params={"tenant_id": tenant_a["id"]},
         headers=auth_headers,
     )
-    assert platform_detail.status_code == 200, platform_detail.text
+    assert platform_detail.status_code == 403
 
 
 def _load_migration_module():

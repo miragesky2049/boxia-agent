@@ -16,11 +16,6 @@ const ROLE_META: Record<AdminRole, { label: string; color: string }> = {
   viewer: { label: '只读', color: 'default' },
 }
 
-const ROLE_OPTIONS = (Object.keys(ROLE_META) as AdminRole[]).map((value) => ({
-  value,
-  label: ROLE_META[value].label,
-}))
-
 interface CreateFormValues {
   username: string
   display_name: string
@@ -44,7 +39,7 @@ export default function AdminUsersPage() {
   const { user: currentUser } = useAuth()
   const { isPlatform, context } = useTenant()
   const { message } = App.useApp()
-  const [tenantRoles, setTenantRoles] = useState<Role[]>([])
+  const [roles, setRoles] = useState<Role[]>([])
   const [items, setItems] = useState<AdminUser[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -60,20 +55,17 @@ export default function AdminUsersPage() {
   const [resetForm] = Form.useForm<ResetFormValues>()
 
   useEffect(() => {
-    if (isPlatform) {
-      setTenantRoles([])
-      return
-    }
+    // 平台与租户都只加载当前作用域角色：后端按上下文返回平台角色或本租户角色
     rolesApi
       .list()
-      .then((roles) => setTenantRoles(roles.filter((role) => role.is_active)))
-      .catch(() => setTenantRoles([]))
+      .then((items) => setRoles(items.filter((role) => role.is_active)))
+      .catch(() => setRoles([]))
   }, [isPlatform])
 
   const findRole = useCallback(
     (roleId?: number | null): Role | undefined =>
-      roleId ? tenantRoles.find((role) => role.id === roleId) : undefined,
-    [tenantRoles],
+      roleId ? roles.find((role) => role.id === roleId) : undefined,
+    [roles],
   )
 
   const load = useCallback(async () => {
@@ -202,6 +194,7 @@ export default function AdminUsersPage() {
       width: 160,
       render: (_: unknown, record: AdminUser) => {
         const bound = findRole(record.role_id)
+
         if (bound) {
           const meta = ROLE_META[bound.system_role]
           return (
@@ -293,7 +286,7 @@ export default function AdminUsersPage() {
           <h2 className="page-header__title">管理员账号</h2>
           <p className="page-header__desc">
             {isPlatform
-              ? '产品级管理员仅能登录产品级平台；租户管理员由租户用户在用户管理页通过管理角色赋予。'
+              ? '产品级管理员仅能登录产品级平台，可绑定平台自有角色；角色决定其可访问的平台级资源。'
               : '展示本租户内拥有超级管理员或管理员角色的账号，可在此调整角色与启用状态。'}
           </p>
         </div>
@@ -380,26 +373,23 @@ export default function AdminUsersPage() {
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          {isPlatform ? (
-            <Form.Item
-              name="role"
-              label="角色"
-              rules={[{ required: true, message: '请选择角色' }]}
-            >
-              <Select options={ROLE_OPTIONS} />
-            </Form.Item>
-          ) : (
-            <Form.Item
-              name="role_id"
-              label="租户角色"
-              rules={[{ required: true, message: '请选择租户角色' }]}
-              extra="租户角色决定账号在管理端可访问的智能体与资源。"
-            >
-              <Select
-                options={tenantRoles.map((role) => ({ label: role.name, value: role.id }))}
-              />
-            </Form.Item>
-          )}
+          <Form.Item
+            name="role_id"
+            label={isPlatform ? '平台角色' : '租户角色'}
+            rules={[
+              {
+                required: true,
+                message: isPlatform ? '请选择平台角色' : '请选择租户角色',
+              },
+            ]}
+            extra={
+              isPlatform
+                ? '平台角色决定账号可访问的平台级资源范围。'
+                : '租户角色决定账号在管理端可访问的智能体与资源。'
+            }
+          >
+            <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
+          </Form.Item>
         </Form>
       </Modal>
 
@@ -421,26 +411,19 @@ export default function AdminUsersPage() {
           >
             <Input />
           </Form.Item>
-          {isPlatform ? (
-            <Form.Item
-              name="role"
-              label="角色"
-              rules={[{ required: true, message: '请选择角色' }]}
-            >
-              <Select options={ROLE_OPTIONS} />
-            </Form.Item>
-          ) : (
-            <Form.Item
-              name="role_id"
-              label="租户角色"
-              rules={[{ required: true, message: '请选择租户角色' }]}
-              extra="修改角色会立即刷新该账号的权限与会话。"
-            >
-              <Select
-                options={tenantRoles.map((role) => ({ label: role.name, value: role.id }))}
-              />
-            </Form.Item>
-          )}
+          <Form.Item
+            name="role_id"
+            label={isPlatform ? '平台角色' : '租户角色'}
+            rules={[
+              {
+                required: true,
+                message: isPlatform ? '请选择平台角色' : '请选择租户角色',
+              },
+            ]}
+            extra="修改角色会立即刷新该账号的权限与会话。"
+          >
+            <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
+          </Form.Item>
         </Form>
       </Modal>
 

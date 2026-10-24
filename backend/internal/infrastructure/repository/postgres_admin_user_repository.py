@@ -151,6 +151,7 @@ class PostgresAdminUserRepository:
             created_at=row.created_at,
             updated_at=row.updated_at,
             role=row.role,
+            role_id=row.role_id,
             token_version=row.token_version,
             failed_login_count=row.failed_login_count,
             locked_until=row.locked_until,

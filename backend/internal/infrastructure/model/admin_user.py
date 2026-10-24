@@ -2,7 +2,17 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, CheckConstraint, DateTime, Integer, String, func
+from sqlalchemy import (
+    BigInteger,
+    Boolean,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Integer,
+    String,
+    func,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from internal.infrastructure.model.base import Base
@@ -14,6 +24,7 @@ class AdminUserModel(Base):
     __tablename__ = "admin_users"
     __table_args__ = (
         CheckConstraint("role IN ('superadmin', 'admin', 'viewer')", name="ck_admin_users_role"),
+        Index("ix_admin_users_role", "role_id"),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
@@ -22,6 +33,9 @@ class AdminUserModel(Base):
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     role: Mapped[str] = mapped_column(String(16), nullable=False, default="admin")
+    role_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("roles.id", ondelete="RESTRICT")
+    )
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

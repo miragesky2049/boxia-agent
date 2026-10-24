@@ -91,30 +91,33 @@ def test_referenced_role_cannot_be_deleted(
     assert deleted.status_code == 409
 
 
-def test_platform_cannot_manage_tenant_roles(
+def test_platform_manages_own_roles_only(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     create_tenant(client, auth_headers)
 
     created = client.post(
         "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营", "system_role": "viewer"},
         headers=auth_headers,
     )
-    assert created.status_code == 403
+    assert created.status_code == 201, created.text
+    assert created.json()["tenant_id"] is None
 
-    missing_tenant = client.get("/api/v1/admin/roles", headers=auth_headers)
-    assert missing_tenant.status_code == 422
+    listed = client.get("/api/v1/admin/roles", headers=auth_headers)
+    assert listed.status_code == 200
+    codes = {item["code"] for item in listed.json()}
+    assert {"superadmin", "admin", "viewer", "ops"} <= codes
+    assert all(item["tenant_id"] is None for item in listed.json())
 
     tenant = client.get("/api/v1/admin/tenants", headers=auth_headers).json()
     tenant_item = next(item for item in tenant["items"] if item["code"] == "acme")
-    listed = client.get(
+    forbidden = client.get(
         "/api/v1/admin/roles",
         params={"tenant_id": tenant_item["id"]},
         headers=auth_headers,
     )
-    assert listed.status_code == 200
-    assert {"superadmin", "admin", "viewer"} <= {item["code"] for item in listed.json()}
+    assert forbidden.status_code == 403
 
 
 def test_roles_are_tenant_isolated(

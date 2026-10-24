@@ -2,7 +2,7 @@
 
 from typing import Any
 
-from sqlalchemy import and_, exists, or_, true
+from sqlalchemy import and_, exists, false, or_, true
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -43,10 +43,25 @@ def grant_exists(
 
 
 def has_any_grant(resource_type: str, resource_id_col: Any) -> ColumnElement[bool]:
-    """资源是否存在任意授权（跨租户）。"""
+    """资源是否存在任意租户授权（跨租户）；平台角色授权不计入。"""
     return exists().where(
         ResourceGrantModel.resource_type == resource_type,
         ResourceGrantModel.resource_id == resource_id_col,
+        ResourceGrantModel.tenant_id.is_not(None),
+    )
+
+
+def platform_role_grant_exists(
+    resource_type: str, resource_id_col: Any, role_ids: tuple[int, ...]
+) -> ColumnElement[bool]:
+    """平台资源是否授权给指定平台角色；无角色时 fail-closed。"""
+    if not role_ids:
+        return false()
+    return exists().where(
+        ResourceGrantModel.resource_type == resource_type,
+        ResourceGrantModel.resource_id == resource_id_col,
+        ResourceGrantModel.tenant_id.is_(None),
+        ResourceGrantModel.role_id.in_(role_ids),
     )
 
 

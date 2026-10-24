@@ -200,10 +200,10 @@ class AdminUserService:
         ip: str | None,
         user_agent: str | None,
     ) -> AdminUser:
-        """创建产品级平台账号。"""
-        if role_id is not None:
-            raise ValidationError("产品级账号不能绑定租户角色")
-        self._validate_system_role(role)
+        """创建产品级平台账号；可绑定平台自定义角色。"""
+        matched_role = self._resolve_platform_role(role_id)
+        role_code = matched_role.system_role if matched_role is not None else role
+        self._validate_system_role(role_code)
         if self._uow.admin_users.get_by_username(username) is not None:
             raise ConflictError("用户名已存在")
         validate_password_strength(password, username)
@@ -212,7 +212,8 @@ class AdminUserService:
                 "username": username,
                 "password_hash": hash_password(password),
                 "display_name": display_name.strip() or username,
-                "role": role,
+                "role": role_code,
+                "role_id": matched_role.id if matched_role is not None else None,
                 "is_active": True,
                 "must_change_password": True,
                 "password_changed_at": datetime.now(UTC),
@@ -227,7 +228,7 @@ class AdminUserService:
             resource_id=str(user.id),
             ip=ip,
             user_agent=user_agent,
-            detail={"role": role, "tenant_id": None},
+            detail={"role": role_code, "role_id": user.role_id, "tenant_id": None},
             tenant_id=None,
         )
         self._uow.commit()
@@ -290,18 +291,21 @@ class AdminUserService:
         ip: str | None,
         user_agent: str | None,
     ) -> AdminUser:
-        """调整产品级平台账号。"""
+        """调整产品级平台账号；可切换到平台自定义角色。"""
         target = self._uow.admin_users.get_by_id(user_id)
         if target is None:
             raise NotFoundError("管理员不存在")
         values: dict = {}
         role_code: str | None = None
         if role is not None or role_id is not None:
-            if role_id is not None:
-                raise ValidationError("产品级账号不能绑定租户角色")
-            role_code = role or target.role
+            matched_role = self._resolve_platform_role(role_id)
+            role_code = (
+                matched_role.system_role if matched_role is not None else role or target.role
+            )
             self._validate_system_role(role_code)
             values["role"] = role_code
+            if matched_role is not None:
+                values["role_id"] = matched_role.id
         if target.id == actor_id:
             if is_active is False:
                 raise ValidationError("不能禁用当前登录账号")
@@ -455,6 +459,17 @@ class AdminUserService:
         if self._context.is_platform or tenant_id is None:
             raise ForbiddenError("租户管理员仅可由租户平台维护")
         return tenant_id
+
+    def _resolve_platform_role(self, role_id: int | None) -> Role | None:
+        """解析平台账号绑定角色，必须是启用的平台角色。"""
+        if role_id is None:
+            return None
+        matched = self._uow.roles.get_by_id(role_id)
+        if matched is None or matched.tenant_id is not None:
+            raise ValidationError("角色不属于产品级平台")
+        if not matched.is_active:
+            raise ValidationError("角色已停用")
+        return matched
 
     @staticmethod
     def _validate_system_role(role: str) -> None:

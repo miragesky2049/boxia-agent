@@ -81,11 +81,25 @@ def _reset_data():
         tables = ", ".join(sorted(existing))
         if tables:
             conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        # TRUNCATE 会清掉迁移种子，需重建平台系统角色并让平台超管绑定 superadmin
+        conn.execute(
+            text(
+                "INSERT INTO roles "
+                "(tenant_id, code, name, description, system_role, is_system, is_active) "
+                "VALUES "
+                "(NULL, 'superadmin', '超级管理员', '平台最高权限，默认可访问全部平台级资源', "
+                " 'superadmin', TRUE, TRUE), "
+                "(NULL, 'admin', '管理员', '可读写被授权的平台级资源', 'admin', TRUE, TRUE), "
+                "(NULL, 'viewer', '只读成员', '只读访问被授权的平台级资源', 'viewer', TRUE, TRUE)"
+            )
+        )
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role, must_change_password) "
-                "VALUES (:username, :password_hash, :display_name, 'superadmin', FALSE)"
+                "(username, password_hash, display_name, role, role_id, must_change_password) "
+                "VALUES (:username, :password_hash, :display_name, 'superadmin', "
+                "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = 'superadmin'), "
+                "        FALSE)"
             ),
             {
                 "username": ADMIN_USERNAME,

@@ -152,15 +152,26 @@ class AuthService:
             raise UnauthorizedError("登录状态已失效，请重新登录")
         if not self._uow.refresh_tokens.is_family_active(session_id):
             raise UnauthorizedError("登录状态已失效，请重新登录")
-        role = self._uow.roles.get_by_id(user.role_id) if user.role_id is not None else None
-        if user.role_id is not None and (role is None or not role.is_active):
-            raise UnauthorizedError("账号角色已失效，请联系管理员")
+        role = self._resolve_platform_role(user)
         return AccessContext(
             user=user,
             session_id=session_id,
             role=role,
             roles=(role,) if role is not None else (),
         )
+
+    def _resolve_platform_role(self, user: AdminUser) -> Role | None:
+        """解析平台账号的平台角色：优先 role_id，旧数据按 role 字符串回退。"""
+        if user.role_id is not None:
+            role = self._uow.roles.get_by_id(user.role_id)
+            if role is None or role.tenant_id is not None or not role.is_active:
+                raise UnauthorizedError("账号角色已失效，请联系管理员")
+            return role
+        # 未绑定角色 ID 的历史账号按角色编码回退，查不到时保持字符串权限
+        role = self._uow.roles.get_by_code(None, user.role) if user.role else None
+        if role is not None and not role.is_active:
+            raise UnauthorizedError("账号角色已失效，请联系管理员")
+        return role
 
     def get_profile(self, user_id: int, tenant_id: int | None = None) -> AdminUser:
         """查询当前管理员信息；租户账号由 users + 角色映射。"""
@@ -511,8 +522,13 @@ class AuthService:
         if rotated_from is not None:
             self._uow.refresh_tokens.rotate(rotated_from, new_row.id)
 
+        role_code = user.role
+        if user.role_id is not None:
+            bound_role = self._uow.roles.get_by_id(user.role_id)
+            if bound_role is not None:
+                role_code = bound_role.system_role
         access_token, expires_in = create_access_token(
-            user.id, user.username, user.role, family, user.token_version, user.tenant_id
+            user.id, user.username, role_code, family, user.token_version, user.tenant_id
         )
         return TokenPair(
             access_token=access_token,

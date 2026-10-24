@@ -76,7 +76,7 @@ def require_admin(
         display_name=user.display_name,
         role=system_role,
         session_id=access.session_id,
-        role_id=user.role_id,
+        role_id=access.role.id if access.role is not None else user.role_id,
         role_ids=access.role_ids,
         system_role=system_role,
         permissions=frozenset(SYSTEM_ROLE_PERMISSIONS.get(system_role, ("read",))),

@@ -23,10 +23,10 @@ SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
 
 @dataclass(frozen=True)
 class Role:
-    """租户自定义角色；system_role 决定管理端基础权限。"""
+    """角色；tenant_id 为空表示平台自有角色，system_role 决定基础权限。"""
 
     id: int
-    tenant_id: int
+    tenant_id: int | None
     code: str
     name: str
     description: str
@@ -86,7 +86,7 @@ class ResourceGrant:
     id: int
     resource_type: str
     resource_id: int
-    tenant_id: int
+    tenant_id: int | None
     role_id: int | None
     granted_by: int | None
     created_at: datetime

@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 
 from internal.domain.entity.access import Role
 from internal.infrastructure.model.access import RoleModel, UserModel, UserRoleModel
+from internal.infrastructure.model.admin_user import AdminUserModel
 
 
 class PostgresRoleRepository:
@@ -20,19 +21,20 @@ class PostgresRoleRepository:
         row = self._session.get(RoleModel, role_id)
         return self._to_entity(row) if row else None
 
-    def get_by_code(self, tenant_id: int, code: str) -> Role | None:
-        """按租户与编码查询（忽略大小写）。"""
-        row = self._session.scalar(
-            select(RoleModel).where(
-                RoleModel.tenant_id == tenant_id,
-                func.lower(RoleModel.code) == code.strip().lower(),
-            )
+    def get_by_code(self, tenant_id: int | None, code: str) -> Role | None:
+        """按作用域与编码查询（忽略大小写）；tenant_id 为空表示平台角色。"""
+        stmt = select(RoleModel).where(
+            func.lower(RoleModel.code) == code.strip().lower()
         )
+        stmt = stmt.where(_tenant_condition(tenant_id))
+        row = self._session.scalar(stmt)
         return self._to_entity(row) if row else None
 
-    def list_by_tenant(self, tenant_id: int, include_inactive: bool = False) -> list[Role]:
-        """查询租户角色列表，系统角色排在前面。"""
-        stmt = select(RoleModel).where(RoleModel.tenant_id == tenant_id)
+    def list_by_tenant(
+        self, tenant_id: int | None, include_inactive: bool = False
+    ) -> list[Role]:
+        """查询作用域内角色列表，系统角色排在前面；tenant_id 为空表示平台角色。"""
+        stmt = select(RoleModel).where(_tenant_condition(tenant_id))
         if not include_inactive:
             stmt = stmt.where(RoleModel.is_active.is_(True))
         rows = self._session.scalars(
@@ -68,20 +70,24 @@ class PostgresRoleRepository:
         self._session.flush()
         return True
 
-    def code_exists(self, tenant_id: int, code: str, exclude_id: int | None = None) -> bool:
-        """租户内编码是否已存在（忽略大小写）。"""
+    def code_exists(
+        self, tenant_id: int | None, code: str, exclude_id: int | None = None
+    ) -> bool:
+        """作用域内编码是否已存在（忽略大小写）。"""
         stmt = select(RoleModel.id).where(
-            RoleModel.tenant_id == tenant_id,
+            _tenant_condition(tenant_id),
             func.lower(RoleModel.code) == code.strip().lower(),
         )
         if exclude_id is not None:
             stmt = stmt.where(RoleModel.id != exclude_id)
         return self._session.scalar(stmt) is not None
 
-    def name_exists(self, tenant_id: int, name: str, exclude_id: int | None = None) -> bool:
-        """租户内名称是否已存在（忽略大小写）。"""
+    def name_exists(
+        self, tenant_id: int | None, name: str, exclude_id: int | None = None
+    ) -> bool:
+        """作用域内名称是否已存在（忽略大小写）。"""
         stmt = select(RoleModel.id).where(
-            RoleModel.tenant_id == tenant_id,
+            _tenant_condition(tenant_id),
             func.lower(RoleModel.name) == name.strip().lower(),
         )
         if exclude_id is not None:
@@ -89,7 +95,7 @@ class PostgresRoleRepository:
         return self._session.scalar(stmt) is not None
 
     def count_references(self, role_id: int) -> int:
-        """统计用户主角色与用户角色关联的引用数。"""
+        """统计用户、用户角色关联与平台管理员账号的引用数。"""
         user_count = self._session.scalar(
             select(func.count()).select_from(UserModel).where(UserModel.role_id == role_id)
         )
@@ -98,7 +104,12 @@ class PostgresRoleRepository:
             .select_from(UserRoleModel)
             .where(UserRoleModel.role_id == role_id)
         )
-        return int(user_count or 0) + int(relation_count or 0)
+        admin_count = self._session.scalar(
+            select(func.count())
+            .select_from(AdminUserModel)
+            .where(AdminUserModel.role_id == role_id)
+        )
+        return int(user_count or 0) + int(relation_count or 0) + int(admin_count or 0)
 
     @staticmethod
     def _to_entity(row: RoleModel) -> Role:
@@ -114,3 +125,10 @@ class PostgresRoleRepository:
             created_at=row.created_at,
             updated_at=row.updated_at,
         )
+
+
+def _tenant_condition(tenant_id: int | None):
+    """作用域条件：None 表示平台角色，其余为租户角色。"""
+    if tenant_id is None:
+        return RoleModel.tenant_id.is_(None)
+    return RoleModel.tenant_id == tenant_id

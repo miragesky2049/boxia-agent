@@ -27,7 +27,7 @@ RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
 
 
 class RoleModel(Base):
-    """roles 表：租户内自定义角色，system_role 决定管理端基础权限。"""
+    """roles 表：tenant_id 为空表示平台角色，非空表示租户角色。"""
 
     __tablename__ = "roles"
     __table_args__ = (
@@ -39,11 +39,23 @@ class RoleModel(Base):
             name="ck_roles_system_role",
         ),
         Index("ix_roles_tenant_active", "tenant_id", "is_active"),
+        Index(
+            "ux_roles_platform_code",
+            func.lower(text("code")),
+            unique=True,
+            postgresql_where=text("tenant_id IS NULL"),
+        ),
+        Index(
+            "ux_roles_platform_name",
+            func.lower(text("name")),
+            unique=True,
+            postgresql_where=text("tenant_id IS NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -157,6 +169,10 @@ class ResourceGrantModel(Base):
             "resource_type IN ('agent', 'skill', 'tool', 'component', 'prompt')",
             name="ck_resource_grants_type",
         ),
+        CheckConstraint(
+            "tenant_id IS NOT NULL OR role_id IS NOT NULL",
+            name="ck_resource_grants_scope",
+        ),
         ForeignKeyConstraint(
             ["role_id", "tenant_id"],
             ["roles.id", "roles.tenant_id"],
@@ -182,15 +198,25 @@ class ResourceGrantModel(Base):
             unique=True,
             postgresql_where=text("role_id IS NOT NULL"),
         ),
+        Index(
+            "ux_resource_grants_platform_role",
+            "resource_type",
+            "resource_id",
+            "role_id",
+            unique=True,
+            postgresql_where=text("tenant_id IS NULL AND role_id IS NOT NULL"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
     resource_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    tenant_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
     )
-    role_id: Mapped[int | None] = mapped_column(BigInteger)
+    role_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("roles.id", ondelete="CASCADE")
+    )
     granted_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
     )

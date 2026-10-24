@@ -779,8 +779,9 @@ def test_admin_context_menus_scope_grants(
     platform_context = client.get("/api/v1/admin/context", headers=auth_headers)
     assert platform_context.status_code == 200, platform_context.text
     platform_menus = platform_context.json()["menus"]
-    # 平台侧不再提供资源授权菜单，租户侧 grants 表示给用户分配角色
+    # 平台侧提供平台角色菜单，不再提供资源授权菜单；租户侧 grants 表示给用户分配角色
     assert "grants" not in platform_menus
+    assert "roles" in platform_menus
     assert "tenants" in platform_menus
 
     create_tenant(client, auth_headers)

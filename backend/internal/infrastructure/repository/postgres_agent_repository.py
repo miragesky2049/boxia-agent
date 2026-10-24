@@ -11,6 +11,7 @@ from internal.infrastructure.model.resource import SkillModel, ToolModel
 from internal.infrastructure.repository.grant_filters import (
     agent_visible,
     has_any_grant,
+    platform_role_grant_exists,
     tenant_grant_exists,
 )
 
@@ -31,9 +32,14 @@ class PostgresAgentRepository:
         self._apply_role_filter = apply_role_filter
 
     def _visible(self, stmt):
-        """读可见范围：平台视角仅产品级；租户视角按授权过滤。"""
+        """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
         if self._tenant_id is None:
-            return stmt.where(AgentModel.tenant_id.is_(None))
+            stmt = stmt.where(AgentModel.tenant_id.is_(None))
+            if self._apply_role_filter:
+                stmt = stmt.where(
+                    platform_role_grant_exists("agent", AgentModel.id, self._role_ids)
+                )
+            return stmt
         return stmt.where(
             agent_visible(
                 AgentModel.id,
