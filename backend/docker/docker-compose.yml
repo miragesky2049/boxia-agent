@@ -1,3 +1,5 @@
+name: postgresql # Compose 项目名（stack 名），不加时默认取本文件所在目录名
+
 services:
   postgres:
     image: postgres:17-alpine
