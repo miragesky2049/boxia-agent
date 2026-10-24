@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-USERS_URL = "/api/v1/admin/users"
+USERS_URL = "/api/v1/admin/admin-users"
 OPERATOR_PASSWORD = "Editor-pass-123"
 
 

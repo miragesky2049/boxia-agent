@@ -10,10 +10,30 @@ const adminUser = {
   username: 'admin',
   display_name: '管理员',
   role: 'superadmin',
+  role_id: null,
+  tenant_id: null,
   is_active: true,
   must_change_password: false,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
+}
+
+const adminContext = {
+  scope: 'platform',
+  tenant: null,
+  user: adminUser,
+  role: 'superadmin',
+  system_role: 'superadmin',
+  permissions: ['agent:read', 'agent:write'],
+  menus: ['agents', 'roles', 'users', 'admin-users', 'tenants'],
+  app_env: 'local',
+  tenant_resolution: 'host',
+  tenant_switch_mode: 'none',
+  root_domain: 'example.com',
+  platform_admin_subdomain: 'admin',
+  platform_admin_host: 'admin.example.com',
+  platform_name: 'Boxia',
+  password_policy: { min_length: 8, max_bytes: 72, min_categories: 2 },
 }
 
 function jsonResponse(body: unknown, status = 200) {
@@ -52,8 +72,8 @@ describe('AuthProvider', () => {
           user: adminUser,
         })
       }
-      if (url.endsWith('/admin/auth/me')) {
-        return jsonResponse(adminUser)
+      if (url.endsWith('/admin/context')) {
+        return jsonResponse(adminContext)
       }
       return jsonResponse({ detail: 'not found' }, 404)
     })

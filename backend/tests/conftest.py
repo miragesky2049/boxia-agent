@@ -15,7 +15,6 @@ os.environ["DATABASE_URL"] = f"postgresql+psycopg://postgres:postgres@127.0.0.1:
 os.environ["JWT_SECRET"] = "test-jwt-secret-0123456789abcdef0123456789abcdef"
 os.environ["ACCESS_TOKEN_MINUTES"] = "60"
 os.environ["BCRYPT_ROUNDS"] = "4"
-os.environ["USER_API_TOKEN"] = "test-user-token-0123456789abcdef"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["ROOT_DOMAIN"] = "example.com"
 os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "adminsystem"
@@ -39,7 +38,6 @@ from web.app import create_app  # noqa: E402
 
 ADMIN_APP = create_app("admin")
 USER_APP = create_app("user")
-USER_API_TOKEN = os.environ["USER_API_TOKEN"]
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Admin-password-123"
@@ -140,3 +138,23 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def user_login_headers(user_tenant_client):
+    """最终用户登录：返回按租户子域名登录后的 Bearer 头。"""
+
+    def _login(
+        tenant_code: str,
+        username: str,
+        password: str,
+    ) -> dict[str, str]:
+        client = user_tenant_client(tenant_code)
+        response = client.post(
+            "/api/v1/user/auth/login",
+            json={"username": username, "password": password},
+        )
+        assert response.status_code == 200, response.text
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _login
