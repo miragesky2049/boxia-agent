@@ -53,19 +53,23 @@
 │
 ├── 管理端  http://localhost:5173    ← 运营/管理员使用（React）
 │           http://*.localhost:5173  ← 本地验证平台/租户子域名
-├── 用户端  http://localhost:5174    ← 最终用户使用（目前是骨架页）
+├── 用户端  http://localhost:5174    ← 最终用户使用（Agent Chat）
 │
-└──────────────┬───────────────────
-               ▼
-        后端 API  http://127.0.0.1:8000   ← 登录、数据、业务规则（Python）
-               │
-               ▼
-          PostgreSQL 数据库               ← 所有数据保存在这里
+├──────────────┬────────────────────
+▼              ▼
+管理端 API      用户端 API
+127.0.0.1:8000  127.0.0.1:8001     ← 两个站点独立打包、独立路由
+/admin/**       /user/**
+/public/**
+│              │
+└──────┬───────┘
+       ▼
+  PostgreSQL 数据库               ← 所有数据保存在这里
 ```
 
-- **后端**：Python 3.12 + FastAPI，负责登录鉴权、数据读写、业务规则。
-- **管理端**：React 19 + TypeScript + Ant Design，负责智能体、资源、管理员和审计管理。
-- **用户端**：React + TypeScript，面向最终用户的对话门户，目前只有骨架页面。
+- **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
+- **管理端**：React 19 + TypeScript + Ant Design，负责智能体、资源、租户、管理员和审计管理。
+- **用户端**：React + TypeScript，面向最终用户的 Agent Chat 对话门户。
 - **数据库**：PostgreSQL 17。开发时用 Docker 启动，不需要单独安装。
 
 ### 1.3 核心能力
@@ -191,7 +195,7 @@ cd boxia-agent
 docker compose -f backend/docker/docker-compose.yml up -d
 ```
 
-这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。
+这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。编排文件把 Compose 项目名固定为 `postgresql`，因此 `docker compose ls` 中显示的名称不受执行目录影响。
 
 确认它真的起来了：
 
@@ -325,10 +329,14 @@ $env:ADMIN_USERNAME="admin"; $env:ADMIN_PASSWORD="Boxia-2026-Root!"; uv run pyth
 **5）启动后端**
 
 ```bash
-uv run uvicorn web.app:app --reload
+# 管理端后端（端口 8000）
+uv run uvicorn web.app_admin:app --reload
+
+# 用户端后端（端口 8001，另开一个终端执行）
+uv run uvicorn web.app_user:app --reload --port 8001
 ```
 
-这个终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。后端地址是 `http://127.0.0.1:8000`。
+终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。
 
 **6）验证后端**
 
@@ -339,6 +347,7 @@ uv run uvicorn web.app:app --reload
 | <http://127.0.0.1:8000/health/live>  | `{"status":"ok"}`                                  |
 | <http://127.0.0.1:8000/health/ready> | `status` 为 `ok`，表示数据库已连通且表结构是最新的 |
 | <http://127.0.0.1:8000/docs>         | Swagger 接口文档（开发环境自动开启）               |
+| <http://127.0.0.1:8001/health/live>  | 用户端后端存活；用户端文档在 `8001/docs`           |
 
 如果 `/health/ready` 返回 503，看 [4.6](#46-healthready-返回-503-migration_outdated)。
 
@@ -354,6 +363,17 @@ pnpm run dev
 
 - `pnpm install` 会严格按照 `pnpm-lock.yaml` 安装依赖；首次较慢，之后复用全局 store，安装基本是秒级。
 - `pnpm run dev` 启动开发服务器，成功后终端会显示访问地址。
+
+也可以在 `frontend/` 根目录按站点启停（先确保对应子目录已 `pnpm install`）：
+
+```bash
+cd frontend
+pnpm run dev admin     # 只启动管理端（5173）
+pnpm run dev user      # 只启动用户端（5174）
+pnpm run dev           # 两个前端一起启动
+pnpm run stop admin    # 只停止管理端
+pnpm run stop          # 停止两个前端
+```
 
 打开 <http://localhost:5173>：
 
@@ -385,22 +405,26 @@ pnpm install
 pnpm run dev     # http://localhost:5174
 ```
 
-用户端目前是骨架页面，只用于验证前端工程和接口链路。它的接口需要后端配置 `USER_API_TOKEN`（见第 6 节），未配置时会返回“暂不可用”。
+也可以从 `frontend/` 根目录执行 `pnpm run dev user`（或 `pnpm run dev` 同时启动两端）。
+
+用户端是 Agent Chat 门户，接口走独立后端 `127.0.0.1:8001`。它要求后端配置 `USER_API_TOKEN`（见第 6 节），未配置时返回“暂不可用”；并且必须通过租户子域名访问（如 `http://<租户编码>.localhost:5174`），根域名 `localhost:5174` 会被拒绝。
 
 ### 3.6 懒人版一键启动
 
-先回到仓库根目录。如果数据库已经在运行，并且能使用 Git Bash，可以一条命令启动后端（含自动迁移）和管理端：
-
-Git Bash / macOS / Linux：
+先回到仓库根目录。如果数据库已经在运行，并且能使用 Git Bash，可以用一条命令启动指定站点（含对应后端与自动迁移），不带参数时启动两个站点：
 
 ```bash
-./ops/dev.sh
+./ops/dev.sh          # 统一启动：管理端 + 用户端
+./ops/dev.sh admin    # 只启动管理端：后端 8000 + Vite 5173
+./ops/dev.sh user     # 只启动用户端：后端 8001 + Vite 5174
 ```
 
 PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh`，那会调用 WSL 的 bash）：
 
 ```powershell
 & "C:\Program Files\Git\bin\bash.exe" ops/dev.sh
+& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh admin
+& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh user
 ```
 
 > 仓库中的 `.sh` 脚本在 Windows 上通常没有可执行权限，所以也可以统一用 `bash 脚本名` 运行（仅在 Git Bash 终端内有效）。
@@ -411,17 +435,18 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 1. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
 2. 执行 `uv sync` 和数据库迁移
-3. 后台启动后端 `127.0.0.1:8000`
-4. 启动管理端 Vite `localhost:5173`
+3. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`
+4. 按参数启动对应 Vite：管理端 `localhost:5173`、用户端 `localhost:5174`
+5. `Ctrl + C` 时一并停止本次启动的后端进程
 
 注意：它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
 
 ### 3.7 如何停止服务
 
-| 服务            | 停止方式                                                                     |
-|-----------------|------------------------------------------------------------------------------|
-| 后端            | 在后端终端按 `Ctrl + C`                                                      |
-| 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或回到仓库根目录执行 `cd frontend && pnpm run stop` |
+| 服务            | 停止方式                                                                                              |
+|-----------------|-------------------------------------------------------------------------------------------------------|
+| 后端            | 在启动它的终端按 `Ctrl + C`；用 `ops/dev.sh` 启动时按一次会同时停止对应的所有后端                     |
+| 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或执行 `cd frontend && pnpm run stop`（两个前端）/ `pnpm run stop admin`（单个） |
 | 数据库          | 执行 `docker compose -f backend/docker/docker-compose.yml down`              |
 
 > `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
@@ -433,10 +458,12 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 | 管理端               | <http://localhost:5173>                              | 管理后台（本地回环，可用请求头切换作用域） |
 | 管理端（平台子域名） | <http://adminsystem.localhost:5173>                  | 本地验证产品级平台域名解析                 |
 | 管理端（租户子域名） | `http://<租户编码>.localhost:5173`                   | 本地验证租户域名解析，需先创建租户         |
-| 用户端               | <http://localhost:5174>                              | 用户门户（骨架）                           |
-| 后端                 | <http://127.0.0.1:8000/>                             | 返回服务名和版本                           |
-| 健康检查             | `http://127.0.0.1:8000/health/live`、`/health/ready` | 存活 / 就绪                                |
-| 接口文档             | <http://127.0.0.1:8000/docs>                         | 开发环境在线调试                           |
+| 用户端               | <http://localhost:5174>                              | Agent Chat 门户，需租户子域名访问          |
+| 用户端（租户子域名） | `http://<租户编码>.localhost:5174`                   | 本地验证用户端域名解析与 `USER_API_TOKEN`  |
+| 管理端后端           | <http://127.0.0.1:8000/>                             | 仅 admin / public 路由                     |
+| 用户端后端           | <http://127.0.0.1:8001/>                             | 仅 user 路由                               |
+| 健康检查             | `http://127.0.0.1:8000/health/live`、`/health/ready` | 管理端后端存活 / 就绪                      |
+| 接口文档             | <http://127.0.0.1:8000/docs>                         | 管理端在线调试（用户端为 8001/docs）       |
 | 数据库               | `127.0.0.1:5432`                                     | 仅本机可访问                               |
 
 ### 3.9 常用命令速查
@@ -448,13 +475,13 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 docker compose -f backend/docker/docker-compose.yml up -d
 
 # 启动后端（控制台 1）
-cd backend && uv run uvicorn web.app:app --reload
+cd backend && uv run uvicorn web.app_admin:app --reload                # 管理端 8000
+cd backend && uv run uvicorn web.app_user:app --reload --port 8001     # 用户端 8001
 
-# 启动管理端（控制台 2）
-cd frontend/admin && pnpm run dev
-
-# 启动两个前端（控制台 2，可选）
-cd frontend && pnpm run dev
+# 启动前端（控制台 2）
+cd frontend && pnpm run dev admin   # 只启动管理端 5173
+cd frontend && pnpm run dev user    # 只启动用户端 5174
+cd frontend && pnpm run dev         # 两个前端一起启动
 
 # 执行数据库迁移
 cd backend && uv run alembic upgrade head
@@ -498,7 +525,7 @@ docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
 
 按 3.2 的密码规则重新输入。最常见的原因：
 
-- 长度不足 `PASSWORD_MIN_LENGTH`（默认 12 位）
+- 长度不足 `PASSWORD_MIN_LENGTH`（代码默认 12 位；`backend/.env.example` 本地模板为 10 位）
 - 只有字母或只有数字，字符类别不足 `PASSWORD_MIN_CATEGORIES`（默认 3 类）
 - 密码里包含用户名 `admin`
 - 使用了常见弱口令
@@ -510,16 +537,18 @@ docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
 - 首次登录后修改过密码，请使用**新密码**登录。
 - 连续输错 5 次会锁定 15 分钟，等待后再试，或让超级管理员重置。
 
-### 4.5 端口被占用（8000 / 5173 / 5174）
+### 4.5 端口被占用（8000 / 8001 / 5173 / 5174）
 
-前端可以一键停止两个开发服务器：
+前端可以按站点停止开发服务器：
 
 ```bash
 cd frontend
-pnpm run stop
+pnpm run stop         # 停止两个
+pnpm run stop admin   # 只停止管理端
+pnpm run stop user    # 只停止用户端
 ```
 
-后端 8000 端口在 Windows 下可以这样排查：
+后端 8000（管理端）或 8001（用户端）端口在 Windows 下可以这样排查：
 
 ```powershell
 netstat -ano | findstr :8000
@@ -660,18 +689,23 @@ WSL (109097 - Relay) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed: 
 boxia-agent/
 ├── backend/                     # 后端（Python）
 │   ├── web/                     # HTTP 层：路由、请求/响应模型、异常处理
-│   │   ├── app.py               # 应用装配入口：中间件、异常、健康检查、指标、路由
-│   │   ├── api_v1.py            # /api/v1 路由汇总（含 /api 兼容别名）
-│   │   ├── public.py            # 匿名作用域信息、本地调试租户列表
-│   │   ├── admin/               # 管理端接口（含租户管理、作用域信息）
-│   │   ├── user/                # 用户端接口（骨架）
+│   │   ├── app.py               # 应用工厂：按站点装配共享基础设施与路由
+│   │   ├── app_admin.py         # 管理端入口：仅装配 admin 路由
+│   │   ├── app_user.py          # 用户端入口：仅装配 user 路由
+│   │   ├── api_v1.py            # admin / user 两套独立的 /api/v1 路由聚合
+│   │   ├── admin/               # 管理端站点
+│   │   │   ├── router.py        # 受保护路由聚合（统一前缀与管理员鉴权）
+│   │   │   ├── routers/         # 接口（按资源拆分：agents / tenants / users ...）
+│   │   │   └── schemas/         # 请求/响应模型（按职责拆分：auth / tenant / resource ...）
+│   │   ├── user/                # 用户端站点（router.py 聚合 + routers/ 业务接口）
 │   │   └── deps/                # 数据库、服务、鉴权、租户作用域依赖
 │   ├── internal/                # 业务实现
 │   │   ├── domain/              # 实体（含租户/请求上下文）、分页对象、仓储协议
 │   │   ├── application/         # 用例服务、统一业务异常
 │   │   └── infrastructure/      # 配置、ORM、仓储、安全、日志、中间件、链路追踪
-│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户）
-│   ├── scripts/                 # create_admin / seed_demo / wait_for_db
+│   ├── docker/                  # 本地 PostgreSQL 编排（项目名固定为 postgresql）
+│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户、0005 技能包文件）
+│   ├── scripts/                 # create_admin / seed_demo / skill_package / wait_for_db
 │   ├── tests/                   # 后端接口测试
 │   └── Dockerfile
 ├── frontend/
@@ -680,12 +714,12 @@ boxia-agent/
 │   │   ├── e2e/                 # Playwright 端到端用例（含多租户场景）
 │   │   ├── nginx/               # 生产 Nginx 配置（SPA、反代、限流、安全头）
 │   │   └── Dockerfile           # Node 构建 + nginx-unprivileged 运行
-│   ├── user/                    # 用户端（端口 5174，骨架）
-│   └── scripts/                 # 前端一键启停脚本
+│   ├── user/                    # 用户端 Agent Chat（端口 5174，含 nginx / Dockerfile）
+│   └── scripts/                 # 前端启停脚本（支持 admin / user / all）
 ├── ops/                         # 跨端运维入口
-│   ├── docker-compose.yml       # 多环境编排：db / migrate / backend / frontend（ENV_FILE 选择配置）
+│   ├── docker-compose.yml       # 多环境编排：db / migrate / backend-admin / backend-user / 两端 frontend
 │   ├── .env.prod          # 部署配置，自行创建且不入 Git（变量清单见 14.3）
-│   ├── dev.sh                   # 本地一键启动
+│   ├── dev.sh                   # 本地启动（admin / user / all）
 │   ├── check.sh                 # 本地质量门禁（与 CI 基本一致）
 │   ├── backup.sh                # 数据库备份
 │   └── restore.sh               # 数据库恢复（二次确认）
@@ -715,7 +749,7 @@ boxia-agent/
 
 | 需求               | 通常要改的文件                                                                                                                                                                          |
 |--------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| 新增一个管理端接口 | `backend/web/admin/xxx.py`（路由和请求响应模型）→ `backend/internal/application/xxx_service.py`（业务）→ `backend/internal/infrastructure/repository/postgres_xxx_repository.py`（SQL） |
+| 新增一个管理端接口 | `backend/web/admin/routers/xxx.py`（路由）+ `backend/web/admin/schemas/xxx.py`（请求响应模型）→ `backend/internal/application/xxx_service.py`（业务）→ `backend/internal/infrastructure/repository/postgres_xxx_repository.py`（SQL） |
 | 新增一张表         | `backend/internal/infrastructure/model/xxx.py`（ORM 模型）→ `backend/internal/domain/entity/xxx.py`（领域实体）→ 生成 Alembic 迁移                                                      |
 | 新增一个管理端页面 | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装）                                                                     |
 | 调整权限           | `backend/web/deps/auth.py`、`backend/web/admin/router.py`、前端 `RequireRole`                                                                                                           |
@@ -762,9 +796,12 @@ boxia-agent/
 | `BCRYPT_ROUNDS`               | `12`                | 否       | 密码哈希成本因子                                                                                                                                      |
 | `LOGIN_MAX_ATTEMPTS`          | `5`                 | 否       | 连续失败几次后锁定                                                                                                                                    |
 | `LOGIN_LOCK_MINUTES`          | `15`                | 否       | 锁定时长（分钟）                                                                                                                                      |
-| `PASSWORD_MIN_LENGTH`         | `12`                | 否       | 密码最小长度（字符数，8-64）；改动后后端校验与前端表单同时生效                                                                                        |
+| `PASSWORD_MIN_LENGTH`         | `12`                | 否       | 密码最小长度（字符数，8-64；代码默认 12，`.env.example` 本地为 10）；改动后后端校验与前端表单同时生效                                                  |
 | `PASSWORD_MAX_BYTES`          | `72`                | 否       | 密码最大字节数（UTF-8，32-72）；bcrypt 只处理前 72 字节                                                                                               |
 | `PASSWORD_MIN_CATEGORIES`     | `3`                 | 否       | 至少包含的字符类别数（1-4：大写字母、小写字母、数字、符号）                                                                                           |
+| `SKILL_PACKAGE_MAX_FILES`     | `200`               | 否       | 单个技能包最大文件数（1-2000）                                                                                                                        |
+| `SKILL_PACKAGE_MAX_FILE_BYTES`| `1048576`           | 否       | 单个技能文件最大字节数（1 KiB-16 MiB）                                                                                                                |
+| `SKILL_PACKAGE_MAX_TOTAL_BYTES`| `8388608`          | 否       | 单个技能包总大小上限（1 KiB-64 MiB）                                                                                                                  |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）即可免 DNS 验证 `*.localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
 | `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
@@ -773,7 +810,7 @@ boxia-agent/
 | `CORS_ORIGINS`                | 空                  | 否       | 逗号分隔的允许来源；生产禁止 `*`                                                                                                                      |
 | `DOCS_ENABLED`                | 生产关闭            | 否       | 是否暴露 Swagger 文档                                                                                                                                 |
 | `LEGACY_API_ENABLED`          | `true`              | 否       | 是否保留 `/api` 兼容别名                                                                                                                              |
-| `USER_API_TOKEN`              | 空                  | 否       | 用户端骨架令牌；启用时生产要求至少 32 字符                                                                                                            |
+| `USER_API_TOKEN`              | 空                  | 否       | 用户端访问令牌；配置后生产要求至少 32 字符                                                                                                            |
 | `LOG_LEVEL`                   | `INFO`              | 否       | 日志级别                                                                                                                                              |
 | `LOG_JSON`                    | 生产默认 `true`     | 否       | 是否输出 JSON 日志                                                                                                                                    |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 空                  | 否       | 链路数据上报地址，不配则不上报                                                                                                                        |
@@ -788,10 +825,11 @@ boxia-agent/
 | 变量                                                       | 默认值               | 说明                                                         |
 |------------------------------------------------------------|----------------------|--------------------------------------------------------------|
 | `POSTGRES_DB` / `POSTGRES_USER` / `POSTGRES_PASSWORD`      | 示例 `boxia` / `boxia` | 初始化数据库容器；密码必须与 `DATABASE_URL` 中的完全一致     |
-| `HTTP_PORT`                                                | `80`                 | 前端容器映射到宿主机的端口                                   |
+| `HTTP_PORT`                                                | `80`                 | 管理端前端容器映射到宿主机的端口                             |
+| `USER_HTTP_PORT`                                           | `8081`               | 用户端前端容器映射到宿主机的端口                             |
 | `PYTHON_IMAGE` / `NODE_IMAGE` / `NGINX_IMAGE`              | 官方镜像             | 构建阶段的基础镜像，国内网络受限时可替换，见 14.7            |
 
-> `ENV_FILE`、`HTTP_PORT`、`WEB_CONCURRENCY` 和上述镜像变量由 Compose 在启动时插值读取，**不会**从 `env_file` 注入容器，因此启动时需用 `--env-file` 或导出到当前 shell，见 14.4。
+> `ENV_FILE`、`HTTP_PORT`、`USER_HTTP_PORT`、`WEB_CONCURRENCY` 和上述镜像变量由 Compose 在启动时插值读取，**不会**从 `env_file` 注入容器，因此启动时需用 `--env-file` 或导出到当前 shell，见 14.4。
 
 ### 6.3 环境启动校验
 
@@ -845,7 +883,7 @@ boxia-agent/
 **部署配置（以生产为例）**
 
 1. DNS：将 `*.example.com`（含 `adminsystem.example.com`）解析到入口；开发/测试环境分别解析 `*.dev.example.com`、`*.test.example.com`。
-2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
+2. Nginx：仓库自带的 `frontend/admin/nginx/default.conf` 与 `frontend/user/nginx/default.conf` 均使用 `server_name _;` 并透传 `Host $host`，泛域名无需逐个配置。若外层还有代理/网关，必须保留原始 Host 头。
 3. 环境变量：按 14.3 创建 `ops/.env.prod`，设置 `ROOT_DOMAIN=example.com`，按需调整 `PLATFORM_ADMIN_SUBDOMAIN`、`PLATFORM_NAME`、`DEFAULT_TENANT_CODE`；开发/测试环境对应使用 `.env.dev` / `.env.test`。
 4. 若前后端分离部署，`CORS_ORIGINS` 需要列出实际使用的平台与租户域名。
 
@@ -954,7 +992,10 @@ boxia-agent/
 
 - 统一前缀：`/api/v1`
 - 兼容别名：`LEGACY_API_ENABLED=true` 时同时注册 `/api`（不进入文档）
-- 除登录、刷新外，管理端接口都需要请求头：
+- 两个站点独立部署、独立路由：
+  - 管理端站点（`web.app_admin:app`）：`/api/v1/admin/**`、`/api/v1/public/**`
+  - 用户端站点（`web.app_user:app`）：`/api/v1/user/**`，使用静态令牌 `Authorization: Bearer <USER_API_TOKEN>`，且必须通过租户子域名访问
+- 除登录、刷新、`/public/*` 外，管理端接口都需要请求头：
 
 ```http
 Authorization: Bearer <access_token>
@@ -1017,6 +1058,38 @@ Authorization: Bearer <access_token>
 - 列表只返回摘要（不含 `config` 和关联 ID），详情返回完整配置。
 - `config` 中缺失的子项由后端补默认值。
 
+### 8.3.1 技能包文件接口
+
+管理端入口：**技能管理 → 列表行「技能包」**。抽屉内可查看/编辑文件、导入和导出 zip；租户查看平台级技能时可一键克隆到本租户。
+
+技能在存储上是一个虚拟目录：每个技能由若干文本文件组成，`SKILL.md` 为入口文件，其余文件（如 `references/**`、脚本说明等）按相对路径存放。文件内容只存在 `skill_files` 表，`skills.content` 是 `SKILL.md` 的镜像，供列表与搜索使用。
+
+平台级与租户级技能不做物理目录区分，归属完全由 `skills.tenant_id` 决定：
+
+- `tenant_id = NULL`：平台级技能，所有租户可见只读，仅产品级平台可维护。
+- `tenant_id = 当前租户`：租户级技能，仅本租户可见可维护。
+- 租户若需修改平台级技能，必须调用克隆接口生成独立副本，不建立跨租户引用。
+- 后续若迁移到对象存储，key 约定为 `skills/platform/{skill_id}/{path}` 与 `skills/tenants/{tenant_id}/{skill_id}/{path}`，与应用层路径规则一致。
+
+| 方法   | 路径                                  | 说明                                                       |
+|--------|---------------------------------------|------------------------------------------------------------|
+| GET    | `/admin/skills/{id}/files`            | 文件清单（不含正文），支持 `prefix` 前缀过滤                |
+| GET    | `/admin/skills/{id}/files/content`    | 读取单文件，参数 `path`                                     |
+| PUT    | `/admin/skills/{id}/files`            | 新增或覆盖文件；写 `SKILL.md` 同步入口内容                  |
+| DELETE | `/admin/skills/{id}/files`            | 删除文件，参数 `path`；删除 `SKILL.md` 清空入口内容         |
+| POST   | `/admin/skills/{id}/import`           | 上传 `application/zip` 全量替换；自动去掉压缩包公共根目录    |
+| GET    | `/admin/skills/{id}/export`           | 导出确定性 zip（固定时间戳，便于比对）                      |
+| POST   | `/admin/skills/{id}/clone`            | 把可见技能克隆到当前租户，返回 201 与新技能                 |
+
+写入约束：
+
+- 路径必须是相对路径，统一 `/` 分隔；拒绝 `..`、绝对路径、反斜杠、控制字符与 `: * ? " < > |` 等不可移植字符。
+- 仅接受 UTF-8 文本，拒绝含 NUL 的二进制内容。
+- 配额默认 200 个文件、单文件 1 MiB、整包 8 MiB，对应 `SKILL_PACKAGE_MAX_FILES` / `SKILL_PACKAGE_MAX_FILE_BYTES` / `SKILL_PACKAGE_MAX_TOTAL_BYTES`。
+- `PUT` 支持 `expected_hash`：与当前文件 SHA-256 不一致返回 409，避免多人同时编辑互相覆盖。
+- 全量替换（导入/目录导入）在单个事务内完成，失败不会留下半包数据。
+- 删除技能时 `skill_files` 随外键级联删除。
+
 ### 8.4 管理员与审计（仅 superadmin）
 
 | 方法  | 路径                         | 说明                               |
@@ -1050,7 +1123,19 @@ Authorization: Bearer <access_token>
 | GET  | `/health/ready` | 数据库连通且迁移版本与代码一致；失败返回 503 |
 | GET  | `/metrics`      | Prometheus 指标；生产由 Nginx 拒绝外部访问   |
 
-### 8.6 调用示例（Git Bash）
+### 8.6 用户端接口
+
+用户端站点（`web.app_user:app`）只有 `/api/v1/user/**`，与管理端完全隔离：
+
+| 方法 | 路径              | 说明                                                                 |
+|------|-------------------|----------------------------------------------------------------------|
+| GET  | `/user/me`        | 返回当前令牌对应的用户信息（`scope`、`subject`）                     |
+
+- 鉴权：请求头 `Authorization: Bearer <USER_API_TOKEN>`，令牌来自环境变量，无效返回 401。
+- 域名：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404。
+- 用户端站点不挂载 `/admin/**` 与 `/public/**`。
+
+### 8.7 调用示例（Git Bash）
 
 ```bash
 # 登录
@@ -1112,6 +1197,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
 | `agents`                                      | 智能体，`config` 为 JSONB 完整配置                                                       |
 | `skills` / `tools` / `components` / `prompts` | 四类资源表                                                                               |
+| `skill_files`                                 | 技能包内文本文件；`(skill_id, path)` 唯一，随技能级联删除，归属由所属技能决定              |
 | `agent_tools` / `agent_skills`                | 智能体与工具/技能的关联表，级联删除                                                      |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
@@ -1137,7 +1223,7 @@ uv run alembic current             # 查看数据库当前版本（带 (head) �
 
 - **全新数据库**：直接 `alembic upgrade head`。
 - **早期手工初始化过的数据库**（表结构已与基线一致）：先 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
-- **生产环境**：由 Compose 中的一次性 `migrate` 服务自动执行，`backend` 等它成功后才启动。
+- **生产环境**：由 Compose 中的一次性 `migrate` 服务自动执行，`backend-admin` / `backend-user` 等它成功后才启动。
 
 ### 9.3 初始化与演示数据
 
@@ -1153,6 +1239,13 @@ ADMIN_MUST_CHANGE_PASSWORD=false uv run python -m scripts.create_admin
 
 # 写入本地演示资源（幂等，可重复执行；写入的是产品级资源，所有租户可见只读）
 uv run python -m scripts.seed_demo
+
+# 技能包运维：目录导入 / 导出 / 克隆到租户 / 列文件
+uv run python -m scripts.skill_package import --dir ../skills/foo --name "技能名"
+uv run python -m scripts.skill_package import --dir ./foo --name "技能名" --tenant acme --replace
+uv run python -m scripts.skill_package export --id 3 --output ./exported
+uv run python -m scripts.skill_package clone --id 3 --tenant acme --name "技能副本"
+uv run python -m scripts.skill_package list --id 3
 ```
 
 ---
@@ -1166,8 +1259,9 @@ uv run python -m scripts.seed_demo
 | 智能体管理                  | 搜索、状态筛选、分页、新建、配置、启用/停用、删除                                                                                                               |
 | 智能体配置                  | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件                                                        |
 | 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读                                                                                                                     |
+| 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 管理员管理                  | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号                                                                            |
-| 租户管理                    | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin）                                                                                                        |
+| 租户管理                    | 租户列表、新建、编辑名称与启用状态（仅产品级平台 superadmin）                                                                                                   |
 | 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |
 | 健壮性                      | 路由懒加载、错误边界、404 页面、请求超时与重试                                                                                                                  |
 
@@ -1205,7 +1299,7 @@ uv run alembic check                # 迁移漂移检查
 
 测试会自动创建独立数据库 `boxia_agent_test`，每次会话重建并执行全部迁移，每个用例前清理数据，互不影响。测试默认连接 `postgres:postgres@127.0.0.1:5432`，且账号需要有建库权限；如果你的本地配置不同，需要修改 `backend/tests/conftest.py` 顶部的连接配置。
 
-覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、产品级资源只读复用、租户账号与审计隔离）、错误模型、健康检查等。
+覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、产品级资源只读复用、租户账号与审计隔离）、admin/user 站点路由隔离（`tests/test_site_isolation.py`）、错误模型、健康检查等。
 
 ### 11.2 管理端
 
@@ -1256,12 +1350,12 @@ E2E_PASSWORD="$E2E_PASSWORD" pnpm run e2e
 ```bash
 cd backend
 APP_ENV=local ROOT_DOMAIN=localhost ALLOW_TENANT_HEADER=true \
-  uv run uvicorn web.app:app --host 127.0.0.1 --port 8000
+  uv run uvicorn web.app_admin:app --host 127.0.0.1 --port 8000
 ```
 
 覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
 
-多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
 
 ### 11.4 CI 与提交前检查
 
@@ -1292,9 +1386,9 @@ uv run pre-commit install   # 钩子安装在仓库根目录
 1. `docker compose` 启动 PostgreSQL。
 2. 后端启动时读取环境变量，校验配置；生产环境还会校验密钥强度。
 3. 后端装配中间件：请求 ID → 访问日志 → 审计 → 安全响应头 → CORS。
-4. 注册路由：`/health/*`、`/api/v1/*`（可选 `/api/*` 兼容别名）、`/metrics`。
-5. 启动 Uvicorn，多个 worker 同时监听 8000。
-6. 管理端构建后由 Nginx 提供静态文件，并把 `/api/` 反向代理到后端。
+4. 按站点装配路由：`/health/*`、`/metrics`，以及本站点的 `/api/v1/*`（可选 `/api/*` 兼容别名）；管理端挂 admin/public，用户端只挂 user。
+5. 两个站点各自启动 Uvicorn：管理端 8000、用户端 8001，多个 worker 同时监听。
+6. 两个前端分别由 Nginx 提供静态文件，并把 `/api/` 反向代理到本站点后端。
 
 ### 12.2 多租户作用域解析
 
@@ -1330,7 +1424,7 @@ Nginx（生产，限流 10r/m）
   ▼
 FastAPI 中间件（request_id、访问日志、审计、安全头）
   ▼
-web/admin/auth.py（参数校验）
+web/admin/routers/auth.py（参数校验）
   ▼
 application/auth_service.py
   ├─ 按当前作用域查询管理员（repository）
@@ -1360,7 +1454,7 @@ web/deps/auth.py
   ├─ 查询数据库中的账号状态与角色
   └─ 写操作的接口再校验角色（viewer 拒绝）
   ▼
-web/admin/agents.py（请求/响应模型）
+web/admin/routers/agents.py（请求/响应模型）
   ▼
 application/agent_service.py（业务规则、默认值、关联校验、作用域可写校验）
   ▼
@@ -1406,7 +1500,7 @@ alembic upgrade head
 应用发布
 ```
 
-生产 Compose 中由一次性 `migrate` 服务执行迁移，`backend` 等它成功后才启动，避免“代码已经更新、表结构还没更新”的窗口。
+生产 Compose 中由一次性 `migrate` 服务执行迁移，`backend-admin` / `backend-user` 等它成功后才启动，避免“代码已经更新、表结构还没更新”的窗口。
 
 ---
 
@@ -1581,7 +1675,7 @@ Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个
 | 事务与仓储                 | `backend/internal/infrastructure/model/uow.py`、`backend/internal/infrastructure/repository/`                                      |
 | 迁移与就绪检查             | `backend/migrations/env.py`、`backend/web/health.py`                                                                               |
 | 前端无感刷新               | `frontend/admin/src/api/client.ts`、`frontend/admin/src/auth/AuthContext.tsx`                                                      |
-| 生产反代与限流             | `frontend/admin/nginx/default.conf`                                                                                                |
+| 生产反代与限流             | `frontend/admin/nginx/default.conf`、`frontend/user/nginx/default.conf`                                                            |
 | 生产编排与容器安全         | `ops/docker-compose.yml`、`backend/Dockerfile`                                                                                     |
 
 ### 13.9 面试演示建议
@@ -1606,16 +1700,18 @@ Access 过期返回 401 时，前端用 Web Locks 保证同一时刻只有一个
    ▼
 TLS 终止层（云负载均衡 / 宿主机 Nginx / Caddy）
    │ HTTP 127.0.0.1:8080（HTTP_PORT）
+   │ HTTP 127.0.0.1:8081（USER_HTTP_PORT）
    ▼
-frontend 容器（Nginx，静态文件 + /api 反代）
+frontend-admin / frontend-user 容器（Nginx，静态文件 + /api 反代）
    │ 内部网络
    ▼
-backend 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
+backend-admin / backend-user 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
 - 入口使用泛域名 `*.example.com`：`adminsystem.example.com` 为产品级平台，其余子域为租户。
-- `backend`、`db` 不发布端口，只走 Compose 内部网络。
+- `backend-admin`、`backend-user`、`db` 不发布端口，只走 Compose 内部网络。
+- 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
 ### 14.2 服务器准备
@@ -1662,8 +1758,9 @@ CORS_ORIGINS=
 # DEFAULT_TENANT_CODE=acme
 
 # ===== Compose 插值 =====
-# 对外端口（前面有 TLS 终止层时可改为 127.0.0.1:8080）
+# 对外端口（前面有 TLS 终止层时可改为 127.0.0.1:8080 / :8081）
 HTTP_PORT=80
+USER_HTTP_PORT=8081
 WEB_CONCURRENCY=2
 
 # ===== 可选 =====
@@ -1679,7 +1776,7 @@ chmod 600 ops/.env.prod
 openssl rand -hex 32
 ```
 
-开发/测试环境同样在 `ops/` 下新建 `.env.dev`、`.env.test`，把 `APP_ENV` 改为 `dev` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），端口建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
+开发/测试环境同样在 `ops/` 下新建 `.env.dev`、`.env.test`，把 `APP_ENV` 改为 `dev` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），`HTTP_PORT` / `USER_HTTP_PORT` 建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
 
 启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.prod`），并把同一份文件交给 `--env-file` 供 Compose 插值：
 
@@ -1702,6 +1799,24 @@ docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build
 docker compose -f ops/docker-compose.yml --env-file ops/.env.prod ps
 ```
 
+也可以只启动一个站点。Compose 会按 `depends_on` 自动带上 `db` 和 `migrate`，但不会启动另一个站点：
+
+```bash
+# 只启动管理端（backend-admin + frontend-admin）
+docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build \
+  backend-admin frontend-admin
+
+# 只启动用户端（backend-user + frontend-user）
+docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build \
+  backend-user frontend-user
+
+# 只停止管理端 / 用户端（保留容器，下次 up -d 可快速恢复）
+docker compose -f ops/docker-compose.yml stop backend-admin frontend-admin
+docker compose -f ops/docker-compose.yml stop backend-user frontend-user
+```
+
+> 两个站点共享同一个 `db`；单独启动任一站点时都会先等一次性迁移服务成功（Alembic 幂等，已是最新版本时不会产生变更）。
+
 开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.prod`）：
 
 ```bash
@@ -1710,20 +1825,22 @@ ENV_FILE=.env.dev docker compose --env-file .env.dev up -d --build
 ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 ```
 
-> `ENV_FILE` 只决定 `db` / `migrate` / `backend` 容器读取哪个 env_file。`HTTP_PORT`（端口映射）、`WEB_CONCURRENCY`（compose 的 `environment`）和镜像变量属于 Compose 自身的插值，只写进 env_file 不会生效，必须像上面这样用 `--env-file` 提供；也可以把这些变量导出到当前 shell。
+> `ENV_FILE` 只决定 `db` / `migrate` / `backend-admin` / `backend-user` 容器读取哪个 env_file。`HTTP_PORT`、`USER_HTTP_PORT`（端口映射）、`WEB_CONCURRENCY`（compose 的 `environment`）和镜像变量属于 Compose 自身的插值，只写进 env_file 不会生效，必须像上面这样用 `--env-file` 提供；也可以把这些变量导出到当前 shell。
 
 服务说明：
 
-| 服务       | 作用                                          | 对外                   |
-|------------|-----------------------------------------------|------------------------|
-| `db`       | PostgreSQL 17，数据存 volume                  | 否                     |
-| `migrate`  | 一次性执行 `alembic upgrade head`，成功后退出 | 否                     |
-| `backend`  | FastAPI，非 root、只读根文件系统              | 否                     |
-| `frontend` | Nginx 静态站点 + `/api` 反代                  | 是（`HTTP_PORT:8080`） |
+| 服务            | 作用                                          | 对外                            |
+|-----------------|-----------------------------------------------|---------------------------------|
+| `db`            | PostgreSQL 17，数据存 volume                  | 否                              |
+| `migrate`       | 一次性执行 `alembic upgrade head`，成功后退出 | 否                              |
+| `backend-admin` | 管理端 FastAPI，仅 admin 路由                 | 否                              |
+| `backend-user`  | 用户端 FastAPI，仅 user 路由                  | 否                              |
+| `frontend-admin` | 管理端 Nginx 静态站点 + `/api` 反代           | 是（`HTTP_PORT:8080`）          |
+| `frontend-user` | 用户端 Nginx 静态站点 + `/api` 反代           | 是（`USER_HTTP_PORT:8080`）     |
 
 除一次性执行的 `migrate` 外，其他服务都配置了健康检查；所有服务都有日志轮转和内存上限。
 
-> CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend`、`ghcr.io/<owner>/<repo>-frontend`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
+> CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend-admin`、`-backend-user`、`-frontend-admin`、`-frontend-user`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
 
 ### 14.5 创建首个管理员
 
@@ -1731,7 +1848,7 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 
 ```bash
 docker compose -f ops/docker-compose.yml run --rm -it \
-  backend python -m scripts.create_admin
+  backend-admin python -m scripts.create_admin
 ```
 
 > Windows Git Bash 如果提示 `the input device is not a TTY`，改用下面的非交互方式。
@@ -1742,7 +1859,7 @@ docker compose -f ops/docker-compose.yml run --rm -it \
 docker compose -f ops/docker-compose.yml run --rm \
   -e ADMIN_USERNAME=admin \
   -e ADMIN_PASSWORD='<符合密码策略的强密码>' \
-  backend python -m scripts.create_admin
+  backend-admin python -m scripts.create_admin
 ```
 
 首次登录会强制改密。默认创建的是产品级平台账号，租户管理员请登录平台后在「租户管理」中创建。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
@@ -1751,19 +1868,39 @@ docker compose -f ops/docker-compose.yml run --rm \
 
 ### 14.6 配置 HTTPS
 
-推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再转发到 `frontend` 容器。
+推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再按域名转发：`adminsystem.<根域名>` 到 `frontend-admin`，根域名与租户子域名到 `frontend-user`。
 
 多租户使用泛域名，证书必须同时覆盖根域和所有子域（如 `example.com` + `*.example.com`）。Let's Encrypt 的泛域名证书只能通过 DNS-01 验证申请。
 
 宿主机 Nginx 示例：
 
 ```nginx
+# HTTP → HTTPS
 server {
     listen 80;
     server_name example.com *.example.com;
     return 301 https://$host$request_uri;
 }
 
+# 管理端：仅平台子域名
+server {
+    listen 443 ssl http2;
+    server_name adminsystem.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8080;  # HTTP_PORT
+        # 必须透传原始域名：后端据此判断产品级 / 租户作用域
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto https;
+    }
+}
+
+# 用户端：根域名与租户子域名
 server {
     listen 443 ssl http2;
     server_name example.com *.example.com;
@@ -1772,8 +1909,7 @@ server {
     ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
 
     location / {
-        proxy_pass http://127.0.0.1:8080;
-        # 必须透传原始域名：后端据此判断产品级 / 租户作用域
+        proxy_pass http://127.0.0.1:8081;  # USER_HTTP_PORT
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -1782,7 +1918,9 @@ server {
 }
 ```
 
-对应地把 `.env.prod` 的 `HTTP_PORT` 改为 `127.0.0.1:8080`，让容器端口只绑定本机。
+`adminsystem.example.com` 是精确匹配，优先级高于 `*.example.com`，顺序不影响结果。
+
+对应地把 `.env.prod` 的 `HTTP_PORT` / `USER_HTTP_PORT` 分别改为 `127.0.0.1:8080` / `127.0.0.1:8081`，让两个前端容器端口只绑定本机。
 
 如果外层还有云负载均衡或网关，同样要求它**保留原始 Host 头**；把域名改写成固定后端地址会导致所有请求落到平台作用域。
 
@@ -1807,11 +1945,14 @@ docker compose -f ops/docker-compose.yml build
 # 1. 容器状态：都应 healthy 或正常退出（migrate 为 exited 0）
 docker compose -f ops/docker-compose.yml ps
 
-# 2. 前端 Nginx 存活（端口按 HTTP_PORT，示例为 TLS 前的 127.0.0.1:8080）
+# 2. 前端 Nginx 存活：管理端 HTTP_PORT（示例 8080）、用户端 USER_HTTP_PORT（示例 8081）
 curl -fsS http://127.0.0.1:8080/healthz
+curl -fsS http://127.0.0.1:8081/healthz
 
-# 3. 后端就绪（数据库连通 + 迁移版本一致）
-docker compose -f ops/docker-compose.yml exec backend \
+# 3. 两个后端都就绪（数据库连通 + 迁移版本一致）
+docker compose -f ops/docker-compose.yml exec backend-admin \
+  python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
+docker compose -f ops/docker-compose.yml exec backend-user \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 
 # 4. 查看迁移服务日志
@@ -1830,6 +1971,8 @@ docker compose -f ops/docker-compose.yml logs migrate
 - [ ] 用 superadmin 查看审计日志，确认租户审计只在租户内可见
 - [ ] 确认 `/docs` 在生产不可访问（`DOCS_ENABLED=false`）
 - [ ] 确认 `/metrics` 从外部不可访问
+- [ ] 打开用户端站点（`USER_HTTP_PORT`，示例 8081），确认 Agent Chat 页面可访问；带 `USER_API_TOKEN` 调用 `/api/v1/user/me` 正常，不带返回 401
+- [ ] 路由隔离：管理端站点访问 `/api/v1/user/me` 返回 404；用户端站点访问 `/api/v1/admin/*`、`/api/v1/public/*` 返回 404
 
 ### 14.9 升级与回滚
 
@@ -1838,7 +1981,7 @@ docker compose -f ops/docker-compose.yml logs migrate
 1. 先备份数据库（见 14.10）。
 2. 拉取新代码。
 3. 重新构建并启动：`docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build`。
-4. `migrate` 服务自动执行迁移，`backend` 等它成功后才启动。
+4. `migrate` 服务自动执行迁移，`backend-admin` / `backend-user` 等它成功后才启动。
 5. 按 14.8 验证。
 
 **回滚流程：**
@@ -1870,10 +2013,10 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 
 ### 14.11 监控与日志
 
-- **健康检查**：Compose 已配置容器健康检查；外部监控建议探测 `https://你的域名/healthz` 和登录页。
+- **健康检查**：Compose 已配置容器健康检查；外部监控建议分别探测管理端域名与用户端域名下的 `/healthz`、`/health/ready`。
 - **日志**：生产默认 JSON 日志，包含 `request_id`、`trace_id`、路径、状态码、耗时。查看实时日志：
   ```bash
-  docker compose -f ops/docker-compose.yml logs -f backend
+  docker compose -f ops/docker-compose.yml logs -f backend-admin backend-user
   ```
 - **指标**：`/metrics` 为 Prometheus 格式，默认只允许内部访问。需要采集时，在内部网络部署 Prometheus 或通过 sidecar 抓取。
 - **告警建议**：容器重启次数、`/health/ready` 失败、5xx 比例、登录 429 数量、数据库连接数、磁盘使用率、备份失败。
@@ -1895,7 +2038,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 
 | 现象                                                  | 排查方向                                                                                                                                     |
 |-------------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------|
-| 访问域名 502                                          | `frontend` 容器是否健康；`backend` 是否启动；Nginx 日志                                                                                      |
+| 访问域名 502                                          | 对应 `frontend-admin` / `frontend-user` 容器是否健康；对应 `backend-admin` / `backend-user` 是否启动；Nginx 日志                              |
 | `/health/ready` 返回 503 `migration_outdated`         | 查看 `migrate` 服务日志，确认迁移是否成功                                                                                                    |
 | 登录返回 429                                          | 触发登录限流或账号锁定；查看 `Retry-After`                                                                                                   |
 | 容器启动后立即退出                                    | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库连不上                                                                         |
@@ -1917,12 +2060,16 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 ### 15.1 健康检查
 
 ```bash
-curl -s http://127.0.0.1:8080/healthz       # 前端 Nginx 存活（端口为 HTTP_PORT）
+curl -s http://127.0.0.1:8080/healthz       # 管理端前端 Nginx 存活（端口为 HTTP_PORT）
+curl -s http://127.0.0.1:8081/healthz       # 用户端前端 Nginx 存活（端口为 USER_HTTP_PORT）
 
-docker compose -f ops/docker-compose.yml exec backend \
+docker compose -f ops/docker-compose.yml exec backend-admin \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
 
-docker compose -f ops/docker-compose.yml exec backend \
+docker compose -f ops/docker-compose.yml exec backend-user \
+  python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/health/ready').read().decode())"
+
+docker compose -f ops/docker-compose.yml exec backend-admin \
   python -c "import urllib.request;print(urllib.request.urlopen('http://127.0.0.1:8000/metrics').read().decode())"
 ```
 
@@ -1955,7 +2102,7 @@ docker compose -f ops/docker-compose.yml exec backend \
 
 **Q3：生产页面刷新后 404**
 
-生产环境依赖 Nginx 的 SPA 回退（`try_files $uri $uri/ /index.html`），仓库中的 `frontend/admin/nginx/default.conf` 已配置好。
+生产环境依赖 Nginx 的 SPA 回退（`try_files $uri $uri/ /index.html`），仓库中的 `frontend/admin/nginx/default.conf` 与 `frontend/user/nginx/default.conf` 均已配置好。
 
 **Q4：`alembic check` 报模型与迁移不一致**
 
@@ -1984,7 +2131,7 @@ uv run alembic check
 Authorization: Bearer <USER_API_TOKEN>
 ```
 
-未配置时，用户端接口返回“服务端未配置 USER_API_TOKEN，暂不可用”。
+未配置时，用户端接口返回“服务端未配置 USER_API_TOKEN，暂不可用”。用户端站点还要求请求来自租户子域名，平台域名或未知域名会返回 404。
 
 **Q8：怎样确认自己没有把密码提交到 Git**
 

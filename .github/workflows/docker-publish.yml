@@ -16,10 +16,18 @@ jobs:
     strategy:
       matrix:
         include:
-          - name: backend
+          - name: backend-admin
             context: backend
-          - name: frontend
+            build-args: APP_MODULE=web.app_admin:app
+          - name: backend-user
+            context: backend
+            build-args: APP_MODULE=web.app_user:app
+          - name: frontend-admin
             context: frontend/admin
+            build-args: ""
+          - name: frontend-user
+            context: frontend/user
+            build-args: ""
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -39,6 +47,7 @@ jobs:
       - uses: docker/build-push-action@v6
         with:
           context: ${{ matrix.context }}
+          build-args: ${{ matrix.build-args }}
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}

@@ -4,7 +4,8 @@ from fastapi import APIRouter, Depends, Query, status
 
 from internal.domain.entity.common import Page  # noqa: F401  (用于类型可读性)
 from internal.domain.entity.resource import Component
-from web.admin.schemas import ComponentOut, ComponentPayload, PageOut
+from web.admin.schemas.common import PageOut
+from web.admin.schemas.resource import ComponentOut, ComponentPayload
 from web.deps.auth import require_editor
 from web.deps.services import ComponentServiceDep
 

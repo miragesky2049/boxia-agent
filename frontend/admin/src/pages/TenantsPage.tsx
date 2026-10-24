@@ -16,6 +16,10 @@ interface CreateFormValues {
   admin_password: string
 }
 
+interface EditFormValues {
+  name: string
+}
+
 export default function TenantsPage() {
   const { message } = App.useApp()
   const { context } = useTenant()
@@ -28,6 +32,8 @@ export default function TenantsPage() {
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [createForm] = Form.useForm<CreateFormValues>()
+  const [editing, setEditing] = useState<Tenant | null>(null)
+  const [editForm] = Form.useForm<EditFormValues>()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,6 +88,27 @@ export default function TenantsPage() {
     }
   }
 
+  const handleEdit = async () => {
+    if (!editing) return
+    const values = await editForm.validateFields()
+    const name = values.name.trim()
+    if (name === editing.name) {
+      setEditing(null)
+      return
+    }
+    setSaving(true)
+    try {
+      await updateTenant(editing.id, { name })
+      message.success('租户名称已更新')
+      setEditing(null)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '保存失败')
+    } finally {
+      setSaving(false)
+    }
+  }
+
   const columns: ColumnsType<Tenant> = [
     {
       title: '租户',
@@ -124,6 +151,23 @@ export default function TenantsPage() {
       key: 'created_at',
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
+    },
+    {
+      title: '操作',
+      key: 'actions',
+      width: 100,
+      render: (_: unknown, record: Tenant) => (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => {
+            setEditing(record)
+            editForm.setFieldsValue({ name: record.name })
+          }}
+        >
+          编辑
+        </Button>
+      ),
     },
   ]
 
@@ -238,6 +282,31 @@ export default function TenantsPage() {
             extra="租户管理员首次登录后必须修改密码。"
           >
             <Input.Password autoComplete="new-password" />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      <Modal
+        title="编辑租户"
+        open={Boolean(editing)}
+        onOk={handleEdit}
+        onCancel={() => setEditing(null)}
+        confirmLoading={saving}
+        okText="保存"
+        cancelText="取消"
+        forceRender
+      >
+        <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+          <Form.Item label="租户编码">
+            <Input value={editing?.code} disabled />
+          </Form.Item>
+          <Form.Item
+            name="name"
+            label="租户名称"
+            extra="仅修改展示名称，租户子域名与编码保持不变。"
+            rules={[{ required: true, message: '请输入租户名称' }]}
+          >
+            <Input placeholder="例如：Acme 公司" maxLength={100} />
           </Form.Item>
         </Form>
       </Modal>

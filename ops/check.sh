@@ -12,13 +12,19 @@ uv run ruff format --check .
 uv run mypy internal web
 uv run pytest --cov=internal --cov=web --cov-fail-under=80
 
-echo "==> 前端：typecheck / lint / format / test / build"
+echo "==> 前端（admin）：typecheck / lint / format / test / build"
 cd "$ROOT/frontend/admin"
 pnpm install --frozen-lockfile
 pnpm run typecheck
 pnpm run lint
 pnpm run format:check
 pnpm run test:coverage
+pnpm run build
+
+echo "==> 前端（user）：lint / build"
+cd "$ROOT/frontend/user"
+pnpm install --frozen-lockfile
+pnpm run lint
 pnpm run build
 
 echo "全部检查通过"

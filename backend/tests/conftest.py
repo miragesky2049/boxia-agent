@@ -35,7 +35,11 @@ from sqlalchemy import text  # noqa: E402
 from internal.infrastructure.model.database import dispose_engine, get_engine  # noqa: E402
 from internal.infrastructure.security.password import hash_password  # noqa: E402
 from internal.infrastructure.trace.exporter import get_tracer_provider  # noqa: E402
-from web.app import app  # noqa: E402
+from web.app import create_app  # noqa: E402
+
+ADMIN_APP = create_app("admin")
+USER_APP = create_app("user")
+USER_API_TOKEN = os.environ["USER_API_TOKEN"]
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Admin-password-123"
@@ -96,17 +100,34 @@ def _reset_data():
 
 @pytest.fixture(scope="session")
 def client():
-    """默认以产品级平台域名访问，与生产 adminsystem 子域名一致。"""
-    with TestClient(app, base_url=f"http://{PLATFORM_HOST}") as test_client:
+    """管理站点客户端：默认以产品级平台域名访问，与生产 adminsystem 子域名一致。"""
+    with TestClient(ADMIN_APP, base_url=f"http://{PLATFORM_HOST}") as test_client:
         yield test_client
 
 
 @pytest.fixture(scope="session")
 def tenant_client():
-    """以租户子域名访问的客户端，用于验证租户级隔离。"""
+    """管理站点租户客户端：以租户子域名访问，用于验证租户级隔离。"""
 
     def _factory(tenant_code: str) -> TestClient:
-        return TestClient(app, base_url=f"http://{tenant_code}.example.com")
+        return TestClient(ADMIN_APP, base_url=f"http://{tenant_code}.example.com")
+
+    return _factory
+
+
+@pytest.fixture(scope="session")
+def user_client():
+    """用户站点客户端：站点仅挂载 user 路由，不含 admin / public。"""
+    with TestClient(USER_APP, base_url=f"http://{PLATFORM_HOST}") as test_client:
+        yield test_client
+
+
+@pytest.fixture(scope="session")
+def user_tenant_client():
+    """用户站点租户客户端：以租户子域名访问。"""
+
+    def _factory(tenant_code: str) -> TestClient:
+        return TestClient(USER_APP, base_url=f"http://{tenant_code}.example.com")
 
     return _factory
 

@@ -9,6 +9,7 @@ from internal.domain.repository.protocols import (
     AuditLogRepository,
     RefreshTokenRepository,
     ResourceRepository,
+    SkillFileRepository,
     TenantRepository,
 )
 from internal.infrastructure.model.database import get_session_factory
@@ -28,6 +29,9 @@ from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresSkillRepository,
     PostgresToolRepository,
 )
+from internal.infrastructure.repository.postgres_skill_file_repository import (
+    PostgresSkillFileRepository,
+)
 from internal.infrastructure.repository.postgres_tenant_repository import (
     PostgresTenantRepository,
 )
@@ -46,6 +50,7 @@ class SqlAlchemyUnitOfWork:
         self.audit_logs: AuditLogRepository = PostgresAuditLogRepository(self.session)
         self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
         self.skills: ResourceRepository[Skill] = PostgresSkillRepository(self.session, tenant_id)
+        self.skill_files: SkillFileRepository = PostgresSkillFileRepository(self.session)
         self.tools: ResourceRepository[Tool] = PostgresToolRepository(self.session, tenant_id)
         self.components: ResourceRepository[Component] = PostgresComponentRepository(
             self.session, tenant_id

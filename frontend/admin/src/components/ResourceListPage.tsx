@@ -44,6 +44,11 @@ export interface ListColumn<T> {
   render?: (record: T) => ReactNode
 }
 
+export interface RowActionHelpers {
+  /** 重新加载当前列表，自定义操作改动数据后调用。 */
+  reload: () => Promise<void>
+}
+
 interface ResourceListPageProps<T extends ResourceBase, P> {
   title: string
   description: string
@@ -52,6 +57,8 @@ interface ResourceListPageProps<T extends ResourceBase, P> {
   fields: FormField[]
   defaults: P
   createText?: string
+  /** 行级自定义操作，渲染在编辑/删除之前；只读角色也会展示。 */
+  extraActions?: (record: T, helpers: RowActionHelpers) => ReactNode
 }
 
 type FormValue = string | number | boolean | string[] | Record<string, unknown>
@@ -75,6 +82,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   fields,
   defaults,
   createText = '新建',
+  extraActions,
 }: ResourceListPageProps<T, P>) {
   const { message } = App.useApp()
   const { canWrite } = useAuth()
@@ -224,34 +232,42 @@ export default function ResourceListPage<T extends ResourceBase, P>({
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    ...(canWrite
+    ...(canWrite || extraActions
       ? [
           {
             title: '操作',
             key: 'actions',
-            width: 130,
-            render: (_: unknown, record: T) =>
-              record.is_platform && !isPlatform ? (
-                <Tag bordered={false}>产品级资源只读</Tag>
-              ) : (
+            width: extraActions ? 240 : 130,
+            render: (_: unknown, record: T) => {
+              const readonly = record.is_platform && !isPlatform
+              return (
                 <Space size={4}>
-                  <Button type="link" size="small" onClick={() => openEdit(record)}>
-                    编辑
-                  </Button>
-                  <Popconfirm
-                    title="确认删除？"
-                    description="删除后不可恢复。"
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => handleDelete(record)}
-                  >
-                    <Button type="link" size="small" danger>
-                      删除
-                    </Button>
-                  </Popconfirm>
+                  {extraActions?.(record, { reload: load })}
+                  {canWrite &&
+                    (readonly ? (
+                      <Tag bordered={false}>产品级资源只读</Tag>
+                    ) : (
+                      <>
+                        <Button type="link" size="small" onClick={() => openEdit(record)}>
+                          编辑
+                        </Button>
+                        <Popconfirm
+                          title="确认删除？"
+                          description="删除后不可恢复。"
+                          okText="删除"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() => handleDelete(record)}
+                        >
+                          <Button type="link" size="small" danger>
+                            删除
+                          </Button>
+                        </Popconfirm>
+                      </>
+                    ))}
                 </Space>
-              ),
+              )
+            },
           },
         ]
       : []),

@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter, Request, status
 
-from web.admin.schemas import (
+from web.admin.schemas.auth import (
     AdminUserOut,
     ChangePasswordRequest,
     LoginRequest,

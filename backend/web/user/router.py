@@ -1,17 +1,13 @@
-"""用户端接口：面向最终用户的对话与智能体使用能力。"""
+"""用户端路由聚合：统一前缀与鉴权，业务接口放在 routers/ 下。"""
 
 from fastapi import APIRouter, Depends
 
-from web.deps.auth import UserAuthDep, require_user
+from web.deps.auth import require_user
+from web.user.routers import profile_router
 
 router = APIRouter(
     prefix="/user",
     tags=["user"],
     dependencies=[Depends(require_user)],
 )
-
-
-@router.get("/me")
-def get_user_profile(principal: UserAuthDep) -> dict:
-    """返回当前用户身份，用于验证用户端鉴权链路。"""
-    return {"scope": "user", "subject": principal.subject}
+router.include_router(profile_router)

@@ -6,6 +6,65 @@ x-default-logging: &default-logging
     max-size: "10m"
     max-file: "3"
 
+x-backend-build: &backend-build
+  context: ../backend
+  args:
+    PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+
+x-backend-runtime: &backend-runtime
+  env_file:
+    - ${ENV_FILE:-.env.prod}
+  depends_on:
+    db:
+      condition: service_healthy
+    migrate:
+      condition: service_completed_successfully
+  networks:
+    - edge
+    - internal
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  healthcheck:
+    test:
+      [
+        "CMD",
+        "python",
+        "-c",
+        "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)",
+      ]
+    interval: 30s
+    timeout: 5s
+    start_period: 20s
+    retries: 3
+  stop_grace_period: 30s
+  restart: unless-stopped
+  mem_limit: 512m
+  logging: *default-logging
+
+x-frontend-runtime: &frontend-runtime
+  networks:
+    - edge
+  read_only: true
+  tmpfs:
+    - /tmp
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  healthcheck:
+    test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
+    interval: 30s
+    timeout: 5s
+    retries: 3
+  restart: unless-stopped
+  mem_limit: 128m
+  logging: *default-logging
+
 services:
   db:
     image: postgres:17-alpine
@@ -25,10 +84,7 @@ services:
     logging: *default-logging
 
   migrate:
-    build:
-      context: ../backend
-      args:
-        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+    build: *backend-build
     image: boxia-agent-backend:local
     command: ["alembic", "upgrade", "head"]
     env_file:
@@ -42,49 +98,30 @@ services:
     mem_limit: 256m
     logging: *default-logging
 
-  backend:
+  backend-admin:
+    <<: *backend-runtime
     build:
-      context: ../backend
+      <<: *backend-build
       args:
         PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
-    image: boxia-agent-backend:local
-    env_file:
-      - ${ENV_FILE:-.env.prod}
+        APP_MODULE: web.app_admin:app
+    image: boxia-agent-admin:local
     environment:
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
-    depends_on:
-      db:
-        condition: service_healthy
-      migrate:
-        condition: service_completed_successfully
-    networks:
-      - edge
-      - internal
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test:
-        [
-          "CMD",
-          "python",
-          "-c",
-          "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health/live', timeout=3)",
-        ]
-      interval: 30s
-      timeout: 5s
-      start_period: 20s
-      retries: 3
-    stop_grace_period: 30s
-    restart: unless-stopped
-    mem_limit: 512m
-    logging: *default-logging
 
-  frontend:
+  backend-user:
+    <<: *backend-runtime
+    build:
+      <<: *backend-build
+      args:
+        PYTHON_IMAGE: ${PYTHON_IMAGE:-python:3.12-slim}
+        APP_MODULE: web.app_user:app
+    image: boxia-agent-user:local
+    environment:
+      WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
+
+  frontend-admin:
+    <<: *frontend-runtime
     build:
       context: ../frontend/admin
       args:
@@ -92,27 +129,23 @@ services:
         NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
         NGINX_IMAGE: ${NGINX_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}
     depends_on:
-      backend:
+      backend-admin:
         condition: service_healthy
     ports:
       - "${HTTP_PORT:-80}:8080"
-    networks:
-      - edge
-    read_only: true
-    tmpfs:
-      - /tmp
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-    restart: unless-stopped
-    mem_limit: 128m
-    logging: *default-logging
+
+  frontend-user:
+    <<: *frontend-runtime
+    build:
+      context: ../frontend/user
+      args:
+        NODE_IMAGE: ${NODE_IMAGE:-node:24-alpine}
+        NGINX_IMAGE: ${NGINX_IMAGE:-nginxinc/nginx-unprivileged:1.27-alpine}
+    depends_on:
+      backend-user:
+        condition: service_healthy
+    ports:
+      - "${USER_HTTP_PORT:-8081}:8080"
 
 volumes:
   pgdata:

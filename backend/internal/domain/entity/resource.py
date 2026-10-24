@@ -26,6 +26,21 @@ class Skill:
 
 
 @dataclass(frozen=True)
+class SkillFile:
+    """技能包内的单个文件，path 为技能包根目录下的相对路径。"""
+
+    id: int
+    skill_id: int
+    path: str
+    content: str
+    content_hash: str
+    size_bytes: int
+    media_type: str
+    created_at: datetime
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class Tool:
     """工具。"""
 

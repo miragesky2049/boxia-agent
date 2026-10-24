@@ -86,6 +86,29 @@ jobs:
       - name: Build
         run: pnpm run build
 
+  frontend-user:
+    name: User typecheck / lint / build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend/user
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          package_json_file: frontend/user/package.json
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: pnpm
+          cache-dependency-path: frontend/user/pnpm-lock.yaml
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Lint
+        run: pnpm run lint
+      - name: Build
+        run: pnpm run build
+
   e2e:
     name: Playwright E2E
     runs-on: ubuntu-latest
@@ -149,7 +172,7 @@ jobs:
       - name: Start backend
         working-directory: backend
         run: |
-          nohup uv run uvicorn web.app:app --host 127.0.0.1 --port 8000 \
+          nohup uv run uvicorn web.app_admin:app --host 127.0.0.1 --port 8000 \
             > "$RUNNER_TEMP/backend.log" 2>&1 &
           for _ in $(seq 1 30); do
             if curl -fsS http://127.0.0.1:8000/health/ready > /dev/null; then

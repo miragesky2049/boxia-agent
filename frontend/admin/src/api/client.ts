@@ -47,6 +47,8 @@ export interface RequestOptions extends RequestInit {
   skipRefresh?: boolean
   /** 关闭 GET 自动重试。 */
   skipRetry?: boolean
+  /** 响应解析方式，下载二进制文件时使用 blob。 */
+  responseType?: 'json' | 'blob'
 }
 
 interface ErrorPayload {
@@ -117,7 +119,7 @@ async function send(
 
 function buildHeaders(init: RequestInit, options: RequestOptions): Headers {
   const headers = new Headers(init.headers)
-  headers.set('Accept', 'application/json')
+  if (!headers.has('Accept')) headers.set('Accept', 'application/json')
   const hasBody = init.body !== undefined && init.body !== null
   const isFormData = typeof FormData !== 'undefined' && init.body instanceof FormData
   if (hasBody && !isFormData && !headers.has('Content-Type')) {
@@ -241,7 +243,13 @@ export function redirectToLogin(): void {
 }
 
 export async function request<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { skipAuth = false, skipRefresh = false, skipRetry = false, ...init } = options
+  const {
+    skipAuth = false,
+    skipRefresh = false,
+    skipRetry = false,
+    responseType = 'json',
+    ...init
+  } = options
   const method = (init.method ?? 'GET').toUpperCase()
   const maxAttempts = method === 'GET' && !skipRetry ? MAX_ATTEMPTS : 1
   let attempt = 0
@@ -286,6 +294,11 @@ export async function request<T>(path: string, options: RequestOptions = {}): Pr
     if (attempt < maxAttempts && RETRYABLE_STATUS.has(response.status)) {
       await sleep(backoffDelay(attempt))
       continue
+    }
+
+    if (responseType === 'blob') {
+      if (!response.ok) throw await buildApiError(response, '文件下载失败，请稍后再试')
+      return (await response.blob()) as T
     }
 
     return parseResponse<T>(response)
