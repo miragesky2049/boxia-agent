@@ -1,109 +1,90 @@
-"""管理员账号管理接口（仅 superadmin）。"""
+"""租户最终用户管理接口。"""
 
-from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi import APIRouter, Query, Request, status
 
-from web.admin.schemas.auth import (
-    AdminUserCreateRequest,
-    AdminUserOut,
-    AdminUserResetPasswordRequest,
-    AdminUserUpdateRequest,
-)
+from internal.domain.entity.access import User
+from internal.domain.entity.common import Page
 from web.admin.schemas.common import PageOut
-from web.deps.auth import AdminAuthDep, require_superadmin
-from web.deps.services import AdminUserServiceDep
-
-router = APIRouter(
-    prefix="/users",
-    tags=["admin-users"],
-    dependencies=[Depends(require_superadmin)],
+from web.admin.schemas.user import (
+    UserCreateRequest,
+    UserOut,
+    UserResetPasswordRequest,
+    UserUpdateRequest,
 )
+from web.deps.auth import SuperadminAuthDep
+from web.deps.http import client_meta
+from web.deps.services import UserAdminServiceDep
+
+router = APIRouter(prefix="/users", tags=["admin-users"])
 
 
-def _client_meta(request: Request) -> tuple[str | None, str | None]:
-    ip = request.client.host if request.client else None
-    user_agent = request.headers.get("user-agent", "")[:255] or None
-    return ip, user_agent
-
-
-@router.get("", response_model=PageOut[AdminUserOut])
+@router.get("", response_model=PageOut[UserOut])
 def list_users(
-    service: AdminUserServiceDep,
+    service: UserAdminServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
-    tenant_id: int | None = Query(None, ge=1),
-    all_tenants: bool = Query(False),
-) -> PageOut[AdminUserOut]:
-    """分页查询管理员：租户只查本租户，产品级可跨租户查询。"""
-    result = (
-        service.list_all_tenants(page, page_size, keyword)
-        if all_tenants
-        else service.list(page, page_size, keyword, tenant_id)
-    )
-    return PageOut[AdminUserOut](
-        items=[AdminUserOut.model_validate(item) for item in result.items],
-        total=result.total,
-        page=result.page,
-        page_size=result.page_size,
-    )
+) -> PageOut[UserOut]:
+    """分页查询本租户最终用户。"""
+    return _to_page_out(service.list(page, page_size, keyword))
 
 
-@router.post("", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
 def create_user(
-    payload: AdminUserCreateRequest,
+    payload: UserCreateRequest,
+    principal: SuperadminAuthDep,
     request: Request,
-    service: AdminUserServiceDep,
-    principal: AdminAuthDep,
-) -> AdminUserOut:
-    """创建管理员账号，首次登录强制改密。"""
-    ip, user_agent = _client_meta(request)
+    service: UserAdminServiceDep,
+) -> UserOut:
+    """创建最终用户并绑定本租户角色。"""
+    ip, user_agent = client_meta(request)
     user = service.create(
         username=payload.username,
         password=payload.password,
         display_name=payload.display_name,
-        role=payload.role,
-        tenant_id=payload.tenant_id,
-        actor_id=principal.user_id,
-        actor_username=principal.username,
-        ip=ip,
-        user_agent=user_agent,
-    )
-    return AdminUserOut.model_validate(user)
-
-
-@router.patch("/{user_id}", response_model=AdminUserOut)
-def update_user(
-    user_id: int,
-    payload: AdminUserUpdateRequest,
-    request: Request,
-    service: AdminUserServiceDep,
-    principal: AdminAuthDep,
-) -> AdminUserOut:
-    """调整显示名、角色与启用状态。"""
-    ip, user_agent = _client_meta(request)
-    user = service.update(
-        user_id,
-        display_name=payload.display_name,
-        role=payload.role,
+        role_ids=payload.role_ids,
         is_active=payload.is_active,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
     )
-    return AdminUserOut.model_validate(user)
+    return UserOut.model_validate(user)
+
+
+@router.patch("/{user_id}", response_model=UserOut)
+def update_user(
+    user_id: int,
+    payload: UserUpdateRequest,
+    principal: SuperadminAuthDep,
+    request: Request,
+    service: UserAdminServiceDep,
+) -> UserOut:
+    """更新最终用户；禁用或改角色会撤销其全部会话。"""
+    ip, user_agent = client_meta(request)
+    user = service.update(
+        user_id,
+        display_name=payload.display_name,
+        role_ids=payload.role_ids,
+        is_active=payload.is_active,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return UserOut.model_validate(user)
 
 
 @router.post("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
 def reset_user_password(
     user_id: int,
-    payload: AdminUserResetPasswordRequest,
+    payload: UserResetPasswordRequest,
+    principal: SuperadminAuthDep,
     request: Request,
-    service: AdminUserServiceDep,
-    principal: AdminAuthDep,
+    service: UserAdminServiceDep,
 ) -> None:
-    """重置管理员密码，强制下次登录改密。"""
-    ip, user_agent = _client_meta(request)
+    """重置最终用户密码并撤销其全部会话。"""
+    ip, user_agent = client_meta(request)
     service.reset_password(
         user_id,
         new_password=payload.new_password,
@@ -111,4 +92,31 @@ def reset_user_password(
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
+    )
+
+
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    user_id: int,
+    principal: SuperadminAuthDep,
+    request: Request,
+    service: UserAdminServiceDep,
+) -> None:
+    """删除最终用户。"""
+    ip, user_agent = client_meta(request)
+    service.delete(
+        user_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+
+def _to_page_out(result: Page[User]) -> PageOut[UserOut]:
+    return PageOut[UserOut](
+        items=[UserOut.model_validate(item) for item in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
     )

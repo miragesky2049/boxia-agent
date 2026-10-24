@@ -8,9 +8,13 @@ from internal.domain.repository.protocols import (
     AgentRepository,
     AuditLogRepository,
     RefreshTokenRepository,
+    ResourceGrantRepository,
     ResourceRepository,
+    RoleRepository,
     SkillFileRepository,
     TenantRepository,
+    UserRefreshTokenRepository,
+    UserRepository,
 )
 from internal.infrastructure.model.database import get_session_factory
 from internal.infrastructure.repository.postgres_admin_user_repository import (
@@ -23,17 +27,27 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 from internal.infrastructure.repository.postgres_refresh_token_repository import (
     PostgresRefreshTokenRepository,
 )
+from internal.infrastructure.repository.postgres_resource_grant_repository import (
+    PostgresResourceGrantRepository,
+)
 from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresComponentRepository,
     PostgresPromptRepository,
     PostgresSkillRepository,
     PostgresToolRepository,
 )
+from internal.infrastructure.repository.postgres_role_repository import PostgresRoleRepository
 from internal.infrastructure.repository.postgres_skill_file_repository import (
     PostgresSkillFileRepository,
 )
 from internal.infrastructure.repository.postgres_tenant_repository import (
     PostgresTenantRepository,
+)
+from internal.infrastructure.repository.postgres_user_refresh_token_repository import (
+    PostgresUserRefreshTokenRepository,
+)
+from internal.infrastructure.repository.postgres_user_repository import (
+    PostgresUserRepository,
 )
 
 
@@ -48,6 +62,14 @@ class SqlAlchemyUnitOfWork:
         self.admin_users: AdminUserRepository = PostgresAdminUserRepository(self.session)
         self.refresh_tokens: RefreshTokenRepository = PostgresRefreshTokenRepository(self.session)
         self.audit_logs: AuditLogRepository = PostgresAuditLogRepository(self.session)
+        self.roles: RoleRepository = PostgresRoleRepository(self.session)
+        self.users: UserRepository = PostgresUserRepository(self.session)
+        self.user_refresh_tokens: UserRefreshTokenRepository = (
+            PostgresUserRefreshTokenRepository(self.session)
+        )
+        self.resource_grants: ResourceGrantRepository = PostgresResourceGrantRepository(
+            self.session
+        )
         self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
         self.skills: ResourceRepository[Skill] = PostgresSkillRepository(self.session, tenant_id)
         self.skill_files: SkillFileRepository = PostgresSkillFileRepository(self.session)
@@ -56,6 +78,26 @@ class SqlAlchemyUnitOfWork:
             self.session, tenant_id
         )
         self.prompts: ResourceRepository[Prompt] = PostgresPromptRepository(self.session, tenant_id)
+
+    def apply_scope(
+        self, role_ids: tuple[int, ...] = (), apply_role_filter: bool = True
+    ) -> None:
+        """按当前账号角色重建资源与智能体仓储，其余仓储复用同一会话。"""
+        self.agents = PostgresAgentRepository(
+            self.session, self.tenant_id, role_ids, apply_role_filter
+        )
+        self.skills = PostgresSkillRepository(
+            self.session, self.tenant_id, role_ids, apply_role_filter
+        )
+        self.tools = PostgresToolRepository(
+            self.session, self.tenant_id, role_ids, apply_role_filter
+        )
+        self.components = PostgresComponentRepository(
+            self.session, self.tenant_id, role_ids, apply_role_filter
+        )
+        self.prompts = PostgresPromptRepository(
+            self.session, self.tenant_id, role_ids, apply_role_filter
+        )
 
     def commit(self) -> None:
         """提交当前事务。"""

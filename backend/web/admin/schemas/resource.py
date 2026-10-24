@@ -12,6 +12,15 @@ class ResourcePayload(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=5000)
     is_enabled: bool = True
+    # 资源归属智能体；为空表示尚未纳入任何智能体
+    agent_id: int | None = Field(default=None, ge=1)
+
+
+class ResourceCloneRequest(BaseModel):
+    """克隆资源到目标智能体请求。"""
+
+    agent_id: int = Field(ge=1)
+    name: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class SkillPayload(ResourcePayload):

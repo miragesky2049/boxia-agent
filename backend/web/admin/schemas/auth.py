@@ -21,6 +21,7 @@ class AdminUserOut(BaseModel):
     username: str
     display_name: str
     role: str
+    role_id: int | None = None
     is_active: bool
     must_change_password: bool
     tenant_id: int | None = None
@@ -55,13 +56,13 @@ class ChangePasswordRequest(BaseModel):
 
 
 class AdminUserCreateRequest(BaseModel):
-    """创建管理员请求；tenant_id 仅产品级平台可指定。"""
+    """创建管理员请求；租户管理员由租户管理端创建，产品级账号不指定租户。"""
 
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
     role: str = Field(default="admin", max_length=16)
-    tenant_id: int | None = Field(default=None, ge=1)
+    role_id: int | None = Field(default=None, ge=1)
 
 
 class AdminUserUpdateRequest(BaseModel):
@@ -69,6 +70,7 @@ class AdminUserUpdateRequest(BaseModel):
 
     display_name: str | None = Field(default=None, min_length=1, max_length=64)
     role: str | None = Field(default=None, max_length=16)
+    role_id: int | None = Field(default=None, ge=1)
     is_active: bool | None = None
 
 

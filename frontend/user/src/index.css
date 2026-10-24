@@ -6,6 +6,12 @@
   --accent: #0d9488;
   --accent-bg: rgba(13, 148, 136, 0.1);
   --accent-border: rgba(13, 148, 136, 0.35);
+  --surface: #ffffff;
+  --line: rgba(148, 163, 184, 0.3);
+  --code-bg: rgba(148, 163, 184, 0.15);
+  --danger: #b91c1c;
+  --danger-bg: rgba(185, 28, 28, 0.08);
+  --danger-border: rgba(185, 28, 28, 0.25);
 
   font-family: system-ui, 'Segoe UI', 'Microsoft YaHei', sans-serif;
   color: var(--text);
@@ -23,6 +29,12 @@
     --accent: #2dd4bf;
     --accent-bg: rgba(45, 212, 191, 0.15);
     --accent-border: rgba(45, 212, 191, 0.4);
+    --surface: #172033;
+    --line: rgba(148, 163, 184, 0.22);
+    --code-bg: rgba(15, 23, 42, 0.75);
+    --danger: #f87171;
+    --danger-bg: rgba(248, 113, 113, 0.12);
+    --danger-border: rgba(248, 113, 113, 0.3);
   }
 }
 

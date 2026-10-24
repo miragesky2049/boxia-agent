@@ -212,9 +212,13 @@ export default function SkillPackageDrawer({
       message.error('请输入副本名称')
       return
     }
+    if (skill.agent_id === null) {
+      message.error('该技能未归属智能体，无法在智能体内克隆')
+      return
+    }
     setCloning(true)
     try {
-      const created = await skillPackageApi.clone(skill.id, name)
+      const created = await skillPackageApi.clone(skill.id, name, skill.agent_id)
       message.success(`已克隆为「${created.name}」`)
       setCloneOpen(false)
       onClose()

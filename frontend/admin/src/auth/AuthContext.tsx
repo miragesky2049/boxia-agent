@@ -2,12 +2,12 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState } 
 import type { ReactNode } from 'react'
 import {
   changePassword as changePasswordApi,
-  fetchCurrentUser,
   login as loginApi,
   logout as logoutApi,
 } from '../api/auth'
 import { refreshSession } from '../api/client'
-import type { AdminUser } from '../api/types'
+import { fetchAdminContext } from '../api/tenant'
+import type { AdminContext, AdminRole, AdminUser } from '../api/types'
 import {
   clearSession,
   hasRefreshToken,
@@ -18,10 +18,14 @@ import {
 
 interface AuthContextValue {
   user: AdminUser | null
+  adminContext: AdminContext | null
   loading: boolean
   mustChangePassword: boolean
   canWrite: boolean
   isSuperAdmin: boolean
+  systemRole: AdminRole
+  menus: string[]
+  hasPermission: (permission: string) => boolean
   signIn: (username: string, password: string) => Promise<AdminUser>
   signOut: () => Promise<void>
   changePassword: (currentPassword: string, newPassword: string) => Promise<void>
@@ -31,6 +35,7 @@ const AuthContext = createContext<AuthContextValue | null>(null)
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AdminUser | null>(null)
+  const [adminContext, setAdminContext] = useState<AdminContext | null>(null)
   const [loading, setLoading] = useState(() => hasRefreshToken())
 
   useEffect(() => {
@@ -48,8 +53,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
       try {
-        const profile = await fetchCurrentUser()
-        if (active) setUser(profile)
+        const profile = await fetchAdminContext()
+        if (active) {
+          setAdminContext(profile)
+          setUser(profile.user)
+        }
       } catch {
         if (active) clearSession()
       }
@@ -66,14 +74,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  useEffect(() => onSessionCleared(() => setUser(null)), [])
+  useEffect(
+    () =>
+      onSessionCleared(() => {
+        setUser(null)
+        setAdminContext(null)
+      }),
+    [],
+  )
 
   const signIn = useCallback(async (username: string, password: string) => {
     const result = await loginApi(username, password)
     setAccessToken(result.access_token)
     setRefreshToken(result.refresh_token)
     setUser(result.user)
-    return result.user
+    try {
+      const profile = await fetchAdminContext()
+      setAdminContext(profile)
+      setUser(profile.user)
+      return profile.user
+    } catch {
+      return result.user
+    }
   }, [])
 
   const signOut = useCallback(async () => {
@@ -84,26 +106,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     clearSession()
     setUser(null)
+    setAdminContext(null)
   }, [])
 
   const changePassword = useCallback(async (currentPassword: string, newPassword: string) => {
     await changePasswordApi(currentPassword, newPassword)
     clearSession()
     setUser(null)
+    setAdminContext(null)
   }, [])
+
+  const systemRole = adminContext?.system_role ?? user?.role ?? 'viewer'
 
   const value = useMemo<AuthContextValue>(
     () => ({
       user,
+      adminContext,
       loading,
       mustChangePassword: user?.must_change_password ?? false,
-      canWrite: user?.role !== 'viewer',
-      isSuperAdmin: user?.role === 'superadmin',
+      canWrite: systemRole !== 'viewer',
+      isSuperAdmin: systemRole === 'superadmin',
+      systemRole,
+      menus: adminContext?.menus ?? [],
+      hasPermission: (permission: string) =>
+        adminContext?.permissions.includes(permission) ?? systemRole !== 'viewer',
       signIn,
       signOut,
       changePassword,
     }),
-    [user, loading, signIn, signOut, changePassword],
+    [user, adminContext, loading, systemRole, signIn, signOut, changePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

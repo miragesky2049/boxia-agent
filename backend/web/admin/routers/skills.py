@@ -1,6 +1,6 @@
 """技能管理接口。"""
 
-from fastapi import APIRouter, Body, Depends, Query, Response, status
+from fastapi import APIRouter, Body, Depends, Query, Request, Response, status
 
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Skill
@@ -13,7 +13,8 @@ from web.admin.schemas.skill_package import (
     SkillFileOut,
     SkillFileWriteRequest,
 )
-from web.deps.auth import require_editor
+from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.http import client_meta
 from web.deps.services import SkillPackageServiceDep, SkillServiceDep
 
 router = APIRouter(prefix="/skills", tags=["admin-skills"])
@@ -26,9 +27,10 @@ def list_skills(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
+    agent_id: int | None = Query(None, ge=1),
 ) -> PageOut[SkillOut]:
-    """分页查询技能。"""
-    result = service.list(page, page_size, keyword, is_enabled)
+    """分页查询技能；agent_id 限定所属智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled, agent_id)
     return _to_page_out(result)
 
 
@@ -154,15 +156,31 @@ def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Resp
     "/{skill_id}/clone",
     response_model=SkillOut,
     status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_editor)],
 )
 def clone_skill(
     skill_id: int,
     payload: SkillCloneRequest,
-    service: SkillPackageServiceDep,
+    principal: EditorAuthDep,
+    request: Request,
+    service: SkillServiceDep,
+    package_service: SkillPackageServiceDep,
 ) -> SkillOut:
-    """把可见的平台级技能克隆到当前租户，生成独立副本。"""
-    return SkillOut.model_validate(service.clone_to_current_tenant(skill_id, payload.name))
+    """指定 agent_id 时克隆到目标智能体；否则克隆到当前租户。"""
+    if payload.agent_id is None:
+        return SkillOut.model_validate(
+            package_service.clone_to_current_tenant(skill_id, payload.name)
+        )
+    ip, user_agent = client_meta(request)
+    clone = service.clone_to_agent(
+        skill_id,
+        agent_id=payload.agent_id,
+        name=payload.name,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return SkillOut.model_validate(clone)
 
 
 def _to_page_out(result: Page[Skill]) -> PageOut[SkillOut]:

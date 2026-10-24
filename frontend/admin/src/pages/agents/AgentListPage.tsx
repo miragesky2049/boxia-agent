@@ -20,6 +20,7 @@ export default function AgentListPage() {
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>(undefined)
+  const [authorizedOnly, setAuthorizedOnly] = useState(false)
   const [loading, setLoading] = useState(false)
 
   const load = useCallback(async () => {
@@ -30,6 +31,7 @@ export default function AgentListPage() {
         page_size: pageSize,
         keyword: keyword || undefined,
         is_enabled: enabledFilter === undefined ? undefined : enabledFilter === 'true',
+        authorized: isPlatform && authorizedOnly ? true : undefined,
       })
       setItems(result.items)
       setTotal(result.total)
@@ -38,7 +40,7 @@ export default function AgentListPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, enabledFilter, message])
+  }, [page, pageSize, keyword, enabledFilter, isPlatform, authorizedOnly, message])
 
   useEffect(() => {
     void load()
@@ -143,7 +145,7 @@ export default function AgentListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 210,
       render: (_: unknown, record: AgentSummary) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => navigate(`/agents/${record.id}/edit`)}>
@@ -209,6 +211,20 @@ export default function AgentListPage() {
             setPage(1)
           }}
         />
+        {isPlatform && (
+          <Select
+            style={{ width: 150 }}
+            value={authorizedOnly ? 'authorized' : 'all'}
+            options={[
+              { label: '全部智能体', value: 'all' },
+              { label: '仅已授权', value: 'authorized' },
+            ]}
+            onChange={(value) => {
+              setAuthorizedOnly(value === 'authorized')
+              setPage(1)
+            }}
+          />
+        )}
         <Tag color="blue" bordered={false}>
           共 {total} 个智能体
         </Tag>

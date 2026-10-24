@@ -10,12 +10,11 @@ const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
 const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
-const SkillsPage = lazy(() => import('./pages/SkillsPage'))
-const ToolsPage = lazy(() => import('./pages/ToolsPage'))
-const ComponentsPage = lazy(() => import('./pages/ComponentsPage'))
-const PromptsPage = lazy(() => import('./pages/PromptsPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const GrantsPage = lazy(() => import('./pages/grants/GrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
+const RolesPage = lazy(() => import('./pages/RolesPage'))
 
 export default function AppRouter() {
   return (
@@ -42,15 +41,35 @@ export default function AppRouter() {
             <Route path="/agents" element={<AgentListPage />} />
             <Route path="/agents/new" element={<AgentEditPage />} />
             <Route path="/agents/:id/edit" element={<AgentEditPage />} />
-            <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
-            <Route path="/components" element={<ComponentsPage />} />
-            <Route path="/prompts" element={<PromptsPage />} />
+            <Route
+              path="/grants"
+              element={
+                <RequireRole role="superadmin">
+                  <GrantsPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/roles"
+              element={
+                <RequireRole role="superadmin">
+                  <RolesPage />
+                </RequireRole>
+              }
+            />
             <Route
               path="/users"
               element={
                 <RequireRole role="superadmin">
                   <UsersPage />
+                </RequireRole>
+              }
+            />
+            <Route
+              path="/admin-users"
+              element={
+                <RequireRole role="superadmin">
+                  <AdminUsersPage />
                 </RequireRole>
               }
             />

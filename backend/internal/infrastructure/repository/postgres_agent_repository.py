@@ -7,21 +7,40 @@ from sqlalchemy.orm import Session
 
 from internal.domain.entity.resource import Agent
 from internal.infrastructure.model.agent import AgentModel, agent_skills, agent_tools
+from internal.infrastructure.model.resource import SkillModel, ToolModel
+from internal.infrastructure.repository.grant_filters import (
+    agent_visible,
+    has_any_grant,
+    tenant_grant_exists,
+)
 
 
 class PostgresAgentRepository:
     """基于 SQLAlchemy 的智能体仓储。"""
 
-    def __init__(self, session: Session, tenant_id: int | None = None):
+    def __init__(
+        self,
+        session: Session,
+        tenant_id: int | None = None,
+        role_ids: tuple[int, ...] = (),
+        apply_role_filter: bool = True,
+    ):
         self._session = session
         self._tenant_id = tenant_id
+        self._role_ids = tuple(role_ids)
+        self._apply_role_filter = apply_role_filter
 
     def _visible(self, stmt):
-        """读可见范围：租户可见本租户 + 产品级智能体；产品级只可见产品级。"""
+        """读可见范围：平台视角仅产品级；租户视角按授权过滤。"""
         if self._tenant_id is None:
             return stmt.where(AgentModel.tenant_id.is_(None))
         return stmt.where(
-            or_(AgentModel.tenant_id == self._tenant_id, AgentModel.tenant_id.is_(None))
+            agent_visible(
+                AgentModel.id,
+                self._tenant_id,
+                self._role_ids,
+                self._apply_role_filter,
+            )
         )
 
     def _owned(self, stmt):
@@ -44,9 +63,29 @@ class PostgresAgentRepository:
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
+        authorized: bool = False,
+        manageable_only: bool = False,
+        grant_state: str | None = None,
+        grant_tenant_id: int | None = None,
     ) -> tuple[list[Agent], int]:
-        """分页查询（列表不加载关联 id）。"""
-        stmt = self._visible(select(AgentModel))
+        """分页查询（列表不加载关联 id）。
+
+        manageable_only 仅返回当前作用域可授权的智能体；grant_state 按直接授权记录筛选。
+        """
+        stmt = (
+            self._owned(select(AgentModel))
+            if manageable_only
+            else self._visible(select(AgentModel))
+        )
+        if authorized:
+            stmt = stmt.where(has_any_grant("agent", AgentModel.id))
+        if grant_state is not None:
+            condition = (
+                has_any_grant("agent", AgentModel.id)
+                if grant_tenant_id is None
+                else tenant_grant_exists("agent", AgentModel.id, grant_tenant_id)
+            )
+            stmt = stmt.where(condition if grant_state == "granted" else ~condition)
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -70,11 +109,7 @@ class PostgresAgentRepository:
         )
         if row is None:
             return None
-        return self._to_entity(
-            row,
-            self._relation_ids(agent_tools, "tool_id", agent_id),
-            self._relation_ids(agent_skills, "skill_id", agent_id),
-        )
+        return self._to_entity(row, self._tool_ids(agent_id), self._skill_ids(agent_id))
 
     def create(self, values: dict[str, Any]) -> Agent:
         """创建智能体并在同一事务内写入关联，归属当前作用域。"""
@@ -106,7 +141,7 @@ class PostgresAgentRepository:
         self._replace_relations(agent_id, tool_ids, skill_ids)
         self._session.flush()
         self._session.refresh(row)
-        return self._to_entity(row, tool_ids, skill_ids)
+        return self._to_entity(row, self._tool_ids(agent_id), self._skill_ids(agent_id))
 
     def delete(self, agent_id: int) -> bool:
         """删除当前作用域自有的智能体（关联表由外键级联删除）。"""
@@ -116,6 +151,61 @@ class PostgresAgentRepository:
         self._session.delete(row)
         self._session.flush()
         return True
+
+    def ids_owned(self, ids: list[int]) -> set[int]:
+        """返回给定 id 中归属于当前作用域的部分（授权写操作校验）。"""
+        if not ids:
+            return set()
+        rows = self._session.scalars(
+            self._owned(select(AgentModel.id)).where(AgentModel.id.in_(ids))
+        ).all()
+        return {int(item) for item in rows}
+
+    def _grantable(self, stmt):
+        """角色授权候选范围：租户自有智能体 + 平台智能体。"""
+        if self._tenant_id is None:
+            return stmt.where(AgentModel.tenant_id.is_(None))
+        return stmt.where(
+            or_(
+                AgentModel.tenant_id == self._tenant_id,
+                AgentModel.tenant_id.is_(None),
+            )
+        )
+
+    def list_grantable(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        ids: list[int] | None = None,
+    ) -> tuple[list[Agent], int]:
+        """分页查询可向本租户角色授权的智能体。"""
+        stmt = self._grantable(select(AgentModel))
+        if ids is not None:
+            if not ids:
+                return [], 0
+            stmt = stmt.where(AgentModel.id.in_(ids))
+        if keyword and keyword.strip():
+            pattern = f"%{keyword.strip()}%"
+            stmt = stmt.where(
+                or_(AgentModel.name.ilike(pattern), AgentModel.description.ilike(pattern))
+            )
+        total = self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
+        rows = self._session.scalars(
+            stmt.order_by(AgentModel.updated_at.desc(), AgentModel.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        ).all()
+        return [self._to_entity(row) for row in rows], int(total)
+
+    def ids_grantable(self, ids: list[int]) -> set[int]:
+        """返回给定 id 中可向本租户角色授权的部分。"""
+        if not ids:
+            return set()
+        rows = self._session.scalars(
+            self._grantable(select(AgentModel.id)).where(AgentModel.id.in_(ids))
+        ).all()
+        return {int(item) for item in rows}
 
     def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
         """名称在当前归属范围内是否已被占用（忽略大小写）。"""
@@ -131,6 +221,22 @@ class PostgresAgentRepository:
             select(table.c[column_name]).where(table.c.agent_id == agent_id)
         ).all()
         return [int(item) for item in rows]
+
+    def _tool_ids(self, agent_id: int) -> list[int]:
+        """合并旧关联表与 agent_id 归属的工具。"""
+        legacy = set(self._relation_ids(agent_tools, "tool_id", agent_id))
+        owned = self._session.scalars(
+            select(ToolModel.id).where(ToolModel.agent_id == agent_id)
+        ).all()
+        return sorted(legacy | {int(item) for item in owned})
+
+    def _skill_ids(self, agent_id: int) -> list[int]:
+        """合并旧关联表与 agent_id 归属的技能。"""
+        legacy = set(self._relation_ids(agent_skills, "skill_id", agent_id))
+        owned = self._session.scalars(
+            select(SkillModel.id).where(SkillModel.agent_id == agent_id)
+        ).all()
+        return sorted(legacy | {int(item) for item in owned})
 
     def _replace_relations(self, agent_id: int, tool_ids: list[int], skill_ids: list[int]) -> None:
         self._session.execute(delete(agent_tools).where(agent_tools.c.agent_id == agent_id))

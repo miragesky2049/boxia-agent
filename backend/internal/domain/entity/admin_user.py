@@ -26,6 +26,7 @@ class AdminUser:
     must_change_password: bool = False
     password_changed_at: datetime | None = None
     tenant_id: int | None = None
+    role_id: int | None = None
 
     @property
     def is_platform(self) -> bool:

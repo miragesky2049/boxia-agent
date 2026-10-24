@@ -47,6 +47,10 @@ export interface AdminContext {
   scope: Scope
   tenant: Tenant | null
   user: AdminUser
+  role: AdminRole
+  system_role: AdminRole
+  permissions: string[]
+  menus: string[]
   app_env: AppEnv
   tenant_resolution: TenantResolution
   tenant_switch_mode: TenantSwitchMode
@@ -75,6 +79,7 @@ export interface AdminUser {
   username: string
   display_name: string
   role: AdminRole
+  role_id: number | null
   is_active: boolean
   must_change_password: boolean
   tenant_id: number | null
@@ -97,13 +102,109 @@ export interface AdminUserCreatePayload {
   password: string
   display_name: string
   role: AdminRole
-  tenant_id?: number | null
+  role_id?: number | null
 }
 
 export interface AdminUserUpdatePayload {
   display_name?: string
   role?: AdminRole
+  role_id?: number | null
   is_active?: boolean
+}
+
+export interface Role {
+  id: number
+  tenant_id: number
+  code: string
+  name: string
+  description: string
+  system_role: AdminRole
+  is_system: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface RoleCreatePayload {
+  code: string
+  name: string
+  description?: string
+  system_role: AdminRole
+}
+
+export interface RoleUpdatePayload {
+  name?: string
+  description?: string
+  system_role?: AdminRole
+  is_active?: boolean
+}
+
+export interface User {
+  id: number
+  tenant_id: number
+  username: string
+  display_name: string
+  is_active: boolean
+  role_id: number
+  role_ids: number[]
+  last_login_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface UserCreatePayload {
+  username: string
+  password: string
+  display_name: string
+  role_ids: number[]
+  is_active: boolean
+}
+
+export interface UserUpdatePayload {
+  display_name?: string
+  role_ids?: number[]
+  is_active?: boolean
+}
+
+export interface ResourceGrant {
+  id: number
+  resource_type: ResourceType
+  resource_id: number
+  tenant_id: number
+  role_id: number | null
+  granted_by: number | null
+  created_at: string
+}
+
+export interface GrantInput {
+  tenant_id: number
+  role_id: number | null
+}
+
+export type ResourceType = 'agent' | 'skill' | 'tool' | 'component' | 'prompt'
+
+export type GrantState = 'granted' | 'ungranted'
+export type GrantBatchMode = 'merge' | 'replace' | 'clear'
+
+export interface GrantOverviewItem {
+  resource_id: number
+  name: string
+  description: string
+  is_platform: boolean
+  is_enabled: boolean
+  updated_at: string
+  grant_count: number
+  tenant_count: number
+  role_count: number
+  is_default_visible: boolean
+}
+
+export interface GrantBatchPayload {
+  resource_type: ResourceType
+  resource_ids: number[]
+  mode: GrantBatchMode
+  tenant_id?: number | null
+  role_ids: number[]
 }
 
 export interface AuditLog {
@@ -126,6 +227,7 @@ export interface ResourceBase {
   description: string
   is_enabled: boolean
   tenant_id: number | null
+  agent_id: number | null
   is_platform: boolean
   created_at: string
   updated_at: string
@@ -275,6 +377,7 @@ export interface ListParams {
   page_size?: number
   keyword?: string
   is_enabled?: boolean
+  agent_id?: number
 }
 
 export interface SkillPayload {
@@ -283,6 +386,7 @@ export interface SkillPayload {
   is_enabled: boolean
   content: string
   config: Record<string, unknown>
+  agent_id?: number | null
 }
 
 export interface ToolPayload {
@@ -291,6 +395,7 @@ export interface ToolPayload {
   is_enabled: boolean
   type: string
   config: Record<string, unknown>
+  agent_id?: number | null
 }
 
 export interface ComponentPayload {
@@ -299,6 +404,7 @@ export interface ComponentPayload {
   is_enabled: boolean
   type: string
   config: Record<string, unknown>
+  agent_id?: number | null
 }
 
 export interface PromptPayload {
@@ -308,4 +414,5 @@ export interface PromptPayload {
   content: string
   variables: string[]
   category: string
+  agent_id?: number | null
 }

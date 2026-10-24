@@ -1,18 +1,18 @@
 import {
   ApartmentOutlined,
-  AppstoreOutlined,
-  FileTextOutlined,
+  IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
   RobotOutlined,
+  SafetyCertificateOutlined,
+  SafetyOutlined,
   TeamOutlined,
-  ThunderboltOutlined,
-  ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { Avatar, Dropdown, Layout, Menu, Tag } from 'antd'
 import type { MenuProps } from 'antd'
 import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
@@ -26,6 +26,15 @@ const ROLE_LABELS = {
   viewer: '只读',
 }
 
+const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
+  agents: { icon: <RobotOutlined />, label: '智能体管理' },
+  grants: { icon: <SafetyOutlined />, label: '授权管理' },
+  roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
+  users: { icon: <IdcardOutlined />, label: '用户管理' },
+  'admin-users': { icon: <TeamOutlined />, label: '管理员账号' },
+  tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
+}
+
 const ENV_LABELS = {
   local: '本地',
   dev: '开发',
@@ -36,7 +45,7 @@ const ENV_LABELS = {
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, signOut, isSuperAdmin, mustChangePassword } = useAuth()
+  const { user, signOut, systemRole, menus, mustChangePassword } = useAuth()
   const { platformName, scopeLabel, isPlatform, context } = useTenant()
 
   useEffect(() => {
@@ -45,17 +54,11 @@ export default function AdminLayout() {
     }
   }, [mustChangePassword, navigate])
 
-  const menuItems: MenuProps['items'] = [
-    { key: '/agents', icon: <RobotOutlined />, label: '智能体管理' },
-    { key: '/skills', icon: <ThunderboltOutlined />, label: '技能管理' },
-    { key: '/tools', icon: <ToolOutlined />, label: '工具管理' },
-    { key: '/components', icon: <AppstoreOutlined />, label: '组件管理' },
-    { key: '/prompts', icon: <FileTextOutlined />, label: '提示词管理' },
-    ...(isSuperAdmin ? [{ key: '/users', icon: <TeamOutlined />, label: '管理员管理' }] : []),
-    ...(isSuperAdmin && isPlatform
-      ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: '租户管理' }]
-      : []),
-  ]
+  // 菜单以后端返回为准，前端只负责图标与文案映射
+  const menuItems: MenuProps['items'] = menus.flatMap((key) => {
+    const meta = MENU_META[key]
+    return meta ? [{ key: `/${key}`, icon: meta.icon, label: meta.label }] : []
+  })
 
   const selectedKey =
     menuItems.map((item) => String(item?.key)).find((key) => location.pathname.startsWith(key)) ??
@@ -115,7 +118,7 @@ export default function AdminLayout() {
             <button type="button" className="admin-header__user">
               <Avatar size={30} icon={<UserOutlined />} />
               <span>{user?.display_name || user?.username}</span>
-              {user && <Tag bordered={false}>{ROLE_LABELS[user.role]}</Tag>}
+              {user && <Tag bordered={false}>{ROLE_LABELS[systemRole]}</Tag>}
             </button>
           </Dropdown>
         </Header>
