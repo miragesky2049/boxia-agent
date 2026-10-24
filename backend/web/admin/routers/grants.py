@@ -1,6 +1,6 @@
 """资源授权管理接口。"""
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.grant import (
@@ -11,17 +11,23 @@ from web.admin.schemas.grant import (
     GrantReplaceRequest,
     UserRoleGrantRequest,
 )
-from web.deps.auth import SuperadminAuthDep
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta
 from web.deps.services import GrantServiceDep
 
 router = APIRouter(prefix="/grants", tags=["admin-grants"])
 
+_VIEW_GRANTS = Depends(require_permission("page:grants"))
+_MANAGE_GRANTS = Depends(require_permission("button:grant:manage"))
 
-@router.get("/overview", response_model=PageOut[GrantOverviewOut])
+
+@router.get(
+    "/overview",
+    response_model=PageOut[GrantOverviewOut],
+    dependencies=[_VIEW_GRANTS],
+)
 def overview_grants(
     service: GrantServiceDep,
-    principal: SuperadminAuthDep,
     resource_type: str = Query(..., max_length=16),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -38,10 +44,14 @@ def overview_grants(
     )
 
 
-@router.put("/batch", response_model=GrantBatchOut)
+@router.put(
+    "/batch",
+    response_model=GrantBatchOut,
+    dependencies=[_MANAGE_GRANTS],
+)
 def replace_grants_batch(
     payload: GrantBatchRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: GrantServiceDep,
 ) -> GrantBatchOut:
@@ -61,10 +71,14 @@ def replace_grants_batch(
     return GrantBatchOut(updated=updated)
 
 
-@router.post("/users", response_model=GrantBatchOut)
+@router.post(
+    "/users",
+    response_model=GrantBatchOut,
+    dependencies=[_MANAGE_GRANTS],
+)
 def assign_user_roles(
     payload: UserRoleGrantRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: GrantServiceDep,
 ) -> GrantBatchOut:
@@ -82,10 +96,13 @@ def assign_user_roles(
     return GrantBatchOut(updated=added)
 
 
-@router.get("", response_model=list[GrantOut])
+@router.get(
+    "",
+    response_model=list[GrantOut],
+    dependencies=[_VIEW_GRANTS],
+)
 def list_grants(
     service: GrantServiceDep,
-    principal: SuperadminAuthDep,
     resource_type: str = Query(..., max_length=16),
     resource_id: int = Query(..., ge=1),
     tenant_id: int | None = Query(None, ge=1),
@@ -97,10 +114,14 @@ def list_grants(
     ]
 
 
-@router.put("", response_model=list[GrantOut])
+@router.put(
+    "",
+    response_model=list[GrantOut],
+    dependencies=[_MANAGE_GRANTS],
+)
 def replace_grants(
     payload: GrantReplaceRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: GrantServiceDep,
     resource_type: str = Query(..., max_length=16),

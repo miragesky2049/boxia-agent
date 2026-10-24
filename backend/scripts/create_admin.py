@@ -28,7 +28,7 @@ def main() -> int:
     """创建或更新管理员账号，并默认强制首次登录改密。"""
     username = os.environ.get("ADMIN_USERNAME", "admin").strip()
     display_name = os.environ.get("ADMIN_DISPLAY_NAME", "系统管理员").strip()
-    role = os.environ.get("ADMIN_ROLE", "superadmin").strip()
+    role_code = os.environ.get("ADMIN_ROLE", "superadmin").strip()
     password = os.environ.get("ADMIN_PASSWORD") or getpass.getpass("管理员密码: ")
     if not password:
         print("密码不能为空", file=sys.stderr)
@@ -45,6 +45,16 @@ def main() -> int:
     engine = get_engine()
     try:
         with engine.begin() as conn:
+            role_id = conn.execute(
+                text(
+                    "SELECT id FROM roles WHERE tenant_id IS NULL AND code = :code "
+                    "AND is_active = TRUE"
+                ),
+                {"code": role_code},
+            ).scalar()
+            if role_id is None:
+                print(f"平台角色 {role_code} 不存在或已停用", file=sys.stderr)
+                return 2
             exists = conn.execute(
                 text("SELECT id FROM admin_users WHERE username = :username"),
                 {"username": username},
@@ -53,7 +63,7 @@ def main() -> int:
                 conn.execute(
                     text(
                         "UPDATE admin_users SET password_hash = :hash, display_name = :name, "
-                        "role = :role, is_active = TRUE, failed_login_count = 0, "
+                        "role_id = :role_id, is_active = TRUE, failed_login_count = 0, "
                         "locked_until = NULL, must_change_password = :must_change, "
                         "token_version = token_version + 1, password_changed_at = now() "
                         "WHERE id = :id"
@@ -61,7 +71,7 @@ def main() -> int:
                     {
                         "hash": password_hash,
                         "name": display_name,
-                        "role": role,
+                        "role_id": role_id,
                         "must_change": must_change,
                         "id": exists[0],
                     },
@@ -71,15 +81,15 @@ def main() -> int:
                 conn.execute(
                     text(
                         "INSERT INTO admin_users "
-                        "(username, password_hash, display_name, role, is_active, "
+                        "(username, password_hash, display_name, role_id, is_active, "
                         "must_change_password, password_changed_at) "
-                        "VALUES (:username, :hash, :name, :role, TRUE, :must_change, now())"
+                        "VALUES (:username, :hash, :name, :role_id, TRUE, :must_change, now())"
                     ),
                     {
                         "username": username,
                         "hash": password_hash,
                         "name": display_name,
-                        "role": role,
+                        "role_id": role_id,
                         "must_change": must_change,
                     },
                 )

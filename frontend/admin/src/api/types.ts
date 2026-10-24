@@ -5,8 +5,6 @@ export interface PageResult<T> {
   page_size: number
 }
 
-export type AdminRole = 'superadmin' | 'admin' | 'viewer'
-
 export type Scope = 'platform' | 'tenant'
 
 export type AppEnv = 'local' | 'dev' | 'test' | 'prod'
@@ -47,8 +45,8 @@ export interface AdminContext {
   scope: Scope
   tenant: Tenant | null
   user: AdminUser
-  role: AdminRole
-  system_role: AdminRole
+  role_code: string
+  role_name: string
   permissions: string[]
   menus: string[]
   app_env: AppEnv
@@ -78,8 +76,9 @@ export interface AdminUser {
   id: number
   username: string
   display_name: string
-  role: AdminRole
   role_id: number | null
+  role_code: string
+  role_name: string
   is_active: boolean
   must_change_password: boolean
   tenant_id: number | null
@@ -101,14 +100,12 @@ export interface AdminUserCreatePayload {
   username: string
   password: string
   display_name: string
-  role: AdminRole
-  role_id?: number | null
+  role_id: number
 }
 
 export interface AdminUserUpdatePayload {
   display_name?: string
-  role?: AdminRole
-  role_id?: number | null
+  role_id?: number
   is_active?: boolean
 }
 
@@ -118,7 +115,6 @@ export interface Role {
   code: string
   name: string
   description: string
-  system_role: AdminRole
   is_system: boolean
   is_active: boolean
   created_at: string
@@ -141,6 +137,32 @@ export interface RoleCopyPayload {
   code: string
   name: string
   description?: string
+}
+
+export type PermissionCategory =
+  | 'system'
+  | 'menu'
+  | 'page'
+  | 'button'
+  | 'agent'
+  | 'skill'
+  | 'tool'
+  | 'component'
+  | 'prompt'
+
+export interface PermissionResource {
+  id: number
+  code: string
+  name: string
+  category: PermissionCategory
+  action: string
+  description: string
+  sort_order: number
+}
+
+export interface RolePermissionList {
+  items: PermissionResource[]
+  codes: string[]
 }
 
 export interface User {

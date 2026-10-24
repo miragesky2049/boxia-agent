@@ -1,5 +1,6 @@
 """admin 与 user 两套权限管控依赖。"""
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Annotated
 from uuid import UUID
@@ -10,8 +11,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from internal.application.auth_service import AuthService
 from internal.application.errors import ForbiddenError, UnauthorizedError
 from internal.application.user_auth_service import UserAuthService
-from internal.domain.entity.access import SYSTEM_ROLE_PERMISSIONS
-from internal.domain.entity.admin_user import EDITOR_ROLES
+from internal.domain.entity.permission import CONSOLE_ACCESS
 from internal.infrastructure.observability.context import set_user_id
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
@@ -24,15 +24,19 @@ class AdminPrincipal:
     user_id: int
     username: str
     display_name: str
-    role: str
+    role_id: int | None
+    role_code: str
+    role_name: str
     session_id: UUID
-    role_id: int | None = None
     role_ids: tuple[int, ...] = ()
-    system_role: str = "admin"
     permissions: frozenset[str] = frozenset()
     tenant_id: int | None = None
     tenant_code: str | None = None
     is_platform: bool = True
+
+    def can(self, code: str) -> bool:
+        """判断当前账号是否拥有指定功能权限。"""
+        return code in self.permissions
 
 
 @dataclass(frozen=True)
@@ -48,6 +52,7 @@ class UserPrincipal:
     role_name: str
     session_id: UUID
     role_ids: tuple[int, ...] = ()
+    permissions: frozenset[str] = frozenset()
     tenant_code: str | None = None
 
 
@@ -60,7 +65,7 @@ def require_admin(
     context: RequestContextDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)] = None,
 ) -> AdminPrincipal:
-    """管理端鉴权：校验 JWT，并确认账号属于当前子域名对应的作用域。"""
+    """管理端鉴权：校验 JWT、账号作用域，并从数据库加载角色权限。"""
     if credentials is None or not credentials.credentials:
         raise UnauthorizedError("未登录或登录已过期")
 
@@ -68,18 +73,24 @@ def require_admin(
     user = access.user
     if user.tenant_id != context.tenant_id:
         raise UnauthorizedError("当前账号不属于该租户，请使用正确的子域名登录")
+    if access.role is None:
+        raise UnauthorizedError("账号角色已失效，请联系管理员")
 
-    system_role = access.role.system_role if access.role is not None else user.role
+    # 权限每次请求实时读取，角色授权变更后无需等待令牌过期即可生效
+    permissions = frozenset(uow.role_permissions.list_codes_for_roles(access.role_ids))
+    if CONSOLE_ACCESS not in permissions:
+        raise ForbiddenError("账号未获得管理端访问权限")
+
     principal = AdminPrincipal(
         user_id=user.id,
         username=user.username,
         display_name=user.display_name,
-        role=system_role,
+        role_id=access.role.id,
+        role_code=access.role.code,
+        role_name=access.role.name,
         session_id=access.session_id,
-        role_id=access.role.id if access.role is not None else user.role_id,
         role_ids=access.role_ids,
-        system_role=system_role,
-        permissions=frozenset(SYSTEM_ROLE_PERMISSIONS.get(system_role, ("read",))),
+        permissions=permissions,
         tenant_id=user.tenant_id,
         tenant_code=context.tenant.code if context.tenant else None,
         is_platform=context.is_platform,
@@ -89,26 +100,23 @@ def require_admin(
     return principal
 
 
-def require_editor(principal: Annotated[AdminPrincipal, Depends(require_admin)]) -> AdminPrincipal:
-    """写操作权限：admin 与 superadmin。"""
-    if principal.system_role not in EDITOR_ROLES:
-        raise ForbiddenError("当前角色无权执行该操作")
-    return principal
+def require_permission(code: str) -> Callable[..., AdminPrincipal]:
+    """生成功能权限校验依赖：缺少编码对应权限时返回 403。"""
+
+    def dependency(
+        principal: Annotated[AdminPrincipal, Depends(require_admin)],
+    ) -> AdminPrincipal:
+        if code not in principal.permissions:
+            raise ForbiddenError("当前角色无权执行该操作")
+        return principal
+
+    return dependency
 
 
-def require_superadmin(
+def require_platform_admin(
     principal: Annotated[AdminPrincipal, Depends(require_admin)],
 ) -> AdminPrincipal:
-    """超级管理员权限（产品级或租户级超级管理员）。"""
-    if principal.system_role != "superadmin":
-        raise ForbiddenError("需要超级管理员权限")
-    return principal
-
-
-def require_platform_superadmin(
-    principal: Annotated[AdminPrincipal, Depends(require_superadmin)],
-) -> AdminPrincipal:
-    """产品级平台超级管理员权限：仅 adminsystem 子域名可用。"""
+    """产品级平台作用域校验：仅 adminsystem 子域名可用。"""
     if not principal.is_platform:
         raise ForbiddenError("该操作仅产品级运营管理平台可用")
     return principal
@@ -141,6 +149,7 @@ def require_user(
         role_name=access.role.name,
         session_id=access.session_id,
         role_ids=access.role_ids,
+        permissions=frozenset(uow.role_permissions.list_codes_for_roles(access.role_ids)),
         tenant_code=context.tenant.code if context.tenant else None,
     )
     request.state.user = principal
@@ -149,7 +158,5 @@ def require_user(
 
 
 AdminAuthDep = Annotated[AdminPrincipal, Depends(require_admin)]
-EditorAuthDep = Annotated[AdminPrincipal, Depends(require_editor)]
-SuperadminAuthDep = Annotated[AdminPrincipal, Depends(require_superadmin)]
-PlatformSuperadminDep = Annotated[AdminPrincipal, Depends(require_platform_superadmin)]
+PlatformAdminDep = Annotated[AdminPrincipal, Depends(require_platform_admin)]
 UserAuthDep = Annotated[UserPrincipal, Depends(require_user)]

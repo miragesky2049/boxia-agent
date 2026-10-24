@@ -10,14 +10,21 @@ USERS_URL = "/api/v1/admin/admin-users"
 OPERATOR_PASSWORD = "Editor-pass-123"
 
 
-def _create_operator(client: TestClient, headers: dict[str, str], role: str = "admin") -> dict:
+def _role_id(client: TestClient, headers: dict[str, str], code: str) -> int:
+    roles = client.get("/api/v1/admin/roles", headers=headers).json()
+    return next(item["id"] for item in roles if item["code"] == code)
+
+
+def _create_operator(
+    client: TestClient, headers: dict[str, str], role_code: str = "admin"
+) -> dict:
     response = client.post(
         USERS_URL,
         json={
             "username": "operator",
             "password": OPERATOR_PASSWORD,
             "display_name": "运营",
-            "role": role,
+            "role_id": _role_id(client, headers, role_code),
         },
         headers=headers,
     )
@@ -38,7 +45,7 @@ def test_list_users(client: TestClient, auth_headers: dict[str, str]) -> None:
 
     assert response.status_code == 200
     assert response.json()["total"] == 1
-    assert response.json()["items"][0]["role"] == "superadmin"
+    assert response.json()["items"][0]["role_code"] == "superadmin"
 
 
 def test_create_user_requires_password_change(
@@ -47,7 +54,7 @@ def test_create_user_requires_password_change(
     created = _create_operator(client, auth_headers)
 
     assert created["must_change_password"] is True
-    assert created["role"] == "admin"
+    assert created["role_code"] == "admin"
     operator_headers = _login(client, "operator", OPERATOR_PASSWORD)
     assert client.get("/api/v1/admin/skills", headers=operator_headers).status_code == 200
 
@@ -60,7 +67,7 @@ def test_create_duplicate_username(client: TestClient, auth_headers: dict[str, s
             "username": "operator",
             "password": OPERATOR_PASSWORD,
             "display_name": "重复",
-            "role": "admin",
+            "role_id": _role_id(client, auth_headers, "admin"),
         },
         headers=auth_headers,
     )
@@ -73,7 +80,12 @@ def test_create_user_rejects_weak_password(
 ) -> None:
     response = client.post(
         USERS_URL,
-        json={"username": "weakuser", "password": "weakweakweak", "display_name": "弱口令"},
+        json={
+            "username": "weakuser",
+            "password": "weakweakweak",
+            "display_name": "弱口令",
+            "role_id": _role_id(client, auth_headers, "admin"),
+        },
         headers=auth_headers,
     )
 
@@ -87,10 +99,12 @@ def test_demote_user_takes_effect_immediately(
     operator_headers = _login(client, "operator", OPERATOR_PASSWORD)
 
     response = client.patch(
-        f"{USERS_URL}/{created['id']}", json={"role": "viewer"}, headers=auth_headers
+        f"{USERS_URL}/{created['id']}",
+        json={"role_id": _role_id(client, auth_headers, "viewer")},
+        headers=auth_headers,
     )
     assert response.status_code == 200
-    assert response.json()["role"] == "viewer"
+    assert response.json()["role_code"] == "viewer"
     assert (
         client.post(
             "/api/v1/admin/skills",
@@ -149,13 +163,12 @@ def test_platform_account_binds_platform_role(
             "username": "platform-viewer",
             "password": OPERATOR_PASSWORD,
             "display_name": "平台只读",
-            "role": "viewer",
             "role_id": roles["viewer"]["id"],
         },
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
-    assert created.json()["role"] == "viewer"
+    assert created.json()["role_code"] == "viewer"
     assert created.json()["role_id"] == roles["viewer"]["id"]
 
     # 平台只读账号仍可登录，资源范围由角色授权决定（此时为空）
@@ -181,7 +194,6 @@ def test_platform_account_rejects_tenant_role(
             "username": "platform-bad-role",
             "password": OPERATOR_PASSWORD,
             "display_name": "错误绑定",
-            "role": "viewer",
             "role_id": tenant_viewer_id,
         },
         headers=auth_headers,

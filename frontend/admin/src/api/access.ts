@@ -2,6 +2,7 @@ import { request } from './client'
 import type {
   GrantBatchPayload,
   PageResult,
+  PermissionResource,
   ResourceGrant,
   ResourceType,
   Role,
@@ -9,6 +10,7 @@ import type {
   RoleCreatePayload,
   RoleGrantResource,
   RoleGrantSummary,
+  RolePermissionList,
   RoleUpdatePayload,
   UserRoleAssignPayload,
 } from './types'
@@ -55,6 +57,30 @@ export const rolesApi = {
   },
   async remove(id: number): Promise<void> {
     await request<void>(`/admin/roles/${id}`, { method: 'DELETE' })
+  },
+  async permissions(): Promise<PermissionResource[]> {
+    return request<PermissionResource[]>('/admin/permissions')
+  },
+  async listPermissions(id: number): Promise<RolePermissionList> {
+    return request<RolePermissionList>(`/admin/roles/${id}/permissions`)
+  },
+  async replacePermissions(id: number, codes: string[]): Promise<RolePermissionList> {
+    return request<RolePermissionList>(`/admin/roles/${id}/permissions`, {
+      method: 'PUT',
+      body: JSON.stringify({ codes }),
+    })
+  },
+  async addPermissions(id: number, codes: string[]): Promise<RolePermissionList> {
+    return request<RolePermissionList>(`/admin/roles/${id}/permissions`, {
+      method: 'POST',
+      body: JSON.stringify({ codes }),
+    })
+  },
+  async removePermission(id: number, code: string): Promise<void> {
+    await request<void>(
+      `/admin/roles/${id}/permissions/${encodeURIComponent(code)}`,
+      { method: 'DELETE' },
+    )
   },
   async grantSummary(id: number): Promise<RoleGrantSummary> {
     return request<RoleGrantSummary>(`/admin/roles/${id}/grants/summary`)

@@ -7,9 +7,11 @@ from internal.domain.repository.protocols import (
     AdminUserRepository,
     AgentRepository,
     AuditLogRepository,
+    PermissionResourceRepository,
     RefreshTokenRepository,
     ResourceGrantRepository,
     ResourceRepository,
+    RolePermissionRepository,
     RoleRepository,
     SkillFileRepository,
     TenantRepository,
@@ -24,6 +26,9 @@ from internal.infrastructure.repository.postgres_agent_repository import Postgre
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
+from internal.infrastructure.repository.postgres_permission_resource_repository import (
+    PostgresPermissionResourceRepository,
+)
 from internal.infrastructure.repository.postgres_refresh_token_repository import (
     PostgresRefreshTokenRepository,
 )
@@ -35,6 +40,9 @@ from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresPromptRepository,
     PostgresSkillRepository,
     PostgresToolRepository,
+)
+from internal.infrastructure.repository.postgres_role_permission_repository import (
+    PostgresRolePermissionRepository,
 )
 from internal.infrastructure.repository.postgres_role_repository import PostgresRoleRepository
 from internal.infrastructure.repository.postgres_skill_file_repository import (
@@ -63,6 +71,12 @@ class SqlAlchemyUnitOfWork:
         self.refresh_tokens: RefreshTokenRepository = PostgresRefreshTokenRepository(self.session)
         self.audit_logs: AuditLogRepository = PostgresAuditLogRepository(self.session)
         self.roles: RoleRepository = PostgresRoleRepository(self.session)
+        self.permission_resources: PermissionResourceRepository = (
+            PostgresPermissionResourceRepository(self.session)
+        )
+        self.role_permissions: RolePermissionRepository = PostgresRolePermissionRepository(
+            self.session
+        )
         self.users: UserRepository = PostgresUserRepository(self.session)
         self.user_refresh_tokens: UserRefreshTokenRepository = (
             PostgresUserRefreshTokenRepository(self.session)

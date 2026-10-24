@@ -10,7 +10,12 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.access import User
-from internal.infrastructure.model.access import RoleModel, UserModel, UserRoleModel
+from internal.infrastructure.model.access import (
+    PermissionResourceModel,
+    RolePermissionModel,
+    UserModel,
+    UserRoleModel,
+)
 
 
 class PostgresUserRepository:
@@ -217,13 +222,20 @@ class PostgresUserRepository:
         page: int,
         page_size: int,
         keyword: str | None,
-        admin_system_roles: tuple[str, ...],
+        permission_code: str,
     ) -> tuple[list[User], int]:
-        """分页查询拥有管理类角色的租户用户。"""
+        """分页查询拥有指定管理权限的租户用户。"""
         admin_user_ids = (
             select(UserRoleModel.user_id)
-            .join(RoleModel, RoleModel.id == UserRoleModel.role_id)
-            .where(RoleModel.system_role.in_(admin_system_roles))
+            .join(RolePermissionModel, RolePermissionModel.role_id == UserRoleModel.role_id)
+            .join(
+                PermissionResourceModel,
+                PermissionResourceModel.id == RolePermissionModel.permission_id,
+            )
+            .where(
+                UserRoleModel.tenant_id == tenant_id,
+                PermissionResourceModel.code == permission_code,
+            )
         )
         stmt = select(UserModel).where(
             UserModel.tenant_id == tenant_id,
@@ -245,17 +257,19 @@ class PostgresUserRepository:
         ).all()
         return self._load_many(rows), int(total)
 
-    def has_role_system(
-        self, user_id: int, tenant_id: int, system_roles: tuple[str, ...]
-    ) -> bool:
-        """判断用户是否拥有指定系统角色之一。"""
+    def has_permission(self, user_id: int, tenant_id: int, permission_code: str) -> bool:
+        """判断用户是否通过任一角色获得指定权限。"""
         row = self._session.scalar(
             select(UserRoleModel.id)
-            .join(RoleModel, RoleModel.id == UserRoleModel.role_id)
+            .join(RolePermissionModel, RolePermissionModel.role_id == UserRoleModel.role_id)
+            .join(
+                PermissionResourceModel,
+                PermissionResourceModel.id == RolePermissionModel.permission_id,
+            )
             .where(
                 UserRoleModel.user_id == user_id,
                 UserRoleModel.tenant_id == tenant_id,
-                RoleModel.system_role.in_(system_roles),
+                PermissionResourceModel.code == permission_code,
             )
             .limit(1)
         )

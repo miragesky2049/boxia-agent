@@ -1,6 +1,6 @@
-"""租户角色管理接口。"""
+"""角色管理接口：角色 CRUD、功能权限与资源授权维护。"""
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.role import (
@@ -16,14 +16,27 @@ from web.admin.schemas.role_grant import (
     RoleGrantSummaryOut,
     RoleGrantUpdateOut,
 )
-from web.deps.auth import SuperadminAuthDep
+from web.admin.schemas.role_permission import (
+    PermissionResourceOut,
+    RolePermissionAddRequest,
+    RolePermissionListOut,
+    RolePermissionReplaceRequest,
+)
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta
-from web.deps.services import RoleGrantServiceDep, RoleServiceDep
+from web.deps.services import (
+    RoleGrantServiceDep,
+    RolePermissionServiceDep,
+    RoleServiceDep,
+)
 
 router = APIRouter(prefix="/roles", tags=["admin-roles"])
 
+_VIEW_ROLES = Depends(require_permission("page:roles"))
+_GRANT_ROLES = Depends(require_permission("button:role:grant"))
 
-@router.get("", response_model=list[RoleOut])
+
+@router.get("", response_model=list[RoleOut], dependencies=[_VIEW_ROLES])
 def list_roles(
     service: RoleServiceDep,
     tenant_id: int | None = Query(None, ge=1),
@@ -33,10 +46,9 @@ def list_roles(
     return [RoleOut.model_validate(item) for item in service.list(tenant_id, include_inactive)]
 
 
-@router.get("/{role_id}", response_model=RoleOut)
+@router.get("/{role_id}", response_model=RoleOut, dependencies=[_VIEW_ROLES])
 def get_role(
     role_id: int,
-    principal: SuperadminAuthDep,
     service: RoleServiceDep,
     tenant_id: int | None = Query(None, ge=1),
 ) -> RoleOut:
@@ -44,14 +56,19 @@ def get_role(
     return RoleOut.model_validate(service.get(role_id, tenant_id))
 
 
-@router.post("", response_model=RoleOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=RoleOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:role:create"))],
+)
 def create_role(
     payload: RoleCreateRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleServiceDep,
 ) -> RoleOut:
-    """创建当前作用域的自定义角色。"""
+    """创建当前作用域的角色；产品级入口创建的角色为系统角色。"""
     ip, user_agent = client_meta(request)
     role = service.create(
         code=payload.code,
@@ -65,21 +82,27 @@ def create_role(
     return RoleOut.model_validate(role)
 
 
-@router.post("/{role_id}/copy", response_model=RoleOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{role_id}/copy",
+    response_model=RoleOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:role:copy"))],
+)
 def copy_role(
     role_id: int,
     payload: RoleCopyRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleServiceDep,
 ) -> RoleOut:
-    """复制角色及其授权关系，生成新的自定义角色。"""
+    """复制角色及其功能权限与资源授权，生成新的自定义角色。"""
     ip, user_agent = client_meta(request)
     role = service.copy(
         role_id,
         code=payload.code,
         name=payload.name,
         description=payload.description,
+        actor_permissions=principal.permissions,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,
@@ -88,15 +111,19 @@ def copy_role(
     return RoleOut.model_validate(role)
 
 
-@router.patch("/{role_id}", response_model=RoleOut)
+@router.patch(
+    "/{role_id}",
+    response_model=RoleOut,
+    dependencies=[Depends(require_permission("button:role:update"))],
+)
 def update_role(
     role_id: int,
     payload: RoleUpdateRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleServiceDep,
 ) -> RoleOut:
-    """更新角色；基础权限不可修改，系统角色不可停用。"""
+    """更新角色名称、描述与启用状态；功能权限通过授权接口维护。"""
     ip, user_agent = client_meta(request)
     role = service.update(
         role_id,
@@ -111,10 +138,14 @@ def update_role(
     return RoleOut.model_validate(role)
 
 
-@router.delete("/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{role_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:role:delete"))],
+)
 def delete_role(
     role_id: int,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleServiceDep,
 ) -> None:
@@ -129,20 +160,125 @@ def delete_role(
     )
 
 
-@router.get("/{role_id}/grants/summary", response_model=RoleGrantSummaryOut)
+@router.get(
+    "/{role_id}/permissions",
+    response_model=RolePermissionListOut,
+    dependencies=[_VIEW_ROLES],
+)
+def list_role_permissions(
+    role_id: int,
+    service: RolePermissionServiceDep,
+) -> RolePermissionListOut:
+    """查询角色已授予的功能权限。"""
+    items = service.list_for_role(role_id)
+    return RolePermissionListOut(
+        items=[PermissionResourceOut.model_validate(item) for item in items],
+        codes=[item.code for item in items],
+    )
+
+
+@router.put(
+    "/{role_id}/permissions",
+    response_model=RolePermissionListOut,
+    dependencies=[_GRANT_ROLES],
+)
+def replace_role_permissions(
+    role_id: int,
+    payload: RolePermissionReplaceRequest,
+    principal: AdminAuthDep,
+    request: Request,
+    service: RolePermissionServiceDep,
+) -> RolePermissionListOut:
+    """整体替换角色功能权限；不能授予自身不具备的权限。"""
+    ip, user_agent = client_meta(request)
+    items = service.replace(
+        role_id,
+        payload.codes,
+        actor_permissions=principal.permissions,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return RolePermissionListOut(
+        items=[PermissionResourceOut.model_validate(item) for item in items],
+        codes=[item.code for item in items],
+    )
+
+
+@router.post(
+    "/{role_id}/permissions",
+    response_model=RolePermissionListOut,
+    dependencies=[_GRANT_ROLES],
+)
+def add_role_permissions(
+    role_id: int,
+    payload: RolePermissionAddRequest,
+    principal: AdminAuthDep,
+    request: Request,
+    service: RolePermissionServiceDep,
+) -> RolePermissionListOut:
+    """为角色追加功能权限；不能授予自身不具备的权限。"""
+    ip, user_agent = client_meta(request)
+    items = service.add(
+        role_id,
+        payload.codes,
+        actor_permissions=principal.permissions,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return RolePermissionListOut(
+        items=[PermissionResourceOut.model_validate(item) for item in items],
+        codes=[item.code for item in items],
+    )
+
+
+@router.delete(
+    "/{role_id}/permissions/{code}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_GRANT_ROLES],
+)
+def remove_role_permission(
+    role_id: int,
+    code: str,
+    principal: AdminAuthDep,
+    request: Request,
+    service: RolePermissionServiceDep,
+) -> None:
+    """移除角色对单个功能权限的授权。"""
+    ip, user_agent = client_meta(request)
+    service.remove(
+        role_id,
+        code,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+
+@router.get(
+    "/{role_id}/grants/summary",
+    response_model=RoleGrantSummaryOut,
+    dependencies=[_VIEW_ROLES],
+)
 def get_role_grant_summary(
     role_id: int,
-    principal: SuperadminAuthDep,
     service: RoleGrantServiceDep,
 ) -> RoleGrantSummaryOut:
     """按资源类型返回角色有效授权数量。"""
     return RoleGrantSummaryOut(counts=service.summary(role_id))
 
 
-@router.get("/{role_id}/grants", response_model=PageOut[RoleGrantResourceOut])
+@router.get(
+    "/{role_id}/grants",
+    response_model=PageOut[RoleGrantResourceOut],
+    dependencies=[_VIEW_ROLES],
+)
 def list_role_grants(
     role_id: int,
-    principal: SuperadminAuthDep,
     service: RoleGrantServiceDep,
     resource_type: str = Query(..., max_length=16),
     page: int = Query(1, ge=1),
@@ -163,12 +299,13 @@ def list_role_grants(
 @router.put(
     "/{role_id}/grants/{resource_type}",
     response_model=RoleGrantUpdateOut,
+    dependencies=[_GRANT_ROLES],
 )
 def replace_role_grants(
     role_id: int,
     resource_type: str,
     payload: RoleGrantReplaceRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleGrantServiceDep,
 ) -> RoleGrantUpdateOut:
@@ -189,12 +326,13 @@ def replace_role_grants(
 @router.post(
     "/{role_id}/grants/{resource_type}",
     response_model=RoleGrantUpdateOut,
+    dependencies=[_GRANT_ROLES],
 )
 def add_role_grants(
     role_id: int,
     resource_type: str,
     payload: RoleGrantAddRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleGrantServiceDep,
 ) -> RoleGrantUpdateOut:
@@ -215,12 +353,13 @@ def add_role_grants(
 @router.delete(
     "/{role_id}/grants/{resource_type}/{resource_id}",
     status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_GRANT_ROLES],
 )
 def remove_role_grant(
     role_id: int,
     resource_type: str,
     resource_id: int,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: RoleGrantServiceDep,
 ) -> None:

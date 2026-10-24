@@ -1,4 +1,4 @@
-"""管理员账号管理接口（仅 superadmin）。"""
+"""管理员账号管理接口。"""
 
 from fastapi import APIRouter, Depends, Query, Request, status
 
@@ -9,14 +9,10 @@ from web.admin.schemas.auth import (
     AdminUserUpdateRequest,
 )
 from web.admin.schemas.common import PageOut
-from web.deps.auth import AdminAuthDep, require_superadmin
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.services import AdminUserServiceDep
 
-router = APIRouter(
-    prefix="/admin-users",
-    tags=["admin-accounts"],
-    dependencies=[Depends(require_superadmin)],
-)
+router = APIRouter(prefix="/admin-users", tags=["admin-accounts"])
 
 
 def _client_meta(request: Request) -> tuple[str | None, str | None]:
@@ -25,14 +21,18 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
     return ip, user_agent
 
 
-@router.get("", response_model=PageOut[AdminUserOut])
+@router.get(
+    "",
+    response_model=PageOut[AdminUserOut],
+    dependencies=[Depends(require_permission("page:admin-users"))],
+)
 def list_users(
     service: AdminUserServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
 ) -> PageOut[AdminUserOut]:
-    """分页查询管理员：平台查平台账号，租户查拥有管理角色的用户。"""
+    """分页查询管理员：平台查平台账号，租户查拥有管理端访问权限的用户。"""
     result = service.list(page, page_size, keyword)
     return PageOut[AdminUserOut](
         items=[AdminUserOut.model_validate(item) for item in result.items],
@@ -42,7 +42,12 @@ def list_users(
     )
 
 
-@router.post("", response_model=AdminUserOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=AdminUserOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:admin-user:create"))],
+)
 def create_user(
     payload: AdminUserCreateRequest,
     request: Request,
@@ -55,7 +60,6 @@ def create_user(
         username=payload.username,
         password=payload.password,
         display_name=payload.display_name,
-        role=payload.role,
         role_id=payload.role_id,
         actor_id=principal.user_id,
         actor_username=principal.username,
@@ -65,7 +69,11 @@ def create_user(
     return AdminUserOut.model_validate(user)
 
 
-@router.patch("/{user_id}", response_model=AdminUserOut)
+@router.patch(
+    "/{user_id}",
+    response_model=AdminUserOut,
+    dependencies=[Depends(require_permission("button:admin-user:update"))],
+)
 def update_user(
     user_id: int,
     payload: AdminUserUpdateRequest,
@@ -78,7 +86,6 @@ def update_user(
     user = service.update(
         user_id,
         display_name=payload.display_name,
-        role=payload.role,
         role_id=payload.role_id,
         is_active=payload.is_active,
         actor_id=principal.user_id,
@@ -89,7 +96,11 @@ def update_user(
     return AdminUserOut.model_validate(user)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:admin-user:delete"))],
+)
 def delete_user(
     user_id: int,
     request: Request,
@@ -107,7 +118,11 @@ def delete_user(
     )
 
 
-@router.post("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{user_id}/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:admin-user:reset-password"))],
+)
 def reset_user_password(
     user_id: int,
     payload: AdminUserResetPasswordRequest,

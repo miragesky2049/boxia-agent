@@ -66,7 +66,9 @@ export default function SkillPackageDrawer({
   onChanged,
 }: SkillPackageDrawerProps) {
   const { message, modal } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:skill:create')
+  const canUpdate = hasPermission('button:skill:update')
   const { isPlatform } = useTenant()
   const [files, setFiles] = useState<SkillFileMeta[]>([])
   const [totalBytes, setTotalBytes] = useState(0)
@@ -78,8 +80,8 @@ export default function SkillPackageDrawer({
   const [cloneName, setCloneName] = useState('')
   const [cloning, setCloning] = useState(false)
 
-  const readonly = !canWrite || Boolean(skill?.is_platform && !isPlatform)
-  const canClone = canWrite && !isPlatform && Boolean(skill?.is_platform)
+  const readonly = !canUpdate || Boolean(skill?.is_platform && !isPlatform)
+  const canClone = canCreate && !isPlatform && Boolean(skill?.is_platform)
 
   const loadFiles = useCallback(async () => {
     if (!skill) return
@@ -283,8 +285,8 @@ export default function SkillPackageDrawer({
     },
   ]
 
-  const readonlyHint = !canWrite
-    ? '当前账号为只读角色，仅可查看技能包。'
+  const readonlyHint = !canUpdate
+    ? '当前账号无技能维护权限，仅可查看技能包。'
     : skill?.is_platform && !isPlatform
       ? '平台级技能对所有租户只读，如需修改请克隆到本租户。'
       : null

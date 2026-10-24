@@ -10,6 +10,7 @@ from internal.application.auth_service import AuthService
 from internal.application.grant_service import GrantService
 from internal.application.resource_service import ResourceService
 from internal.application.role_grant_service import RoleGrantService
+from internal.application.role_permission_service import RolePermissionService
 from internal.application.role_service import RoleService
 from internal.application.skill_package_service import SkillPackageService
 from internal.application.skill_service import SkillService
@@ -99,6 +100,13 @@ def get_role_grant_service(uow: UowDep, context: RequestContextDep) -> RoleGrant
     return RoleGrantService(uow, context)
 
 
+def get_role_permission_service(
+    uow: UowDep, context: RequestContextDep
+) -> RolePermissionService:
+    """角色功能权限用例。"""
+    return RolePermissionService(uow, context)
+
+
 def get_user_service(uow: UowDep, context: RequestContextDep) -> UserAdminService:
     """最终用户管理用例。"""
     return UserAdminService(uow, context)
@@ -129,6 +137,9 @@ AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
 TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
 RoleServiceDep = Annotated[RoleService, Depends(get_role_service)]
 RoleGrantServiceDep = Annotated[RoleGrantService, Depends(get_role_grant_service)]
+RolePermissionServiceDep = Annotated[
+    RolePermissionService, Depends(get_role_permission_service)
+]
 UserAdminServiceDep = Annotated[UserAdminService, Depends(get_user_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
 UserPortalServiceDep = Annotated[UserPortalService, Depends(get_user_portal_service)]
@@ -144,6 +155,7 @@ __all__ = [
     "GrantServiceDep",
     "PromptServiceDep",
     "RoleGrantServiceDep",
+    "RolePermissionServiceDep",
     "RoleServiceDep",
     "SkillPackageServiceDep",
     "SkillServiceDep",

@@ -20,7 +20,6 @@ def test_tenant_roles_initialized_and_custom_crud(
     roles = list_roles(site, headers)
     assert {"superadmin", "admin", "viewer"} <= set(roles)
     assert all(item["is_system"] for item in roles.values())
-    assert roles["superadmin"]["system_role"] == "superadmin"
 
     created = site.post(
         "/api/v1/admin/roles",
@@ -35,7 +34,6 @@ def test_tenant_roles_initialized_and_custom_crud(
     role = created.json()
     assert role["is_system"] is False
     assert role["is_active"] is True
-    assert role["system_role"] == "viewer"
 
     duplicate = site.post(
         "/api/v1/admin/roles",
@@ -124,7 +122,6 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
     copy = copied.json()
     assert copy["is_system"] is False
     assert copy["is_active"] is True
-    assert copy["system_role"] == "viewer"
     assert copy["description"] == "销售角色"
 
     summary = site.get(
@@ -157,7 +154,7 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
     assert forbidden.status_code == 422
 
 
-def test_create_role_defaults_viewer_and_copy_inherits_base_permission(
+def test_create_role_has_no_permissions_and_copy_inherits_permissions(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     create_tenant(client, auth_headers)
@@ -169,24 +166,38 @@ def test_create_role_defaults_viewer_and_copy_inherits_base_permission(
         headers=headers,
     )
     assert created.status_code == 201, created.text
-    # 创建时不再接收基础权限，默认只读
-    assert created.json()["system_role"] == "viewer"
+    role_id = created.json()["id"]
 
+    # 新建角色不预置任何功能权限，由授权接口显式维护
+    permissions = site.get(f"/api/v1/admin/roles/{role_id}/permissions", headers=headers)
+    assert permissions.status_code == 200, permissions.text
+    assert permissions.json()["codes"] == []
+
+    # 基础权限字段已移除，编辑接口不再接收
     rejected = site.patch(
-        f"/api/v1/admin/roles/{created.json()['id']}",
+        f"/api/v1/admin/roles/{role_id}",
         json={"system_role": "superadmin"},
         headers=headers,
     )
     assert rejected.status_code == 422
 
     admin_id = list_roles(site, headers)["admin"]["id"]
+    admin_codes = set(
+        site.get(f"/api/v1/admin/roles/{admin_id}/permissions", headers=headers).json()["codes"]
+    )
     copied = site.post(
         f"/api/v1/admin/roles/{admin_id}/copy",
         json={"code": "ops-admin", "name": "运营管理员"},
         headers=headers,
     )
     assert copied.status_code == 201, copied.text
-    assert copied.json()["system_role"] == "admin"
+    copied_codes = set(
+        site.get(
+            f"/api/v1/admin/roles/{copied.json()['id']}/permissions", headers=headers
+        ).json()["codes"]
+    )
+    assert copied_codes == admin_codes
+    assert "skill:read" in copied_codes
 
 
 def test_copy_role_is_tenant_isolated(
@@ -222,7 +233,8 @@ def test_platform_manages_own_roles_only(
     )
     assert created.status_code == 201, created.text
     assert created.json()["tenant_id"] is None
-    assert created.json()["system_role"] == "viewer"
+    # 产品级入口创建的角色统一标记为系统角色
+    assert created.json()["is_system"] is True
 
     listed = client.get("/api/v1/admin/roles", headers=auth_headers)
     assert listed.status_code == 200
@@ -264,7 +276,7 @@ def test_roles_are_tenant_isolated(
     assert forbidden.status_code == 403
 
 
-def test_viewer_admin_can_read_but_not_manage_roles(
+def test_viewer_admin_cannot_access_role_management(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     create_tenant(client, auth_headers)
@@ -290,7 +302,8 @@ def test_viewer_admin_can_read_but_not_manage_roles(
     assert login.status_code == 200, login.text
     viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
 
-    assert site.get("/api/v1/admin/roles", headers=viewer_headers).status_code == 200
+    # 只读角色仅拥有资源查看权限，不含角色管理页面权限
+    assert site.get("/api/v1/admin/roles", headers=viewer_headers).status_code == 403
     denied = site.post(
         "/api/v1/admin/roles",
         json={"code": "sales", "name": "销售"},

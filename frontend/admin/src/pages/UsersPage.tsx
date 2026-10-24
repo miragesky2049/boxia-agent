@@ -31,7 +31,11 @@ interface ResetFormValues {
 
 export default function UsersPage() {
   const { message } = App.useApp()
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, hasPermission } = useAuth()
+  const canCreate = hasPermission('button:user:create')
+  const canUpdate = hasPermission('button:user:update')
+  const canDelete = hasPermission('button:user:delete')
+  const showActions = canUpdate || canDelete
   const { context } = useTenant()
   const [items, setItems] = useState<User[]>([])
   const [total, setTotal] = useState(0)
@@ -213,7 +217,7 @@ export default function UsersPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="禁用"
-          disabled={record.id === currentUser?.id}
+          disabled={!canUpdate || record.id === currentUser?.id}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -233,44 +237,54 @@ export default function UsersPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 190,
-      render: (_: unknown, record: User) => (
-        <Space size={4}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              setEditing(record)
-              editForm.setFieldsValue({
-                display_name: record.display_name,
-                role_ids: record.role_ids,
-                is_active: record.is_active,
-              })
-            }}
-          >
-            编辑
-          </Button>
-          <Button type="link" size="small" onClick={() => setResetTarget(record)}>
-            重置密码
-          </Button>
-          <Popconfirm
-            title="确认删除该用户？"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            disabled={record.id === currentUser?.id}
-            onConfirm={() => handleDelete(record)}
-          >
-            <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
+    ...(showActions
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 190,
+            render: (_: unknown, record: User) => (
+              <Space size={4}>
+                {canUpdate && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      setEditing(record)
+                      editForm.setFieldsValue({
+                        display_name: record.display_name,
+                        role_ids: record.role_ids,
+                        is_active: record.is_active,
+                      })
+                    }}
+                  >
+                    编辑
+                  </Button>
+                )}
+                {canUpdate && (
+                  <Button type="link" size="small" onClick={() => setResetTarget(record)}>
+                    重置密码
+                  </Button>
+                )}
+                {canDelete && (
+                  <Popconfirm
+                    title="确认删除该用户？"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    disabled={record.id === currentUser?.id}
+                    onConfirm={() => handleDelete(record)}
+                  >
+                    <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -282,17 +296,19 @@ export default function UsersPage() {
             租户管理员与普通用户统一为同一账号体系，通过角色赋予管理或使用权限。
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            createForm.resetFields()
-            createForm.setFieldsValue({ is_active: true, display_name: '', role_ids: [] })
-            setCreateOpen(true)
-          }}
-        >
-          新建用户
-        </Button>
+        {canCreate && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              createForm.resetFields()
+              createForm.setFieldsValue({ is_active: true, display_name: '', role_ids: [] })
+              setCreateOpen(true)
+            }}
+          >
+            新建用户
+          </Button>
+        )}
       </div>
 
       <div className="page-toolbar">

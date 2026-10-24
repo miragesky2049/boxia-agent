@@ -8,6 +8,7 @@ from web.admin.routers.audit_logs import router as audit_logs_router
 from web.admin.routers.components import router as components_router
 from web.admin.routers.context import router as context_router
 from web.admin.routers.grants import router as grants_router
+from web.admin.routers.permissions import router as permissions_router
 from web.admin.routers.prompts import router as prompts_router
 from web.admin.routers.roles import router as roles_router
 from web.admin.routers.skills import router as skills_router
@@ -27,5 +28,6 @@ router.include_router(prompts_router)
 router.include_router(users_router)
 router.include_router(admin_users_router)
 router.include_router(roles_router)
+router.include_router(permissions_router)
 router.include_router(grants_router)
 router.include_router(audit_logs_router)

@@ -15,7 +15,6 @@ class RoleOut(BaseModel):
     code: str
     name: str
     description: str
-    system_role: str
     is_system: bool
     is_active: bool
     created_at: datetime
@@ -23,7 +22,7 @@ class RoleOut(BaseModel):
 
 
 class RoleCreateRequest(BaseModel):
-    """创建角色请求：基础权限固定为只读，不可指定。"""
+    """创建角色请求；新角色不预置权限，通过角色授权接口维护。"""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -33,7 +32,7 @@ class RoleCreateRequest(BaseModel):
 
 
 class RoleUpdateRequest(BaseModel):
-    """更新角色请求：基础权限不可修改，只能通过复制角色继承。"""
+    """更新角色请求：功能权限通过角色授权接口单独维护。"""
 
     model_config = ConfigDict(extra="forbid")
 

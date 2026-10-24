@@ -4,30 +4,22 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { rolesApi } from '../api/access'
-import type { AdminRole, AdminUser, Role } from '../api/types'
+import type { AdminUser, Role } from '../api/types'
 import { adminUsersApi } from '../api/users'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
-const ROLE_META: Record<AdminRole, { label: string; color: string }> = {
-  superadmin: { label: '超级管理员', color: 'red' },
-  admin: { label: '管理员', color: 'blue' },
-  viewer: { label: '只读', color: 'default' },
-}
-
 interface CreateFormValues {
   username: string
   display_name: string
   password: string
-  role: AdminRole
-  role_id?: number
+  role_id: number
 }
 
 interface EditFormValues {
   display_name: string
-  role: AdminRole
-  role_id?: number
+  role_id: number
 }
 
 interface ResetFormValues {
@@ -36,7 +28,12 @@ interface ResetFormValues {
 }
 
 export default function AdminUsersPage() {
-  const { user: currentUser } = useAuth()
+  const { user: currentUser, hasPermission } = useAuth()
+  const canCreate = hasPermission('button:admin-user:create')
+  const canUpdate = hasPermission('button:admin-user:update')
+  const canDelete = hasPermission('button:admin-user:delete')
+  const canResetPassword = hasPermission('button:admin-user:reset-password')
+  const showActions = canUpdate || canDelete || canResetPassword
   const { isPlatform, context } = useTenant()
   const { message } = App.useApp()
   const [roles, setRoles] = useState<Role[]>([])
@@ -62,12 +59,6 @@ export default function AdminUsersPage() {
       .catch(() => setRoles([]))
   }, [isPlatform])
 
-  const findRole = useCallback(
-    (roleId?: number | null): Role | undefined =>
-      roleId ? roles.find((role) => role.id === roleId) : undefined,
-    [roles],
-  )
-
   const load = useCallback(async () => {
     setLoading(true)
     try {
@@ -91,15 +82,13 @@ export default function AdminUsersPage() {
 
   const handleCreate = async () => {
     const values = await createForm.validateFields()
-    const boundRole = findRole(values.role_id)
     setSaving(true)
     try {
       await adminUsersApi.create({
         username: values.username.trim(),
         display_name: values.display_name.trim(),
         password: values.password,
-        role: boundRole?.system_role ?? values.role,
-        role_id: values.role_id ?? null,
+        role_id: values.role_id,
       })
       message.success('账号已创建，首次登录需修改密码')
       setCreateOpen(false)
@@ -115,13 +104,11 @@ export default function AdminUsersPage() {
   const handleEdit = async () => {
     if (!editing) return
     const values = await editForm.validateFields()
-    const boundRole = findRole(values.role_id)
     setSaving(true)
     try {
       await adminUsersApi.update(editing.id, {
         display_name: values.display_name.trim(),
-        role: boundRole?.system_role ?? values.role,
-        role_id: values.role_id ?? null,
+        role_id: values.role_id,
       })
       message.success('已保存')
       setEditing(null)
@@ -192,21 +179,12 @@ export default function AdminUsersPage() {
       title: '角色',
       key: 'role',
       width: 160,
-      render: (_: unknown, record: AdminUser) => {
-        const bound = findRole(record.role_id)
-
-        if (bound) {
-          const meta = ROLE_META[bound.system_role]
-          return (
-            <Space size={4} wrap>
-              <Tag color="green">{bound.name}</Tag>
-              <Tag color={meta.color}>{meta.label}</Tag>
-            </Space>
-          )
-        }
-        const meta = ROLE_META[record.role]
-        return <Tag color={meta.color}>{meta.label}</Tag>
-      },
+      render: (_: unknown, record: AdminUser) => (
+        <div>
+          <Tag color="green">{record.role_name || '-'}</Tag>
+          <div className="resource-desc">{record.role_code}</div>
+        </div>
+      ),
     },
     {
       title: '密码状态',
@@ -227,7 +205,7 @@ export default function AdminUsersPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="禁用"
-          disabled={record.id === currentUser?.id}
+          disabled={!canUpdate || record.id === currentUser?.id}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -239,44 +217,53 @@ export default function AdminUsersPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 220,
-      render: (_: unknown, record: AdminUser) => (
-        <Space size={4}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              setEditing(record)
-              editForm.setFieldsValue({
-                display_name: record.display_name,
-                role: record.role,
-                role_id: record.role_id ?? undefined,
-              })
-            }}
-          >
-            编辑
-          </Button>
-          <Button type="link" size="small" onClick={() => setResetTarget(record)}>
-            重置密码
-          </Button>
-          <Popconfirm
-            title="确认删除该管理员？"
-            okText="删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            disabled={record.id === currentUser?.id}
-            onConfirm={() => handleDelete(record)}
-          >
-            <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
-              删除
-            </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
+    ...(showActions
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 220,
+            render: (_: unknown, record: AdminUser) => (
+              <Space size={4}>
+                {canUpdate && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      setEditing(record)
+                      editForm.setFieldsValue({
+                        display_name: record.display_name,
+                        role_id: record.role_id ?? undefined,
+                      })
+                    }}
+                  >
+                    编辑
+                  </Button>
+                )}
+                {canResetPassword && (
+                  <Button type="link" size="small" onClick={() => setResetTarget(record)}>
+                    重置密码
+                  </Button>
+                )}
+                {canDelete && (
+                  <Popconfirm
+                    title="确认删除该管理员？"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    disabled={record.id === currentUser?.id}
+                    onConfirm={() => handleDelete(record)}
+                  >
+                    <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -290,17 +277,18 @@ export default function AdminUsersPage() {
               : '展示本租户内拥有超级管理员或管理员角色的账号，可在此调整角色与启用状态。'}
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            createForm.resetFields()
-            createForm.setFieldsValue({ role: 'admin' })
-            setCreateOpen(true)
-          }}
-        >
-          新建账号
-        </Button>
+        {canCreate && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              createForm.resetFields()
+              setCreateOpen(true)
+            }}
+          >
+            新建账号
+          </Button>
+        )}
       </div>
 
       <div className="page-toolbar">

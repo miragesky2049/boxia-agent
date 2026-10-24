@@ -29,7 +29,7 @@ class UserOut(BaseModel):
 
 
 class UserProfileOut(UserOut):
-    """当前登录用户身份，含角色与基础权限。"""
+    """当前登录用户身份，含角色与功能权限编码。"""
 
     role_code: str
     role_name: str

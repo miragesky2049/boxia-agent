@@ -13,24 +13,15 @@ SYSTEM_ROLE_SEEDS = (
 
 RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
 
-# 管理端基础权限：read=查看，write=业务对象读写，manage=角色/账号/授权管理
-SYSTEM_ROLE_PERMISSIONS: dict[str, tuple[str, ...]] = {
-    "superadmin": ("read", "write", "manage"),
-    "admin": ("read", "write"),
-    "viewer": ("read",),
-}
-
-
 @dataclass(frozen=True)
 class Role:
-    """角色；tenant_id 为空表示平台自有角色，system_role 决定基础权限。"""
+    """角色；tenant_id 为空表示平台自有角色，功能权限由 role_permissions 决定。"""
 
     id: int
     tenant_id: int | None
     code: str
     name: str
     description: str
-    system_role: str
     is_system: bool
     is_active: bool
     created_at: datetime

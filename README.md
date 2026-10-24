@@ -80,10 +80,10 @@
 | 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本 |
 | 租户授权     | 产品级智能体必须显式授权给租户后才可见；通过独立「授权管理」菜单按租户/角色集中配置                 |
 | 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
-| 角色管理     | 平台与租户各自维护角色体系；新建角色默认只读基础权限，需要更高基础权限时复制现有角色继承；平台角色可授权平台级资源 |
+| 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
 | 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的智能体 |
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
-| 权限控制     | 管理端与用户端分别校验角色；列表、详情、写操作均由服务端按可见性规则过滤                       |
+| 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
 | 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
 | 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标                         |
 | 工程化交付   | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本                         |
@@ -105,19 +105,28 @@
 | 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权 |
 | 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
 
-### 1.5 账号角色
+### 1.5 角色与权限
 
-| 角色                       | 能读资源 | 能改资源 | 能管管理员 | 能看审计 |
-|----------------------------|----------|----------|------------|----------|
-| `superadmin`（超级管理员） | 是       | 是       | 是         | 是       |
-| `admin`（管理员）          | 是       | 是       | 否         | 否       |
-| `viewer`（只读）           | 是       | 否       | 否         | 否       |
+系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）、按钮（`button:*`）以及智能体/技能/工具/组件/提示词的增删改查（如 `agent:read`、`agent:update`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
+
+| 权限类别 | 作用                         | 示例                                                         |
+|----------|------------------------------|--------------------------------------------------------------|
+| `system` | 管理端入口与全量数据范围     | `system:console:access`、`system:data:all`                   |
+| `menu`   | 左侧菜单可见性               | `menu:roles`                                                 |
+| `page`   | 页面与对应接口访问           | `page:roles`                                                 |
+| `button` | 页面操作按钮                 | `button:role:grant`                                          |
+| 资源     | 资源读写                     | `agent:create` / `agent:read` / `agent:update` / `agent:delete` |
+
+- 产品级平台与每个租户各自拥有 `superadmin` / `admin` / `viewer` 三个内置系统角色，不可删除、不可停用；平台与租户角色数据完全隔离。
+- `superadmin` 默认拥有所属作用域全部权限（含 `system:data:all`），其功能权限与数据授权在角色详情中只读。
+- 通过产品级入口「角色管理」新建的角色自动标记为系统角色；复制出的角色为可删除的自定义角色，并继承源角色的功能权限与数据授权。
+- 新建角色默认没有任何功能权限，需要在其详情页勾选，或复制现有角色继承。
+- `system:console:access` 是登录管理端的必要条件，未授予该权限的角色不能绑定管理端账号。
+- 授权遵循最小权限：只能授予自己已拥有的功能权限，也不能复制包含自身不具备权限的角色。
+- 产品级平台账号单独存于 `admin_users` 并绑定平台角色；租户管理员与普通用户统一存于 `users`，通过 `user_roles` 绑定租户角色。
+- 角色只在所属作用域内生效：产品级账号只能登录 `adminsystem.<根域名>`，租户账号只能登录本租户子域名；不同作用域可以使用相同用户名。
 
 > 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
-
-角色只在所属作用域内生效：产品级账号只能登录 `adminsystem.<根域名>`，租户账号只能登录本租户子域名。不同作用域可以使用相同用户名，彼此互不影响。
-
-上表是**基础权限**（`roles.system_role`）。产品级平台账号单独存于 `admin_users`，可绑定平台自有角色；租户管理员与普通用户统一存于 `users`，通过 `user_roles` 绑定一个或多个租户角色。拥有 `superadmin` / `admin` 角色的用户即可登录管理端，其余用户仅使用用户端。平台与每个租户各自拥有 `superadmin` / `admin` / `viewer` 三个系统角色，系统角色不可删除；平台与租户角色数据完全隔离，平台不能查看或操作任何租户角色。
 
 ### 1.6 技术栈速览
 
@@ -302,7 +311,7 @@ uv run python -m scripts.create_admin
 输入密码时**屏幕不会显示字符**，这是正常的。输入完按回车。默认会创建：
 
 - 用户名：`admin`
-- 角色：`superadmin`
+- 绑定平台 `superadmin` 角色（默认拥有所属作用域全部功能权限与数据范围，可用 `ADMIN_ROLE` 指定其他平台角色编码）
 - 首次登录必须改密
 
 默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`；本地为 `localhost:5173` 或 `adminsystem.localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
@@ -944,17 +953,25 @@ boxia-agent/
 
 ### 7.3 权限（RBAC）
 
-| 基础权限     | 读资源 | 写资源 | 管理员账号 | 审计查询 |
-|--------------|--------|--------|------------|----------|
-| `superadmin` | 是     | 是     | 是         | 是       |
-| `admin`      | 是     | 是     | 否         | 否       |
-| `viewer`     | 是     | 否     | 否         | 否       |
+权限分两层：
 
-每次请求都以数据库中的实时角色和状态为准，不信任令牌里的旧角色信息。
+- **功能权限**：角色与全局权限资源目录（`permission_resources`）通过 `role_permissions` 建立多对多关系，决定能否看到菜单/页面/按钮，以及能否对资源做增删改查。
+- **数据权限**：`resource_grants` 决定角色能看到哪些资源实例（智能体、技能、工具、组件、提示词），属于实例级授权。
+
+权限资源随迁移预置、只读维护，分类为 `system` / `menu` / `page` / `button` / `agent` / `skill` / `tool` / `component` / `prompt`。管理端只提供查询接口，不提供新增或修改。
+
+约束与规则：
+
+- 每次请求都以数据库中的实时角色、权限与账号状态为准（`AdminPrincipal.permissions` 每次重建），不信任令牌里的旧角色信息。
+- `system:console:access` 控制管理端登录；`system:data:all` 跳过数据授权过滤，但仍受租户隔离约束。
+- 超级管理员角色拥有所属作用域全部权限，功能权限与数据授权均不可单独调整。
+- 平台角色不能授予租户专属菜单与按钮（`menu:grants`、`menu:users`、`page:users`、`button:user:*`）；租户角色不能授予平台级租户管理权限（`menu:tenants` 等）。
+- 授权只允许授予调用者已拥有的权限，复制角色同样校验；写入时对角色行加锁，避免并发授权互相覆盖。
+- 前端隐藏菜单和按钮只是体验优化，所有接口都以服务端权限校验为准，不满足返回 403。
 
 **租户角色与资源可见性**：
 
-- 租户管理员与普通用户都通过 `user_roles` 绑定租户角色（`users.role_id` 保留主角色），角色的 `system_role` 决定管理端读写能力。
+- 租户管理员与普通用户都通过 `user_roles` 绑定租户角色（`users.role_id` 保留主角色），角色拥有的功能权限决定能否进入管理端及可执行的操作。
 - 产品级智能体必须存在授权记录（`resource_grants`），租户才能看到；`role_id = NULL` 表示授予整个租户，否则仅授予指定角色。
 - 租户自有智能体默认对本租户全部角色可见；配置了角色授权后按授权收紧。
 - 技能、工具、组件、提示词同样支持角色授权；未单独配置授权时随所属智能体放行。
@@ -992,8 +1009,9 @@ boxia-agent/
 - [ ] Refresh Token 重放会撤销整条会话链
 - [ ] 登出后 Access / Refresh Token 均立即失效
 - [ ] 改密后所有旧会话失效
-- [ ] viewer 调用写接口返回 403，管理端隐藏写按钮
-- [ ] `/admin/users`、`/admin/admin-users`、`/admin/audit-logs` 仅 superadmin 可访问
+- [ ] 无对应 `button:*` 权限的角色调用写接口返回 403，管理端隐藏操作按钮
+- [ ] `/admin/users`、`/admin/admin-users`、`/admin/audit-logs` 仅授予对应 `page:*` 权限的角色可访问
+- [ ] 角色授权不能授予调用者自身不具备的权限（越权授权返回 403）
 - [ ] 错误响应不含堆栈，500 只返回通用文案
 - [ ] 日志与审计不含密码、令牌等敏感信息
 - [ ] 生产环境无默认账号，`JWT_SECRET` 不是示例值
@@ -1054,10 +1072,10 @@ Authorization: Bearer <access_token>
 
 | 字段          | 说明                                                                 |
 |---------------|----------------------------------------------------------------------|
-| `role`        | 基础角色编码，如 `superadmin`；与 `system_role` 同值，保留兼容字段    |
-| `system_role` | 基础权限 `superadmin` / `admin` / `viewer`，决定管理端能否读写        |
-| `permissions` | 基础权限集合：`read` / `write` / `manage`；前端据此控制按钮           |
-| `menus`       | 当前账号可见菜单键；所有账号包含 `agents`，superadmin 额外获得管理菜单（平台为 `grants/roles/admin-users/tenants/audit`，租户为 `grants/roles/users/admin-users/audit`），非 superadmin 仅 `agents` |
+| `role_code`   | 当前账号绑定角色的编码，如 `superadmin`、`admin` 或自定义编码         |
+| `role_name`   | 角色名称                                                             |
+| `permissions` | 角色拥有的功能权限编码集合（如 `menu:roles`、`button:agent:create`），前端据此控制菜单、路由与按钮 |
+| `menus`       | 由 `menu:*` 权限推导出的可见菜单键；平台账号不会包含租户专属菜单     |
 
 ### 8.3 资源接口
 
@@ -1066,10 +1084,10 @@ Authorization: Bearer <access_token>
 | 方法   | 路径                            | 说明                                                                                     |
 |--------|---------------------------------|------------------------------------------------------------------------------------------|
 | GET    | `/admin/{resource}`             | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled`、`agent_id`          |
-| POST   | `/admin/{resource}`             | 创建，返回 201（viewer 返回 403）；技能/工具/组件/提示词可传 `agent_id` 绑定归属智能体    |
+| POST   | `/admin/{resource}`             | 创建，返回 201（无 `button:{resource}:create` 返回 403）；技能/工具/组件/提示词可传 `agent_id` 绑定归属智能体 |
 | GET    | `/admin/{resource}/{id}`        | 详情；未授权统一返回 404                                                                 |
-| PUT    | `/admin/{resource}/{id}`        | 全量更新（viewer 返回 403）                                                              |
-| DELETE | `/admin/{resource}/{id}`        | 删除，返回 204（viewer 返回 403），同事务清理授权记录                                    |
+| PUT    | `/admin/{resource}/{id}`        | 全量更新（无 `button:{resource}:update` 返回 403）                                       |
+| DELETE | `/admin/{resource}/{id}`        | 删除，返回 204（无 `button:{resource}:delete` 返回 403），同事务清理授权记录              |
 | POST   | `/admin/{resource}/{id}/clone`  | 克隆到目标智能体，入参 `{agent_id, name?}`，返回 201 与独立副本                          |
 
 分页响应格式：
@@ -1129,9 +1147,9 @@ Authorization: Bearer <access_token>
 - 全量替换（导入/目录导入）在单个事务内完成，失败不会留下半包数据。
 - 删除技能时 `skill_files` 随外键级联删除。
 
-### 8.4 管理员、用户与审计（仅 superadmin）
+### 8.4 管理员、用户与审计
 
-管理员账号接口（平台作用域操作 `admin_users`，租户作用域操作拥有 `superadmin` / `admin` 角色的 `users`）：
+管理员账号接口（平台作用域操作 `admin_users`，租户作用域操作拥有管理端入口权限的 `users`；需 `page:admin-users` 及对应按钮权限）：
 
 | 方法   | 路径                               | 说明                                                   |
 |--------|------------------------------------|--------------------------------------------------------|
@@ -1142,7 +1160,7 @@ Authorization: Bearer <access_token>
 | DELETE | `/admin/admin-users/{id}`          | 删除管理员账号，返回 204                               |
 | GET    | `/admin/audit-logs`                | 审计查询（按时间、用户、动作筛选）                     |
 
-租户管理（仅产品级平台 superadmin）：
+租户管理（需 `page:tenants` 及 `button:tenant:*`，仅产品级平台角色可授予）：
 
 | 方法  | 路径                  | 说明                                 |
 |-------|-----------------------|--------------------------------------|
@@ -1161,14 +1179,24 @@ Authorization: Bearer <access_token>
 
 | 方法   | 路径                  | 说明                                                       |
 |--------|-----------------------|------------------------------------------------------------|
-| GET    | `/admin/roles`        | 角色列表，参数 `include_inactive`                          |
-| POST   | `/admin/roles`        | 创建自定义角色，基础权限固定为只读（不可指定），返回 201   |
-| POST   | `/admin/roles/{id}/copy` | 复制角色及显式授权关系，入参 `{code,name,description?}`，返回 201；`superadmin` 角色不支持复制 |
-| GET    | `/admin/roles/{id}`   | 角色详情                                                   |
-| PATCH  | `/admin/roles/{id}`   | 修改名称/描述/启停；基础权限不可修改（只能复制继承），系统角色不可停用 |
-| DELETE | `/admin/roles/{id}`   | 删除角色；被账号或授权引用时返回 409                       |
+| GET    | `/admin/roles`        | 角色列表，参数 `include_inactive`（`page:roles`）           |
+| POST   | `/admin/roles`        | 创建角色，返回 201（`button:role:create`）；新角色默认无功能权限，产品级入口创建的角色为系统角色 |
+| POST   | `/admin/roles/{id}/copy` | 复制角色、功能权限与数据授权，入参 `{code,name,description?}`，返回 201（`button:role:copy`）；副本为自定义角色，`superadmin` 不支持复制 |
+| GET    | `/admin/roles/{id}`   | 角色详情（`page:roles`）                                    |
+| PATCH  | `/admin/roles/{id}`   | 修改名称/描述/启停（`button:role:update`）；系统角色不可停用 |
+| DELETE | `/admin/roles/{id}`   | 删除角色（`button:role:delete`）；系统角色、被账号或授权引用时拒绝 |
 
-角色授权接口（仅所属作用域的 superadmin；`superadmin` 角色默认拥有全部资源，不可单独授权）：
+角色功能权限接口（权限目录只读，授权需 `button:role:grant`；`superadmin` 角色不可单独调整）：
+
+| 方法   | 路径                                    | 说明                                                     |
+|--------|-----------------------------------------|----------------------------------------------------------|
+| GET    | `/admin/permissions`                    | 当前作用域可授权的功能权限目录（`page:roles`）           |
+| GET    | `/admin/roles/{id}/permissions`         | 角色已授予的功能权限，返回 `items` 与 `codes`（`page:roles`） |
+| PUT    | `/admin/roles/{id}/permissions`         | 整体替换，入参 `{codes}`                                 |
+| POST   | `/admin/roles/{id}/permissions`         | 追加授权，入参 `{codes}`                                 |
+| DELETE | `/admin/roles/{id}/permissions/{code}`  | 移除单个功能权限                                         |
+
+角色数据授权接口（需 `button:role:grant`；`superadmin` 角色默认拥有全部资源，只读）：
 
 | 方法   | 路径                                         | 说明                                     |
 |--------|----------------------------------------------|------------------------------------------|
@@ -1229,7 +1257,7 @@ Authorization: Bearer <access_token>
 | POST | `/user/auth/login`     | 账号密码登录，返回 access/refresh、有效期与用户角色信息              |
 | POST | `/user/auth/refresh`   | 轮换刷新令牌；检测到重放会撤销整个会话族                             |
 | POST | `/user/auth/logout`    | 撤销当前会话族，返回 204                                             |
-| GET  | `/user/me`             | 当前用户、所属租户、角色与基础权限                                   |
+| GET  | `/user/me`             | 当前用户、所属租户、角色与功能权限编码                               |
 | GET  | `/user/agents`         | 分页查询当前角色可见且已启用的智能体，支持 `keyword`                 |
 | GET  | `/user/agents/{id}`    | 智能体详情及已过滤的技能/工具/组件/提示词；不可见统一返回 404        |
 
@@ -1295,11 +1323,13 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | 表                                            | 说明                                                                                     |
 |-----------------------------------------------|------------------------------------------------------------------------------------------|
 | `tenants`                                     | 租户编码（即子域名前缀）、名称、启用状态                                                 |
-| `admin_users`                                 | 产品级平台账号、`role`、绑定平台角色 `role_id`、锁定状态、`token_version`、首登改密标记；不保存租户维度 |
+| `admin_users`                                 | 产品级平台账号、绑定平台角色 `role_id`、锁定状态、`token_version`、首登改密标记；不保存租户维度 |
 | `admin_refresh_tokens`                        | 产品级平台 Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA                              |
-| `roles`                                       | 平台或租户角色：`tenant_id`（`NULL` 为平台角色）、`code`、`name`、`system_role`（基础权限）、`is_system`（系统角色不可删）、启用状态 |
+| `roles`                                       | 平台或租户角色：`tenant_id`（`NULL` 为平台角色）、`code`、`name`、`description`、`is_system`（系统角色不可删/不可停用）、启用状态 |
+| `permission_resources`                        | 全局功能权限目录（只读）：`code` 唯一、`category`、`action`、`sort_order`、启用状态         |
+| `role_permissions`                            | 角色与权限资源的多对多关系；`(role_id, permission_id)` 唯一，记录授予人                        |
 | `users`                                       | 租户管理员与普通用户统一账号、密码哈希、主角色 `role_id`、锁定状态、`token_version`；`(tenant_id, username)` 唯一 |
-| `user_roles`                                  | 用户与租户角色的多对多关系；租户管理员通过 `superadmin` / `admin` 角色获得管理端权限       |
+| `user_roles`                                  | 用户与租户角色的多对多关系；租户管理员通过角色的 `system:console:access` 获得管理端权限     |
 | `user_refresh_tokens`                         | 租户用户 Refresh Token 哈希、会话族、轮换/撤销状态、IP/UA                                |
 | `resource_grants`                             | 多态授权：`resource_type`（agent/skill/tool/component/prompt）+ `resource_id` + 可空 `tenant_id` + 可空 `role_id`；`tenant_id` 非空且 `role_id=NULL` 表示整个租户，`tenant_id=NULL` 表示平台角色授权 |
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
@@ -1318,6 +1348,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
 - 迁移 `0006_roles_and_resource_access` 新增角色、最终用户、授权表与资源 `agent_id`，并为存量数据回填系统角色、归属与租户授权；DDL 支持 downgrade，但数据回填不可逆，升级前必须备份并在预发库演练。
 - 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
+- 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
 
 ### 9.2 迁移命令
 
@@ -1368,14 +1399,14 @@ uv run python -m scripts.skill_package list --id 3
 | 会话                        | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销                                                                                               |
 | 智能体管理                  | 搜索、状态筛选（平台视角含“仅已授权”）、分页、新建、配置、启用/停用、删除                                                                                        |
 | 智能体配置                  | Tabs：配置（基础信息、模型、角色与提示词、记忆、对话体验、发布渠道、知识库等）、技能与资源                                                                       |
-| 技能与资源                  | 在智能体详情内管理所属技能/工具/组件/提示词；增删改查、搜索、分页、克隆到其他智能体；viewer 只读                                                                |
+| 技能与资源                  | 在智能体详情内管理所属技能/工具/组件/提示词；增删改查、搜索、分页、克隆到其他智能体；按 `button:{resource}:*` 权限控制操作入口                                  |
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 授权管理                    | 独立菜单按资源类型集中授权；资源列表与详情页不再提供授权入口；支持授权状态筛选、多选批量追加/覆盖/移除；平台视角按租户逐个配置，租户视角仅本租户角色               |
-| 角色管理                    | 平台/租户各自维护角色增删改；系统角色不可删除、不可改基础权限；平台角色可授权平台级资源（仅所属作用域 superadmin）                                                |
-| 用户管理                    | 租户管理员与普通用户统一账号：增删改、多角色绑定、重置密码、启停（仅租户 superadmin）                                                                            |
-| 管理员账号                  | 平台维护产品级账号，租户维护拥有管理角色的用户；列表、创建、角色/状态调整、重置密码、删除（仅 superadmin）                                                       |
-| 租户管理                    | 租户列表、新建、编辑名称与启用状态（仅产品级平台 superadmin）                                                                                                   |
-| 菜单与路由                  | 菜单由 `/admin/context` 的 `menus` 驱动；无权限路由返回 404                                                                                                      |
+| 角色管理                    | 平台/租户各自维护角色增删改与复制；详情页按权限目录维护功能权限；系统角色不可删除、不可停用；平台角色可授权平台级资源（`button:role:*`）                       |
+| 用户管理                    | 租户管理员与普通用户统一账号：增删改、多角色绑定、重置密码、启停（`button:user:*`）                                                                             |
+| 管理员账号                  | 平台维护产品级账号，租户维护拥有管理角色的用户；列表、创建、角色/状态调整、重置密码、删除（`button:admin-user:*`）                                               |
+| 租户管理                    | 租户列表、新建、编辑名称与启用状态（`button:tenant:*`，仅产品级平台角色可授予）                                                                                  |
+| 菜单与路由                  | 菜单由 `/admin/context` 的 `menus`（`menu:*`）驱动，路由由 `page:*` 权限守卫；无权限路由返回 404                                                                |
 | 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |
 | 健壮性                      | 路由懒加载、错误边界、404 页面、请求超时与重试                                                                                                                  |
 
@@ -1387,15 +1418,15 @@ uv run python -m scripts.skill_package list --id 3
 /agents                  智能体列表
 /agents/new              新建智能体
 /agents/:id/edit         智能体配置 + 技能与资源
-/grants                  授权管理（superadmin）
-/roles                   角色管理（superadmin；平台显示平台角色，租户显示本租户角色）
-/users                   用户管理（租户 superadmin）
-/admin-users             管理员账号（superadmin）
-/tenants                 租户管理（产品级 superadmin）
+/grants                  授权管理（menu:grants）
+/roles                   角色管理（menu:roles；平台显示平台角色，租户显示本租户角色）
+/users                   用户管理（menu:users，租户）
+/admin-users             管理员账号（menu:admin-users）
+/tenants                 租户管理（menu:tenants，产品级）
 *                        404
 ```
 
-菜单由 `/admin/context` 返回的 `menus` 驱动：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, admin-users, audit`。前端只负责图标与文案映射，无权限路由返回 404。
+菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, admin-users, audit`。自定义角色按实际授权显示，前端只负责图标与文案映射，无权限路由返回 404。
 
 授权管理页同样按视角收敛：平台只列平台级资源，租户只列本租户自有资源；列表展示授权汇总与授权状态，翻页保留勾选（单次最多 100 个），可批量追加/覆盖/移除。行内「配置授权」抽屉按租户配置访问范围（平台为「该租户不可见 / 整个租户 / 指定角色」，租户为「全部角色可见（默认）/ 指定角色」），保存只写入当前租户并刷新汇总。
 
@@ -1582,9 +1613,9 @@ web/deps/auth.py
   ├─ 解析 Bearer Token
   ├─ 校验签名、过期时间、token_version
   ├─ 校验令牌作用域与当前域名一致（跨作用域 401）
-  ├─ 查询数据库中的账号、角色与基础权限
+  ├─ 查询数据库中的账号、角色与功能权限编码
   ├─ 构建 AdminPrincipal + AccessScope（tenant_id、role_id、是否平台）
-  └─ 写操作的接口再校验角色（viewer 拒绝）
+  └─ 接口再按 page:*/button:*/资源读写权限校验（不满足返回 403）
   ▼
 web/admin/routers/agents.py（请求/响应模型）
   ▼
