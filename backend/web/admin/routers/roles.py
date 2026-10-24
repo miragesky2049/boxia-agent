@@ -57,7 +57,6 @@ def create_role(
         code=payload.code,
         name=payload.name,
         description=payload.description,
-        system_role=payload.system_role,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,
@@ -97,13 +96,12 @@ def update_role(
     request: Request,
     service: RoleServiceDep,
 ) -> RoleOut:
-    """更新角色；系统角色的基础权限与启停状态受保护。"""
+    """更新角色；基础权限不可修改，系统角色不可停用。"""
     ip, user_agent = client_meta(request)
     role = service.update(
         role_id,
         name=payload.name,
         description=payload.description,
-        system_role=payload.system_role,
         is_active=payload.is_active,
         actor_id=principal.user_id,
         actor_username=principal.username,

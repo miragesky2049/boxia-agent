@@ -108,7 +108,7 @@ def test_platform_role_grant_controls_visibility(
 def test_copy_platform_role_copies_grants(client: TestClient, auth_headers) -> None:
     source = client.post(
         ROLES_URL,
-        json={"code": "ops", "name": "平台运营", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营"},
         headers=auth_headers,
     )
     assert source.status_code == 201, source.text
@@ -205,7 +205,7 @@ def test_custom_platform_role_grant_takes_effect(
 ) -> None:
     custom = client.post(
         ROLES_URL,
-        json={"code": "auditor", "name": "平台审计", "system_role": "viewer"},
+        json={"code": "auditor", "name": "平台审计"},
         headers=auth_headers,
     )
     assert custom.status_code == 201, custom.text

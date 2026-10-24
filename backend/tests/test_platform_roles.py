@@ -24,36 +24,45 @@ def test_platform_roles_initialized_and_custom_crud(
 
     created = client.post(
         ROLES_URL,
-        json={"code": "ops", "name": "平台运营", "description": "", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营", "description": ""},
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
     role = created.json()
     assert role["tenant_id"] is None
     assert role["is_system"] is False
+    assert role["system_role"] == "viewer"
 
     duplicate_code = client.post(
         ROLES_URL,
-        json={"code": "ops", "name": "平台运营二部", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营二部"},
         headers=auth_headers,
     )
     assert duplicate_code.status_code == 409
 
     duplicate_name = client.post(
         ROLES_URL,
-        json={"code": "ops2", "name": "平台运营", "system_role": "viewer"},
+        json={"code": "ops2", "name": "平台运营"},
         headers=auth_headers,
     )
     assert duplicate_name.status_code == 409
 
     updated = client.patch(
         f"{ROLES_URL}/{role['id']}",
-        json={"name": "平台运营组", "system_role": "admin"},
+        json={"name": "平台运营组"},
         headers=auth_headers,
     )
     assert updated.status_code == 200, updated.text
     assert updated.json()["name"] == "平台运营组"
-    assert updated.json()["system_role"] == "admin"
+    assert updated.json()["system_role"] == "viewer"
+
+    # 基础权限不可通过编辑修改，只能复制对应角色继承
+    changed = client.patch(
+        f"{ROLES_URL}/{role['id']}",
+        json={"system_role": "admin"},
+        headers=auth_headers,
+    )
+    assert changed.status_code == 422
 
     deleted = client.delete(f"{ROLES_URL}/{role['id']}", headers=auth_headers)
     assert deleted.status_code == 204
@@ -88,7 +97,7 @@ def test_platform_role_referenced_by_account_cannot_delete(
 ) -> None:
     custom = client.post(
         ROLES_URL,
-        json={"code": "support", "name": "平台客服", "system_role": "viewer"},
+        json={"code": "support", "name": "平台客服"},
         headers=auth_headers,
     ).json()
     created = client.post(
@@ -116,12 +125,12 @@ def test_platform_and_tenant_roles_are_isolated(
 
     site.post(
         ROLES_URL,
-        json={"code": "sales", "name": "销售", "system_role": "viewer"},
+        json={"code": "sales", "name": "销售"},
         headers=tenant_headers,
     )
     client.post(
         ROLES_URL,
-        json={"code": "ops", "name": "平台运营", "system_role": "viewer"},
+        json={"code": "ops", "name": "平台运营"},
         headers=auth_headers,
     )
 

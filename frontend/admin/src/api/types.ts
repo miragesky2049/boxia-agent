@@ -129,13 +129,11 @@ export interface RoleCreatePayload {
   code: string
   name: string
   description?: string
-  system_role: AdminRole
 }
 
 export interface RoleUpdatePayload {
   name?: string
   description?: string
-  system_role?: AdminRole
   is_active?: boolean
 }
 
