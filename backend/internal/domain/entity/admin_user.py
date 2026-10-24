@@ -3,9 +3,6 @@
 from dataclasses import dataclass
 from datetime import datetime
 
-ROLES = ("superadmin", "admin", "viewer")
-EDITOR_ROLES = ("superadmin", "admin")
-
 
 @dataclass(frozen=True)
 class AdminUser:
@@ -19,7 +16,6 @@ class AdminUser:
     last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
-    role: str = "admin"
     token_version: int = 1
     failed_login_count: int = 0
     locked_until: datetime | None = None
@@ -27,6 +23,8 @@ class AdminUser:
     password_changed_at: datetime | None = None
     tenant_id: int | None = None
     role_id: int | None = None
+    role_code: str = ""
+    role_name: str = ""
 
     @property
     def is_platform(self) -> bool:

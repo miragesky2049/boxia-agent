@@ -14,9 +14,10 @@ from internal.application.errors import (
 )
 from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.entity.access import Role, User
-from internal.domain.entity.admin_user import EDITOR_ROLES, ROLES, AdminUser
+from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.common import Page
+from internal.domain.entity.permission import CONSOLE_ACCESS, DATA_ALL
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.security.password import hash_password, validate_password_strength
@@ -28,7 +29,7 @@ class AdminUserService:
     """管理员账号 CRUD、角色调整与密码重置。
 
     产品级平台账号独立存于 admin_users；租户管理员统一存于 users，
-    通过角色是否属于管理类系统角色来识别，不再维护双记录。
+    通过角色是否拥有「管理端访问」权限来识别，不再维护基础权限字段。
     """
 
     def __init__(self, uow: UnitOfWork, context: RequestContext):
@@ -44,13 +45,14 @@ class AdminUserService:
             return Page(items=items, total=total, page=page, page_size=page_size)
         tenant_id = self._require_tenant()
         rows, total = self._uow.users.list_admin_page(
-            tenant_id, page, page_size, keyword, EDITOR_ROLES
+            tenant_id, page, page_size, keyword, CONSOLE_ACCESS
         )
         role_map = self._role_map(tenant_id)
+        console_ids, data_all_ids = self._role_scope_meta(tenant_id)
         items = [
             self._to_admin_user(user, role)
             for user in rows
-            for role in [self._pick_admin_role(user, role_map)]
+            for role in [self._pick_admin_role(user, role_map, console_ids, data_all_ids)]
             if role is not None
         ]
         return Page(items=items, total=total, page=page, page_size=page_size)
@@ -61,10 +63,9 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role: str,
+        role_id: int,
         actor_id: int,
         actor_username: str,
-        role_id: int | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> AdminUser:
@@ -74,11 +75,11 @@ class AdminUserService:
             raise ValidationError("用户名需为 3-64 位字母、数字、下划线、点或短横线")
         if self._context.is_platform:
             return self._create_platform_admin(
-                normalized, password, display_name, role, role_id,
+                normalized, password, display_name, role_id,
                 actor_id, actor_username, ip, user_agent,
             )
         return self._create_tenant_admin(
-            normalized, password, display_name, role, role_id,
+            normalized, password, display_name, role_id,
             actor_id, actor_username, ip, user_agent,
         )
 
@@ -87,22 +88,21 @@ class AdminUserService:
         user_id: int,
         *,
         display_name: str | None,
-        role: str | None,
+        role_id: int | None,
         is_active: bool | None,
         actor_id: int,
         actor_username: str,
-        role_id: int | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> AdminUser:
         """调整显示名、角色与启用状态；禁用或改角色会撤销全部会话。"""
         if self._context.is_platform:
             return self._update_platform_admin(
-                user_id, display_name, role, role_id, is_active,
+                user_id, display_name, role_id, is_active,
                 actor_id, actor_username, ip, user_agent,
             )
         return self._update_tenant_admin(
-            user_id, display_name, role, role_id, is_active,
+            user_id, display_name, role_id, is_active,
             actor_id, actor_username, ip, user_agent,
         )
 
@@ -193,17 +193,15 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role: str,
-        role_id: int | None,
+        role_id: int,
         actor_id: int,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
     ) -> AdminUser:
-        """创建产品级平台账号；可绑定平台自定义角色。"""
+        """创建产品级平台账号，必须绑定具备管理端访问权限的平台角色。"""
         matched_role = self._resolve_platform_role(role_id)
-        role_code = matched_role.system_role if matched_role is not None else role
-        self._validate_system_role(role_code)
+        self._ensure_console_role(matched_role)
         if self._uow.admin_users.get_by_username(username) is not None:
             raise ConflictError("用户名已存在")
         validate_password_strength(password, username)
@@ -212,8 +210,7 @@ class AdminUserService:
                 "username": username,
                 "password_hash": hash_password(password),
                 "display_name": display_name.strip() or username,
-                "role": role_code,
-                "role_id": matched_role.id if matched_role is not None else None,
+                "role_id": matched_role.id,
                 "is_active": True,
                 "must_change_password": True,
                 "password_changed_at": datetime.now(UTC),
@@ -228,7 +225,11 @@ class AdminUserService:
             resource_id=str(user.id),
             ip=ip,
             user_agent=user_agent,
-            detail={"role": role_code, "role_id": user.role_id, "tenant_id": None},
+            detail={
+                "role_id": matched_role.id,
+                "role_code": matched_role.code,
+                "tenant_id": None,
+            },
             tenant_id=None,
         )
         self._uow.commit()
@@ -239,16 +240,15 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role: str,
-        role_id: int | None,
+        role_id: int,
         actor_id: int,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
     ) -> AdminUser:
-        """在 users 中创建租户管理员，并通过管理类角色赋权。"""
+        """在 users 中创建租户管理员，并绑定具备管理端访问权限的角色。"""
         tenant_id = self._require_tenant()
-        matched_role = self._resolve_tenant_admin_role(tenant_id, role, role_id)
+        matched_role = self._resolve_tenant_admin_role(tenant_id, role_id)
         if self._uow.users.username_exists(tenant_id, username):
             raise ConflictError("用户名已存在")
         validate_password_strength(password, username)
@@ -273,7 +273,11 @@ class AdminUserService:
             resource_id=str(user.id),
             ip=ip,
             user_agent=user_agent,
-            detail={"role": matched_role.system_role, "tenant_id": tenant_id},
+            detail={
+                "role_id": matched_role.id,
+                "role_code": matched_role.code,
+                "tenant_id": tenant_id,
+            },
             tenant_id=tenant_id,
         )
         self._uow.commit()
@@ -283,7 +287,6 @@ class AdminUserService:
         self,
         user_id: int,
         display_name: str | None,
-        role: str | None,
         role_id: int | None,
         is_active: bool | None,
         actor_id: int,
@@ -291,26 +294,19 @@ class AdminUserService:
         ip: str | None,
         user_agent: str | None,
     ) -> AdminUser:
-        """调整产品级平台账号；可切换到平台自定义角色。"""
+        """调整产品级平台账号；改角色会校验新角色的管理端访问权限。"""
         target = self._uow.admin_users.get_by_id(user_id)
         if target is None:
             raise NotFoundError("管理员不存在")
         values: dict = {}
-        role_code: str | None = None
-        if role is not None or role_id is not None:
+        if role_id is not None:
             matched_role = self._resolve_platform_role(role_id)
-            role_code = (
-                matched_role.system_role if matched_role is not None else role or target.role
-            )
-            self._validate_system_role(role_code)
-            values["role"] = role_code
-            if matched_role is not None:
-                values["role_id"] = matched_role.id
-        if target.id == actor_id:
-            if is_active is False:
-                raise ValidationError("不能禁用当前登录账号")
-            if role_code is not None and role_code != "superadmin":
-                raise ValidationError("不能降低当前登录账号的角色")
+            self._ensure_console_role(matched_role)
+            if target.id == actor_id and role_id != target.role_id:
+                raise ValidationError("不能修改当前登录账号的角色")
+            values["role_id"] = matched_role.id
+        if target.id == actor_id and is_active is False:
+            raise ValidationError("不能禁用当前登录账号")
         if display_name is not None:
             values["display_name"] = display_name.strip()
         if is_active is not None:
@@ -340,7 +336,6 @@ class AdminUserService:
         self,
         user_id: int,
         display_name: str | None,
-        role: str | None,
         role_id: int | None,
         is_active: bool | None,
         actor_id: int,
@@ -353,21 +348,13 @@ class AdminUserService:
         target = self._get_tenant_admin(user_id, tenant_id)
         values: dict = {}
         resolved_role: Role | None = None
-        if role is not None or role_id is not None:
-            role_code = role or self._current_role_system(target, tenant_id)
-            if role_code is None:
-                raise ValidationError("账号缺少管理角色")
-            resolved_role = self._resolve_tenant_admin_role(tenant_id, role_code, role_id)
+        if role_id is not None:
+            resolved_role = self._resolve_tenant_admin_role(tenant_id, role_id)
+            if target.id == actor_id and role_id != target.role_id:
+                raise ValidationError("不能修改当前登录账号的角色")
             values["role_id"] = resolved_role.id
-        if target.id == actor_id:
-            if is_active is False:
-                raise ValidationError("不能禁用当前登录账号")
-            if (
-                resolved_role is not None
-                and self._current_role_system(target, tenant_id) == "superadmin"
-                and resolved_role.system_role != "superadmin"
-            ):
-                raise ValidationError("不能降低当前登录账号的角色")
+        if target.id == actor_id and is_active is False:
+            raise ValidationError("不能禁用当前登录账号")
         if display_name is not None:
             values["display_name"] = display_name.strip()
         if is_active is not None:
@@ -394,18 +381,23 @@ class AdminUserService:
             tenant_id=tenant_id,
         )
         self._uow.commit()
-        admin_role = self._pick_admin_role(updated, self._role_map(tenant_id))
+        admin_role = resolved_role
+        if admin_role is None:
+            console_ids, data_all_ids = self._role_scope_meta(tenant_id)
+            admin_role = self._pick_admin_role(
+                updated, self._role_map(tenant_id), console_ids, data_all_ids
+            )
         if admin_role is None:
             raise NotFoundError("管理员不存在")
         return self._to_admin_user(updated, admin_role)
 
     def _get_tenant_admin(self, user_id: int, tenant_id: int) -> User:
-        """读取本租户且拥有管理类角色的用户。"""
+        """读取本租户且拥有管理端访问权限的用户。"""
         target = self._uow.users.get_by_id(user_id)
         if (
             target is None
             or target.tenant_id != tenant_id
-            or not self._uow.users.has_role_system(user_id, tenant_id, EDITOR_ROLES)
+            or not self._uow.users.has_permission(user_id, tenant_id, CONSOLE_ACCESS)
         ):
             raise NotFoundError("管理员不存在")
         return target
@@ -416,42 +408,42 @@ class AdminUserService:
             tenant_id, include_inactive=True
         )}
 
+    def _role_scope_meta(self, tenant_id: int) -> tuple[set[int], set[int]]:
+        """返回租户内拥有管理端访问、全量数据权限的角色集合。"""
+        return (
+            self._uow.role_permissions.list_role_ids_with_code(tenant_id, CONSOLE_ACCESS),
+            self._uow.role_permissions.list_role_ids_with_code(tenant_id, DATA_ALL),
+        )
+
     @staticmethod
-    def _pick_admin_role(user: User, role_map: dict[int, Role]) -> Role | None:
-        """从用户角色中选出管理角色，superadmin 优先。"""
+    def _pick_admin_role(
+        user: User,
+        role_map: dict[int, Role],
+        console_role_ids: set[int],
+        data_all_role_ids: set[int],
+    ) -> Role | None:
+        """从用户角色中选出管理角色，全量数据权限优先。"""
         admin_roles = [
             role
             for role_id in user.effective_role_ids()
             for role in [role_map.get(role_id)]
-            if role is not None and role.system_role in EDITOR_ROLES
+            if role is not None and role.id in console_role_ids
         ]
         if not admin_roles:
             return None
         for role in admin_roles:
-            if role.system_role == "superadmin":
+            if role.id in data_all_role_ids:
                 return role
         return admin_roles[0]
 
-    def _current_role_system(self, user: User, tenant_id: int) -> str | None:
-        role = self._pick_admin_role(user, self._role_map(tenant_id))
-        return role.system_role if role is not None else None
-
-    def _resolve_tenant_admin_role(
-        self, tenant_id: int, role: str, role_id: int | None
-    ) -> Role:
-        """解析租户管理员角色，必须是本租户启用的管理类角色。"""
-        if role_id is not None:
-            matched = self._uow.roles.get_by_id(role_id)
-            if matched is None or matched.tenant_id != tenant_id:
-                raise ValidationError("角色不属于当前租户")
-        else:
-            matched = self._uow.roles.get_by_code(tenant_id, role)
-            if matched is None:
-                raise ValidationError(f"租户内不存在角色 {role}")
+    def _resolve_tenant_admin_role(self, tenant_id: int, role_id: int) -> Role:
+        """解析租户管理员角色，必须是本租户启用且可访问管理端的角色。"""
+        matched = self._uow.roles.get_by_id(role_id)
+        if matched is None or matched.tenant_id != tenant_id:
+            raise ValidationError("角色不属于当前租户")
         if not matched.is_active:
             raise ValidationError("角色已停用")
-        if matched.system_role not in EDITOR_ROLES:
-            raise ValidationError("管理员账号必须绑定 superadmin 或 admin 角色")
+        self._ensure_console_role(matched)
         return matched
 
     def _require_tenant(self) -> int:
@@ -460,10 +452,8 @@ class AdminUserService:
             raise ForbiddenError("租户管理员仅可由租户平台维护")
         return tenant_id
 
-    def _resolve_platform_role(self, role_id: int | None) -> Role | None:
+    def _resolve_platform_role(self, role_id: int) -> Role:
         """解析平台账号绑定角色，必须是启用的平台角色。"""
-        if role_id is None:
-            return None
         matched = self._uow.roles.get_by_id(role_id)
         if matched is None or matched.tenant_id is not None:
             raise ValidationError("角色不属于产品级平台")
@@ -471,10 +461,10 @@ class AdminUserService:
             raise ValidationError("角色已停用")
         return matched
 
-    @staticmethod
-    def _validate_system_role(role: str) -> None:
-        if role not in ROLES:
-            raise ValidationError(f"角色必须是 {', '.join(ROLES)} 之一")
+    def _ensure_console_role(self, role: Role) -> None:
+        """管理员角色必须被授予管理端访问权限，否则无法登录。"""
+        if CONSOLE_ACCESS not in self._uow.role_permissions.list_codes_for_role(role.id):
+            raise ValidationError("角色未授予管理端访问权限，不能作为管理员角色")
 
     @staticmethod
     def _to_admin_user(user: User, role: Role) -> AdminUser:
@@ -488,7 +478,6 @@ class AdminUserService:
             last_login_at=user.last_login_at,
             created_at=user.created_at,
             updated_at=user.updated_at,
-            role=role.system_role,
             token_version=user.token_version,
             failed_login_count=user.failed_login_count,
             locked_until=user.locked_until,
@@ -496,6 +485,8 @@ class AdminUserService:
             password_changed_at=None,
             tenant_id=user.tenant_id,
             role_id=role.id,
+            role_code=role.code,
+            role_name=role.name,
         )
 
 

@@ -119,7 +119,6 @@ class PostgresRoleRepository:
             code=row.code,
             name=row.name,
             description=row.description,
-            system_role=row.system_role,
             is_system=row.is_system,
             is_active=row.is_active,
             created_at=row.created_at,

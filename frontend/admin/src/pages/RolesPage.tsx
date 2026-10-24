@@ -1,37 +1,33 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
+import { App, Button, Form, Input, Modal, Popconfirm, Space, Switch, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { rolesApi } from '../api/access'
-import type { AdminRole, Role, RoleCopyPayload, RoleCreatePayload } from '../api/types'
+import type { Role, RoleCopyPayload, RoleCreatePayload } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
-
-const SYSTEM_ROLE_META: Record<AdminRole, { label: string; color: string }> = {
-  superadmin: { label: '超级管理员', color: 'red' },
-  admin: { label: '管理员', color: 'blue' },
-  viewer: { label: '只读', color: 'default' },
-}
-
-const SYSTEM_ROLE_OPTIONS = (Object.keys(SYSTEM_ROLE_META) as AdminRole[]).map((value) => ({
-  value,
-  label: SYSTEM_ROLE_META[value].label,
-}))
 
 interface RoleFormValues {
   code: string
   name: string
   description?: string
-  system_role?: AdminRole
   is_active: boolean
 }
+
+const SUPERADMIN_TITLE = '超级管理员角色默认拥有全部资源，不支持该操作'
 
 export default function RolesPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:role:create')
+  const canCopy = hasPermission('button:role:copy')
+  const canUpdate = hasPermission('button:role:update')
+  const canDelete = hasPermission('button:role:delete')
+  const canGrant = hasPermission('button:role:grant')
+  const showActions = canCopy || canUpdate || canDelete
   const { isPlatform } = useTenant()
   const [items, setItems] = useState<Role[]>([])
   const [loading, setLoading] = useState(false)
@@ -77,7 +73,6 @@ export default function RolesPage() {
       code: `${record.code}-copy`.slice(0, 64),
       name: `${record.name}副本`.slice(0, 64),
       description: record.description,
-      system_role: record.system_role,
       is_active: true,
     })
     setModalOpen(true)
@@ -164,16 +159,6 @@ export default function RolesPage() {
       ),
     },
     {
-      title: '基础权限',
-      dataIndex: 'system_role',
-      key: 'system_role',
-      width: 130,
-      render: (role: AdminRole) => {
-        const meta = SYSTEM_ROLE_META[role]
-        return <Tag color={meta.color}>{meta.label}</Tag>
-      },
-    },
-    {
       title: '描述',
       dataIndex: 'description',
       key: 'description',
@@ -194,61 +179,57 @@ export default function RolesPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    ...(canWrite
+    ...(showActions || canGrant
       ? [
           {
             title: '操作',
             key: 'actions',
-            width: 220,
-            render: (_: unknown, record: Role) => (
-              <Space size={4}>
-                <Button
-                  type="link"
-                  size="small"
-                  disabled={record.system_role === 'superadmin'}
-                  title={
-                    record.system_role === 'superadmin'
-                      ? isPlatform
-                        ? '超级管理员默认拥有全部平台级资源，无需授权'
-                        : '超级管理员默认拥有本租户全部资源，无需授权'
-                      : undefined
-                  }
-                  onClick={() => navigate(`/roles/${record.id}`)}
-                >
-                  授权
-                </Button>
-                <Button
-                  type="link"
-                  size="small"
-                  disabled={record.system_role === 'superadmin'}
-                  title={
-                    record.system_role === 'superadmin'
-                      ? '超级管理员角色默认拥有全部资源，不支持复制'
-                      : undefined
-                  }
-                  onClick={() => openCopy(record)}
-                >
-                  复制
-                </Button>
-                <Button type="link" size="small" onClick={() => openEdit(record)}>
-                  编辑
-                </Button>
-                {!record.is_system && (
-                  <Popconfirm
-                    title="确认删除该角色？"
-                    description="被账号或授权引用时无法删除。"
-                    okText="删除"
-                    cancelText="取消"
-                    okButtonProps={{ danger: true }}
-                    onConfirm={() => handleDelete(record)}
+            width: 240,
+            render: (_: unknown, record: Role) => {
+              const isSuperAdmin = record.is_system && record.code === 'superadmin'
+              return (
+                <Space size={4} wrap>
+                  <Button
+                    type="link"
+                    size="small"
+                    title={isSuperAdmin ? '超级管理员默认拥有全部权限，授权页只读' : undefined}
+                    onClick={() => navigate(`/roles/${record.id}`)}
                   >
-                    <Button type="link" size="small" danger>
-                      删除
+                    {canGrant ? '授权' : '查看'}
+                  </Button>
+                  {canCopy && (
+                    <Button
+                      type="link"
+                      size="small"
+                      disabled={isSuperAdmin}
+                      title={isSuperAdmin ? SUPERADMIN_TITLE : undefined}
+                      onClick={() => openCopy(record)}
+                    >
+                      复制
                     </Button>
-                  </Popconfirm>
-                )}
-              </Space>
-            ),
+                  )}
+                  {canUpdate && (
+                    <Button type="link" size="small" onClick={() => openEdit(record)}>
+                      编辑
+                    </Button>
+                  )}
+                  {canDelete && !record.is_system && (
+                    <Popconfirm
+                      title="确认删除该角色？"
+                      description="被账号或授权引用时无法删除。"
+                      okText="删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => handleDelete(record)}
+                    >
+                      <Button type="link" size="small" danger>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </Space>
+              )
+            },
           },
         ]
       : []),
@@ -265,7 +246,7 @@ export default function RolesPage() {
               : '为本租户配置自定义角色，角色决定可访问的智能体与资源范围。'}
           </p>
         </div>
-        {canWrite && (
+        {canCreate && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             新建角色
           </Button>
@@ -316,13 +297,9 @@ export default function RolesPage() {
             <Input.TextArea rows={2} maxLength={500} />
           </Form.Item>
           {copying && (
-            <Form.Item
-              name="system_role"
-              label="基础权限"
-              extra="复制角色会继承源角色的基础权限；如需其他基础权限，请复制对应角色。"
-            >
-              <Select options={SYSTEM_ROLE_OPTIONS} disabled />
-            </Form.Item>
+            <p className="page-header__desc">
+              复制会同步源角色的功能权限与资源授权，副本为可删除的自定义角色。
+            </p>
           )}
           {editing && !editing.is_system && (
             <Form.Item name="is_active" label="启用" valuePropName="checked">

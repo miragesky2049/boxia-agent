@@ -7,7 +7,7 @@ import {
 } from '../api/auth'
 import { refreshSession } from '../api/client'
 import { fetchAdminContext } from '../api/tenant'
-import type { AdminContext, AdminRole, AdminUser } from '../api/types'
+import type { AdminContext, AdminUser } from '../api/types'
 import {
   clearSession,
   hasRefreshToken,
@@ -21,9 +21,9 @@ interface AuthContextValue {
   adminContext: AdminContext | null
   loading: boolean
   mustChangePassword: boolean
-  canWrite: boolean
-  isSuperAdmin: boolean
-  systemRole: AdminRole
+  roleCode: string
+  roleName: string
+  permissions: string[]
   menus: string[]
   hasPermission: (permission: string) => boolean
   signIn: (username: string, password: string) => Promise<AdminUser>
@@ -116,7 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setAdminContext(null)
   }, [])
 
-  const systemRole = adminContext?.system_role ?? user?.role ?? 'viewer'
+  const roleCode = adminContext?.role_code ?? user?.role_code ?? ''
+  const roleName = adminContext?.role_name ?? user?.role_name ?? ''
+  const permissions = adminContext?.permissions ?? []
 
   const value = useMemo<AuthContextValue>(
     () => ({
@@ -124,17 +126,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       adminContext,
       loading,
       mustChangePassword: user?.must_change_password ?? false,
-      canWrite: systemRole !== 'viewer',
-      isSuperAdmin: systemRole === 'superadmin',
-      systemRole,
+      roleCode,
+      roleName,
+      permissions,
       menus: adminContext?.menus ?? [],
-      hasPermission: (permission: string) =>
-        adminContext?.permissions.includes(permission) ?? systemRole !== 'viewer',
+      hasPermission: (permission: string) => permissions.includes(permission),
       signIn,
       signOut,
       changePassword,
     }),
-    [user, adminContext, loading, systemRole, signIn, signOut, changePassword],
+    [user, adminContext, loading, roleCode, roleName, permissions, signIn, signOut, changePassword],
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

@@ -13,6 +13,7 @@ from internal.application.errors import (
 )
 from internal.domain.entity.access import Role, User
 from internal.domain.entity.admin_user import AdminUser
+from internal.domain.entity.permission import CONSOLE_ACCESS, DATA_ALL
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.security.jwt import create_access_token, decode_access_token
@@ -153,23 +154,15 @@ class AuthService:
         if not self._uow.refresh_tokens.is_family_active(session_id):
             raise UnauthorizedError("登录状态已失效，请重新登录")
         role = self._resolve_platform_role(user)
-        return AccessContext(
-            user=user,
-            session_id=session_id,
-            role=role,
-            roles=(role,) if role is not None else (),
-        )
+        self._assert_console_access((role,))
+        return AccessContext(user=user, session_id=session_id, role=role, roles=(role,))
 
-    def _resolve_platform_role(self, user: AdminUser) -> Role | None:
-        """解析平台账号的平台角色：优先 role_id，旧数据按 role 字符串回退。"""
-        if user.role_id is not None:
-            role = self._uow.roles.get_by_id(user.role_id)
-            if role is None or role.tenant_id is not None or not role.is_active:
-                raise UnauthorizedError("账号角色已失效，请联系管理员")
-            return role
-        # 未绑定角色 ID 的历史账号按角色编码回退，查不到时保持字符串权限
-        role = self._uow.roles.get_by_code(None, user.role) if user.role else None
-        if role is not None and not role.is_active:
+    def _resolve_platform_role(self, user: AdminUser) -> Role:
+        """解析平台账号绑定的平台角色；账号必须绑定有效角色。"""
+        if user.role_id is None:
+            raise UnauthorizedError("账号角色已失效，请联系管理员")
+        role = self._uow.roles.get_by_id(user.role_id)
+        if role is None or role.tenant_id is not None or not role.is_active:
             raise UnauthorizedError("账号角色已失效，请联系管理员")
         return role
 
@@ -184,7 +177,8 @@ class AuthService:
         if tenant_user is None or tenant_user.tenant_id != tenant_id:
             raise NotFoundError("管理员不存在")
         roles = self._active_roles(tenant_user, UnauthorizedError)
-        return self._to_admin_user(tenant_user, self._primary_role(roles))
+        role_codes = self._role_codes(roles)
+        return self._to_admin_user(tenant_user, self._primary_role(roles, role_codes))
 
     def _login_platform(
         self,
@@ -233,8 +227,16 @@ class AuthService:
             )
             raise ForbiddenError("账号已被禁用")
 
+        role = self._resolve_platform_role(user)
+        if CONSOLE_ACCESS not in self._role_codes((role,))[role.id]:
+            self._record_login_failure(
+                user.id, user.username, ip, user_agent,
+                reason="no_console_access", tenant_id=tenant_id,
+            )
+            raise ForbiddenError("账号未获得管理端访问权限")
+
         self._uow.admin_users.mark_login_success(user.id)
-        pair = self._issue_session(user, ip, user_agent)
+        pair = self._issue_session(user, role, ip, user_agent)
         record_audit(
             self._uow,
             action="auth.login",
@@ -295,7 +297,14 @@ class AuthService:
             raise ForbiddenError("账号已被禁用")
 
         roles = self._active_roles(user, ForbiddenError)
-        primary = self._primary_role(roles)
+        role_codes = self._role_codes(roles)
+        if not self._has_console_access(roles, role_codes):
+            self._record_login_failure(
+                user.id, user.username, ip, user_agent,
+                reason="no_console_access", tenant_id=tenant_id,
+            )
+            raise ForbiddenError("账号未获得管理端访问权限")
+        primary = self._primary_role(roles, role_codes)
         self._uow.users.mark_login_success(user.id)
         pair = self._issue_tenant_session(user, primary, ip, user_agent)
         record_audit(
@@ -354,8 +363,14 @@ class AuthService:
             self._uow.commit()
             raise UnauthorizedError("登录状态已失效，请重新登录")
 
+        role = self._resolve_platform_role(user)
+        if CONSOLE_ACCESS not in self._role_codes((role,))[role.id]:
+            self._uow.refresh_tokens.revoke_family(row.family_id)
+            self._uow.commit()
+            raise ForbiddenError("账号未获得管理端访问权限")
+
         pair = self._issue_session(
-            user, ip, user_agent, family_id=row.family_id, rotated_from=row.id
+            user, role, ip, user_agent, family_id=row.family_id, rotated_from=row.id
         )
         self._uow.commit()
         return pair
@@ -396,7 +411,12 @@ class AuthService:
             raise UnauthorizedError("登录状态已失效，请重新登录")
 
         roles = self._active_roles(user, UnauthorizedError)
-        primary = self._primary_role(roles)
+        role_codes = self._role_codes(roles)
+        if not self._has_console_access(roles, role_codes):
+            self._uow.user_refresh_tokens.revoke_family(row.family_id)
+            self._uow.commit()
+            raise ForbiddenError("账号未获得管理端访问权限")
+        primary = self._primary_role(roles, role_codes)
         pair = self._issue_tenant_session(
             user,
             primary,
@@ -425,7 +445,10 @@ class AuthService:
         if not self._uow.user_refresh_tokens.is_family_active(session_id):
             raise UnauthorizedError("登录状态已失效，请重新登录")
         roles = self._active_roles(user, UnauthorizedError)
-        primary = self._primary_role(roles)
+        role_codes = self._role_codes(roles)
+        if not self._has_console_access(roles, role_codes):
+            raise ForbiddenError("账号未获得管理端访问权限")
+        primary = self._primary_role(roles, role_codes)
         return AccessContext(
             user=self._to_admin_user(user, primary),
             session_id=session_id,
@@ -499,6 +522,7 @@ class AuthService:
     def _issue_session(
         self,
         user: AdminUser,
+        role: Role,
         ip: str | None,
         user_agent: str | None,
         family_id: UUID | None = None,
@@ -522,13 +546,8 @@ class AuthService:
         if rotated_from is not None:
             self._uow.refresh_tokens.rotate(rotated_from, new_row.id)
 
-        role_code = user.role
-        if user.role_id is not None:
-            bound_role = self._uow.roles.get_by_id(user.role_id)
-            if bound_role is not None:
-                role_code = bound_role.system_role
         access_token, expires_in = create_access_token(
-            user.id, user.username, role_code, family, user.token_version, user.tenant_id
+            user.id, user.username, role.code, family, user.token_version, user.tenant_id
         )
         return TokenPair(
             access_token=access_token,
@@ -568,7 +587,7 @@ class AuthService:
         access_token, expires_in = create_access_token(
             user.id,
             user.username,
-            primary.system_role,
+            primary.code,
             family,
             user.token_version,
             user.tenant_id,
@@ -595,13 +614,31 @@ class AuthService:
             raise error_cls("账号角色已失效，请联系管理员")
         return tuple(roles)
 
+    def _role_codes(self, roles: tuple[Role, ...]) -> dict[int, set[str]]:
+        """按角色读取权限编码，供主角色选择与登录准入判断使用。"""
+        return {
+            role.id: self._uow.role_permissions.list_codes_for_role(role.id)
+            for role in roles
+        }
+
     @staticmethod
-    def _primary_role(roles: tuple[Role, ...]) -> Role:
-        """按 superadmin > admin > 其他 选择主角色，决定管理端基础权限。"""
-        for preferred in ("superadmin", "admin"):
-            for role in roles:
-                if role.system_role == preferred:
-                    return role
+    def _has_console_access(
+        roles: tuple[Role, ...], role_codes: dict[int, set[str]]
+    ) -> bool:
+        """任一有效角色授予管理端访问权限即可登录。"""
+        return any(CONSOLE_ACCESS in role_codes.get(role.id, set()) for role in roles)
+
+    def _assert_console_access(self, roles: tuple[Role, ...]) -> None:
+        """访问令牌校验阶段再次确认管理端访问权限仍有效。"""
+        if not self._has_console_access(roles, self._role_codes(roles)):
+            raise ForbiddenError("账号未获得管理端访问权限")
+
+    @staticmethod
+    def _primary_role(roles: tuple[Role, ...], role_codes: dict[int, set[str]]) -> Role:
+        """优先选择拥有全量数据权限的角色作为主角色，否则取首个有效角色。"""
+        for role in roles:
+            if DATA_ALL in role_codes.get(role.id, set()):
+                return role
         return roles[0]
 
     @staticmethod
@@ -616,7 +653,6 @@ class AuthService:
             last_login_at=user.last_login_at,
             created_at=user.created_at,
             updated_at=user.updated_at,
-            role=primary.system_role,
             token_version=user.token_version,
             failed_login_count=user.failed_login_count,
             locked_until=user.locked_until,
@@ -624,6 +660,8 @@ class AuthService:
             password_changed_at=None,
             tenant_id=user.tenant_id,
             role_id=primary.id,
+            role_code=primary.code,
+            role_name=primary.name,
         )
 
     def _record_login_failure(

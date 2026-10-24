@@ -18,8 +18,8 @@ class AdminContextOut(BaseModel):
     scope: str
     tenant: TenantOut | None
     user: AdminUserOut
-    role: str
-    system_role: str
+    role_code: str
+    role_name: str
     permissions: list[str]
     menus: list[str]
     app_env: AppEnv

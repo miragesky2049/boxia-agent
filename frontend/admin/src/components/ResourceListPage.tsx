@@ -96,7 +96,11 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   extraActions,
 }: ResourceListPageProps<T, P>) {
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = resourceType ? hasPermission(`button:${resourceType}:create`) : false
+  const canUpdate = resourceType ? hasPermission(`button:${resourceType}:update`) : false
+  const canDelete = resourceType ? hasPermission(`button:${resourceType}:delete`) : false
+  const canEdit = canUpdate || canDelete
   const { isPlatform } = useTenant()
   const [form] = Form.useForm<FormValues>()
   const [items, setItems] = useState<T[]>([])
@@ -283,7 +287,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    ...(canWrite || showExtraActions
+    ...(canEdit || showExtraActions || (isPlatform && resourceType)
       ? [
           {
             title: '操作',
@@ -299,33 +303,31 @@ export default function ResourceListPage<T extends ResourceBase, P>({
                       授权
                     </Button>
                   )}
-                  {resourceType && enableClone && canWrite && (
+                  {resourceType && enableClone && canCreate && (
                     <Button type="link" size="small" onClick={() => void openClone(record)}>
                       克隆
                     </Button>
                   )}
-                  {canWrite &&
-                    (readonly ? (
-                      <Tag bordered={false}>产品级资源只读</Tag>
-                    ) : (
-                      <>
-                        <Button type="link" size="small" onClick={() => openEdit(record)}>
-                          编辑
-                        </Button>
-                        <Popconfirm
-                          title="确认删除？"
-                          description="删除后不可恢复。"
-                          okText="删除"
-                          cancelText="取消"
-                          okButtonProps={{ danger: true }}
-                          onConfirm={() => handleDelete(record)}
-                        >
-                          <Button type="link" size="small" danger>
-                            删除
-                          </Button>
-                        </Popconfirm>
-                      </>
-                    ))}
+                  {readonly && canEdit && <Tag bordered={false}>产品级资源只读</Tag>}
+                  {!readonly && canUpdate && (
+                    <Button type="link" size="small" onClick={() => openEdit(record)}>
+                      编辑
+                    </Button>
+                  )}
+                  {!readonly && canDelete && (
+                    <Popconfirm
+                      title="确认删除？"
+                      description="删除后不可恢复。"
+                      okText="删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => handleDelete(record)}
+                    >
+                      <Button type="link" size="small" danger>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  )}
                 </Space>
               )
             },
@@ -341,7 +343,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
           <h2 className="page-header__title">{title}</h2>
           <p className="page-header__desc">{description}</p>
         </div>
-        {canWrite && (
+        {canCreate && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             {createText}
           </Button>

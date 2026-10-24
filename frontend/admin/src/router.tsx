@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import RequireAuth from './auth/RequireAuth'
-import RequireRole from './auth/RequireRole'
+import RequirePermission from './auth/RequirePermission'
 import PageLoading from './components/PageLoading'
 import AdminLayout from './layouts/AdminLayout'
 
@@ -39,55 +39,76 @@ export default function AppRouter() {
             }
           >
             <Route path="/" element={<Navigate to="/agents" replace />} />
-            <Route path="/agents" element={<AgentListPage />} />
-            <Route path="/agents/new" element={<AgentEditPage />} />
-            <Route path="/agents/:id/edit" element={<AgentEditPage />} />
+            <Route
+              path="/agents"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentListPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/agents/new"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/agents/:id/edit"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentEditPage />
+                </RequirePermission>
+              }
+            />
             <Route
               path="/grants"
               element={
-                <RequireRole role="superadmin" tenantOnly>
+                <RequirePermission permission="page:grants" tenantOnly>
                   <UserGrantsPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="/roles"
               element={
-                <RequireRole role="superadmin">
+                <RequirePermission permission="page:roles">
                   <RolesPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="/roles/:id"
               element={
-                <RequireRole role="superadmin">
+                <RequirePermission permission="page:roles">
                   <RoleDetailPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="/users"
               element={
-                <RequireRole role="superadmin">
+                <RequirePermission permission="page:users">
                   <UsersPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="/admin-users"
               element={
-                <RequireRole role="superadmin">
+                <RequirePermission permission="page:admin-users">
                   <AdminUsersPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
             <Route
               path="/tenants"
               element={
-                <RequireRole role="superadmin" platformOnly>
+                <RequirePermission permission="page:tenants" platformOnly>
                   <TenantsPage />
-                </RequireRole>
+                </RequirePermission>
               }
             />
           </Route>

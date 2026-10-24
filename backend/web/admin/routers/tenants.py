@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import TenantCreateRequest, TenantOut, TenantUpdateRequest
-from web.deps.auth import PlatformSuperadminDep, require_platform_superadmin
+from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
 from web.deps.services import TenantServiceDep
 
 router = APIRouter(
     prefix="/tenants",
     tags=["admin-tenants"],
-    dependencies=[Depends(require_platform_superadmin)],
+    dependencies=[Depends(require_platform_admin)],
 )
 
 
@@ -20,7 +20,11 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
     return ip, user_agent
 
 
-@router.get("", response_model=PageOut[TenantOut])
+@router.get(
+    "",
+    response_model=PageOut[TenantOut],
+    dependencies=[Depends(require_permission("page:tenants"))],
+)
 def list_tenants(
     service: TenantServiceDep,
     page: int = Query(1, ge=1),
@@ -38,12 +42,17 @@ def list_tenants(
     )
 
 
-@router.post("", response_model=TenantOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=TenantOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:tenant:create"))],
+)
 def create_tenant(
     payload: TenantCreateRequest,
     request: Request,
     service: TenantServiceDep,
-    principal: PlatformSuperadminDep,
+    principal: AdminAuthDep,
 ) -> TenantOut:
     """创建租户并初始化租户级超级管理员。"""
     ip, user_agent = _client_meta(request)
@@ -61,19 +70,27 @@ def create_tenant(
     return TenantOut.model_validate(tenant)
 
 
-@router.get("/{tenant_id}", response_model=TenantOut)
+@router.get(
+    "/{tenant_id}",
+    response_model=TenantOut,
+    dependencies=[Depends(require_permission("page:tenants"))],
+)
 def get_tenant(tenant_id: int, service: TenantServiceDep) -> TenantOut:
     """查询租户详情。"""
     return TenantOut.model_validate(service.get(tenant_id))
 
 
-@router.patch("/{tenant_id}", response_model=TenantOut)
+@router.patch(
+    "/{tenant_id}",
+    response_model=TenantOut,
+    dependencies=[Depends(require_permission("button:tenant:update"))],
+)
 def update_tenant(
     tenant_id: int,
     payload: TenantUpdateRequest,
     request: Request,
     service: TenantServiceDep,
-    principal: PlatformSuperadminDep,
+    principal: AdminAuthDep,
 ) -> TenantOut:
     """更新租户名称或启用状态。"""
     ip, user_agent = _client_meta(request)

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useState } from 'react'
 import { grantsApi, rolesApi } from '../../api/access'
 import type { Role, User } from '../../api/types'
 import { usersApi } from '../../api/users'
+import { useAuth } from '../../auth/AuthContext'
 
 interface AssignFormValues {
   role_ids: number[]
@@ -14,6 +15,8 @@ interface AssignFormValues {
 const MAX_BATCH_SELECTION = 100
 
 export default function UserGrantsPage() {
+  const { hasPermission } = useAuth()
+  const canManage = hasPermission('button:grant:manage')
   const { message } = App.useApp()
   const [items, setItems] = useState<User[]>([])
   const [total, setTotal] = useState(0)
@@ -138,16 +141,20 @@ export default function UserGrantsPage() {
       render: (value: string | null) =>
         value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '从未登录',
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 100,
-      render: (_: unknown, record: User) => (
-        <Button type="link" size="small" onClick={() => openAssign([record])}>
-          分配角色
-        </Button>
-      ),
-    },
+    ...(canManage
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 100,
+            render: (_: unknown, record: User) => (
+              <Button type="link" size="small" onClick={() => openAssign([record])}>
+                分配角色
+              </Button>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -159,14 +166,16 @@ export default function UserGrantsPage() {
             为用户分配角色；角色决定其可访问的智能体与资源范围。
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<SafetyCertificateOutlined />}
-          disabled={selectedRowKeys.length === 0}
-          onClick={() => openAssign(items.filter((item) => selectedRowKeys.includes(item.id)))}
-        >
-          批量分配角色
-        </Button>
+        {canManage && (
+          <Button
+            type="primary"
+            icon={<SafetyCertificateOutlined />}
+            disabled={selectedRowKeys.length === 0}
+            onClick={() => openAssign(items.filter((item) => selectedRowKeys.includes(item.id)))}
+          >
+            批量分配角色
+          </Button>
+        )}
       </div>
 
       <Alert

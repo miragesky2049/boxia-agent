@@ -12,6 +12,7 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.domain.entity.access import SYSTEM_ROLE_SEEDS
+from internal.domain.entity.permission import DEFAULT_ROLE_PERMISSION_CODES
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
@@ -85,13 +86,19 @@ class TenantService:
                     "code": code,
                     "name": role_name,
                     "description": description,
-                    "system_role": code,
                     "is_system": True,
                     "is_active": True,
                 }
             )
             for code, role_name, description in SYSTEM_ROLE_SEEDS
         }
+        # 内置角色按默认权限集合初始化，后续可通过角色授权接口调整
+        for code, role in roles.items():
+            self._uow.role_permissions.add_for_role(
+                role.id,
+                DEFAULT_ROLE_PERMISSION_CODES["tenant"][code],
+                actor_id,
+            )
         if self._uow.users.username_exists(tenant.id, username):
             raise ConflictError("用户名已被租户用户占用")
         admin_user = self._uow.users.create(

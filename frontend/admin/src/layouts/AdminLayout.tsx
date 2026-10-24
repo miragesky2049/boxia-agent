@@ -20,12 +20,6 @@ import './AdminLayout.css'
 
 const { Header, Sider, Content } = Layout
 
-const ROLE_LABELS = {
-  superadmin: '超级管理员',
-  admin: '管理员',
-  viewer: '只读',
-}
-
 const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   agents: { icon: <RobotOutlined />, label: '智能体管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
@@ -45,7 +39,7 @@ const ENV_LABELS = {
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, signOut, systemRole, menus, mustChangePassword } = useAuth()
+  const { user, signOut, roleName, menus, mustChangePassword } = useAuth()
   const { platformName, scopeLabel, isPlatform, context } = useTenant()
 
   useEffect(() => {
@@ -118,7 +112,7 @@ export default function AdminLayout() {
             <button type="button" className="admin-header__user">
               <Avatar size={30} icon={<UserOutlined />} />
               <span>{user?.display_name || user?.username}</span>
-              {user && <Tag bordered={false}>{ROLE_LABELS[systemRole]}</Tag>}
+              {user && roleName && <Tag bordered={false}>{roleName}</Tag>}
             </button>
           </Dropdown>
         </Header>

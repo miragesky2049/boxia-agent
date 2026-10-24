@@ -6,13 +6,17 @@ from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Agent
 from web.admin.schemas.agent import AgentOut, AgentPayload, AgentSummaryOut
 from web.admin.schemas.common import PageOut
-from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.services import AgentServiceDep
 
 router = APIRouter(prefix="/agents", tags=["admin-agents"])
 
 
-@router.get("", response_model=PageOut[AgentSummaryOut])
+@router.get(
+    "",
+    response_model=PageOut[AgentSummaryOut],
+    dependencies=[Depends(require_permission("agent:read"))],
+)
 def list_agents(
     service: AgentServiceDep,
     page: int = Query(1, ge=1),
@@ -30,23 +34,32 @@ def list_agents(
     "",
     response_model=AgentOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("agent:create"))],
 )
 def create_agent(
     payload: AgentPayload,
-    principal: EditorAuthDep,
+    principal: AdminAuthDep,
     service: AgentServiceDep,
 ) -> AgentOut:
     """创建智能体，并授权给创建者角色。"""
     return AgentOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
-@router.get("/{agent_id}", response_model=AgentOut)
+@router.get(
+    "/{agent_id}",
+    response_model=AgentOut,
+    dependencies=[Depends(require_permission("agent:read"))],
+)
 def get_agent(agent_id: int, service: AgentServiceDep) -> AgentOut:
     """查询智能体详情。"""
     return AgentOut.model_validate(service.get(agent_id))
 
 
-@router.put("/{agent_id}", response_model=AgentOut, dependencies=[Depends(require_editor)])
+@router.put(
+    "/{agent_id}",
+    response_model=AgentOut,
+    dependencies=[Depends(require_permission("agent:update"))],
+)
 def update_agent(agent_id: int, payload: AgentPayload, service: AgentServiceDep) -> AgentOut:
     """更新智能体（含配置与工具/技能关联）。"""
     return AgentOut.model_validate(service.update(agent_id, payload.model_dump()))
@@ -55,7 +68,7 @@ def update_agent(agent_id: int, payload: AgentPayload, service: AgentServiceDep)
 @router.delete(
     "/{agent_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("agent:delete"))],
 )
 def delete_agent(agent_id: int, service: AgentServiceDep) -> None:
     """删除智能体。"""

@@ -12,6 +12,7 @@ from internal.application.errors import ForbiddenError, NotFoundError, Validatio
 from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.entity.access import RESOURCE_TYPES, Role
 from internal.domain.entity.common import Page
+from internal.domain.entity.permission import DATA_ALL
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 
@@ -53,8 +54,8 @@ class RoleGrantService:
         repository = self._resource_repository(resource_type)
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        if self._has_all_platform_resources(role):
-            # 平台超管默认拥有全部平台资源，授权页只读展示全量
+        if self._has_all_resources(role):
+            # 全量数据权限角色默认拥有作用域内全部资源，授权页只读展示全量
             items, total = repository.list_grantable(page, page_size, keyword, None)
             return Page(
                 items=[self._to_item(item, True) for item in items],
@@ -75,7 +76,7 @@ class RoleGrantService:
     def summary(self, role_id: int) -> dict[str, int]:
         """按资源类型统计角色的有效授权数量。"""
         role = self._require_role(role_id)
-        implicit_full = self._has_all_platform_resources(role)
+        implicit_full = self._has_all_resources(role)
         return {
             resource_type: self._granted_count(
                 role, resource_type, implicit_full=implicit_full
@@ -223,7 +224,7 @@ class RoleGrantService:
 
     def _require_writable_role(self, role_id: int) -> Role:
         role = self._require_role(role_id)
-        if role.system_role == "superadmin":
+        if self._has_all_resources(role):
             raise ValidationError("超级管理员角色默认拥有全部资源，不可单独授权")
         return role
 
@@ -240,7 +241,7 @@ class RoleGrantService:
     def _granted_count(
         self, role: Role, resource_type: str, *, implicit_full: bool = False
     ) -> int:
-        """角色已授权资源数量；平台超管按全量平台资源统计。"""
+        """角色已授权资源数量；全量数据权限角色按作用域全量统计。"""
         if implicit_full:
             repository = self._resource_repository(resource_type)
             return repository.list_grantable(1, 1, None, None)[1]
@@ -250,22 +251,24 @@ class RoleGrantService:
             role.id, role.tenant_id, resource_type
         )
 
-    @staticmethod
-    def _has_all_platform_resources(role: Role) -> bool:
-        """平台超管默认拥有全部平台资源，无需显式授权。"""
-        return role.tenant_id is None and role.system_role == "superadmin"
+    def _has_all_resources(self, role: Role) -> bool:
+        """拥有全量数据权限的角色默认可见作用域内全部资源，无需显式授权。"""
+        return DATA_ALL in self._uow.role_permissions.list_codes_for_role(role.id)
 
     def _demote_tenant_wide(
         self, role: Role, resource_type: str, resource_id: int, actor_id: int
     ) -> None:
         """把整租户授权拆成除目标角色外其余角色的显式授权。"""
+        tenant_id = role.tenant_id
+        if tenant_id is None:
+            raise ValidationError("平台角色不支持整租户授权")
         remaining = [
             item.id
-            for item in self._uow.roles.list_by_tenant(role.tenant_id, include_inactive=True)
+            for item in self._uow.roles.list_by_tenant(tenant_id, include_inactive=True)
             if item.id != role.id
         ]
         self._uow.resource_grants.replace_for_tenant(
-            resource_type, resource_id, role.tenant_id, remaining, actor_id
+            resource_type, resource_id, tenant_id, remaining, actor_id
         )
 
     @staticmethod

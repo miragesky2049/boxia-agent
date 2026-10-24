@@ -98,13 +98,16 @@ export default function AgentEditPage() {
   const isEdit = agentId !== undefined && !Number.isNaN(agentId)
   const navigate = useNavigate()
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:agent:create')
+  const canUpdate = hasPermission('button:agent:update')
   const { isPlatform } = useTenant()
   const [form] = Form.useForm<AgentFormValues>()
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [platformResource, setPlatformResource] = useState(false)
-  const readonly = !canWrite || (!isPlatform && platformResource)
+  const canSubmit = isEdit ? canUpdate : canCreate
+  const readonly = !canSubmit || (!isPlatform && platformResource)
   const [tools, setTools] = useState<Tool[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [components, setComponents] = useState<ComponentResource[]>([])
@@ -217,7 +220,7 @@ export default function AgentEditPage() {
               保存配置
             </Button>
           )}
-          {readonly && canWrite && <Tag bordered={false}>产品级资源只读</Tag>}
+          {readonly && canSubmit && <Tag bordered={false}>产品级资源只读</Tag>}
         </Space>
       </div>
 

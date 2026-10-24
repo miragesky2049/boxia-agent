@@ -5,6 +5,7 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { createTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant } from '../api/types'
+import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
@@ -22,6 +23,9 @@ interface EditFormValues {
 
 export default function TenantsPage() {
   const { message } = App.useApp()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:tenant:create')
+  const canUpdate = hasPermission('button:tenant:update')
   const { context } = useTenant()
   const [items, setItems] = useState<Tenant[]>([])
   const [total, setTotal] = useState(0)
@@ -141,6 +145,7 @@ export default function TenantsPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
+          disabled={!canUpdate}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -152,23 +157,27 @@ export default function TenantsPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 100,
-      render: (_: unknown, record: Tenant) => (
-        <Button
-          type="link"
-          size="small"
-          onClick={() => {
-            setEditing(record)
-            editForm.setFieldsValue({ name: record.name })
-          }}
-        >
-          编辑
-        </Button>
-      ),
-    },
+    ...(canUpdate
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 100,
+            render: (_: unknown, record: Tenant) => (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  setEditing(record)
+                  editForm.setFieldsValue({ name: record.name })
+                }}
+              >
+                编辑
+              </Button>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -180,16 +189,18 @@ export default function TenantsPage() {
             创建租户并分配子域名，租户内资源与管理员账号彼此隔离；仅产品级平台可维护。
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            createForm.resetFields()
-            setCreateOpen(true)
-          }}
-        >
-          新建租户
-        </Button>
+        {canCreate && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              createForm.resetFields()
+              setCreateOpen(true)
+            }}
+          >
+            新建租户
+          </Button>
+        )}
       </div>
 
       <div className="page-toolbar">

@@ -16,12 +16,10 @@ from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]{1,63}$")
-# 新建自定义角色默认只读基础权限；需要更高基础权限时通过复制现有角色继承
-_DEFAULT_SYSTEM_ROLE = "viewer"
 
 
 class RoleService:
-    """租户角色 CRUD；系统角色不可删除、不可变更基础权限。"""
+    """角色 CRUD；产品级入口创建的角色为系统角色，系统角色不可删除。"""
 
     def __init__(self, uow: UnitOfWork, context: RequestContext):
         self._uow = uow
@@ -58,7 +56,7 @@ class RoleService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """创建当前作用域的自定义角色；基础权限固定为只读，需要更高权限时复制现有角色。"""
+        """创建当前作用域的角色；产品级入口创建的角色标记为系统角色。"""
         tenant_id = self._management_scope()
         normalized_code = code.strip().lower()
         if not _CODE_PATTERN.match(normalized_code):
@@ -71,14 +69,14 @@ class RoleService:
         if self._uow.roles.name_exists(tenant_id, normalized_name):
             raise ConflictError("角色名称已存在")
 
+        is_system = tenant_id is None
         role = self._uow.roles.create(
             {
                 "tenant_id": tenant_id,
                 "code": normalized_code,
                 "name": normalized_name,
                 "description": description.strip(),
-                "system_role": _DEFAULT_SYSTEM_ROLE,
-                "is_system": False,
+                "is_system": is_system,
                 "is_active": True,
             }
         )
@@ -94,7 +92,7 @@ class RoleService:
             detail={
                 "code": normalized_code,
                 "name": normalized_name,
-                "system_role": _DEFAULT_SYSTEM_ROLE,
+                "is_system": is_system,
             },
             tenant_id=tenant_id,
         )
@@ -108,16 +106,23 @@ class RoleService:
         code: str,
         name: str,
         description: str | None,
+        actor_permissions: frozenset[str],
         actor_id: int,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """复制角色及其显式授权的资源关系，生成同作用域的自定义角色。"""
+        """复制角色及其功能权限与数据授权关系，生成同作用域的自定义角色。"""
         tenant_id = self._management_scope()
         source = self._get_owned(role_id, tenant_id)
-        if source.system_role == "superadmin":
+        if source.is_system and source.code == "superadmin":
             raise ValidationError("超级管理员角色默认拥有全部资源，不支持复制")
+        source_codes = self._uow.role_permissions.list_codes_for_role(source.id)
+        unauthorized = source_codes - actor_permissions
+        if unauthorized:
+            raise ForbiddenError(
+                f"不能复制包含自身不具备权限的角色：{', '.join(sorted(unauthorized))}"
+            )
 
         normalized_code = code.strip().lower()
         if not _CODE_PATTERN.match(normalized_code):
@@ -136,12 +141,12 @@ class RoleService:
                 "code": normalized_code,
                 "name": normalized_name,
                 "description": source.description if description is None else description.strip(),
-                # 复制系统角色时保留基础权限，但副本始终是可删除的自定义角色
-                "system_role": source.system_role,
+                # 副本始终是可删除的自定义角色，权限与数据授权由源角色复制而来
                 "is_system": False,
                 "is_active": True,
             }
         )
+        copied_permissions = self._copy_permissions(source, role, actor_id)
         copied_grants = self._copy_grants(source, role, actor_id)
         record_audit(
             self._uow,
@@ -156,13 +161,20 @@ class RoleService:
                 "source_role_id": source.id,
                 "code": normalized_code,
                 "name": normalized_name,
-                "system_role": source.system_role,
+                "copied_permissions": copied_permissions,
                 "copied_grants": copied_grants,
             },
             tenant_id=tenant_id,
         )
         self._uow.commit()
         return role
+
+    def _copy_permissions(self, source: Role, target: Role, granted_by: int) -> int:
+        """复制源角色的功能权限授权。"""
+        codes = self._uow.role_permissions.list_codes_for_role(source.id)
+        if not codes:
+            return 0
+        return self._uow.role_permissions.add_for_role(target.id, codes, granted_by)
 
     def _copy_grants(self, source: Role, target: Role, granted_by: int) -> int:
         """按资源类型复制源角色的显式授权；整租户授权对所有角色生效，无需重复复制。"""
@@ -202,7 +214,7 @@ class RoleService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> Role:
-        """更新角色名称/描述/启停；基础权限不可修改，只能通过复制继承。"""
+        """更新角色名称/描述/启停；功能权限通过角色授权接口单独维护。"""
         tenant_id = self._management_scope()
         role = self._get_owned(role_id, tenant_id)
 

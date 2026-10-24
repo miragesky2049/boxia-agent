@@ -1,6 +1,6 @@
 """租户最终用户管理接口。"""
 
-from fastapi import APIRouter, Query, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.access import User
 from internal.domain.entity.common import Page
@@ -11,14 +11,18 @@ from web.admin.schemas.user import (
     UserResetPasswordRequest,
     UserUpdateRequest,
 )
-from web.deps.auth import SuperadminAuthDep
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta
 from web.deps.services import UserAdminServiceDep
 
 router = APIRouter(prefix="/users", tags=["admin-users"])
 
 
-@router.get("", response_model=PageOut[UserOut])
+@router.get(
+    "",
+    response_model=PageOut[UserOut],
+    dependencies=[Depends(require_permission("page:users"))],
+)
 def list_users(
     service: UserAdminServiceDep,
     page: int = Query(1, ge=1),
@@ -29,10 +33,15 @@ def list_users(
     return _to_page_out(service.list(page, page_size, keyword))
 
 
-@router.post("", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "",
+    response_model=UserOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:user:create"))],
+)
 def create_user(
     payload: UserCreateRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: UserAdminServiceDep,
 ) -> UserOut:
@@ -52,11 +61,15 @@ def create_user(
     return UserOut.model_validate(user)
 
 
-@router.patch("/{user_id}", response_model=UserOut)
+@router.patch(
+    "/{user_id}",
+    response_model=UserOut,
+    dependencies=[Depends(require_permission("button:user:update"))],
+)
 def update_user(
     user_id: int,
     payload: UserUpdateRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: UserAdminServiceDep,
 ) -> UserOut:
@@ -75,11 +88,15 @@ def update_user(
     return UserOut.model_validate(user)
 
 
-@router.post("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
+@router.post(
+    "/{user_id}/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:user:update"))],
+)
 def reset_user_password(
     user_id: int,
     payload: UserResetPasswordRequest,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: UserAdminServiceDep,
 ) -> None:
@@ -95,10 +112,14 @@ def reset_user_password(
     )
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:user:delete"))],
+)
 def delete_user(
     user_id: int,
-    principal: SuperadminAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: UserAdminServiceDep,
 ) -> None:

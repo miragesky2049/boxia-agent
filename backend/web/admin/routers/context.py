@@ -14,16 +14,16 @@ router = APIRouter(prefix="/context", tags=["admin-context"])
 
 
 def _menus(principal: AdminPrincipal) -> list[str]:
-    """按作用域与系统角色返回可见菜单 key，前端仅用于渲染。
-
-    平台超管维护平台自有角色；平台侧不提供按资源的赠予菜单，租户侧 grants 表示给用户分配角色。
-    """
-    menus = ["agents"]
-    if principal.system_role != "superadmin":
-        return menus
-    if principal.is_platform:
-        return [*menus, "roles", "admin-users", "tenants", "audit"]
-    return [*menus, "grants", "roles", "users", "admin-users", "audit"]
+    """按 menu:* 权限返回可见菜单 key，前端仅用于渲染。"""
+    menus = [
+        code.split(":", 1)[1]
+        for code in principal.permissions
+        if code.startswith("menu:")
+    ]
+    order = [
+        "agents", "grants", "roles", "users", "admin-users", "tenants", "audit",
+    ]
+    return sorted(menus, key=lambda item: order.index(item) if item in order else len(order))
 
 
 @router.get("", response_model=AdminContextOut)
@@ -39,8 +39,8 @@ def get_admin_context(
         scope=context.scope,
         tenant=TenantOut.model_validate(context.tenant) if context.tenant else None,
         user=AdminUserOut.model_validate(profile),
-        role=principal.system_role,
-        system_role=principal.system_role,
+        role_code=principal.role_code,
+        role_name=principal.role_name,
         permissions=sorted(principal.permissions),
         menus=_menus(principal),
         app_env=settings.app_env,

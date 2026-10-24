@@ -4,14 +4,15 @@ from typing import Annotated
 
 from fastapi import Depends
 
+from internal.domain.entity.permission import DATA_ALL
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from web.deps.auth import AdminAuthDep, AdminPrincipal, UserAuthDep
 from web.deps.db import UowDep
 
 
 def _admin_scope(principal: AdminPrincipal) -> tuple[tuple[int, ...], bool]:
-    """超管不做角色过滤；平台与租户 admin/viewer 均按全部角色授权收敛。"""
-    if principal.system_role == "superadmin":
+    """拥有全量数据权限的角色不做资源过滤，其余按全部角色授权收敛。"""
+    if DATA_ALL in principal.permissions:
         return (), False
     return principal.role_ids, True
 

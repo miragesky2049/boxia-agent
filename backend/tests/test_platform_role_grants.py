@@ -28,7 +28,6 @@ def _create_platform_account(
     headers: dict[str, str],
     username: str,
     role_id: int,
-    role: str = "admin",
 ) -> dict[str, str]:
     created = client.post(
         ACCOUNTS_URL,
@@ -36,7 +35,6 @@ def _create_platform_account(
             "username": username,
             "password": OPERATOR_PASSWORD,
             "display_name": username,
-            "role": role,
             "role_id": role_id,
         },
         headers=headers,
@@ -48,6 +46,20 @@ def _create_platform_account(
     )
     assert login.status_code == 200, login.text
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
+def _set_permissions(
+    client: TestClient,
+    headers: dict[str, str],
+    role_id: int,
+    codes: list[str],
+) -> None:
+    response = client.put(
+        f"{ROLES_URL}/{role_id}/permissions",
+        json={"codes": codes},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
 
 
 def _agent_ids(client: TestClient, headers: dict[str, str]) -> set[int]:
@@ -125,7 +137,6 @@ def test_copy_platform_role_copies_grants(client: TestClient, auth_headers) -> N
     copy = copied.json()
     assert copy["tenant_id"] is None
     assert copy["is_system"] is False
-    assert copy["system_role"] == "viewer"
 
     summary = client.get(f"{ROLES_URL}/{copy['id']}/grants/summary", headers=auth_headers)
     assert summary.status_code == 200, summary.text
@@ -144,7 +155,7 @@ def test_platform_viewer_is_read_only(client: TestClient, auth_headers) -> None:
     roles = _roles_by_code(client, auth_headers)
     viewer_role_id = roles["viewer"]["id"]
     viewer_headers = _create_platform_account(
-        client, auth_headers, "platform-viewer-grants", viewer_role_id, role="viewer"
+        client, auth_headers, "platform-viewer-grants", viewer_role_id
     )
     agent = create_agent(client, auth_headers, "只读平台智能体")
     _grant(client, auth_headers, viewer_role_id, [agent["id"]])
@@ -210,9 +221,16 @@ def test_custom_platform_role_grant_takes_effect(
     )
     assert custom.status_code == 201, custom.text
     custom_role_id = custom.json()["id"]
+    # 新建平台角色无任何权限，先授予管理端入口与技能查看权限才能登录并读取
+    _set_permissions(
+        client,
+        auth_headers,
+        custom_role_id,
+        ["system:console:access", "skill:read"],
+    )
 
     account_headers = _create_platform_account(
-        client, auth_headers, "platform-auditor", custom_role_id, role="viewer"
+        client, auth_headers, "platform-auditor", custom_role_id
     )
     skill = client.post(
         "/api/v1/admin/skills",

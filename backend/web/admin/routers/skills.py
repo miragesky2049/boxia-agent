@@ -13,14 +13,18 @@ from web.admin.schemas.skill_package import (
     SkillFileOut,
     SkillFileWriteRequest,
 )
-from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta
 from web.deps.services import SkillPackageServiceDep, SkillServiceDep
 
 router = APIRouter(prefix="/skills", tags=["admin-skills"])
 
 
-@router.get("", response_model=PageOut[SkillOut])
+@router.get(
+    "",
+    response_model=PageOut[SkillOut],
+    dependencies=[Depends(require_permission("skill:read"))],
+)
 def list_skills(
     service: SkillServiceDep,
     page: int = Query(1, ge=1),
@@ -38,23 +42,32 @@ def list_skills(
     "",
     response_model=SkillOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("skill:create"))],
 )
 def create_skill(
     payload: SkillPayload,
-    principal: EditorAuthDep,
+    principal: AdminAuthDep,
     service: SkillServiceDep,
 ) -> SkillOut:
     """创建技能，并授权给创建者角色。"""
     return SkillOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
-@router.get("/{skill_id}", response_model=SkillOut)
+@router.get(
+    "/{skill_id}",
+    response_model=SkillOut,
+    dependencies=[Depends(require_permission("skill:read"))],
+)
 def get_skill(skill_id: int, service: SkillServiceDep) -> SkillOut:
     """查询技能详情。"""
     return SkillOut.model_validate(service.get(skill_id))
 
 
-@router.put("/{skill_id}", response_model=SkillOut, dependencies=[Depends(require_editor)])
+@router.put(
+    "/{skill_id}",
+    response_model=SkillOut,
+    dependencies=[Depends(require_permission("skill:update"))],
+)
 def update_skill(skill_id: int, payload: SkillPayload, service: SkillServiceDep) -> SkillOut:
     """更新技能。"""
     return SkillOut.model_validate(service.update(skill_id, payload.model_dump()))
@@ -63,14 +76,18 @@ def update_skill(skill_id: int, payload: SkillPayload, service: SkillServiceDep)
 @router.delete(
     "/{skill_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("skill:delete"))],
 )
 def delete_skill(skill_id: int, service: SkillServiceDep) -> None:
     """删除技能（包内文件随外键级联删除）。"""
     service.delete(skill_id)
 
 
-@router.get("/{skill_id}/files", response_model=SkillFileListOut)
+@router.get(
+    "/{skill_id}/files",
+    response_model=SkillFileListOut,
+    dependencies=[Depends(require_permission("skill:read"))],
+)
 def list_skill_files(
     skill_id: int,
     service: SkillPackageServiceDep,
@@ -86,7 +103,11 @@ def list_skill_files(
     )
 
 
-@router.get("/{skill_id}/files/content", response_model=SkillFileOut)
+@router.get(
+    "/{skill_id}/files/content",
+    response_model=SkillFileOut,
+    dependencies=[Depends(require_permission("skill:read"))],
+)
 def read_skill_file(
     skill_id: int,
     service: SkillPackageServiceDep,
@@ -99,7 +120,7 @@ def read_skill_file(
 @router.put(
     "/{skill_id}/files",
     response_model=SkillFileOut,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("skill:update"))],
 )
 def write_skill_file(
     skill_id: int,
@@ -119,7 +140,7 @@ def write_skill_file(
 @router.delete(
     "/{skill_id}/files",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("skill:update"))],
 )
 def delete_skill_file(
     skill_id: int,
@@ -133,7 +154,7 @@ def delete_skill_file(
 @router.post(
     "/{skill_id}/import",
     response_model=list[SkillFileMetaOut],
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("skill:update"))],
 )
 def import_skill_package(
     skill_id: int,
@@ -144,7 +165,10 @@ def import_skill_package(
     return [SkillFileMetaOut.model_validate(file) for file in service.import_zip(skill_id, body)]
 
 
-@router.get("/{skill_id}/export")
+@router.get(
+    "/{skill_id}/export",
+    dependencies=[Depends(require_permission("skill:read"))],
+)
 def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Response:
     """导出技能包为 zip。"""
     data = service.export_zip(skill_id)
@@ -159,11 +183,12 @@ def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Resp
     "/{skill_id}/clone",
     response_model=SkillOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("skill:create"))],
 )
 def clone_skill(
     skill_id: int,
     payload: SkillCloneRequest,
-    principal: EditorAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: SkillServiceDep,
     package_service: SkillPackageServiceDep,

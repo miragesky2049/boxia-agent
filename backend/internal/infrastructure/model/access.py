@@ -34,10 +34,6 @@ class RoleModel(Base):
         UniqueConstraint("tenant_id", "code", name="ux_roles_tenant_code"),
         # 复合外键需要被引用列上有唯一约束
         UniqueConstraint("id", "tenant_id", name="ux_roles_id_tenant"),
-        CheckConstraint(
-            "system_role IN ('superadmin', 'admin', 'viewer')",
-            name="ck_roles_system_role",
-        ),
         Index("ix_roles_tenant_active", "tenant_id", "is_active"),
         Index(
             "ux_roles_platform_code",
@@ -60,7 +56,6 @@ class RoleModel(Base):
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
-    system_role: Mapped[str] = mapped_column(String(16), nullable=False)
     is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -216,6 +211,52 @@ class ResourceGrantModel(Base):
     )
     role_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("roles.id", ondelete="CASCADE")
+    )
+    granted_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PermissionResourceModel(Base):
+    """permission_resources 表：全局唯一的权限资源目录，随迁移预置。"""
+
+    __tablename__ = "permission_resources"
+    __table_args__ = (
+        UniqueConstraint("code", name="ux_permission_resources_code"),
+        Index("ix_permission_resources_category", "category", "sort_order"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    code: Mapped[str] = mapped_column(String(128), nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    category: Mapped[str] = mapped_column(String(16), nullable=False)
+    action: Mapped[str] = mapped_column(String(16), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RolePermissionModel(Base):
+    """role_permissions 表：角色与权限资源的多对多授权关系。"""
+
+    __tablename__ = "role_permissions"
+    __table_args__ = (
+        UniqueConstraint("role_id", "permission_id", name="ux_role_permissions_role_permission"),
+        Index("ix_role_permissions_role", "role_id"),
+        Index("ix_role_permissions_permission", "permission_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
+    )
+    permission_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("permission_resources.id", ondelete="CASCADE"), nullable=False
     )
     granted_by: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")

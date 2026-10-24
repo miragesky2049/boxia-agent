@@ -10,14 +10,18 @@ from web.admin.schemas.resource import (
     ComponentPayload,
     ResourceCloneRequest,
 )
-from web.deps.auth import EditorAuthDep, require_editor
+from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta
 from web.deps.services import ComponentServiceDep
 
 router = APIRouter(prefix="/components", tags=["admin-components"])
 
 
-@router.get("", response_model=PageOut[ComponentOut])
+@router.get(
+    "",
+    response_model=PageOut[ComponentOut],
+    dependencies=[Depends(require_permission("component:read"))],
+)
 def list_components(
     service: ComponentServiceDep,
     page: int = Query(1, ge=1),
@@ -35,10 +39,11 @@ def list_components(
     "",
     response_model=ComponentOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("component:create"))],
 )
 def create_component(
     payload: ComponentPayload,
-    principal: EditorAuthDep,
+    principal: AdminAuthDep,
     service: ComponentServiceDep,
 ) -> ComponentOut:
     """创建组件，并授权给创建者角色。"""
@@ -47,7 +52,11 @@ def create_component(
     )
 
 
-@router.get("/{component_id}", response_model=ComponentOut)
+@router.get(
+    "/{component_id}",
+    response_model=ComponentOut,
+    dependencies=[Depends(require_permission("component:read"))],
+)
 def get_component(component_id: int, service: ComponentServiceDep) -> ComponentOut:
     """查询组件详情。"""
     return ComponentOut.model_validate(service.get(component_id))
@@ -56,7 +65,7 @@ def get_component(component_id: int, service: ComponentServiceDep) -> ComponentO
 @router.put(
     "/{component_id}",
     response_model=ComponentOut,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("component:update"))],
 )
 def update_component(
     component_id: int,
@@ -70,7 +79,7 @@ def update_component(
 @router.delete(
     "/{component_id}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_editor)],
+    dependencies=[Depends(require_permission("component:delete"))],
 )
 def delete_component(component_id: int, service: ComponentServiceDep) -> None:
     """删除组件。"""
@@ -81,11 +90,12 @@ def delete_component(component_id: int, service: ComponentServiceDep) -> None:
     "/{component_id}/clone",
     response_model=ComponentOut,
     status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("component:create"))],
 )
 def clone_component(
     component_id: int,
     payload: ResourceCloneRequest,
-    principal: EditorAuthDep,
+    principal: AdminAuthDep,
     request: Request,
     service: ComponentServiceDep,
 ) -> ComponentOut:

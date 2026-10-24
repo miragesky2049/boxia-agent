@@ -13,6 +13,7 @@ from internal.domain.entity.access import (
 )
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
+from internal.domain.entity.permission import PermissionResource
 from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
 from internal.domain.entity.tenant import Tenant
@@ -312,6 +313,54 @@ class RoleRepository(Protocol):
         """统计管理员账号与最终用户的引用数。"""
 
 
+class PermissionResourceRepository(Protocol):
+    """权限资源目录仓储（全局只读目录）。"""
+
+    def list_all(self, include_inactive: bool = False) -> list[PermissionResource]:
+        """按分类与排序读取权限目录。"""
+
+    def list_by_codes(self, codes: set[str] | frozenset[str]) -> list[PermissionResource]:
+        """按编码批量读取权限资源。"""
+
+    def list_ids_by_codes(self, codes: set[str] | frozenset[str]) -> dict[str, int]:
+        """返回编码到主键的映射，用于写入角色授权。"""
+
+    def existing_codes(self, codes: set[str] | frozenset[str]) -> set[str]:
+        """返回给定编码中真实存在且启用的部分。"""
+
+
+class RolePermissionRepository(Protocol):
+    """角色权限关系仓储。"""
+
+    def lock_role(self, role_id: int) -> bool:
+        """锁定角色行，串行化同一角色的并发授权写入。"""
+
+    def list_codes_for_role(self, role_id: int) -> set[str]:
+        """读取角色已授予的权限编码。"""
+
+    def list_codes_for_roles(self, role_ids: tuple[int, ...]) -> set[str]:
+        """合并读取多个角色的权限编码（多角色用户取并集）。"""
+
+    def list_role_ids_with_code(self, tenant_id: int | None, code: str) -> set[int]:
+        """读取作用域内拥有指定权限的角色 ID。"""
+
+    def replace_for_role(
+        self, role_id: int, codes: set[str] | frozenset[str], granted_by: int | None
+    ) -> None:
+        """整体替换角色权限；未在目录中的编码被忽略。"""
+
+    def add_for_role(
+        self, role_id: int, codes: set[str] | frozenset[str], granted_by: int | None
+    ) -> int:
+        """追加角色权限，重复授权自动跳过，返回新增数量。"""
+
+    def remove_for_role(self, role_id: int, code: str) -> bool:
+        """移除角色对单个权限的授权。"""
+
+    def count_for_role(self, role_id: int) -> int:
+        """统计角色权限数量。"""
+
+
 class UserRepository(Protocol):
     """最终用户仓储。"""
 
@@ -378,14 +427,12 @@ class UserRepository(Protocol):
         page: int,
         page_size: int,
         keyword: str | None,
-        admin_system_roles: tuple[str, ...],
+        permission_code: str,
     ) -> tuple[list[User], int]:
-        """分页查询拥有管理类角色的租户用户。"""
+        """分页查询拥有指定管理权限的租户用户。"""
 
-    def has_role_system(
-        self, user_id: int, tenant_id: int, system_roles: tuple[str, ...]
-    ) -> bool:
-        """判断用户是否拥有指定系统角色之一。"""
+    def has_permission(self, user_id: int, tenant_id: int, permission_code: str) -> bool:
+        """判断用户是否通过任一角色获得指定权限。"""
 
 
 class UserRefreshTokenRepository(Protocol):
@@ -555,6 +602,8 @@ class UnitOfWork(Protocol):
     refresh_tokens: RefreshTokenRepository
     audit_logs: AuditLogRepository
     roles: RoleRepository
+    permission_resources: PermissionResourceRepository
+    role_permissions: RolePermissionRepository
     users: UserRepository
     user_refresh_tokens: UserRefreshTokenRepository
     resource_grants: ResourceGrantRepository
