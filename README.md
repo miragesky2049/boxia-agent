@@ -195,7 +195,7 @@ cd boxia-agent
 docker compose -f backend/docker/docker-compose.yml up -d
 ```
 
-这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。
+这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。编排文件把 Compose 项目名固定为 `postgresql`，因此 `docker compose ls` 中显示的名称不受执行目录影响。
 
 确认它真的起来了：
 
@@ -525,7 +525,7 @@ docker tag docker.m.daocloud.io/library/postgres:17-alpine postgres:17-alpine
 
 按 3.2 的密码规则重新输入。最常见的原因：
 
-- 长度不足 `PASSWORD_MIN_LENGTH`（默认 12 位）
+- 长度不足 `PASSWORD_MIN_LENGTH`（代码默认 12 位；`backend/.env.example` 本地模板为 10 位）
 - 只有字母或只有数字，字符类别不足 `PASSWORD_MIN_CATEGORIES`（默认 3 类）
 - 密码里包含用户名 `admin`
 - 使用了常见弱口令
@@ -703,8 +703,9 @@ boxia-agent/
 │   │   ├── domain/              # 实体（含租户/请求上下文）、分页对象、仓储协议
 │   │   ├── application/         # 用例服务、统一业务异常
 │   │   └── infrastructure/      # 配置、ORM、仓储、安全、日志、中间件、链路追踪
-│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户）
-│   ├── scripts/                 # create_admin / seed_demo / wait_for_db
+│   ├── docker/                  # 本地 PostgreSQL 编排（项目名固定为 postgresql）
+│   ├── migrations/              # Alembic 迁移（0001 基线、0002 认证加固、0003 搜索索引、0004 多租户、0005 技能包文件）
+│   ├── scripts/                 # create_admin / seed_demo / skill_package / wait_for_db
 │   ├── tests/                   # 后端接口测试
 │   └── Dockerfile
 ├── frontend/
@@ -795,9 +796,12 @@ boxia-agent/
 | `BCRYPT_ROUNDS`               | `12`                | 否       | 密码哈希成本因子                                                                                                                                      |
 | `LOGIN_MAX_ATTEMPTS`          | `5`                 | 否       | 连续失败几次后锁定                                                                                                                                    |
 | `LOGIN_LOCK_MINUTES`          | `15`                | 否       | 锁定时长（分钟）                                                                                                                                      |
-| `PASSWORD_MIN_LENGTH`         | `12`                | 否       | 密码最小长度（字符数，8-64）；改动后后端校验与前端表单同时生效                                                                                        |
+| `PASSWORD_MIN_LENGTH`         | `12`                | 否       | 密码最小长度（字符数，8-64；代码默认 12，`.env.example` 本地为 10）；改动后后端校验与前端表单同时生效                                                  |
 | `PASSWORD_MAX_BYTES`          | `72`                | 否       | 密码最大字节数（UTF-8，32-72）；bcrypt 只处理前 72 字节                                                                                               |
 | `PASSWORD_MIN_CATEGORIES`     | `3`                 | 否       | 至少包含的字符类别数（1-4：大写字母、小写字母、数字、符号）                                                                                           |
+| `SKILL_PACKAGE_MAX_FILES`     | `200`               | 否       | 单个技能包最大文件数（1-2000）                                                                                                                        |
+| `SKILL_PACKAGE_MAX_FILE_BYTES`| `1048576`           | 否       | 单个技能文件最大字节数（1 KiB-16 MiB）                                                                                                                |
+| `SKILL_PACKAGE_MAX_TOTAL_BYTES`| `8388608`          | 否       | 单个技能包总大小上限（1 KiB-64 MiB）                                                                                                                  |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）即可免 DNS 验证 `*.localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
 | `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
@@ -1257,7 +1261,7 @@ uv run python -m scripts.skill_package list --id 3
 | 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读                                                                                                                     |
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 管理员管理                  | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号                                                                            |
-| 租户管理                    | 租户列表、新建租户、启用/停用（仅产品级平台 superadmin）                                                                                                        |
+| 租户管理                    | 租户列表、新建、编辑名称与启用状态（仅产品级平台 superadmin）                                                                                                   |
 | 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |
 | 健壮性                      | 路由懒加载、错误边界、404 页面、请求超时与重试                                                                                                                  |
 
@@ -1351,7 +1355,7 @@ APP_ENV=local ROOT_DOMAIN=localhost ALLOW_TENANT_HEADER=true \
 
 覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
 
-多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
 
 ### 11.4 CI 与提交前检查
 
