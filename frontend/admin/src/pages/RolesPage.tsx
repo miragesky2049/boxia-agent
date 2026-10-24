@@ -5,7 +5,7 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { rolesApi } from '../api/access'
-import type { AdminRole, Role, RoleCreatePayload } from '../api/types'
+import type { AdminRole, Role, RoleCopyPayload, RoleCreatePayload } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 
@@ -38,6 +38,7 @@ export default function RolesPage() {
   const [saving, setSaving] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<Role | null>(null)
+  const [copying, setCopying] = useState<Role | null>(null)
   const [form] = Form.useForm<RoleFormValues>()
 
   const load = useCallback(async () => {
@@ -57,6 +58,7 @@ export default function RolesPage() {
 
   const openCreate = () => {
     setEditing(null)
+    setCopying(null)
     form.resetFields()
     form.setFieldsValue({
       code: '',
@@ -68,7 +70,22 @@ export default function RolesPage() {
     setModalOpen(true)
   }
 
+  const openCopy = (record: Role) => {
+    setEditing(null)
+    setCopying(record)
+    form.resetFields()
+    form.setFieldsValue({
+      code: `${record.code}-copy`.slice(0, 64),
+      name: `${record.name}副本`.slice(0, 64),
+      description: record.description,
+      system_role: record.system_role,
+      is_active: true,
+    })
+    setModalOpen(true)
+  }
+
   const openEdit = (record: Role) => {
+    setCopying(null)
     setEditing(record)
     form.setFieldsValue({
       code: record.code,
@@ -92,6 +109,14 @@ export default function RolesPage() {
           is_active: values.is_active,
         })
         message.success('角色已保存')
+      } else if (copying) {
+        const payload: RoleCopyPayload = {
+          code: values.code.trim(),
+          name: values.name.trim(),
+          description: values.description ?? '',
+        }
+        await rolesApi.copy(copying.id, payload)
+        message.success('角色已复制，授权关系已同步')
       } else {
         const payload: RoleCreatePayload = {
           code: values.code.trim(),
@@ -104,6 +129,7 @@ export default function RolesPage() {
       }
       setModalOpen(false)
       setEditing(null)
+      setCopying(null)
       await load()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存失败')
@@ -177,7 +203,7 @@ export default function RolesPage() {
           {
             title: '操作',
             key: 'actions',
-            width: 170,
+            width: 220,
             render: (_: unknown, record: Role) => (
               <Space size={4}>
                 <Button
@@ -194,6 +220,19 @@ export default function RolesPage() {
                   onClick={() => navigate(`/roles/${record.id}`)}
                 >
                   授权
+                </Button>
+                <Button
+                  type="link"
+                  size="small"
+                  disabled={record.system_role === 'superadmin'}
+                  title={
+                    record.system_role === 'superadmin'
+                      ? '超级管理员角色默认拥有全部资源，不支持复制'
+                      : undefined
+                  }
+                  onClick={() => openCopy(record)}
+                >
+                  复制
                 </Button>
                 <Button type="link" size="small" onClick={() => openEdit(record)}>
                   编辑
@@ -246,12 +285,13 @@ export default function RolesPage() {
       />
 
       <Modal
-        title={editing ? '编辑角色' : '新建角色'}
+        title={copying ? '复制角色' : editing ? '编辑角色' : '新建角色'}
         open={modalOpen}
         onOk={handleSubmit}
         onCancel={() => {
           setModalOpen(false)
           setEditing(null)
+          setCopying(null)
         }}
         confirmLoading={saving}
         okText="保存"
@@ -285,7 +325,10 @@ export default function RolesPage() {
             rules={[{ required: true, message: '请选择基础权限' }]}
             extra="基础权限控制管理端读写能力；系统角色不可修改该项。"
           >
-            <Select options={SYSTEM_ROLE_OPTIONS} disabled={editing?.is_system} />
+            <Select
+              options={SYSTEM_ROLE_OPTIONS}
+              disabled={Boolean(editing?.is_system) || Boolean(copying)}
+            />
           </Form.Item>
           {editing && !editing.is_system && (
             <Form.Item name="is_active" label="启用" valuePropName="checked">

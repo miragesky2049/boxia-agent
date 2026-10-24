@@ -5,6 +5,7 @@ import type {
   ResourceGrant,
   ResourceType,
   Role,
+  RoleCopyPayload,
   RoleCreatePayload,
   RoleGrantResource,
   RoleGrantSummary,
@@ -39,6 +40,12 @@ export const rolesApi = {
   },
   async create(payload: RoleCreatePayload): Promise<Role> {
     return request<Role>('/admin/roles', { method: 'POST', body: JSON.stringify(payload) })
+  },
+  async copy(id: number, payload: RoleCopyPayload): Promise<Role> {
+    return request<Role>(`/admin/roles/${id}/copy`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    })
   },
   async update(id: number, payload: RoleUpdatePayload): Promise<Role> {
     return request<Role>(`/admin/roles/${id}`, {

@@ -11,7 +11,7 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
-from internal.domain.entity.access import Role
+from internal.domain.entity.access import RESOURCE_TYPES, Role
 from internal.domain.entity.admin_user import ROLES
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
@@ -102,6 +102,95 @@ class RoleService:
         )
         self._uow.commit()
         return role
+
+    def copy(
+        self,
+        role_id: int,
+        *,
+        code: str,
+        name: str,
+        description: str | None,
+        actor_id: int,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> Role:
+        """复制角色及其显式授权的资源关系，生成同作用域的自定义角色。"""
+        tenant_id = self._management_scope()
+        source = self._get_owned(role_id, tenant_id)
+        if source.system_role == "superadmin":
+            raise ValidationError("超级管理员角色默认拥有全部资源，不支持复制")
+
+        normalized_code = code.strip().lower()
+        if not _CODE_PATTERN.match(normalized_code):
+            raise ValidationError("角色编码需为 2-64 位小写字母、数字、下划线或短横线")
+        normalized_name = name.strip()
+        if not normalized_name:
+            raise ValidationError("角色名称不能为空")
+        if self._uow.roles.code_exists(tenant_id, normalized_code):
+            raise ConflictError("角色编码已存在")
+        if self._uow.roles.name_exists(tenant_id, normalized_name):
+            raise ConflictError("角色名称已存在")
+
+        role = self._uow.roles.create(
+            {
+                "tenant_id": tenant_id,
+                "code": normalized_code,
+                "name": normalized_name,
+                "description": source.description if description is None else description.strip(),
+                # 复制系统角色时保留基础权限，但副本始终是可删除的自定义角色
+                "system_role": source.system_role,
+                "is_system": False,
+                "is_active": True,
+            }
+        )
+        copied_grants = self._copy_grants(source, role, actor_id)
+        record_audit(
+            self._uow,
+            action="role.copied",
+            actor_id=actor_id,
+            actor_username=actor_username,
+            resource_type="role",
+            resource_id=str(role.id),
+            ip=ip,
+            user_agent=user_agent,
+            detail={
+                "source_role_id": source.id,
+                "code": normalized_code,
+                "name": normalized_name,
+                "system_role": source.system_role,
+                "copied_grants": copied_grants,
+            },
+            tenant_id=tenant_id,
+        )
+        self._uow.commit()
+        return role
+
+    def _copy_grants(self, source: Role, target: Role, granted_by: int) -> int:
+        """按资源类型复制源角色的显式授权；整租户授权对所有角色生效，无需重复复制。"""
+        total = 0
+        for resource_type in RESOURCE_TYPES:
+            if source.tenant_id is None:
+                resource_ids = sorted(
+                    self._uow.resource_grants.list_platform_granted_resource_ids(
+                        source.id, resource_type
+                    )
+                )
+            else:
+                resource_ids = sorted(
+                    self._uow.resource_grants.list_granted_resource_ids(source.id, resource_type)
+                )
+            if not resource_ids:
+                continue
+            if source.tenant_id is None:
+                total += self._uow.resource_grants.add_for_platform_role(
+                    target.id, resource_type, resource_ids, granted_by
+                )
+            else:
+                total += self._uow.resource_grants.add_for_role(
+                    target.id, source.tenant_id, resource_type, resource_ids, granted_by
+                )
+        return total
 
     def update(
         self,

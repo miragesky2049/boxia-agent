@@ -3,7 +3,12 @@
 from fastapi import APIRouter, Query, Request, status
 
 from web.admin.schemas.common import PageOut
-from web.admin.schemas.role import RoleCreateRequest, RoleOut, RoleUpdateRequest
+from web.admin.schemas.role import (
+    RoleCopyRequest,
+    RoleCreateRequest,
+    RoleOut,
+    RoleUpdateRequest,
+)
 from web.admin.schemas.role_grant import (
     RoleGrantAddRequest,
     RoleGrantReplaceRequest,
@@ -53,6 +58,29 @@ def create_role(
         name=payload.name,
         description=payload.description,
         system_role=payload.system_role,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return RoleOut.model_validate(role)
+
+
+@router.post("/{role_id}/copy", response_model=RoleOut, status_code=status.HTTP_201_CREATED)
+def copy_role(
+    role_id: int,
+    payload: RoleCopyRequest,
+    principal: SuperadminAuthDep,
+    request: Request,
+    service: RoleServiceDep,
+) -> RoleOut:
+    """复制角色及其授权关系，生成新的自定义角色。"""
+    ip, user_agent = client_meta(request)
+    role = service.copy(
+        role_id,
+        code=payload.code,
+        name=payload.name,
+        description=payload.description,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,
