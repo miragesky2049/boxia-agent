@@ -67,6 +67,8 @@ interface PermissionGroup {
   items: PermissionResource[]
 }
 
+type RoleDetailSection = 'permissions' | 'data'
+
 export default function RoleDetailPage() {
   const { id } = useParams()
   const roleId = Number(id)
@@ -87,6 +89,9 @@ export default function RoleDetailPage() {
   const [pendingIds, setPendingIds] = useState<number[]>([])
   const [catalog, setCatalog] = useState<PermissionResource[]>([])
   const [selectedCodes, setSelectedCodes] = useState<string[]>([])
+  const [savedCodes, setSavedCodes] = useState<string[]>([])
+  const [activeSection, setActiveSection] = useState<RoleDetailSection>('permissions')
+  const [activeCategory, setActiveCategory] = useState<PermissionCategory | null>(null)
   const [permissionLoading, setPermissionLoading] = useState(false)
   const [savingPermissions, setSavingPermissions] = useState(false)
 
@@ -126,6 +131,7 @@ export default function RoleDetailPage() {
       ])
       setCatalog(resources)
       setSelectedCodes(granted.codes)
+      setSavedCodes(granted.codes)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载功能权限失败')
     } finally {
@@ -182,6 +188,50 @@ export default function RoleDetailPage() {
     })).filter((group) => group.items.length > 0)
   }, [catalog])
 
+  const selectedSet = useMemo(() => new Set(selectedCodes), [selectedCodes])
+
+  const activeGroup = useMemo<PermissionGroup | undefined>(() => {
+    if (permissionGroups.length === 0) return undefined
+    return (
+      permissionGroups.find((group) => group.category === activeCategory) ?? permissionGroups[0]
+    )
+  }, [permissionGroups, activeCategory])
+
+  const activeCodes = useMemo(
+    () => activeGroup?.items.map((item) => item.code) ?? [],
+    [activeGroup],
+  )
+
+  const selectedCountByCategory = useMemo(() => {
+    const counts: Partial<Record<PermissionCategory, number>> = {}
+    permissionGroups.forEach((group) => {
+      counts[group.category] = group.items.filter((item) => selectedSet.has(item.code)).length
+    })
+    return counts
+  }, [permissionGroups, selectedSet])
+
+  const activeSelectedCount = activeCodes.filter((code) => selectedSet.has(code)).length
+
+  const permissionsDirty = useMemo(() => {
+    if (selectedCodes.length !== savedCodes.length) return true
+    const saved = new Set(savedCodes)
+    return selectedCodes.some((code) => !saved.has(code))
+  }, [selectedCodes, savedCodes])
+
+  const handleActiveGroupToggle = (checked: boolean) => {
+    setSelectedCodes((prev) => {
+      const next = new Set(prev)
+      activeCodes.forEach((code) => {
+        if (checked) {
+          next.add(code)
+        } else {
+          next.delete(code)
+        }
+      })
+      return [...next]
+    })
+  }
+
   const handleToggle = async (record: RoleGrantResource, checked: boolean) => {
     setPendingIds((prev) => [...prev, record.resource_id])
     try {
@@ -204,6 +254,7 @@ export default function RoleDetailPage() {
     try {
       const result = await rolesApi.replacePermissions(roleId, selectedCodes)
       setSelectedCodes(result.codes)
+      setSavedCodes(result.codes)
       message.success('功能权限已保存')
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存功能权限失败')
@@ -266,11 +317,7 @@ export default function RoleDetailPage() {
       <div className="page-header">
         <div>
           <Space size={8}>
-            <Button
-              type="text"
-              icon={<ArrowLeftOutlined />}
-              onClick={() => navigate('/roles')}
-            />
+            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/roles')} />
             <h2 className="page-header__title">{role?.name ?? '角色授权'}</h2>
           </Space>
           <p className="page-header__desc">
@@ -286,11 +333,7 @@ export default function RoleDetailPage() {
           <Descriptions column={3} size="small">
             <Descriptions.Item label="角色编码">{role.code}</Descriptions.Item>
             <Descriptions.Item label="类型">
-              {role.is_system ? (
-                <Tag color="gold">系统角色</Tag>
-              ) : (
-                <Tag>自定义角色</Tag>
-              )}
+              {role.is_system ? <Tag color="gold">系统角色</Tag> : <Tag>自定义角色</Tag>}
             </Descriptions.Item>
             <Descriptions.Item label="状态">
               {role.is_active ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>}
@@ -302,147 +345,209 @@ export default function RoleDetailPage() {
         </Card>
       )}
 
-      <Card
-        size="small"
-        title="功能权限"
-        style={{ marginBottom: 16 }}
-        extra={
-          canGrant && !isSuperAdmin ? (
-            <Button
-              type="primary"
-              size="small"
-              icon={<SaveOutlined />}
-              loading={savingPermissions}
-              onClick={() => void handleSavePermissions()}
-            >
-              保存
-            </Button>
-          ) : null
-        }
-      >
-        {isSuperAdmin && (
-          <Alert
-            type="info"
-            showIcon
-            style={{ marginBottom: 12 }}
-            message="超级管理员角色默认拥有全部功能权限，无需配置。"
-          />
-        )}
-        <Spin spinning={permissionLoading}>
-          {permissionGroups.length === 0 ? (
-            <Empty description="暂无可配置的功能权限" />
-          ) : (
-            <Checkbox.Group
-              value={selectedCodes}
-              disabled={readonly}
-              style={{ width: '100%' }}
-            >
-              <Space direction="vertical" size={16} style={{ width: '100%' }}>
-                {permissionGroups.map((group) => (
-                  <div key={group.category}>
-                    <div className="resource-name" style={{ marginBottom: 8 }}>
-                      {group.label}
-                      <Tag bordered={false} style={{ marginLeft: 6 }}>
-                        {group.items.length}
-                      </Tag>
-                    </div>
-                    <Space size={[24, 8]} wrap>
-                      {group.items.map((item) => (
-                        <Checkbox key={item.code} value={item.code}>
-                          <span title={item.description || undefined}>{item.name}</span>
-                          <Tag bordered={false} style={{ marginLeft: 6 }}>
-                            {item.code}
-                          </Tag>
-                        </Checkbox>
-                      ))}
-                    </Space>
-                  </div>
-                ))}
-              </Space>
-            </Checkbox.Group>
-          )}
-        </Spin>
-      </Card>
-
-      {isSuperAdmin && (
-        <Alert
-          type="info"
-          showIcon
-          style={{ marginBottom: 16 }}
-          message={
-            isPlatformRole
-              ? '超级管理员角色默认拥有全部平台级资源，数据授权只读。'
-              : '超级管理员角色默认拥有本租户全部资源，数据授权只读。'
-          }
-        />
-      )}
-
-      <Card size="small" title="数据授权">
+      <Card size="small">
         <Tabs
-          activeKey={resourceType}
-          items={RESOURCE_TABS.map((tab) => ({
-            key: tab.key,
-            label: (
-              <span>
-                {tab.label}
-                <Tag bordered={false} style={{ marginLeft: 6 }}>
-                  {counts[tab.key] ?? 0}
-                </Tag>
-              </span>
-            ),
-          }))}
-          onChange={(key) => {
-            setResourceType(key as ResourceType)
-            setPage(1)
-            setKeyword('')
-            setGrantedOnly(false)
-          }}
-        />
-
-        <div className="page-toolbar">
-          <Input.Search
-            key={resourceType}
-            allowClear
-            placeholder="搜索名称或描述"
-            style={{ width: 260 }}
-            onSearch={(value) => {
-              setKeyword(value.trim())
-              setPage(1)
-            }}
-          />
-          <Space size={8}>
-            <Switch
-              size="small"
-              checked={grantedOnly}
-              onChange={(checked) => {
-                setGrantedOnly(checked)
-                setPage(1)
-              }}
-            />
-            <span>仅看已授权</span>
-          </Space>
-          <Tag color="blue" bordered={false}>
-            共 {total} 个
-          </Tag>
-        </div>
-
-        <Table<RoleGrantResource>
-          rowKey="resource_id"
-          columns={columns}
-          dataSource={items}
-          loading={loading}
-          pagination={{
-            current: page,
-            pageSize,
-            total,
-            showSizeChanger: true,
-            pageSizeOptions: ['10', '20', '50'],
-            showTotal: (count) => `共 ${count} 条`,
-            onChange: (nextPage, nextSize) => {
-              setPage(nextSize !== pageSize ? 1 : nextPage)
-              setPageSize(nextSize)
+          activeKey={activeSection}
+          onChange={(key) => setActiveSection(key as RoleDetailSection)}
+          items={[
+            {
+              key: 'permissions',
+              label: '功能权限',
+              children: (
+                <>
+                  {isSuperAdmin && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message="超级管理员角色默认拥有全部功能权限，无需配置。"
+                    />
+                  )}
+                  <Spin spinning={permissionLoading}>
+                    {permissionGroups.length === 0 || !activeGroup ? (
+                      <Empty description="暂无可配置的功能权限" />
+                    ) : (
+                      <>
+                        <Tabs
+                          size="small"
+                          activeKey={activeGroup.category}
+                          onChange={(key) => setActiveCategory(key as PermissionCategory)}
+                          items={permissionGroups.map((group) => {
+                            const selectedCount = selectedCountByCategory[group.category] ?? 0
+                            return {
+                              key: group.category,
+                              label: (
+                                <span>
+                                  {group.label}
+                                  <Tag
+                                    color={selectedCount > 0 ? 'blue' : undefined}
+                                    bordered={false}
+                                    style={{ marginLeft: 6 }}
+                                  >
+                                    {selectedCount}/{group.items.length}
+                                  </Tag>
+                                </span>
+                              ),
+                            }
+                          })}
+                        />
+                        <div className="permission-panel">
+                          <div className="permission-toolbar">
+                            <Checkbox
+                              checked={
+                                activeCodes.length > 0 && activeSelectedCount === activeCodes.length
+                              }
+                              indeterminate={
+                                activeSelectedCount > 0 && activeSelectedCount < activeCodes.length
+                              }
+                              disabled={readonly || activeCodes.length === 0}
+                              onChange={(event) => handleActiveGroupToggle(event.target.checked)}
+                            >
+                              全选本类
+                            </Checkbox>
+                            <span className="permission-summary">
+                              本类已选 {activeSelectedCount} / {activeCodes.length} 项 · 全部已选{' '}
+                              {selectedCodes.length} 项
+                            </span>
+                            {canGrant && !isSuperAdmin && (
+                              <Space size={8} className="permission-toolbar__actions">
+                                {permissionsDirty && (
+                                  <Tag color="warning" bordered={false}>
+                                    有未保存的更改
+                                  </Tag>
+                                )}
+                                <Button
+                                  type="primary"
+                                  size="small"
+                                  icon={<SaveOutlined />}
+                                  loading={savingPermissions}
+                                  disabled={!permissionsDirty}
+                                  onClick={() => void handleSavePermissions()}
+                                >
+                                  保存
+                                </Button>
+                              </Space>
+                            )}
+                          </div>
+                          <Checkbox.Group
+                            value={selectedCodes}
+                            disabled={readonly}
+                            style={{ width: '100%' }}
+                            onChange={(values) => setSelectedCodes(values.map(String))}
+                          >
+                            <div className="permission-grid">
+                              {activeGroup.items.map((item) => (
+                                <Checkbox
+                                  key={item.code}
+                                  value={item.code}
+                                  className="permission-item"
+                                >
+                                  <span
+                                    className="permission-item__name"
+                                    title={item.description || undefined}
+                                  >
+                                    {item.name}
+                                  </span>
+                                  <span className="permission-item__code">{item.code}</span>
+                                </Checkbox>
+                              ))}
+                            </div>
+                          </Checkbox.Group>
+                        </div>
+                      </>
+                    )}
+                  </Spin>
+                </>
+              ),
             },
-          }}
+            {
+              key: 'data',
+              label: '数据授权',
+              children: (
+                <>
+                  {isSuperAdmin && (
+                    <Alert
+                      type="info"
+                      showIcon
+                      style={{ marginBottom: 12 }}
+                      message={
+                        isPlatformRole
+                          ? '超级管理员角色默认拥有全部平台级资源，数据授权只读。'
+                          : '超级管理员角色默认拥有本租户全部资源，数据授权只读。'
+                      }
+                    />
+                  )}
+                  <Tabs
+                    size="small"
+                    activeKey={resourceType}
+                    items={RESOURCE_TABS.map((tab) => ({
+                      key: tab.key,
+                      label: (
+                        <span>
+                          {tab.label}
+                          <Tag bordered={false} style={{ marginLeft: 6 }}>
+                            {counts[tab.key] ?? 0}
+                          </Tag>
+                        </span>
+                      ),
+                    }))}
+                    onChange={(key) => {
+                      setResourceType(key as ResourceType)
+                      setPage(1)
+                      setKeyword('')
+                      setGrantedOnly(false)
+                    }}
+                  />
+
+                  <div className="page-toolbar">
+                    <Input.Search
+                      key={resourceType}
+                      allowClear
+                      placeholder="搜索名称或描述"
+                      style={{ width: 260 }}
+                      onSearch={(value) => {
+                        setKeyword(value.trim())
+                        setPage(1)
+                      }}
+                    />
+                    <Space size={8}>
+                      <Switch
+                        size="small"
+                        checked={grantedOnly}
+                        onChange={(checked) => {
+                          setGrantedOnly(checked)
+                          setPage(1)
+                        }}
+                      />
+                      <span>仅看已授权</span>
+                    </Space>
+                    <Tag color="blue" bordered={false}>
+                      共 {total} 个
+                    </Tag>
+                  </div>
+
+                  <Table<RoleGrantResource>
+                    rowKey="resource_id"
+                    columns={columns}
+                    dataSource={items}
+                    loading={loading}
+                    pagination={{
+                      current: page,
+                      pageSize,
+                      total,
+                      showSizeChanger: true,
+                      pageSizeOptions: ['10', '20', '50'],
+                      showTotal: (count) => `共 ${count} 条`,
+                      onChange: (nextPage, nextSize) => {
+                        setPage(nextSize !== pageSize ? 1 : nextPage)
+                        setPageSize(nextSize)
+                      },
+                    }}
+                  />
+                </>
+              ),
+            },
+          ]}
         />
       </Card>
     </div>
