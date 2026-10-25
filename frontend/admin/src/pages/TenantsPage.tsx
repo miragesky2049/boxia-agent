@@ -1,8 +1,9 @@
-import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Switch, Table, Tag, Typography } from 'antd'
+import { PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { App, Button, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
@@ -22,6 +23,7 @@ interface EditFormValues {
 }
 
 export default function TenantsPage() {
+  const navigate = useNavigate()
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
   const canCreate = hasPermission('button:tenant:create')
@@ -157,27 +159,38 @@ export default function TenantsPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    ...(canUpdate
-      ? [
-          {
-            title: '操作',
-            key: 'actions',
-            width: 100,
-            render: (_: unknown, record: Tenant) => (
-              <Button
-                type="link"
-                size="small"
-                onClick={() => {
-                  setEditing(record)
-                  editForm.setFieldsValue({ name: record.name })
-                }}
-              >
-                编辑
-              </Button>
-            ),
-          },
-        ]
-      : []),
+    {
+      title: '操作',
+      key: 'actions',
+      width: 250,
+      render: (_: unknown, record: Tenant) => (
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
+            详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<RobotOutlined />}
+            onClick={() => navigate(`/tenants/${record.id}?tab=agents`)}
+          >
+            开通智能体
+          </Button>
+          {canUpdate && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setEditing(record)
+                editForm.setFieldsValue({ name: record.name })
+              }}
+            >
+              编辑
+            </Button>
+          )}
+        </Space>
+      ),
+    },
   ]
 
   return (

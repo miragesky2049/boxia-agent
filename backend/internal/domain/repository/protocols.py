@@ -5,6 +5,7 @@ from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 from internal.domain.entity.access import (
+    AgentTenantOpening,
     GrantSummary,
     ResourceGrant,
     Role,
@@ -238,7 +239,6 @@ class AgentRepository(Protocol):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        authorized: bool = False,
         manageable_only: bool = False,
         grant_state: str | None = None,
         grant_tenant_id: int | None = None,
@@ -506,6 +506,11 @@ class ResourceGrantRepository(Protocol):
     def delete_for_resources(self, resource_type: str, resource_ids: list[int]) -> None:
         """批量删除多个资源的全部授权。"""
 
+    def delete_for_tenant_resources(
+        self, resource_type: str, resource_ids: list[int], tenant_id: int
+    ) -> None:
+        """批量删除某租户对多个资源的授权，不影响其他租户。"""
+
     def delete_for_resource(self, resource_type: str, resource_id: int) -> None:
         """删除资源全部授权。"""
 
@@ -593,6 +598,54 @@ class ResourceGrantRepository(Protocol):
         """删除平台角色对单个平台资源的授权。"""
 
 
+class AgentTenantOpeningRepository(Protocol):
+    """平台智能体与租户的开通关系仓储。"""
+
+    def get(self, agent_id: int, tenant_id: int) -> AgentTenantOpening | None:
+        """查询单条开通关系。"""
+
+    def open(self, agent_id: int, tenant_id: int, opened_by: int | None) -> AgentTenantOpening:
+        """开通智能体；重复开通保持原开通时间并返回现有记录。"""
+
+    def close(self, agent_id: int, tenant_id: int) -> bool:
+        """关闭开通；返回是否存在并删除成功。"""
+
+    def list_platform_agent_ids(self, agent_ids: list[int]) -> set[int]:
+        """返回给定 id 中属于平台级智能体的部分。"""
+
+    def open_many(
+        self, agent_ids: list[int], tenant_id: int, opened_by: int | None
+    ) -> None:
+        """批量开通；已开通的保持原开通时间。"""
+
+    def close_many(self, agent_ids: list[int], tenant_id: int) -> int:
+        """批量关闭；返回实际删除的数量。"""
+
+    def sync_for_resource(
+        self, agent_id: int, tenant_ids: set[int], opened_by: int | None
+    ) -> None:
+        """按给定租户集合同步开通关系，用于兼容旧的整资源授权接口。"""
+
+    def list_for_tenant(
+        self,
+        tenant_id: int,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        is_enabled: bool | None,
+        opened_only: bool,
+    ) -> tuple[list[tuple[Agent, AgentTenantOpening | None]], int]:
+        """分页查询平台智能体及该租户的开通状态。"""
+
+    def list_opened_tenants(
+        self, agent_id: int, page: int, page_size: int, keyword: str | None
+    ) -> tuple[list[tuple[Tenant, AgentTenantOpening]], int]:
+        """分页查询已开通该智能体的租户。"""
+
+    def get_platform_agent(self, agent_id: int) -> Agent | None:
+        """查询平台级智能体，忽略平台角色的数据授权过滤。"""
+
+
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -607,6 +660,7 @@ class UnitOfWork(Protocol):
     users: UserRepository
     user_refresh_tokens: UserRefreshTokenRepository
     resource_grants: ResourceGrantRepository
+    agent_openings: AgentTenantOpeningRepository
     agents: AgentRepository
     skills: ResourceRepository[Skill]
     skill_files: SkillFileRepository

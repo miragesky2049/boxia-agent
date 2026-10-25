@@ -7,7 +7,6 @@ import { useNavigate } from 'react-router-dom'
 import { deleteAgent, listAgents, updateAgent, getAgent } from '../../api/agents'
 import type { AgentSummary } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
-import AuthorizationDrawer from '../../components/AuthorizationDrawer'
 import { useTenant } from '../../tenant/TenantContext'
 
 export default function AgentListPage() {
@@ -24,9 +23,7 @@ export default function AgentListPage() {
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
   const [enabledFilter, setEnabledFilter] = useState<string | undefined>(undefined)
-  const [authorizedOnly, setAuthorizedOnly] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [grantTarget, setGrantTarget] = useState<AgentSummary | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -36,7 +33,6 @@ export default function AgentListPage() {
         page_size: pageSize,
         keyword: keyword || undefined,
         is_enabled: enabledFilter === undefined ? undefined : enabledFilter === 'true',
-        authorized: isPlatform && authorizedOnly ? true : undefined,
       })
       setItems(result.items)
       setTotal(result.total)
@@ -45,7 +41,7 @@ export default function AgentListPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, enabledFilter, isPlatform, authorizedOnly, message])
+  }, [page, pageSize, keyword, enabledFilter, message])
 
   useEffect(() => {
     void load()
@@ -156,11 +152,6 @@ export default function AgentListPage() {
           <Button type="link" size="small" onClick={() => navigate(`/agents/${record.id}/edit`)}>
             配置
           </Button>
-          {isPlatform && (
-            <Button type="link" size="small" onClick={() => setGrantTarget(record)}>
-              授权
-            </Button>
-          )}
           {canDelete && (isPlatform || !record.is_platform) && (
             <Popconfirm
               title="确认删除该智能体？"
@@ -223,20 +214,6 @@ export default function AgentListPage() {
             setPage(1)
           }}
         />
-        {isPlatform && (
-          <Select
-            style={{ width: 150 }}
-            value={authorizedOnly ? 'authorized' : 'all'}
-            options={[
-              { label: '全部智能体', value: 'all' },
-              { label: '仅已授权', value: 'authorized' },
-            ]}
-            onChange={(value) => {
-              setAuthorizedOnly(value === 'authorized')
-              setPage(1)
-            }}
-          />
-        )}
         <Tag color="blue" bordered={false}>
           共 {total} 个智能体
         </Tag>
@@ -260,17 +237,6 @@ export default function AgentListPage() {
           },
         }}
       />
-
-      {grantTarget && (
-        <AuthorizationDrawer
-          open={grantTarget !== null}
-          onClose={() => setGrantTarget(null)}
-          onSaved={() => void load()}
-          resourceType="agent"
-          resourceId={grantTarget.id}
-          resourceName={grantTarget.name}
-        />
-      )}
     </div>
   )
 }

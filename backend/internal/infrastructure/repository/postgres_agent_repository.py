@@ -69,7 +69,6 @@ class PostgresAgentRepository:
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        authorized: bool = False,
         manageable_only: bool = False,
         grant_state: str | None = None,
         grant_tenant_id: int | None = None,
@@ -83,8 +82,6 @@ class PostgresAgentRepository:
             if manageable_only
             else self._visible(select(AgentModel))
         )
-        if authorized:
-            stmt = stmt.where(has_any_grant("agent", AgentModel.id))
         if grant_state is not None:
             condition = (
                 has_any_grant("agent", AgentModel.id)

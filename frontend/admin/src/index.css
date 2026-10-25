@@ -38,6 +38,20 @@ body,
   -webkit-line-clamp: 2;
 }
 
+.tenant-agent-entry {
+  margin-top: 16px;
+  border-radius: 10px;
+}
+
+.page-toolbar__spacer {
+  flex: 1 1 auto;
+}
+
+.page-toolbar__hint {
+  color: #86909c;
+  font-size: 13px;
+}
+
 .permission-panel {
   display: flex;
   flex-direction: column;

@@ -2,12 +2,14 @@
 
 from fastapi import APIRouter, Depends, Query, status
 
+from internal.application.tenant_service import AgentTenantView
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Agent
 from web.admin.schemas.agent import AgentOut, AgentPayload, AgentSummaryOut
 from web.admin.schemas.common import PageOut
-from web.deps.auth import AdminAuthDep, require_permission
-from web.deps.services import AgentServiceDep
+from web.admin.schemas.tenant import AgentOpenedTenantOut
+from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
+from web.deps.services import AgentServiceDep, TenantServiceDep
 
 router = APIRouter(prefix="/agents", tags=["admin-agents"])
 
@@ -23,10 +25,9 @@ def list_agents(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
-    authorized: bool = Query(False),
 ) -> PageOut[AgentSummaryOut]:
-    """分页查询智能体；authorized 仅保留已有租户授权的平台智能体。"""
-    result = service.list(page, page_size, keyword, is_enabled, authorized)
+    """分页查询智能体。"""
+    result = service.list(page, page_size, keyword, is_enabled)
     return _to_page_out(result)
 
 
@@ -73,6 +74,42 @@ def update_agent(agent_id: int, payload: AgentPayload, service: AgentServiceDep)
 def delete_agent(agent_id: int, service: AgentServiceDep) -> None:
     """删除智能体。"""
     service.delete(agent_id)
+
+
+@router.get(
+    "/{agent_id}/tenants",
+    response_model=PageOut[AgentOpenedTenantOut],
+    dependencies=[
+        Depends(require_platform_admin),
+        Depends(require_permission("page:agents")),
+    ],
+)
+def list_agent_tenants(
+    agent_id: int,
+    service: TenantServiceDep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = Query(None, max_length=100),
+) -> PageOut[AgentOpenedTenantOut]:
+    """分页查询已开通该产品智能体的租户。"""
+    result = service.list_agent_tenants(agent_id, page, page_size, keyword)
+    return PageOut[AgentOpenedTenantOut](
+        items=[_to_agent_tenant_out(item) for item in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+def _to_agent_tenant_out(item: AgentTenantView) -> AgentOpenedTenantOut:
+    return AgentOpenedTenantOut(
+        id=item.tenant.id,
+        code=item.tenant.code,
+        name=item.tenant.name,
+        is_active=item.tenant.is_active,
+        opened_at=item.opening.opened_at,
+        opened_by=item.opening.opened_by,
+    )
 
 
 def _to_page_out(result: Page[Agent]) -> PageOut[AgentSummaryOut]:

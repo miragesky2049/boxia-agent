@@ -7,7 +7,7 @@ from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
 from internal.infrastructure.model.access import ResourceGrantModel
-from internal.infrastructure.model.agent import AgentModel
+from internal.infrastructure.model.agent import AgentModel, AgentTenantOpeningModel
 
 # 内层 EXISTS 必须使用别名表，否则在智能体列表查询中会编译成 agents.id = agents.id 恒真条件
 _VisibleAgent = aliased(AgentModel, name="visible_agent")
@@ -83,6 +83,14 @@ def tenant_grant_absent(
     return ~tenant_grant_exists(resource_type, resource_id_col, tenant_id)
 
 
+def agent_opening_exists(agent_id_col: Any, tenant_id: int) -> ColumnElement[bool]:
+    """平台智能体是否已对指定租户开通。"""
+    return exists().where(
+        AgentTenantOpeningModel.agent_id == agent_id_col,
+        AgentTenantOpeningModel.tenant_id == tenant_id,
+    )
+
+
 def agent_visible(
     agent_id_col: Any,
     tenant_id: int,
@@ -92,22 +100,27 @@ def agent_visible(
     """资源所属智能体对当前租户是否可见。
 
     严格 RBAC：租户自有智能体必须显式授权；管理端超级管理员全量可见。
-    产品级智能体必须存在对当前租户的授权。
+    产品级智能体必须先对本租户开通；租户内再由角色数据授权细分可见范围。
     """
     if apply_role_filter:
         tenant_owned = and_(
             _VisibleAgent.tenant_id == tenant_id,
             grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
         )
+        platform_available = and_(
+            _VisibleAgent.tenant_id.is_(None),
+            agent_opening_exists(_VisibleAgent.id, tenant_id),
+            grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
+        )
     else:
         tenant_owned = _VisibleAgent.tenant_id == tenant_id
-    platform_granted = and_(
-        _VisibleAgent.tenant_id.is_(None),
-        grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, apply_role_filter),
-    )
+        platform_available = and_(
+            _VisibleAgent.tenant_id.is_(None),
+            agent_opening_exists(_VisibleAgent.id, tenant_id),
+        )
     return exists().where(
         _VisibleAgent.id == agent_id_col,
-        or_(tenant_owned, platform_granted),
+        or_(tenant_owned, platform_available),
     )
 
 

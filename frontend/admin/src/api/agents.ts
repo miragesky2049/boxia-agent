@@ -1,16 +1,33 @@
 import { request } from './client'
-import type { Agent, AgentPayload, AgentSummary, ListParams, PageResult } from './types'
+import type {
+  Agent,
+  AgentOpenedTenant,
+  AgentPayload,
+  AgentSummary,
+  ListParams,
+  PageResult,
+} from './types'
 
-export async function listAgents(
-  params: ListParams & { authorized?: boolean },
-): Promise<PageResult<AgentSummary>> {
+export async function listAgents(params: ListParams): Promise<PageResult<AgentSummary>> {
   const query = new URLSearchParams()
   query.set('page', String(params.page ?? 1))
   query.set('page_size', String(params.page_size ?? 20))
   if (params.keyword) query.set('keyword', params.keyword)
   if (params.is_enabled !== undefined) query.set('is_enabled', String(params.is_enabled))
-  if (params.authorized) query.set('authorized', 'true')
   return request<PageResult<AgentSummary>>(`/admin/agents?${query.toString()}`)
+}
+
+export async function listAgentTenants(
+  agentId: number,
+  params: { page?: number; page_size?: number; keyword?: string } = {},
+): Promise<PageResult<AgentOpenedTenant>> {
+  const query = new URLSearchParams()
+  query.set('page', String(params.page ?? 1))
+  query.set('page_size', String(params.page_size ?? 20))
+  if (params.keyword) query.set('keyword', params.keyword)
+  return request<PageResult<AgentOpenedTenant>>(
+    `/admin/agents/${agentId}/tenants?${query.toString()}`,
+  )
 }
 
 export async function getAgent(id: number): Promise<Agent> {
