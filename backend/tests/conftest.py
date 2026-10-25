@@ -32,7 +32,7 @@ import pytest  # noqa: E402
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import bindparam, text  # noqa: E402
+from sqlalchemy import text  # noqa: E402
 
 from internal.domain.entity.permission import (  # noqa: E402
     PERMISSION_CATALOG,
@@ -40,6 +40,7 @@ from internal.domain.entity.permission import (  # noqa: E402
     PLATFORM_SUPERADMIN_CODES,
     PLATFORM_VIEWER_CODES,
 )
+from internal.infrastructure.id.uuid7 import new_uuid  # noqa: E402
 from internal.infrastructure.model.database import dispose_engine, get_engine  # noqa: E402
 from internal.infrastructure.security.password import hash_password  # noqa: E402
 from internal.infrastructure.trace.exporter import get_tracer_provider  # noqa: E402
@@ -90,15 +91,17 @@ def _reset_data():
         tables = ", ".join(sorted(existing))
         if tables:
             conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
-        # TRUNCATE 会清掉迁移种子，需重建权限目录、平台系统角色与角色权限关系
+        # TRUNCATE 会清掉迁移种子，需重建权限目录、平台系统角色与角色权限关系。
+        # 主键已改为应用层 UUID v7，原生 INSERT 必须显式写入 id。
         conn.execute(
             text(
                 "INSERT INTO permission_resources "
-                "(code, name, category, action, description, sort_order, is_active) "
-                "VALUES (:code, :name, :category, :action, :description, :sort_order, TRUE)"
+                "(id, code, name, category, action, description, sort_order, is_active) "
+                "VALUES (:id, :code, :name, :category, :action, :description, :sort_order, TRUE)"
             ),
             [
                 {
+                    "id": new_uuid(),
                     "code": item.code,
                     "name": item.name,
                     "category": item.category,
@@ -112,36 +115,65 @@ def _reset_data():
         conn.execute(
             text(
                 "INSERT INTO roles "
-                "(tenant_id, code, name, description, is_system, is_active) "
-                "VALUES "
-                "(NULL, 'superadmin', '超级管理员', '平台最高权限，可访问全部平台级资源', TRUE, TRUE), "
-                "(NULL, 'admin', '管理员', '可读写被授权的平台级资源', TRUE, TRUE), "
-                "(NULL, 'viewer', '只读成员', '只读访问被授权的平台级资源', TRUE, TRUE)"
-            )
+                "(id, tenant_id, code, name, description, is_system, is_active) "
+                "VALUES (:id, NULL, :code, :name, :description, TRUE, TRUE)"
+            ),
+            [
+                {
+                    "id": new_uuid(),
+                    "code": code,
+                    "name": name,
+                    "description": description,
+                }
+                for code, name, description in (
+                    ("superadmin", "超级管理员", "平台最高权限，可访问全部平台级资源"),
+                    ("admin", "管理员", "可读写被授权的平台级资源"),
+                    ("viewer", "只读成员", "只读访问被授权的平台级资源"),
+                )
+            ],
         )
+        role_ids = {
+            code: role_id
+            for code, role_id in conn.execute(
+                text("SELECT code, id FROM roles WHERE tenant_id IS NULL")
+            ).tuples()
+        }
+        permission_ids = {
+            code: permission_id
+            for code, permission_id in conn.execute(
+                text("SELECT code, id FROM permission_resources")
+            ).tuples()
+        }
         grant_stmt = text(
-            "INSERT INTO role_permissions (role_id, permission_id) "
-            "SELECT r.id, p.id FROM roles r, permission_resources p "
-            "WHERE r.tenant_id IS NULL AND r.code = :role_code AND p.code IN :codes"
-        ).bindparams(bindparam("codes", expanding=True))
+            "INSERT INTO role_permissions (id, role_id, permission_id) "
+            "VALUES (:id, :role_id, :permission_id)"
+        )
         for role_code, codes in (
             ("superadmin", PLATFORM_SUPERADMIN_CODES),
             ("admin", PLATFORM_ADMIN_CODES),
             ("viewer", PLATFORM_VIEWER_CODES),
         ):
-            conn.execute(grant_stmt, {"role_code": role_code, "codes": sorted(codes)})
+            for permission_code in sorted(codes):
+                conn.execute(
+                    grant_stmt,
+                    {
+                        "id": new_uuid(),
+                        "role_id": role_ids[role_code],
+                        "permission_id": permission_ids[permission_code],
+                    },
+                )
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role_id, must_change_password) "
-                "VALUES (:username, :password_hash, :display_name, "
-                "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = 'superadmin'), "
-                "        FALSE)"
+                "(id, username, password_hash, display_name, role_id, must_change_password) "
+                "VALUES (:id, :username, :password_hash, :display_name, :role_id, FALSE)"
             ),
             {
+                "id": new_uuid(),
                 "username": ADMIN_USERNAME,
                 "password_hash": ADMIN_HASH,
                 "display_name": "系统管理员",
+                "role_id": role_ids["superadmin"],
             },
         )
     yield

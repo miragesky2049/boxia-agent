@@ -4,7 +4,6 @@ from datetime import datetime
 from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     CheckConstraint,
     DateTime,
@@ -21,7 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
 
@@ -49,9 +48,9 @@ class RoleModel(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
+    id: Mapped[UuidPrimaryKey]
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -79,15 +78,15 @@ class UserModel(Base):
         Index("ix_users_tenant_role", "tenant_id", "role_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    role_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    role_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -113,13 +112,13 @@ class UserRoleModel(Base):
         Index("ix_user_roles_role", "tenant_id", "role_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
-    role_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    role_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -134,9 +133,9 @@ class UserRefreshTokenModel(Base):
         Index("ix_user_refresh_tokens_expires_at", "expires_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     family_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
@@ -147,7 +146,7 @@ class UserRefreshTokenModel(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    replaced_by_id: Mapped[int | None] = mapped_column(BigInteger)
+    replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(255))
 
@@ -203,18 +202,17 @@ class ResourceGrantModel(Base):
         ),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
-    resource_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
+    resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
     )
-    role_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("roles.id", ondelete="CASCADE")
+    role_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE")
     )
-    granted_by: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
-    )
+    # 授权人可能是平台管理员（admin_users）或租户账号（users），无法用单一外键约束
+    granted_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -227,7 +225,7 @@ class PermissionResourceModel(Base):
         Index("ix_permission_resources_category", "category", "sort_order"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     code: Mapped[str] = mapped_column(String(128), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
     category: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -251,14 +249,15 @@ class RolePermissionModel(Base):
         Index("ix_role_permissions_permission", "permission_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    role_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    role_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE"), nullable=False
     )
-    permission_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("permission_resources.id", ondelete="CASCADE"), nullable=False
+    permission_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True),
+        ForeignKey("permission_resources.id", ondelete="CASCADE"),
+        nullable=False,
     )
-    granted_by: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
-    )
+    # 授权人可能是平台管理员（admin_users）或租户账号（users），无法用单一外键约束
+    granted_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

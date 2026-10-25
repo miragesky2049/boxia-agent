@@ -5,7 +5,7 @@ import { getAgent } from '../api/agents'
 import type { UserAgentDetail, UserPrompt, UserSkill, UserTool } from '../api/types'
 import AppHeader from '../components/AppHeader'
 
-function ResourceSection<T extends { id: number; name: string; description: string }>({
+function ResourceSection<T extends { id: string; name: string; description: string }>({
   title,
   hint,
   items,
@@ -72,18 +72,16 @@ export default function AgentDetailPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const parsedId = Number(agentId)
-
   useEffect(() => {
     let active = true
-    if (!Number.isInteger(parsedId) || parsedId <= 0) {
+    if (!agentId) {
       setError('智能体地址不正确')
       setLoading(false)
       return
     }
     setLoading(true)
     setError(null)
-    getAgent(parsedId)
+    getAgent(agentId)
       .then((data) => {
         if (active) setAgent(data)
       })
@@ -96,7 +94,7 @@ export default function AgentDetailPage() {
     return () => {
       active = false
     }
-  }, [parsedId])
+  }, [agentId])
 
   const resourceTotal =
     (agent?.skills.length ?? 0) +

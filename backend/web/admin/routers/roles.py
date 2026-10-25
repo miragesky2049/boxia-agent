@@ -1,5 +1,7 @@
 """角色管理接口：角色 CRUD、功能权限与资源授权维护。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.common import PageOut
@@ -39,7 +41,7 @@ _GRANT_ROLES = Depends(require_permission("button:role:grant"))
 @router.get("", response_model=list[RoleOut], dependencies=[_VIEW_ROLES])
 def list_roles(
     service: RoleServiceDep,
-    tenant_id: int | None = Query(None, ge=1),
+    tenant_id: UUID | None = Query(None),
     include_inactive: bool = Query(False),
 ) -> list[RoleOut]:
     """查询角色；平台只返回平台角色，租户只返回本租户角色。"""
@@ -48,9 +50,9 @@ def list_roles(
 
 @router.get("/{role_id}", response_model=RoleOut, dependencies=[_VIEW_ROLES])
 def get_role(
-    role_id: int,
+    role_id: UUID,
     service: RoleServiceDep,
-    tenant_id: int | None = Query(None, ge=1),
+    tenant_id: UUID | None = Query(None),
 ) -> RoleOut:
     """查询角色详情；平台只返回平台角色，租户只返回本租户角色。"""
     return RoleOut.model_validate(service.get(role_id, tenant_id))
@@ -89,7 +91,7 @@ def create_role(
     dependencies=[Depends(require_permission("button:role:copy"))],
 )
 def copy_role(
-    role_id: int,
+    role_id: UUID,
     payload: RoleCopyRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -117,7 +119,7 @@ def copy_role(
     dependencies=[Depends(require_permission("button:role:update"))],
 )
 def update_role(
-    role_id: int,
+    role_id: UUID,
     payload: RoleUpdateRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -144,7 +146,7 @@ def update_role(
     dependencies=[Depends(require_permission("button:role:delete"))],
 )
 def delete_role(
-    role_id: int,
+    role_id: UUID,
     principal: AdminAuthDep,
     request: Request,
     service: RoleServiceDep,
@@ -166,7 +168,7 @@ def delete_role(
     dependencies=[_VIEW_ROLES],
 )
 def list_role_permissions(
-    role_id: int,
+    role_id: UUID,
     service: RolePermissionServiceDep,
 ) -> RolePermissionListOut:
     """查询角色已授予的功能权限。"""
@@ -183,7 +185,7 @@ def list_role_permissions(
     dependencies=[_GRANT_ROLES],
 )
 def replace_role_permissions(
-    role_id: int,
+    role_id: UUID,
     payload: RolePermissionReplaceRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -212,7 +214,7 @@ def replace_role_permissions(
     dependencies=[_GRANT_ROLES],
 )
 def add_role_permissions(
-    role_id: int,
+    role_id: UUID,
     payload: RolePermissionAddRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -241,7 +243,7 @@ def add_role_permissions(
     dependencies=[_GRANT_ROLES],
 )
 def remove_role_permission(
-    role_id: int,
+    role_id: UUID,
     code: str,
     principal: AdminAuthDep,
     request: Request,
@@ -265,7 +267,7 @@ def remove_role_permission(
     dependencies=[_VIEW_ROLES],
 )
 def get_role_grant_summary(
-    role_id: int,
+    role_id: UUID,
     service: RoleGrantServiceDep,
 ) -> RoleGrantSummaryOut:
     """按资源类型返回角色有效授权数量。"""
@@ -278,7 +280,7 @@ def get_role_grant_summary(
     dependencies=[_VIEW_ROLES],
 )
 def list_role_grants(
-    role_id: int,
+    role_id: UUID,
     service: RoleGrantServiceDep,
     resource_type: str = Query(..., max_length=16),
     page: int = Query(1, ge=1),
@@ -302,7 +304,7 @@ def list_role_grants(
     dependencies=[_GRANT_ROLES],
 )
 def replace_role_grants(
-    role_id: int,
+    role_id: UUID,
     resource_type: str,
     payload: RoleGrantReplaceRequest,
     principal: AdminAuthDep,
@@ -329,7 +331,7 @@ def replace_role_grants(
     dependencies=[_GRANT_ROLES],
 )
 def add_role_grants(
-    role_id: int,
+    role_id: UUID,
     resource_type: str,
     payload: RoleGrantAddRequest,
     principal: AdminAuthDep,
@@ -356,9 +358,9 @@ def add_role_grants(
     dependencies=[_GRANT_ROLES],
 )
 def remove_role_grant(
-    role_id: int,
+    role_id: UUID,
     resource_type: str,
-    resource_id: int,
+    resource_id: UUID,
     principal: AdminAuthDep,
     request: Request,
     service: RoleGrantServiceDep,

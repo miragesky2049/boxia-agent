@@ -47,7 +47,7 @@ export default function AgentListPage() {
     void load()
   }, [load])
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await deleteAgent(id)
       message.success('已删除')

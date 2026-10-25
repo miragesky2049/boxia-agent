@@ -2,9 +2,9 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     Column,
     DateTime,
@@ -14,25 +14,43 @@ from sqlalchemy import (
     Table,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 agent_tools = Table(
     "agent_tools",
     Base.metadata,
-    Column("agent_id", BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True),
-    Column("tool_id", BigInteger, ForeignKey("tools.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "agent_id",
+        Uuid(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "tool_id", Uuid(as_uuid=True), ForeignKey("tools.id", ondelete="CASCADE"), primary_key=True
+    ),
 )
 
 agent_skills = Table(
     "agent_skills",
     Base.metadata,
-    Column("agent_id", BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), primary_key=True),
-    Column("skill_id", BigInteger, ForeignKey("skills.id", ondelete="CASCADE"), primary_key=True),
+    Column(
+        "agent_id",
+        Uuid(as_uuid=True),
+        ForeignKey("agents.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column(
+        "skill_id",
+        Uuid(as_uuid=True),
+        ForeignKey("skills.id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
 )
 
 
@@ -41,10 +59,10 @@ class AgentModel(Base):
 
     __tablename__ = "agents"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级智能体，所有租户可见；非空表示租户私有智能体。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
@@ -66,15 +84,15 @@ class AgentTenantOpeningModel(Base):
         Index("ix_agent_tenant_openings_tenant", "tenant_id", "agent_id"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    agent_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    agent_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
     )
-    tenant_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
-    opened_by: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
+    opened_by: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("admin_users.id", ondelete="SET NULL")
     )
     opened_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

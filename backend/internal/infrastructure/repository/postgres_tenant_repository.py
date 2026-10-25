@@ -1,6 +1,7 @@
 """租户的 PostgreSQL 仓储实现。"""
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -22,7 +23,7 @@ class PostgresTenantRepository:
         )
         return self._to_entity(row) if row else None
 
-    def get_by_id(self, tenant_id: int) -> Tenant | None:
+    def get_by_id(self, tenant_id: UUID) -> Tenant | None:
         """按主键查询。"""
         row = self._session.get(TenantModel, tenant_id)
         return self._to_entity(row) if row else None
@@ -51,7 +52,7 @@ class PostgresTenantRepository:
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def update(self, tenant_id: int, values: dict[str, Any]) -> Tenant | None:
+    def update(self, tenant_id: UUID, values: dict[str, Any]) -> Tenant | None:
         """更新租户基础信息。"""
         row = self._session.get(TenantModel, tenant_id)
         if row is None:

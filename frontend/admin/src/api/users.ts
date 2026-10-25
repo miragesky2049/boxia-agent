@@ -34,16 +34,16 @@ export const usersApi = {
       body: JSON.stringify(payload),
     })
   },
-  async update(id: number, payload: UserUpdatePayload): Promise<User> {
+  async update(id: string, payload: UserUpdatePayload): Promise<User> {
     return request<User>(`/admin/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await request<void>(`/admin/users/${id}`, { method: 'DELETE' })
   },
-  async resetPassword(id: number, newPassword: string): Promise<void> {
+  async resetPassword(id: string, newPassword: string): Promise<void> {
     await request<void>(`/admin/users/${id}/password`, {
       method: 'POST',
       body: JSON.stringify({ new_password: newPassword }),
@@ -62,16 +62,16 @@ export const adminUsersApi = {
       body: JSON.stringify(payload),
     })
   },
-  async update(id: number, payload: AdminUserUpdatePayload): Promise<AdminUser> {
+  async update(id: string, payload: AdminUserUpdatePayload): Promise<AdminUser> {
     return request<AdminUser>(`/admin/admin-users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await request<void>(`/admin/admin-users/${id}`, { method: 'DELETE' })
   },
-  async resetPassword(id: number, newPassword: string): Promise<void> {
+  async resetPassword(id: string, newPassword: string): Promise<void> {
     await request<void>(`/admin/admin-users/${id}/password`, {
       method: 'POST',
       body: JSON.stringify({ new_password: newPassword }),

@@ -14,13 +14,13 @@ interface CreateFormValues {
   username: string
   password: string
   display_name: string
-  role_ids: number[]
+  role_ids: string[]
   is_active: boolean
 }
 
 interface EditFormValues {
   display_name: string
-  role_ids: number[]
+  role_ids: string[]
   is_active: boolean
 }
 
@@ -42,7 +42,7 @@ export default function UsersPage() {
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
-  const [roleOptions, setRoleOptions] = useState<{ label: string; value: number }[]>([])
+  const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -87,7 +87,7 @@ export default function UsersPage() {
   }, [])
 
   const roleNames = useCallback(
-    (roleIds: number[]) =>
+    (roleIds: string[]) =>
       (roleIds.length ? roleIds : []).map(
         (roleId) =>
           roleOptions.find((option) => option.value === roleId)?.label ?? `角色 #${roleId}`,

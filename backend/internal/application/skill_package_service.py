@@ -11,6 +11,7 @@ import copy
 import io
 import zipfile
 from collections.abc import Sequence
+from uuid import UUID
 
 from internal.application.errors import (
     ConflictError,
@@ -73,7 +74,7 @@ class SkillPackageService:
         self._uow = uow
         self._context = context
 
-    def list_files(self, skill_id: int, prefix: str | None = None) -> list[SkillFile]:
+    def list_files(self, skill_id: UUID, prefix: str | None = None) -> list[SkillFile]:
         """列出技能包文件元数据（不含正文）。"""
         skill = self._require_readable(skill_id)
         normalized_prefix = None
@@ -81,7 +82,7 @@ class SkillPackageService:
             normalized_prefix = normalize_path(prefix.strip().rstrip("/"))
         return self._uow.skill_files.list_by_skill(skill.id, normalized_prefix)
 
-    def read_file(self, skill_id: int, path: str) -> SkillFile:
+    def read_file(self, skill_id: UUID, path: str) -> SkillFile:
         """读取单个文件。"""
         skill = self._require_readable(skill_id)
         normalized = normalize_path(path)
@@ -92,7 +93,7 @@ class SkillPackageService:
 
     def write_file(
         self,
-        skill_id: int,
+        skill_id: UUID,
         *,
         path: str,
         content: str,
@@ -114,7 +115,7 @@ class SkillPackageService:
         self._uow.commit()
         return file
 
-    def delete_file(self, skill_id: int, path: str) -> None:
+    def delete_file(self, skill_id: UUID, path: str) -> None:
         """删除文件；删除 SKILL.md 时清空入口 content。"""
         skill = self._require_manageable(skill_id)
         normalized = normalize_path(path)
@@ -124,7 +125,7 @@ class SkillPackageService:
             self._sync_entry(skill.id, "")
         self._uow.commit()
 
-    def replace_files(self, skill_id: int, files: dict[str, str]) -> list[SkillFile]:
+    def replace_files(self, skill_id: UUID, files: dict[str, str]) -> list[SkillFile]:
         """事务内全量替换技能包（目录导入与 zip 导入共用）。"""
         skill = self._require_manageable(skill_id)
         normalized_files: dict[str, str] = {}
@@ -148,11 +149,11 @@ class SkillPackageService:
         self._uow.commit()
         return replaced
 
-    def import_zip(self, skill_id: int, data: bytes) -> list[SkillFile]:
+    def import_zip(self, skill_id: UUID, data: bytes) -> list[SkillFile]:
         """从 zip 压缩包导入并全量替换技能包。"""
         return self.replace_files(skill_id, self._parse_zip(data))
 
-    def export_zip(self, skill_id: int) -> bytes:
+    def export_zip(self, skill_id: UUID) -> bytes:
         """导出技能包为确定性 zip（固定时间戳，便于比对）。"""
         skill = self._require_readable(skill_id)
         files = self._uow.skill_files.list_by_skill(skill.id, include_content=True)
@@ -167,9 +168,9 @@ class SkillPackageService:
 
     def clone_to_current_tenant(
         self,
-        skill_id: int,
+        skill_id: UUID,
         name: str | None = None,
-        actor_role_ids: Sequence[int] = (),
+        actor_role_ids: Sequence[UUID] = (),
     ) -> Skill:
         """把可见技能克隆到当前租户并授权给创建者角色；平台级技能保持只读。"""
         source = self._require_readable(skill_id)
@@ -197,7 +198,7 @@ class SkillPackageService:
                 created.id, [(file.path, file.content) for file in files]
             )
         tenant_id = getattr(created, "tenant_id", None)
-        role_ids = sorted({int(role_id) for role_id in actor_role_ids})
+        role_ids = sorted(set(actor_role_ids))
         if tenant_id is not None:
             for role_id in role_ids:
                 self._uow.resource_grants.add_for_role(
@@ -206,19 +207,19 @@ class SkillPackageService:
         self._uow.commit()
         return created
 
-    def _require_readable(self, skill_id: int) -> Skill:
+    def _require_readable(self, skill_id: UUID) -> Skill:
         skill = self._uow.skills.get(skill_id)
         if skill is None:
             raise NotFoundError("技能不存在")
         return skill
 
-    def _require_manageable(self, skill_id: int) -> Skill:
+    def _require_manageable(self, skill_id: UUID) -> Skill:
         skill = self._require_readable(skill_id)
         if not self._context.can_manage(skill.tenant_id):
             raise ForbiddenError("产品级技能仅产品级平台可维护，租户可克隆后再修改")
         return skill
 
-    def _sync_entry(self, skill_id: int, content: str) -> None:
+    def _sync_entry(self, skill_id: UUID, content: str) -> None:
         """skills.content 是 SKILL.md 的镜像，供列表与搜索使用。"""
         self._uow.skills.update(skill_id, {"content": content})
 
@@ -230,7 +231,7 @@ class SkillPackageService:
         if "\x00" in content:
             raise ValidationError(f"文件 {path} 包含二进制内容，技能包仅支持文本文件")
 
-    def _ensure_quota(self, skill_id: int, path: str, content: str) -> None:
+    def _ensure_quota(self, skill_id: UUID, path: str, content: str) -> None:
         settings = get_settings()
         count, total = self._uow.skill_files.stats(skill_id)
         existing = self._uow.skill_files.get(skill_id, path)

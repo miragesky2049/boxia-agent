@@ -1,5 +1,7 @@
 """租户管理接口（仅产品级运营管理平台）。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.application.tenant_service import TenantAgentView
@@ -85,7 +87,7 @@ def create_tenant(
     response_model=TenantOut,
     dependencies=[Depends(require_permission("page:tenants"))],
 )
-def get_tenant(tenant_id: int, service: TenantServiceDep) -> TenantOut:
+def get_tenant(tenant_id: UUID, service: TenantServiceDep) -> TenantOut:
     """查询租户详情。"""
     return TenantOut.model_validate(service.get(tenant_id))
 
@@ -96,7 +98,7 @@ def get_tenant(tenant_id: int, service: TenantServiceDep) -> TenantOut:
     dependencies=[Depends(require_permission("button:tenant:update"))],
 )
 def update_tenant(
-    tenant_id: int,
+    tenant_id: UUID,
     payload: TenantUpdateRequest,
     request: Request,
     service: TenantServiceDep,
@@ -122,7 +124,7 @@ def update_tenant(
     dependencies=[Depends(require_permission("page:tenants"))],
 )
 def list_tenant_agents(
-    tenant_id: int,
+    tenant_id: UUID,
     service: TenantServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -131,9 +133,7 @@ def list_tenant_agents(
     opened_only: bool = Query(False),
 ) -> PageOut[TenantAgentOut]:
     """分页查询产品智能体及该租户的开通状态。"""
-    result = service.list_agents(
-        tenant_id, page, page_size, keyword, is_enabled, opened_only
-    )
+    result = service.list_agents(tenant_id, page, page_size, keyword, is_enabled, opened_only)
     return PageOut[TenantAgentOut](
         items=[_to_tenant_agent_out(item) for item in result.items],
         total=result.total,
@@ -148,7 +148,7 @@ def list_tenant_agents(
     dependencies=[Depends(require_permission("button:tenant:update"))],
 )
 def set_tenant_agents_opened(
-    tenant_id: int,
+    tenant_id: UUID,
     payload: TenantAgentBatchOpenRequest,
     request: Request,
     service: TenantServiceDep,
@@ -179,8 +179,8 @@ def set_tenant_agents_opened(
     dependencies=[Depends(require_permission("button:tenant:update"))],
 )
 def set_tenant_agent_opened(
-    tenant_id: int,
-    agent_id: int,
+    tenant_id: UUID,
+    agent_id: UUID,
     payload: TenantAgentOpenRequest,
     request: Request,
     service: TenantServiceDep,

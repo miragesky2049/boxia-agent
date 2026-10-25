@@ -51,7 +51,8 @@ def test_create_and_get(client: TestClient, auth_headers, case) -> None:
     assert created.status_code == 201, created.text
 
     body = created.json()
-    assert body["id"] > 0
+    # 雪花 ID 以字符串输出，比较前需转为整数
+    assert body["id"]
     assert body["name"] == "示例资源"
     assert body["description"] == "描述"
     assert body["is_enabled"] is True
@@ -156,7 +157,7 @@ def test_delete(client: TestClient, auth_headers, case) -> None:
 
 @pytest.mark.parametrize("case", RESOURCE_CASES, ids=CASE_IDS)
 def test_get_not_found(client: TestClient, auth_headers, case) -> None:
-    response = client.get(f"/api/v1/admin/{case[0]}/999999", headers=auth_headers)
+    response = client.get(f"/api/v1/admin/{case[0]}/0190f5a0-0000-7000-8000-000000000000", headers=auth_headers)
 
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"

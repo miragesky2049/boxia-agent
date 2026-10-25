@@ -21,16 +21,16 @@ from web.deps.tenant import RequestContextDep
 class AdminPrincipal:
     """管理端调用者身份（来自数据库校验后的访问上下文）。"""
 
-    user_id: int
+    user_id: UUID
     username: str
     display_name: str
-    role_id: int | None
+    role_id: UUID | None
     role_code: str
     role_name: str
     session_id: UUID
-    role_ids: tuple[int, ...] = ()
+    role_ids: tuple[UUID, ...] = ()
     permissions: frozenset[str] = frozenset()
-    tenant_id: int | None = None
+    tenant_id: UUID | None = None
     tenant_code: str | None = None
     is_platform: bool = True
 
@@ -43,15 +43,15 @@ class AdminPrincipal:
 class UserPrincipal:
     """用户端调用者身份（最终用户 JWT）。"""
 
-    user_id: int
+    user_id: UUID
     username: str
     display_name: str
-    tenant_id: int
-    role_id: int
+    tenant_id: UUID
+    role_id: UUID
     role_code: str
     role_name: str
     session_id: UUID
-    role_ids: tuple[int, ...] = ()
+    role_ids: tuple[UUID, ...] = ()
     permissions: frozenset[str] = frozenset()
     tenant_code: str | None = None
 

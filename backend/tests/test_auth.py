@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
 from internal.infrastructure.security.password import hash_password
 
@@ -57,12 +58,13 @@ def _insert_user(username: str, role_code: str) -> None:
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role_id, must_change_password) "
-                "VALUES (:username, :hash, :display_name, "
+                "(id, username, password_hash, display_name, role_id, must_change_password) "
+                "VALUES (:id, :username, :hash, :display_name, "
                 "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = :role_code), "
                 "        FALSE)"
             ),
             {
+                "id": new_uuid(),
                 "username": username,
                 "hash": hash_password(ADMIN_PASSWORD),
                 "display_name": username,

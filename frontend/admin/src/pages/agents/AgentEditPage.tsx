@@ -76,8 +76,8 @@ interface AgentFormValues {
   description?: string
   is_enabled?: boolean
   config: AgentConfig
-  tool_ids?: number[]
-  skill_ids?: number[]
+  tool_ids?: string[]
+  skill_ids?: string[]
 }
 
 const ANCHOR_ITEMS = [
@@ -95,8 +95,8 @@ const ANCHOR_ITEMS = [
 
 export default function AgentEditPage() {
   const { id } = useParams<{ id: string }>()
-  const agentId = id ? Number(id) : undefined
-  const isEdit = agentId !== undefined && !Number.isNaN(agentId)
+  const agentId = id
+  const isEdit = Boolean(agentId)
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
@@ -283,7 +283,7 @@ export default function AgentEditPage() {
                   label: '开通租户',
                   children: (
                     <Spin spinning={loading}>
-                      <AgentTenantsTab agentId={agentId as number} />
+                      <AgentTenantsTab agentId={agentId as string} />
                     </Spin>
                   ),
                 },

@@ -1,6 +1,7 @@
 """多租户隔离测试：子域名识别、账号隔离与产品级资源只读复用。"""
 
 from datetime import datetime
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -331,7 +332,7 @@ def _fake_tenant(code: str) -> Tenant:
     """构造租户实体，避免单元测试依赖数据库。"""
     now = datetime(2026, 1, 1)
     return Tenant(
-        id=1,
+        id=UUID("0190f5a0-0000-7000-8000-000000000000"),
         code=code,
         name=f"{code} 公司",
         is_active=True,

@@ -4,6 +4,7 @@ import sys
 
 from sqlalchemy import text
 
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import dispose_engine, get_engine
 
 _DEMO_RESOURCES = {
@@ -47,10 +48,11 @@ def main() -> int:
                         conn.execute(
                             text(
                                 "INSERT INTO prompts "
-                                "(name, description, content, variables, category) "
-                                "VALUES (:name, :desc, :content, CAST(:variables AS JSONB), :category)"
+                                "(id, name, description, content, variables, category) "
+                                "VALUES (:id, :name, :desc, :content, CAST(:variables AS JSONB), :category)"
                             ),
                             {
+                                "id": new_uuid(),
                                 "name": row[0],
                                 "desc": row[1],
                                 "content": row[2],
@@ -61,10 +63,11 @@ def main() -> int:
                     elif table == "skills":
                         conn.execute(
                             text(
-                                "INSERT INTO skills (name, description, content, config) "
-                                "VALUES (:name, :desc, :content, CAST(:config AS JSONB))"
+                                "INSERT INTO skills (id, name, description, content, config) "
+                                "VALUES (:id, :name, :desc, :content, CAST(:config AS JSONB))"
                             ),
                             {
+                                "id": new_uuid(),
                                 "name": row[0],
                                 "desc": row[1],
                                 "content": row[2],
@@ -74,10 +77,11 @@ def main() -> int:
                     else:
                         conn.execute(
                             text(
-                                f"INSERT INTO {table} (name, description, type, config) "
-                                "VALUES (:name, :desc, :type, CAST(:config AS JSONB))"
+                                f"INSERT INTO {table} (id, name, description, type, config) "
+                                "VALUES (:id, :name, :desc, :type, CAST(:config AS JSONB))"
                             ),
                             {
+                                "id": new_uuid(),
                                 "name": row[0],
                                 "desc": row[1],
                                 "type": row[2],

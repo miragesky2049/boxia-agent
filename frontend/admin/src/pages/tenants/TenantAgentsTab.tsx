@@ -12,7 +12,7 @@ import type { TenantAgent } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 
 interface TenantAgentsTabProps {
-  tenantId: number
+  tenantId: string
   onChanged?: () => void
 }
 
@@ -27,8 +27,8 @@ export default function TenantAgentsTab({ tenantId, onChanged }: TenantAgentsTab
   const [keyword, setKeyword] = useState('')
   const [openedOnly, setOpenedOnly] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [pendingId, setPendingId] = useState<number | null>(null)
-  const [selectedIds, setSelectedIds] = useState<number[]>([])
+  const [pendingId, setPendingId] = useState<string | null>(null)
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [batchAction, setBatchAction] = useState<'open' | 'close' | null>(null)
 
   const load = useCallback(async () => {
@@ -245,7 +245,7 @@ export default function TenantAgentsTab({ tenantId, onChanged }: TenantAgentsTab
           canUpdate
             ? {
                 selectedRowKeys: selectedIds,
-                onChange: (keys) => setSelectedIds(keys as number[]),
+                onChange: (keys) => setSelectedIds(keys as string[]),
               }
             : undefined
         }

@@ -37,7 +37,7 @@ export async function listTenants(
   return request<PageResult<Tenant>>(`/admin/tenants?${query.toString()}`)
 }
 
-export async function getTenant(id: number): Promise<Tenant> {
+export async function getTenant(id: string): Promise<Tenant> {
   return request<Tenant>(`/admin/tenants/${id}`)
 }
 
@@ -48,7 +48,7 @@ export async function createTenant(payload: TenantCreatePayload): Promise<Tenant
   })
 }
 
-export async function updateTenant(id: number, payload: TenantUpdatePayload): Promise<Tenant> {
+export async function updateTenant(id: string, payload: TenantUpdatePayload): Promise<Tenant> {
   return request<Tenant>(`/admin/tenants/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
@@ -56,7 +56,7 @@ export async function updateTenant(id: number, payload: TenantUpdatePayload): Pr
 }
 
 export async function listTenantAgents(
-  tenantId: number,
+  tenantId: string,
   params: {
     page?: number
     page_size?: number
@@ -75,8 +75,8 @@ export async function listTenantAgents(
 }
 
 export async function setTenantAgentOpened(
-  tenantId: number,
-  agentId: number,
+  tenantId: string,
+  agentId: string,
   opened: boolean,
 ): Promise<TenantAgentOpenResult> {
   return request<TenantAgentOpenResult>(`/admin/tenants/${tenantId}/agents/${agentId}`, {
@@ -86,8 +86,8 @@ export async function setTenantAgentOpened(
 }
 
 export async function setTenantAgentsOpened(
-  tenantId: number,
-  agentIds: number[],
+  tenantId: string,
+  agentIds: string[],
   opened: boolean,
 ): Promise<TenantAgentBatchOpenResult> {
   return request<TenantAgentBatchOpenResult>(`/admin/tenants/${tenantId}/agents/batch`, {

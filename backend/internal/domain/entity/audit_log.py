@@ -3,14 +3,15 @@
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 
 @dataclass(frozen=True)
 class AuditLog:
     """管理端操作审计记录。"""
 
-    id: int
-    actor_id: int | None
+    id: UUID
+    actor_id: UUID | None
     actor_username: str
     action: str
     resource_type: str
@@ -20,4 +21,4 @@ class AuditLog:
     user_agent: str | None
     detail: dict[str, Any]
     created_at: datetime
-    tenant_id: int | None = None
+    tenant_id: UUID | None = None

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -25,7 +26,7 @@ class RoleService:
         self._uow = uow
         self._context = context
 
-    def list(self, tenant_id: int | None = None, include_inactive: bool = False) -> list[Role]:
+    def list(self, tenant_id: UUID | None = None, include_inactive: bool = False) -> list[Role]:
         """查询角色：平台只返回平台角色，租户只返回本租户角色。"""
         target = self._management_scope()
         if self._context.is_platform:
@@ -35,7 +36,7 @@ class RoleService:
             raise ForbiddenError("只能查询本租户角色")
         return self._uow.roles.list_by_tenant(target, include_inactive)
 
-    def get(self, role_id: int, tenant_id: int | None = None) -> Role:
+    def get(self, role_id: UUID, tenant_id: UUID | None = None) -> Role:
         """查询角色详情：平台只返回平台角色，租户只返回本租户角色。"""
         target = self._management_scope()
         if self._context.is_platform:
@@ -51,7 +52,7 @@ class RoleService:
         code: str,
         name: str,
         description: str,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -101,13 +102,13 @@ class RoleService:
 
     def copy(
         self,
-        role_id: int,
+        role_id: UUID,
         *,
         code: str,
         name: str,
         description: str | None,
         actor_permissions: frozenset[str],
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -169,14 +170,14 @@ class RoleService:
         self._uow.commit()
         return role
 
-    def _copy_permissions(self, source: Role, target: Role, granted_by: int) -> int:
+    def _copy_permissions(self, source: Role, target: Role, granted_by: UUID) -> int:
         """复制源角色的功能权限授权。"""
         codes = self._uow.role_permissions.list_codes_for_role(source.id)
         if not codes:
             return 0
         return self._uow.role_permissions.add_for_role(target.id, codes, granted_by)
 
-    def _copy_grants(self, source: Role, target: Role, granted_by: int) -> int:
+    def _copy_grants(self, source: Role, target: Role, granted_by: UUID) -> int:
         """按资源类型复制源角色的显式授权；整租户授权对所有角色生效，无需重复复制。"""
         total = 0
         for resource_type in RESOURCE_TYPES:
@@ -204,12 +205,12 @@ class RoleService:
 
     def update(
         self,
-        role_id: int,
+        role_id: UUID,
         *,
         name: str | None,
         description: str | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -253,9 +254,9 @@ class RoleService:
 
     def delete(
         self,
-        role_id: int,
+        role_id: UUID,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -285,7 +286,7 @@ class RoleService:
         )
         self._uow.commit()
 
-    def _management_scope(self) -> int | None:
+    def _management_scope(self) -> UUID | None:
         """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
         if self._context.is_platform:
             return None
@@ -293,7 +294,7 @@ class RoleService:
             raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 
-    def _get_owned(self, role_id: int, tenant_id: int | None) -> Role:
+    def _get_owned(self, role_id: UUID, tenant_id: UUID | None) -> Role:
         role = self._uow.roles.get_by_id(role_id)
         if role is None or role.tenant_id != tenant_id:
             raise NotFoundError("角色不存在")

@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+from uuid import UUID
 
 PERMISSION_CATEGORIES = (
     "system",
@@ -39,7 +40,7 @@ class PermissionDefinition:
 class PermissionResource:
     """持久化的权限资源目录项。"""
 
-    id: int
+    id: UUID
     code: str
     name: str
     category: str

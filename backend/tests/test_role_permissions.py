@@ -1,5 +1,7 @@
 """RBAC 权限资源目录、角色功能权限维护与防提权测试。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from tests.helpers import create_tenant, list_roles, tenant_admin_client
@@ -14,7 +16,7 @@ def _create_platform_account(
     client: TestClient,
     headers: dict[str, str],
     username: str,
-    role_id: int,
+    role_id: UUID,
 ) -> dict[str, str]:
     created = client.post(
         ADMIN_USERS_URL,
@@ -35,7 +37,7 @@ def _create_platform_account(
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
-def _role_codes(client: TestClient, headers: dict[str, str], role_id: int) -> set[str]:
+def _role_codes(client: TestClient, headers: dict[str, str], role_id: UUID) -> set[str]:
     response = client.get(f"{ROLES_URL}/{role_id}/permissions", headers=headers)
     assert response.status_code == 200, response.text
     return set(response.json()["codes"])
@@ -44,7 +46,7 @@ def _role_codes(client: TestClient, headers: dict[str, str], role_id: int) -> se
 def _replace_permissions(
     client: TestClient,
     headers: dict[str, str],
-    role_id: int,
+    role_id: UUID,
     codes: list[str],
 ):
     return client.put(

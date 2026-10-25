@@ -1,7 +1,11 @@
 """平台智能体对租户开通关系的 PostgreSQL 仓储实现。"""
 
+from typing import cast
+from uuid import UUID
+
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.access import AgentTenantOpening
@@ -17,7 +21,7 @@ class PostgresAgentTenantOpeningRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def get(self, agent_id: int, tenant_id: int) -> AgentTenantOpening | None:
+    def get(self, agent_id: UUID, tenant_id: UUID) -> AgentTenantOpening | None:
         """查询单条开通关系。"""
         row = self._session.scalar(
             select(AgentTenantOpeningModel).where(
@@ -27,7 +31,7 @@ class PostgresAgentTenantOpeningRepository:
         )
         return self._to_entity(row) if row else None
 
-    def open(self, agent_id: int, tenant_id: int, opened_by: int | None) -> AgentTenantOpening:
+    def open(self, agent_id: UUID, tenant_id: UUID, opened_by: UUID | None) -> AgentTenantOpening:
         """开通智能体；重复开通保持原开通时间并返回现有记录。"""
         self._session.execute(
             pg_insert(AgentTenantOpeningModel)
@@ -45,7 +49,7 @@ class PostgresAgentTenantOpeningRepository:
             raise RuntimeError("开通关系写入失败")
         return opening
 
-    def close(self, agent_id: int, tenant_id: int) -> bool:
+    def close(self, agent_id: UUID, tenant_id: UUID) -> bool:
         """关闭开通；返回是否存在并删除成功。"""
         result = self._session.execute(
             delete(AgentTenantOpeningModel).where(
@@ -54,9 +58,9 @@ class PostgresAgentTenantOpeningRepository:
             )
         )
         self._session.flush()
-        return bool(result.rowcount)
+        return bool(cast(CursorResult, result).rowcount)
 
-    def list_platform_agent_ids(self, agent_ids: list[int]) -> set[int]:
+    def list_platform_agent_ids(self, agent_ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中属于平台级智能体的部分。"""
         if not agent_ids:
             return set()
@@ -66,11 +70,9 @@ class PostgresAgentTenantOpeningRepository:
                 AgentModel.tenant_id.is_(None),
             )
         ).all()
-        return {int(row) for row in rows}
+        return set(rows)
 
-    def open_many(
-        self, agent_ids: list[int], tenant_id: int, opened_by: int | None
-    ) -> None:
+    def open_many(self, agent_ids: list[UUID], tenant_id: UUID, opened_by: UUID | None) -> None:
         """批量开通；已开通的保持原开通时间。"""
         if not agent_ids:
             return
@@ -90,7 +92,7 @@ class PostgresAgentTenantOpeningRepository:
         )
         self._session.flush()
 
-    def close_many(self, agent_ids: list[int], tenant_id: int) -> int:
+    def close_many(self, agent_ids: list[UUID], tenant_id: UUID) -> int:
         """批量关闭；返回实际删除的数量。"""
         if not agent_ids:
             return 0
@@ -101,10 +103,10 @@ class PostgresAgentTenantOpeningRepository:
             )
         )
         self._session.flush()
-        return int(result.rowcount or 0)
+        return int(cast(CursorResult, result).rowcount or 0)
 
     def sync_for_resource(
-        self, agent_id: int, tenant_ids: set[int], opened_by: int | None
+        self, agent_id: UUID, tenant_ids: set[UUID], opened_by: UUID | None
     ) -> None:
         """按给定租户集合同步开通关系，用于兼容旧的整资源授权接口。"""
         if tenant_ids:
@@ -116,9 +118,7 @@ class PostgresAgentTenantOpeningRepository:
             )
         else:
             self._session.execute(
-                delete(AgentTenantOpeningModel).where(
-                    AgentTenantOpeningModel.agent_id == agent_id
-                )
+                delete(AgentTenantOpeningModel).where(AgentTenantOpeningModel.agent_id == agent_id)
             )
         if tenant_ids:
             self._session.execute(
@@ -139,7 +139,7 @@ class PostgresAgentTenantOpeningRepository:
 
     def list_for_tenant(
         self,
-        tenant_id: int,
+        tenant_id: UUID,
         page: int,
         page_size: int,
         keyword: str | None,
@@ -184,7 +184,7 @@ class PostgresAgentTenantOpeningRepository:
         return items, int(total)
 
     def list_opened_tenants(
-        self, agent_id: int, page: int, page_size: int, keyword: str | None
+        self, agent_id: UUID, page: int, page_size: int, keyword: str | None
     ) -> tuple[list[tuple[Tenant, AgentTenantOpening]], int]:
         """分页查询已开通该智能体的租户。"""
         stmt = select(TenantModel, AgentTenantOpeningModel).join(
@@ -196,15 +196,11 @@ class PostgresAgentTenantOpeningRepository:
         )
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
-            stmt = stmt.where(
-                or_(TenantModel.name.ilike(pattern), TenantModel.code.ilike(pattern))
-            )
+            stmt = stmt.where(or_(TenantModel.name.ilike(pattern), TenantModel.code.ilike(pattern)))
 
         total = self._session.scalar(select(func.count()).select_from(stmt.subquery())) or 0
         rows = self._session.execute(
-            stmt.order_by(
-                AgentTenantOpeningModel.opened_at.desc(), TenantModel.id.desc()
-            )
+            stmt.order_by(AgentTenantOpeningModel.opened_at.desc(), TenantModel.id.desc())
             .offset((page - 1) * page_size)
             .limit(page_size)
         ).all()
@@ -213,7 +209,7 @@ class PostgresAgentTenantOpeningRepository:
             for tenant_row, opening_row in rows
         ], int(total)
 
-    def get_platform_agent(self, agent_id: int) -> Agent | None:
+    def get_platform_agent(self, agent_id: UUID) -> Agent | None:
         """查询平台级智能体，忽略平台角色的数据授权过滤。"""
         row = self._session.scalar(
             select(AgentModel).where(

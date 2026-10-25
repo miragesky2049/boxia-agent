@@ -2,6 +2,7 @@
 
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -33,14 +34,12 @@ class PostgresAdminUserRepository:
         ).first()
         return self._to_entity(*row) if row else None
 
-    def get_by_id(self, user_id: int) -> AdminUser | None:
+    def get_by_id(self, user_id: UUID) -> AdminUser | None:
         """按主键查询。"""
-        row = self._session.execute(
-            _select_with_role().where(AdminUserModel.id == user_id)
-        ).first()
+        row = self._session.execute(_select_with_role().where(AdminUserModel.id == user_id)).first()
         return self._to_entity(*row) if row else None
 
-    def delete(self, admin_user_id: int) -> bool:
+    def delete(self, admin_user_id: UUID) -> bool:
         """删除管理员账号。"""
         row = self._session.get(AdminUserModel, admin_user_id)
         if row is None:
@@ -65,11 +64,10 @@ class PostgresAdminUserRepository:
                     AdminUserModel.display_name.ilike(pattern),
                 )
             )
-        total = self._session.scalar(
-            select(func.count())
-            .select_from(AdminUserModel)
-            .where(*criteria)
-        ) or 0
+        total = (
+            self._session.scalar(select(func.count()).select_from(AdminUserModel).where(*criteria))
+            or 0
+        )
         rows = self._session.execute(
             _select_with_role()
             .where(*criteria)
@@ -88,7 +86,7 @@ class PostgresAdminUserRepository:
         role_code, role_name = self._role_meta(row.role_id)
         return self._to_entity(row, role_code, role_name)
 
-    def update(self, user_id: int, values: dict[str, Any]) -> AdminUser | None:
+    def update(self, user_id: UUID, values: dict[str, Any]) -> AdminUser | None:
         """更新管理员基础字段。"""
         row = self._session.get(AdminUserModel, user_id)
         if row is None:
@@ -100,7 +98,7 @@ class PostgresAdminUserRepository:
         role_code, role_name = self._role_meta(row.role_id)
         return self._to_entity(row, role_code, role_name)
 
-    def mark_login_success(self, user_id: int) -> None:
+    def mark_login_success(self, user_id: UUID) -> None:
         """登录成功：清零失败计数并记录最后登录时间。"""
         row = self._session.get(AdminUserModel, user_id)
         if row is None:
@@ -111,7 +109,7 @@ class PostgresAdminUserRepository:
         self._session.flush()
 
     def record_failed_login(
-        self, user_id: int, max_attempts: int, lock_minutes: int
+        self, user_id: UUID, max_attempts: int, lock_minutes: int
     ) -> datetime | None:
         """累计失败次数，达到阈值后锁定账号。"""
         row = self._session.get(AdminUserModel, user_id, with_for_update=True)
@@ -126,7 +124,7 @@ class PostgresAdminUserRepository:
 
     def update_password(
         self,
-        user_id: int,
+        user_id: UUID,
         password_hash: str,
         must_change_password: bool,
         changed_at: datetime,
@@ -141,7 +139,7 @@ class PostgresAdminUserRepository:
         row.token_version += 1
         self._session.flush()
 
-    def bump_token_version(self, user_id: int) -> int:
+    def bump_token_version(self, user_id: UUID) -> int:
         """递增令牌版本并返回新版本。"""
         row = self._session.get(AdminUserModel, user_id)
         if row is None:
@@ -150,16 +148,14 @@ class PostgresAdminUserRepository:
         self._session.flush()
         return row.token_version
 
-    def _role_meta(self, role_id: int) -> tuple[str, str]:
+    def _role_meta(self, role_id: UUID) -> tuple[str, str]:
         role = self._session.get(RoleModel, role_id)
         if role is None:
             return "", ""
         return role.code, role.name
 
     @staticmethod
-    def _to_entity(
-        row: AdminUserModel, role_code: str = "", role_name: str = ""
-    ) -> AdminUser:
+    def _to_entity(row: AdminUserModel, role_code: str = "", role_name: str = "") -> AdminUser:
         return AdminUser(
             id=row.id,
             username=row.username,

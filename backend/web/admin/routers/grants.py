@@ -1,5 +1,7 @@
 """资源授权管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from web.admin.schemas.common import PageOut
@@ -104,8 +106,8 @@ def assign_user_roles(
 def list_grants(
     service: GrantServiceDep,
     resource_type: str = Query(..., max_length=16),
-    resource_id: int = Query(..., ge=1),
-    tenant_id: int | None = Query(None, ge=1),
+    resource_id: UUID = Query(...),
+    tenant_id: UUID | None = Query(None),
 ) -> list[GrantOut]:
     """查询资源授权；平台可限定租户，租户视角只返回本租户授权。"""
     return [
@@ -125,7 +127,7 @@ def replace_grants(
     request: Request,
     service: GrantServiceDep,
     resource_type: str = Query(..., max_length=16),
-    resource_id: int = Query(..., ge=1),
+    resource_id: UUID = Query(...),
 ) -> list[GrantOut]:
     """整体替换资源授权，写审计并返回最新授权列表。"""
     ip, user_agent = client_meta(request)

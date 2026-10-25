@@ -19,6 +19,7 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "python-json-logger>=3.2,<4",
     "sqlalchemy>=2.0.36,<2.1",
+    "uuid6>=2024.7.10",
     "uvicorn[standard]>=0.32.0",
 ]
 
@@ -45,6 +46,9 @@ extend-exclude = ["migrations/versions"]
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501", "UP046"]
+
+[tool.ruff.lint.flake8-bugbear]
+extend-immutable-calls = ["uuid.UUID"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["B011"]

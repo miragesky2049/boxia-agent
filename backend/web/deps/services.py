@@ -40,9 +40,7 @@ def get_agent_service(uow: AdminScopedUowDep, context: RequestContextDep) -> Age
     return AgentService(uow, context)
 
 
-def get_skill_service(
-    uow: AdminScopedUowDep, context: RequestContextDep
-) -> SkillService:
+def get_skill_service(uow: AdminScopedUowDep, context: RequestContextDep) -> SkillService:
     """技能用例（含 SKILL.md 同步）。"""
     return SkillService(uow.skills, "技能", "skill", uow, context)
 
@@ -54,9 +52,7 @@ def get_skill_package_service(
     return SkillPackageService(uow, context)
 
 
-def get_tool_service(
-    uow: AdminScopedUowDep, context: RequestContextDep
-) -> ResourceService[Tool]:
+def get_tool_service(uow: AdminScopedUowDep, context: RequestContextDep) -> ResourceService[Tool]:
     """工具用例。"""
     return ResourceService(uow.tools, "工具", "tool", uow, context)
 
@@ -100,9 +96,7 @@ def get_role_grant_service(uow: UowDep, context: RequestContextDep) -> RoleGrant
     return RoleGrantService(uow, context)
 
 
-def get_role_permission_service(
-    uow: UowDep, context: RequestContextDep
-) -> RolePermissionService:
+def get_role_permission_service(uow: UowDep, context: RequestContextDep) -> RolePermissionService:
     """角色功能权限用例。"""
     return RolePermissionService(uow, context)
 
@@ -117,9 +111,7 @@ def get_grant_service(uow: AdminScopedUowDep, context: RequestContextDep) -> Gra
     return GrantService(uow, context)
 
 
-def get_user_portal_service(
-    uow: UserScopedUowDep, context: RequestContextDep
-) -> UserPortalService:
+def get_user_portal_service(uow: UserScopedUowDep, context: RequestContextDep) -> UserPortalService:
     """用户端智能体查询用例。"""
     return UserPortalService(uow, context)
 
@@ -137,9 +129,7 @@ AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
 TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
 RoleServiceDep = Annotated[RoleService, Depends(get_role_service)]
 RoleGrantServiceDep = Annotated[RoleGrantService, Depends(get_role_grant_service)]
-RolePermissionServiceDep = Annotated[
-    RolePermissionService, Depends(get_role_permission_service)
-]
+RolePermissionServiceDep = Annotated[RolePermissionService, Depends(get_role_permission_service)]
 UserAdminServiceDep = Annotated[UserAdminService, Depends(get_user_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
 UserPortalServiceDep = Annotated[UserPortalService, Depends(get_user_portal_service)]

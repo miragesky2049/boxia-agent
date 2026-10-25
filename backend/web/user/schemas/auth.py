@@ -1,5 +1,7 @@
 """用户端登录与身份模型。"""
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -21,11 +23,11 @@ class UserOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     username: str
     display_name: str
-    tenant_id: int
-    role_id: int
+    tenant_id: UUID
+    role_id: UUID
 
 
 class UserProfileOut(UserOut):

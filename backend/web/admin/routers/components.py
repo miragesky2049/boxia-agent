@@ -1,5 +1,7 @@
 """组件管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.common import Page  # noqa: F401  (用于类型可读性)
@@ -28,7 +30,7 @@ def list_components(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
-    agent_id: int | None = Query(None, ge=1),
+    agent_id: UUID | None = Query(None),
 ) -> PageOut[ComponentOut]:
     """分页查询组件；agent_id 限定所属智能体。"""
     result = service.list(page, page_size, keyword, is_enabled, agent_id)
@@ -47,9 +49,7 @@ def create_component(
     service: ComponentServiceDep,
 ) -> ComponentOut:
     """创建组件，并授权给创建者角色。"""
-    return ComponentOut.model_validate(
-        service.create(payload.model_dump(), principal.role_ids)
-    )
+    return ComponentOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
 
 
 @router.get(
@@ -57,7 +57,7 @@ def create_component(
     response_model=ComponentOut,
     dependencies=[Depends(require_permission("component:read"))],
 )
-def get_component(component_id: int, service: ComponentServiceDep) -> ComponentOut:
+def get_component(component_id: UUID, service: ComponentServiceDep) -> ComponentOut:
     """查询组件详情。"""
     return ComponentOut.model_validate(service.get(component_id))
 
@@ -68,7 +68,7 @@ def get_component(component_id: int, service: ComponentServiceDep) -> ComponentO
     dependencies=[Depends(require_permission("component:update"))],
 )
 def update_component(
-    component_id: int,
+    component_id: UUID,
     payload: ComponentPayload,
     service: ComponentServiceDep,
 ) -> ComponentOut:
@@ -81,7 +81,7 @@ def update_component(
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission("component:delete"))],
 )
-def delete_component(component_id: int, service: ComponentServiceDep) -> None:
+def delete_component(component_id: UUID, service: ComponentServiceDep) -> None:
     """删除组件。"""
     service.delete(component_id)
 
@@ -93,7 +93,7 @@ def delete_component(component_id: int, service: ComponentServiceDep) -> None:
     dependencies=[Depends(require_permission("component:create"))],
 )
 def clone_component(
-    component_id: int,
+    component_id: UUID,
     payload: ResourceCloneRequest,
     principal: AdminAuthDep,
     request: Request,

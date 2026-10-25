@@ -1,5 +1,7 @@
 """资源授权：按租户、按角色、资源继承与跨作用域限制。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from tests.helpers import (
@@ -21,7 +23,7 @@ _LIST_PATHS = {
 }
 
 
-def _skill_payload(name: str, agent_id: int | None = None) -> dict:
+def _skill_payload(name: str, agent_id: UUID | None = None) -> dict:
     payload: dict = {"name": name, "description": "", "content": "", "config": {}}
     if agent_id is not None:
         payload["agent_id"] = agent_id
@@ -46,10 +48,10 @@ def _prompt_payload(name: str) -> dict:
     }
 
 
-def _visible_ids(client: TestClient, headers: dict[str, str], path: str) -> set[int]:
+def _visible_ids(client: TestClient, headers: dict[str, str], path: str) -> set[str]:
     response = client.get(f"/api/v1/admin/{path}", headers=headers)
     assert response.status_code == 200, response.text
-    return {int(item["id"]) for item in response.json()["items"]}
+    return {item["id"] for item in response.json()["items"]}
 
 
 def _user_headers(user_tenant_client, username: str) -> dict[str, str]:
@@ -63,7 +65,7 @@ def _user_headers(user_tenant_client, username: str) -> dict[str, str]:
 
 
 def _create_admin_with_role(
-    site: TestClient, headers: dict[str, str], username: str, role_id: int
+    site: TestClient, headers: dict[str, str], username: str, role_id: UUID
 ) -> dict[str, str]:
     created = site.post(
         "/api/v1/admin/users",
@@ -320,7 +322,7 @@ def test_grant_scope_restrictions(client: TestClient, auth_headers, tenant_clien
 
     unknown = client.get(
         "/api/v1/admin/grants",
-        params={"resource_type": "skill", "resource_id": 999999},
+        params={"resource_type": "skill", "resource_id": "0190f5a0-0000-7000-8000-000000000000"},
         headers=auth_headers,
     )
     assert unknown.status_code == 404
@@ -353,10 +355,10 @@ def _batch(
     headers: dict[str, str],
     *,
     resource_type: str,
-    resource_ids: list[int],
+    resource_ids: list[UUID],
     mode: str,
-    tenant_id: int | None = None,
-    role_ids: list[int] | None = None,
+    tenant_id: UUID | None = None,
+    role_ids: list[UUID] | None = None,
 ):
     return client.put(
         "/api/v1/admin/grants/batch",
@@ -646,7 +648,7 @@ def test_batch_grant_validation(client: TestClient, auth_headers, tenant_client)
         client,
         auth_headers,
         resource_type="agent",
-        resource_ids=list(range(1, 102)),
+        resource_ids=[f"0190f5a0-0000-7000-8000-{index:012d}" for index in range(1, 102)],
         mode="replace",
         tenant_id=tenant_a["id"],
     )
@@ -656,7 +658,7 @@ def test_batch_grant_validation(client: TestClient, auth_headers, tenant_client)
         client,
         auth_headers,
         resource_type="agent",
-        resource_ids=[agent["id"], 999999],
+        resource_ids=[agent["id"], "0190f5a0-0000-7000-8000-000000000000"],
         mode="replace",
         tenant_id=tenant_a["id"],
     )
@@ -767,7 +769,7 @@ def test_non_superadmin_cannot_manage_grants(
         site,
         admin_headers,
         resource_type="agent",
-        resource_ids=[1],
+        resource_ids=["0190f5a0-0000-7000-8000-000000000000"],
         mode="clear",
     )
     assert batch.status_code == 403
