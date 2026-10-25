@@ -42,6 +42,61 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class TenantAgentOut(BaseModel):
+    """租户详情页的产品智能体及其开通状态。"""
+
+    id: int
+    name: str
+    avatar_url: str
+    description: str
+    is_enabled: bool
+    is_opened: bool
+    opened_at: datetime | None = None
+    opened_by: int | None = None
+
+
+class TenantAgentOpenRequest(BaseModel):
+    """开通或关闭租户对产品智能体的访问。"""
+
+    opened: bool
+
+
+class TenantAgentOpenOut(BaseModel):
+    """开通/关闭操作结果。"""
+
+    agent_id: int
+    tenant_id: int
+    is_opened: bool
+    opened_at: datetime | None = None
+
+
+class TenantAgentBatchOpenRequest(BaseModel):
+    """批量开通或关闭租户对产品智能体的访问。"""
+
+    agent_ids: list[int] = Field(min_length=1, max_length=100)
+    opened: bool
+
+
+class TenantAgentBatchOpenOut(BaseModel):
+    """批量开通/关闭操作结果。"""
+
+    tenant_id: int
+    opened: bool
+    count: int
+    agent_ids: list[int]
+
+
+class AgentOpenedTenantOut(BaseModel):
+    """智能体详情页展示的已开通租户。"""
+
+    id: int
+    code: str
+    name: str
+    is_active: bool
+    opened_at: datetime
+    opened_by: int | None = None
+
+
 class PasswordPolicyOut(BaseModel):
     """密码策略，前端表单与后端校验共用同一份配置。"""
 

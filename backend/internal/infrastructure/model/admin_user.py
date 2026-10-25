@@ -5,9 +5,9 @@ from datetime import datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
-    CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     String,
     func,
@@ -18,23 +18,19 @@ from internal.infrastructure.model.base import Base
 
 
 class AdminUserModel(Base):
-    """admin_users 表。"""
+    """admin_users 表：仅存产品级平台账号，租户管理员统一存于 users。"""
 
     __tablename__ = "admin_users"
-    __table_args__ = (
-        CheckConstraint("role IN ('superadmin', 'admin', 'viewer')", name="ck_admin_users_role"),
-    )
+    __table_args__ = (Index("ix_admin_users_role", "role_id"),)
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    # NULL 表示产品级平台账号；非空表示租户级账号。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
-    )
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    role: Mapped[str] = mapped_column(String(16), nullable=False, default="admin")
+    role_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False
+    )
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

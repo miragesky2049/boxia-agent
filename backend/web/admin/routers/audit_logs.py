@@ -4,13 +4,13 @@ from fastapi import APIRouter, Depends, Query
 
 from web.admin.schemas.audit import AuditLogOut
 from web.admin.schemas.common import PageOut
-from web.deps.auth import require_superadmin
+from web.deps.auth import require_permission
 from web.deps.services import AuditServiceDep
 
 router = APIRouter(
     prefix="/audit-logs",
     tags=["admin-audit"],
-    dependencies=[Depends(require_superadmin)],
+    dependencies=[Depends(require_permission("page:audit"))],
 )
 
 

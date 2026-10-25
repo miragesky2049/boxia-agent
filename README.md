@@ -1,6 +1,6 @@
 # boxia-agent 项目手册
 
-基于大语言模型的**智能体开发与运营平台**：管理员在后台创建智能体、配置模型与提示词、挂载技能和工具；后端提供登录鉴权、资源管理和审计能力；用户端预留最终用户的对话入口。
+基于大语言模型的**智能体开发与运营平台**：管理员在后台创建智能体、配置模型与提示词、挂载技能和工具；后端提供登录鉴权、资源管理、租户与角色授权和审计能力；最终用户在用户端登录后，只看到被授权且已启用的智能体。
 
 本手册同时服务三类读者，可以按目的跳读：
 
@@ -53,7 +53,7 @@
 │
 ├── 管理端  http://localhost:5173    ← 运营/管理员使用（React）
 │           http://*.localhost:5173  ← 本地验证平台/租户子域名
-├── 用户端  http://localhost:5174    ← 最终用户使用（Agent Chat）
+├── 用户端  http://localhost:5174    ← 最终用户使用（登录后浏览已授权智能体）
 │
 ├──────────────┬────────────────────
 ▼              ▼
@@ -69,7 +69,7 @@
 
 - **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
 - **管理端**：React 19 + TypeScript + Ant Design，负责智能体、资源、租户、管理员和审计管理。
-- **用户端**：React + TypeScript，面向最终用户的 Agent Chat 对话门户。
+- **用户端**：React + TypeScript，最终用户登录后浏览可见智能体及其技能、工具、组件与提示词。
 - **数据库**：PostgreSQL 17。开发时用 Docker 启动，不需要单独安装。
 
 ### 1.3 核心能力
@@ -77,10 +77,13 @@
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
 | 智能体管理   | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
-| 资源管理     | 技能、工具、组件、提示词四类资源的增删改查、搜索、分页、启用/停用                              |
-| 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级资源对租户只读复用                     |
+| 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本 |
+| 租户授权     | 产品级智能体必须显式授权给租户后才可见；通过独立「授权管理」菜单按租户/角色集中配置                 |
+| 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
+| 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
+| 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的智能体 |
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
-| 权限控制     | `superadmin` / `admin` / `viewer` 三级角色，接口级 RBAC                                        |
+| 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
 | 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
 | 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标                         |
 | 工程化交付   | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本                         |
@@ -99,20 +102,31 @@
 | 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步                             |
 | Token             | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁               |
 | RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
-| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护对所有租户可见的产品级智能体与资源 |
+| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权 |
 | 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
 
-### 1.5 账号角色
+### 1.5 角色与权限
 
-| 角色                       | 能读资源 | 能改资源 | 能管管理员 | 能看审计 |
-|----------------------------|----------|----------|------------|----------|
-| `superadmin`（超级管理员） | 是       | 是       | 是         | 是       |
-| `admin`（管理员）          | 是       | 是       | 否         | 否       |
-| `viewer`（只读）           | 是       | 否       | 否         | 否       |
+系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）、按钮（`button:*`）以及智能体/技能/工具/组件/提示词的增删改查（如 `agent:read`、`agent:update`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
+
+| 权限类别 | 作用                         | 示例                                                         |
+|----------|------------------------------|--------------------------------------------------------------|
+| `system` | 管理端入口与全量数据范围     | `system:console:access`、`system:data:all`                   |
+| `menu`   | 左侧菜单可见性               | `menu:roles`                                                 |
+| `page`   | 页面与对应接口访问           | `page:roles`                                                 |
+| `button` | 页面操作按钮                 | `button:role:grant`                                          |
+| 资源     | 资源读写                     | `agent:create` / `agent:read` / `agent:update` / `agent:delete` |
+
+- 产品级平台与每个租户各自拥有 `superadmin` / `admin` / `viewer` 三个内置系统角色，不可删除、不可停用；平台与租户角色数据完全隔离。
+- `superadmin` 默认拥有所属作用域全部权限（含 `system:data:all`），其功能权限与数据授权在角色详情中只读。
+- 通过产品级入口「角色管理」新建的角色自动标记为系统角色；复制出的角色为可删除的自定义角色，并继承源角色的功能权限与数据授权。
+- 新建角色默认没有任何功能权限，需要在其详情页勾选，或复制现有角色继承。
+- `system:console:access` 是登录管理端的必要条件，未授予该权限的角色不能绑定管理端账号。
+- 授权遵循最小权限：只能授予自己已拥有的功能权限，也不能复制包含自身不具备权限的角色。
+- 产品级平台账号单独存于 `admin_users` 并绑定平台角色；租户管理员与普通用户统一存于 `users`，通过 `user_roles` 绑定租户角色。
+- 角色只在所属作用域内生效：产品级账号只能登录 `adminsystem.<根域名>`，租户账号只能登录本租户子域名；不同作用域可以使用相同用户名。
 
 > 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
-
-角色只在所属作用域内生效：产品级账号只能登录 `adminsystem.<根域名>`，租户账号只能登录本租户子域名。不同作用域可以使用相同用户名，彼此互不影响。
 
 ### 1.6 技术栈速览
 
@@ -297,7 +311,7 @@ uv run python -m scripts.create_admin
 输入密码时**屏幕不会显示字符**，这是正常的。输入完按回车。默认会创建：
 
 - 用户名：`admin`
-- 角色：`superadmin`
+- 绑定平台 `superadmin` 角色（默认拥有所属作用域全部功能权限与数据范围，可用 `ADMIN_ROLE` 指定其他平台角色编码）
 - 首次登录必须改密
 
 默认创建的是**产品级平台账号**，只能登录平台子域名（生产为 `adminsystem.<根域名>`；本地为 `localhost:5173` 或 `adminsystem.localhost:5173`）。租户管理员由平台在「租户管理」中创建，或用下文的 `TENANT_CODE` 方式创建。
@@ -407,7 +421,7 @@ pnpm run dev     # http://localhost:5174
 
 也可以从 `frontend/` 根目录执行 `pnpm run dev user`（或 `pnpm run dev` 同时启动两端）。
 
-用户端是 Agent Chat 门户，接口走独立后端 `127.0.0.1:8001`。它要求后端配置 `USER_API_TOKEN`（见第 6 节），未配置时返回“暂不可用”；并且必须通过租户子域名访问（如 `http://<租户编码>.localhost:5174`），根域名 `localhost:5174` 会被拒绝。
+用户端接口走独立后端 `127.0.0.1:8001`，使用最终用户账号密码登录。账号需由租户管理员在管理端“用户管理”中创建并绑定角色。用户端必须通过租户子域名访问（如 `http://<租户编码>.localhost:5174`），根域名 `localhost:5174` 会被拒绝；本地回环主机调试时可在登录页填写租户编码或使用 `?tenant=<租户编码>`。
 
 ### 3.6 懒人版一键启动
 
@@ -458,8 +472,8 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 | 管理端               | <http://localhost:5173>                              | 管理后台（本地回环，可用请求头切换作用域） |
 | 管理端（平台子域名） | <http://adminsystem.localhost:5173>                  | 本地验证产品级平台域名解析                 |
 | 管理端（租户子域名） | `http://<租户编码>.localhost:5173`                   | 本地验证租户域名解析，需先创建租户         |
-| 用户端               | <http://localhost:5174>                              | Agent Chat 门户，需租户子域名访问          |
-| 用户端（租户子域名） | `http://<租户编码>.localhost:5174`                   | 本地验证用户端域名解析与 `USER_API_TOKEN`  |
+| 用户端               | <http://localhost:5174>                              | 最终用户门户，需租户子域名访问             |
+| 用户端（租户子域名） | `http://<租户编码>.localhost:5174`                   | 本地验证用户端域名解析与最终用户登录       |
 | 管理端后端           | <http://127.0.0.1:8000/>                             | 仅 admin / public 路由                     |
 | 用户端后端           | <http://127.0.0.1:8001/>                             | 仅 user 路由                               |
 | 健康检查             | `http://127.0.0.1:8000/health/live`、`/health/ready` | 管理端后端存活 / 就绪                      |
@@ -714,7 +728,7 @@ boxia-agent/
 │   │   ├── e2e/                 # Playwright 端到端用例（含多租户场景）
 │   │   ├── nginx/               # 生产 Nginx 配置（SPA、反代、限流、安全头）
 │   │   └── Dockerfile           # Node 构建 + nginx-unprivileged 运行
-│   ├── user/                    # 用户端 Agent Chat（端口 5174，含 nginx / Dockerfile）
+│   ├── user/                    # 用户端门户（端口 5174，含 nginx / Dockerfile）
 │   └── scripts/                 # 前端启停脚本（支持 admin / user / all）
 ├── ops/                         # 跨端运维入口
 │   ├── docker-compose.yml       # 多环境编排：db / migrate / backend-admin / backend-user / 两端 frontend
@@ -810,7 +824,7 @@ boxia-agent/
 | `CORS_ORIGINS`                | 空                  | 否       | 逗号分隔的允许来源；生产禁止 `*`                                                                                                                      |
 | `DOCS_ENABLED`                | 生产关闭            | 否       | 是否暴露 Swagger 文档                                                                                                                                 |
 | `LEGACY_API_ENABLED`          | `true`              | 否       | 是否保留 `/api` 兼容别名                                                                                                                              |
-| `USER_API_TOKEN`              | 空                  | 否       | 用户端访问令牌；配置后生产要求至少 32 字符                                                                                                            |
+| `USER_JWT_AUDIENCE`           | `boxia-user`        | 否       | 最终用户令牌受众；与管理端 `JWT_AUDIENCE` 隔离，防止两端令牌互相冒用                                                                                  |
 | `LOG_LEVEL`                   | `INFO`              | 否       | 日志级别                                                                                                                                              |
 | `LOG_JSON`                    | 生产默认 `true`     | 否       | 是否输出 JSON 日志                                                                                                                                    |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 空                  | 否       | 链路数据上报地址，不配则不上报                                                                                                                        |
@@ -841,8 +855,7 @@ boxia-agent/
   - 禁止开启 `ALLOW_TENANT_HEADER`，部署环境只认二级域名。
 - `prod` 额外要求：
   - `JWT_SECRET` 至少 32 字符，且不能使用示例占位值；
-  - `CORS_ORIGINS` 不允许 `*`；
-  - 启用 `USER_API_TOKEN` 时长度至少 32 字符。
+  - `CORS_ORIGINS` 不允许 `*`。
 
 这些检查是为了避免“复制示例配置直接上线”或漏配域名时把请求放进最高权限的产品级平台。
 
@@ -890,9 +903,10 @@ boxia-agent/
 **数据隔离规则**
 
 - 资源与账号都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有。
-- 产品级资源对所有租户可见、只读复用；租户资源只对本租户可见。
+- 产品级智能体必须显式授权给租户后才可见；产品级资源按自身授权或所属智能体授权放行；租户资源只对本租户可见。
+- 授权可按角色收窄：`role_id` 为空表示整个租户，非空仅指定角色可见。
 - 登录、刷新与访问令牌都绑定作用域，跨作用域使用直接返回 401。
-- 同一作用域内资源名称唯一，不同租户之间允许同名；租户不能与产品级资源重名（产品级资源对所有租户可见）。
+- 同一作用域内资源名称唯一，不同租户之间允许同名；租户不能与产品级资源重名（产品级资源可能被授权给该租户，需保持名称唯一以避免混淆）。
 - 用户名同样按作用域唯一：不同作用域可以有同名账号，它们属于不同的人。
 
 **创建并使用租户**
@@ -939,13 +953,31 @@ boxia-agent/
 
 ### 7.3 权限（RBAC）
 
-| 角色         | 读资源 | 写资源 | 管理员管理 | 审计查询 |
-|--------------|--------|--------|------------|----------|
-| `superadmin` | 是     | 是     | 是         | 是       |
-| `admin`      | 是     | 是     | 否         | 否       |
-| `viewer`     | 是     | 否     | 否         | 否       |
+权限分两层：
 
-每次请求都以数据库中的实时角色和状态为准，不信任令牌里的旧角色信息。
+- **功能权限**：角色与全局权限资源目录（`permission_resources`）通过 `role_permissions` 建立多对多关系，决定能否看到菜单/页面/按钮，以及能否对资源做增删改查。
+- **数据权限**：`resource_grants` 决定角色能看到哪些资源实例（智能体、技能、工具、组件、提示词），属于实例级授权。
+
+权限资源随迁移预置、只读维护，分类为 `system` / `menu` / `page` / `button` / `agent` / `skill` / `tool` / `component` / `prompt`。管理端只提供查询接口，不提供新增或修改。
+
+约束与规则：
+
+- 每次请求都以数据库中的实时角色、权限与账号状态为准（`AdminPrincipal.permissions` 每次重建），不信任令牌里的旧角色信息。
+- `system:console:access` 控制管理端登录；`system:data:all` 跳过数据授权过滤，但仍受租户隔离约束。
+- 超级管理员角色拥有所属作用域全部权限，功能权限与数据授权均不可单独调整。
+- 平台角色不能授予租户专属菜单与按钮（`menu:grants`、`menu:users`、`page:users`、`button:user:*`）；租户角色不能授予平台级租户管理权限（`menu:tenants` 等）。
+- 授权只允许授予调用者已拥有的权限，复制角色同样校验；写入时对角色行加锁，避免并发授权互相覆盖。
+- 前端隐藏菜单和按钮只是体验优化，所有接口都以服务端权限校验为准，不满足返回 403。
+
+**租户角色与资源可见性**：
+
+- 租户管理员与普通用户都通过 `user_roles` 绑定租户角色（`users.role_id` 保留主角色），角色拥有的功能权限决定能否进入管理端及可执行的操作。
+- 产品级智能体必须存在授权记录（`resource_grants`），租户才能看到；`role_id = NULL` 表示授予整个租户，否则仅授予指定角色。
+- 租户自有智能体默认对本租户全部角色可见；配置了角色授权后按授权收紧。
+- 技能、工具、组件、提示词同样支持角色授权；未单独配置授权时随所属智能体放行。
+- 未授权对象在详情与写操作中统一返回 404，避免泄露资源是否存在。
+- 管理端「授权管理」按资源类型集中维护授权；平台视角按租户逐个配置，租户视角只能维护本租户角色。
+- 前端隐藏菜单和按钮只是体验优化，所有可见性与写权限都以服务端校验为准。
 
 ### 7.4 审计日志
 
@@ -956,6 +988,9 @@ boxia-agent/
 | 认证                 | `auth.login`、`auth.login_failed`、`auth.refresh_replay`、`auth.logout`、`auth.password_changed` |
 | 管理员               | `admin_user.created`、`admin_user.updated`、`admin_user.password_reset`                          |
 | 租户（仅产品级平台） | `tenant.created`、`tenant.updated`                                                               |
+| 角色与用户           | `role.created`、`role.updated`、`role.deleted`、`user.created`、`user.updated`、`user.deleted`、`user.password_reset` |
+| 授权与资源           | `grant.updated`、`resource.cloned`                                                               |
+| 用户端认证           | `user_auth.login`、`user_auth.login_failed`、`user_auth.refresh_replay`、`user_auth.logout`      |
 
 每条记录包含操作者、动作、资源、`request_id`、IP、User-Agent、作用域（`tenant_id`）和详情，便于追溯。登录失败、登出、改密也会写入归属的作用域：租户账号的审计只在租户内可见，产品级账号可以查看全部。
 
@@ -974,8 +1009,9 @@ boxia-agent/
 - [ ] Refresh Token 重放会撤销整条会话链
 - [ ] 登出后 Access / Refresh Token 均立即失效
 - [ ] 改密后所有旧会话失效
-- [ ] viewer 调用写接口返回 403，管理端隐藏写按钮
-- [ ] `/admin/users`、`/admin/audit-logs` 仅 superadmin 可访问
+- [ ] 无对应 `button:*` 权限的角色调用写接口返回 403，管理端隐藏操作按钮
+- [ ] `/admin/users`、`/admin/admin-users`、`/admin/audit-logs` 仅授予对应 `page:*` 权限的角色可访问
+- [ ] 角色授权不能授予调用者自身不具备的权限（越权授权返回 403）
 - [ ] 错误响应不含堆栈，500 只返回通用文案
 - [ ] 日志与审计不含密码、令牌等敏感信息
 - [ ] 生产环境无默认账号，`JWT_SECRET` 不是示例值
@@ -994,7 +1030,7 @@ boxia-agent/
 - 兼容别名：`LEGACY_API_ENABLED=true` 时同时注册 `/api`（不进入文档）
 - 两个站点独立部署、独立路由：
   - 管理端站点（`web.app_admin:app`）：`/api/v1/admin/**`、`/api/v1/public/**`
-  - 用户端站点（`web.app_user:app`）：`/api/v1/user/**`，使用静态令牌 `Authorization: Bearer <USER_API_TOKEN>`，且必须通过租户子域名访问
+  - 用户端站点（`web.app_user:app`）：`/api/v1/user/**`，最终用户使用账号密码登录获得 JWT，且必须通过租户子域名访问
 - 除登录、刷新、`/public/*` 外，管理端接口都需要请求头：
 
 ```http
@@ -1032,17 +1068,27 @@ Authorization: Bearer <access_token>
 | `root_domain`、`platform_admin_subdomain`、`platform_name` | 当前环境的根域名、平台子域名与展示名称                                    |
 | `password_policy`                                          | 密码策略 `{min_length, max_bytes, min_categories}`，前端表单按此动态校验 |
 
+`/admin/context` 额外返回当前账号的权限信息（匿名接口不含）：
+
+| 字段          | 说明                                                                 |
+|---------------|----------------------------------------------------------------------|
+| `role_code`   | 当前账号绑定角色的编码，如 `superadmin`、`admin` 或自定义编码         |
+| `role_name`   | 角色名称                                                             |
+| `permissions` | 角色拥有的功能权限编码集合（如 `menu:roles`、`button:agent:create`），前端据此控制菜单、路由与按钮 |
+| `menus`       | 由 `menu:*` 权限推导出的可见菜单键；平台账号不会包含租户专属菜单     |
+
 ### 8.3 资源接口
 
 `{resource}` 可以是 `agents`、`skills`、`tools`、`components`、`prompts`：
 
-| 方法   | 路径                     | 说明                                                                |
-|--------|--------------------------|---------------------------------------------------------------------|
-| GET    | `/admin/{resource}`      | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled` |
-| POST   | `/admin/{resource}`      | 创建，返回 201（viewer 返回 403）                                   |
-| GET    | `/admin/{resource}/{id}` | 详情                                                                |
-| PUT    | `/admin/{resource}/{id}` | 全量更新（viewer 返回 403）                                         |
-| DELETE | `/admin/{resource}/{id}` | 删除，返回 204（viewer 返回 403）                                   |
+| 方法   | 路径                            | 说明                                                                                     |
+|--------|---------------------------------|------------------------------------------------------------------------------------------|
+| GET    | `/admin/{resource}`             | 分页查询，参数 `page`、`page_size`（≤100）、`keyword`、`is_enabled`、`agent_id`          |
+| POST   | `/admin/{resource}`             | 创建，返回 201（无 `button:{resource}:create` 返回 403）；技能/工具/组件/提示词可传 `agent_id` 绑定归属智能体 |
+| GET    | `/admin/{resource}/{id}`        | 详情；未授权统一返回 404                                                                 |
+| PUT    | `/admin/{resource}/{id}`        | 全量更新（无 `button:{resource}:update` 返回 403）                                       |
+| DELETE | `/admin/{resource}/{id}`        | 删除，返回 204（无 `button:{resource}:delete` 返回 403），同事务清理授权记录              |
+| POST   | `/admin/{resource}/{id}/clone`  | 克隆到目标智能体，入参 `{agent_id, name?}`，返回 201 与独立副本                          |
 
 分页响应格式：
 
@@ -1050,23 +1096,34 @@ Authorization: Bearer <access_token>
 { "items": [], "total": 0, "page": 1, "page_size": 20 }
 ```
 
-资源与智能体的响应都带 `tenant_id`（`null` 表示产品级）和 `is_platform`：租户内看到的平台级资源 `is_platform=true`，前端据此切换只读状态；租户自有资源 `tenant_id` 为当前租户。
+资源与智能体的响应都带 `tenant_id`（`null` 表示产品级）和 `is_platform`：租户内看到的平台级资源 `is_platform=true`，前端据此切换只读状态；租户自有资源 `tenant_id` 为当前租户。技能/工具/组件/提示词额外返回 `agent_id`，表示数据归属的智能体。
 
 智能体的特殊字段：
 
 - 创建/更新时可以传 `config`（对象）、`tool_ids`、`skill_ids`；后端会去重并校验关联是否存在。
+- `tool_ids` / `skill_ids` 仅为兼容旧数据保留，标注 deprecated；新数据以资源的 `agent_id` 归属为准，列表与详情会合并两种来源。
 - 列表只返回摘要（不含 `config` 和关联 ID），详情返回完整配置。
 - `config` 中缺失的子项由后端补默认值。
 
+可见性规则（服务端唯一事实来源）：
+
+| 场景                       | 可见条件                                                                 |
+|----------------------------|--------------------------------------------------------------------------|
+| 平台级智能体 @ 租户        | 存在授权记录，且 `role_id` 为 `NULL` 或命中当前账号角色                    |
+| 租户自有智能体 @ 租户      | 同租户；未配置授权时全角色可见，配置后按授权收紧                           |
+| 平台级资源 @ 租户          | 直接授权命中，或（无直接授权且所属智能体可见）                             |
+| 租户自有资源 @ 租户        | 随所属智能体规则                                                         |
+| 用户端                     | 在租户规则上追加 `is_enabled=true`，角色集合仅本人角色                     |
+
 ### 8.3.1 技能包文件接口
 
-管理端入口：**技能管理 → 列表行「技能包」**。抽屉内可查看/编辑文件、导入和导出 zip；租户查看平台级技能时可一键克隆到本租户。
+管理端入口：**智能体详情 → 技能与资源 → 技能 → 列表行「技能包」**。抽屉内可查看/编辑文件、导入和导出 zip。
 
 技能在存储上是一个虚拟目录：每个技能由若干文本文件组成，`SKILL.md` 为入口文件，其余文件（如 `references/**`、脚本说明等）按相对路径存放。文件内容只存在 `skill_files` 表，`skills.content` 是 `SKILL.md` 的镜像，供列表与搜索使用。
 
 平台级与租户级技能不做物理目录区分，归属完全由 `skills.tenant_id` 决定：
 
-- `tenant_id = NULL`：平台级技能，所有租户可见只读，仅产品级平台可维护。
+- `tenant_id = NULL`：平台级技能，仅产品级平台可维护；租户需有直接授权，或技能所属智能体对租户可见时才能看到。
 - `tenant_id = 当前租户`：租户级技能，仅本租户可见可维护。
 - 租户若需修改平台级技能，必须调用克隆接口生成独立副本，不建立跨租户引用。
 - 后续若迁移到对象存储，key 约定为 `skills/platform/{skill_id}/{path}` 与 `skills/tenants/{tenant_id}/{skill_id}/{path}`，与应用层路径规则一致。
@@ -1079,7 +1136,7 @@ Authorization: Bearer <access_token>
 | DELETE | `/admin/skills/{id}/files`            | 删除文件，参数 `path`；删除 `SKILL.md` 清空入口内容         |
 | POST   | `/admin/skills/{id}/import`           | 上传 `application/zip` 全量替换；自动去掉压缩包公共根目录    |
 | GET    | `/admin/skills/{id}/export`           | 导出确定性 zip（固定时间戳，便于比对）                      |
-| POST   | `/admin/skills/{id}/clone`            | 把可见技能克隆到当前租户，返回 201 与新技能                 |
+| POST   | `/admin/skills/{id}/clone`            | 克隆到目标智能体，入参 `{agent_id, name?}`，返回 201 与独立副本 |
 
 写入约束：
 
@@ -1090,17 +1147,20 @@ Authorization: Bearer <access_token>
 - 全量替换（导入/目录导入）在单个事务内完成，失败不会留下半包数据。
 - 删除技能时 `skill_files` 随外键级联删除。
 
-### 8.4 管理员与审计（仅 superadmin）
+### 8.4 管理员、用户与审计
 
-| 方法  | 路径                         | 说明                               |
-|-------|------------------------------|------------------------------------|
-| GET   | `/admin/users`               | 管理员列表（关键字搜索、分页）     |
-| POST  | `/admin/users`               | 创建管理员，返回 201               |
-| PATCH | `/admin/users/{id}`          | 修改角色 / 显示名 / 启用状态       |
-| POST  | `/admin/users/{id}/password` | 重置密码，返回 204                 |
-| GET   | `/admin/audit-logs`          | 审计查询（按时间、用户、动作筛选） |
+管理员账号接口（平台作用域操作 `admin_users`，租户作用域操作拥有管理端入口权限的 `users`；需 `page:admin-users` 及对应按钮权限）：
 
-租户管理（仅产品级平台 superadmin）：
+| 方法   | 路径                               | 说明                                                   |
+|--------|------------------------------------|--------------------------------------------------------|
+| GET    | `/admin/admin-users`               | 管理员列表（关键字搜索、分页）                         |
+| POST   | `/admin/admin-users`               | 创建管理员，返回 201                                   |
+| PATCH  | `/admin/admin-users/{id}`          | 修改角色 / 显示名 / 启用状态                           |
+| POST   | `/admin/admin-users/{id}/password` | 重置密码，返回 204                                     |
+| DELETE | `/admin/admin-users/{id}`          | 删除管理员账号，返回 204                               |
+| GET    | `/admin/audit-logs`                | 审计查询（按时间、用户、动作筛选）                     |
+
+租户管理（需 `page:tenants` 及 `button:tenant:*`，仅产品级平台角色可授予）：
 
 | 方法  | 路径                  | 说明                                 |
 |-------|-----------------------|--------------------------------------|
@@ -1109,11 +1169,76 @@ Authorization: Bearer <access_token>
 | GET   | `/admin/tenants/{id}` | 租户详情                             |
 | PATCH | `/admin/tenants/{id}` | 修改租户名称或启用状态               |
 
-管理员列表额外支持 `tenant_id` 与 `all_tenants=true`：
+管理员账号没有跨租户查询入口：产品级平台只能维护 `admin_users`，租户管理员则通过本租户的用户管理页维护。创建租户时同步创建租户超管用户，不再写入 `admin_users`。
 
-- 产品级平台可用 `tenant_id` 指定归属、用 `all_tenants=true` 查看全部租户账号；指定不存在的租户返回 404。
-- 租户账号的列表强制限定本租户，传 `all_tenants=true` 返回 403。
 - 审计查询同样按作用域过滤：租户只返回本租户记录，平台返回全部记录。
+
+### 8.4.1 角色、用户与授权
+
+角色接口（平台管理平台角色，租户管理本租户角色；两者数据隔离）。平台默认只能看到平台角色，传 `tenant_id` 查询租户角色返回 403；租户无法看到平台角色：
+
+| 方法   | 路径                  | 说明                                                       |
+|--------|-----------------------|------------------------------------------------------------|
+| GET    | `/admin/roles`        | 角色列表，参数 `include_inactive`（`page:roles`）           |
+| POST   | `/admin/roles`        | 创建角色，返回 201（`button:role:create`）；新角色默认无功能权限，产品级入口创建的角色为系统角色 |
+| POST   | `/admin/roles/{id}/copy` | 复制角色、功能权限与数据授权，入参 `{code,name,description?}`，返回 201（`button:role:copy`）；副本为自定义角色，`superadmin` 不支持复制 |
+| GET    | `/admin/roles/{id}`   | 角色详情（`page:roles`）                                    |
+| PATCH  | `/admin/roles/{id}`   | 修改名称/描述/启停（`button:role:update`）；系统角色不可停用 |
+| DELETE | `/admin/roles/{id}`   | 删除角色（`button:role:delete`）；系统角色、被账号或授权引用时拒绝 |
+
+角色功能权限接口（权限目录只读，授权需 `button:role:grant`；`superadmin` 角色不可单独调整）：
+
+| 方法   | 路径                                    | 说明                                                     |
+|--------|-----------------------------------------|----------------------------------------------------------|
+| GET    | `/admin/permissions`                    | 当前作用域可授权的功能权限目录（`page:roles`）           |
+| GET    | `/admin/roles/{id}/permissions`         | 角色已授予的功能权限，返回 `items` 与 `codes`（`page:roles`） |
+| PUT    | `/admin/roles/{id}/permissions`         | 整体替换，入参 `{codes}`                                 |
+| POST   | `/admin/roles/{id}/permissions`         | 追加授权，入参 `{codes}`                                 |
+| DELETE | `/admin/roles/{id}/permissions/{code}`  | 移除单个功能权限                                         |
+
+角色数据授权接口（需 `button:role:grant`；`superadmin` 角色默认拥有全部资源，只读）：
+
+| 方法   | 路径                                         | 说明                                     |
+|--------|----------------------------------------------|------------------------------------------|
+| GET    | `/admin/roles/{id}/grants`                   | 授权候选/已授权资源，参数 `resource_type`、`granted_only` |
+| GET    | `/admin/roles/{id}/grants/summary`           | 各资源类型的有效授权数量                 |
+| POST   | `/admin/roles/{id}/grants/{resource_type}`   | 追加授权，入参 `{resource_ids}`          |
+| PUT    | `/admin/roles/{id}/grants/{resource_type}`   | 整体替换授权，空数组表示清空             |
+| DELETE | `/admin/roles/{id}/grants/{resource_type}/{resource_id}` | 移除单个资源授权               |
+
+平台角色的授权对象只能是平台级资源（`tenant_id IS NULL`）；平台账号绑定 `admin` / `viewer` / 自定义平台角色后，只能看到授权给该角色的平台资源。
+
+用户接口（租户作用域）：
+
+| 方法   | 路径                         | 说明                                     |
+|--------|------------------------------|------------------------------------------|
+| GET    | `/admin/users`               | 分页查询，参数 `keyword`                 |
+| POST   | `/admin/users`               | 创建用户并绑定 `role_ids`（至少一个）    |
+| PATCH  | `/admin/users/{id}`          | 修改显示名、`role_ids`、启用状态         |
+| POST   | `/admin/users/{id}/password` | 重置密码，返回 204                       |
+| DELETE | `/admin/users/{id}`          | 删除用户，返回 204                       |
+
+授权接口：
+
+| 方法 | 路径                                        | 说明                                                                              |
+|------|---------------------------------------------|-----------------------------------------------------------------------------------|
+| GET  | `/admin/grants/overview?resource_type=`     | 分页查询可授权资源及授权汇总，参数 `page`、`page_size`、`keyword`、`grant_state`   |
+| GET  | `/admin/grants?resource_type=&resource_id=` | 查询资源授权，可选 `tenant_id`；租户视角只返回本租户记录                           |
+| PUT  | `/admin/grants/batch`                       | 批量授权，入参 `{resource_type, resource_ids, mode, tenant_id?, role_ids}`        |
+| PUT  | `/admin/grants?resource_type=&resource_id=` | 整体替换单资源授权，入参 `{grants:[{tenant_id, role_id?}]}`；幂等                   |
+
+- `resource_type` 取值：`agent`、`skill`、`tool`、`component`、`prompt`。
+- `role_id` 为空表示授予整个租户（该租户所有角色可见）。
+- 产品级 superadmin 可操作任意租户；租户 superadmin 仅限本租户角色。
+
+`overview` 只返回当前作用域**可管理**的资源：平台视角为平台级资源，租户视角为本租户自有资源；并返回 `grant_count`、`tenant_count`、`role_count` 与 `is_default_visible`（租户自有资源且无授权时为 `true`）。`grant_state` 取 `granted` 或 `ungranted`，按目标作用域的直接授权记录过滤。列表不返回授权明细，抽屉再按租户按需加载，避免迁移回填产生的大量授权记录进入列表响应。
+
+`batch` 的 `mode` 取值为 `merge`（追加角色）、`replace`（覆盖该租户授权）、`clear`（清空该租户授权）；所有模式都只作用于 `tenant_id` 指定的租户，不会影响其他租户。平台可选「整个租户」或「指定角色」，租户视角在 `merge` / `replace` 时必须指定本租户角色；`clear` 后租户自有资源恢复为全部角色可见，平台资源则该租户不可见。
+
+- 单次最多 100 个资源，资源 id 自动去重；任一资源不存在或无权管理时整批返回 404 且不写入。
+- 平台调用 `batch` 必须指定存在的租户；角色必须属于目标租户，否则返回 422。
+- 批量写入先按资源排序获取 advisory lock，再读取旧授权并逐资源写入；同一事务内完成并逐资源记录 `grant.updated` 审计（before/after 仅包含目标租户）。
+- 单资源 `PUT /admin/grants` 保留用于兼容与脚本调用，语义为整体替换该资源的全部授权。
 
 ### 8.5 运维端点
 
@@ -1125,15 +1250,21 @@ Authorization: Bearer <access_token>
 
 ### 8.6 用户端接口
 
-用户端站点（`web.app_user:app`）只有 `/api/v1/user/**`，与管理端完全隔离：
+用户端站点（`web.app_user:app`）只有 `/api/v1/user/**`，与管理端完全隔离。最终用户由租户管理员在管理端“用户管理”中创建并绑定角色：
 
-| 方法 | 路径              | 说明                                                                 |
-|------|-------------------|----------------------------------------------------------------------|
-| GET  | `/user/me`        | 返回当前令牌对应的用户信息（`scope`、`subject`）                     |
+| 方法 | 路径                   | 说明                                                                 |
+|------|------------------------|----------------------------------------------------------------------|
+| POST | `/user/auth/login`     | 账号密码登录，返回 access/refresh、有效期与用户角色信息              |
+| POST | `/user/auth/refresh`   | 轮换刷新令牌；检测到重放会撤销整个会话族                             |
+| POST | `/user/auth/logout`    | 撤销当前会话族，返回 204                                             |
+| GET  | `/user/me`             | 当前用户、所属租户、角色与功能权限编码                               |
+| GET  | `/user/agents`         | 分页查询当前角色可见且已启用的智能体，支持 `keyword`                 |
+| GET  | `/user/agents/{id}`    | 智能体详情及已过滤的技能/工具/组件/提示词；不可见统一返回 404        |
 
-- 鉴权：请求头 `Authorization: Bearer <USER_API_TOKEN>`，令牌来自环境变量，无效返回 401。
-- 域名：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404。
-- 用户端站点不挂载 `/admin/**` 与 `/public/**`。
+- 鉴权：Access Token + Refresh Token，与管理员令牌使用不同 `aud`（`USER_JWT_AUDIENCE`），两端令牌不能互相冒用。
+- 租户作用域：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404/403。登录与刷新令牌都校验租户一致性。
+- 可见性：在租户规则上追加 `is_enabled=true`，角色集合仅本人 `role_id`；未显式授权的智能体不可见。
+- 用户端站点不挂载 `/admin/**` 与 `/public/**`；用户登录、刷新重放与登出写入审计日志。
 
 ### 8.7 调用示例（Git Bash）
 
@@ -1165,7 +1296,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 
 > PowerShell 中 `curl` 是别名，请改用 `curl.exe`。
 
-### 8.7 错误响应
+### 8.8 错误响应
 
 ```json
 { "detail": "错误说明", "code": "ERROR_CODE", "request_id": "..." }
@@ -1192,22 +1323,32 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | 表                                            | 说明                                                                                     |
 |-----------------------------------------------|------------------------------------------------------------------------------------------|
 | `tenants`                                     | 租户编码（即子域名前缀）、名称、启用状态                                                 |
-| `admin_users`                                 | 管理员账号、角色、锁定状态、`token_version`、首登改密标记；`tenant_id=NULL` 为产品级账号 |
-| `admin_refresh_tokens`                        | Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA                                         |
+| `admin_users`                                 | 产品级平台账号、绑定平台角色 `role_id`、锁定状态、`token_version`、首登改密标记；不保存租户维度 |
+| `admin_refresh_tokens`                        | 产品级平台 Refresh Token 哈希、会话链、轮换/撤销状态、IP/UA                              |
+| `roles`                                       | 平台或租户角色：`tenant_id`（`NULL` 为平台角色）、`code`、`name`、`description`、`is_system`（系统角色不可删/不可停用）、启用状态 |
+| `permission_resources`                        | 全局功能权限目录（只读）：`code` 唯一、`category`、`action`、`sort_order`、启用状态         |
+| `role_permissions`                            | 角色与权限资源的多对多关系；`(role_id, permission_id)` 唯一，记录授予人                        |
+| `users`                                       | 租户管理员与普通用户统一账号、密码哈希、主角色 `role_id`、锁定状态、`token_version`；`(tenant_id, username)` 唯一 |
+| `user_roles`                                  | 用户与租户角色的多对多关系；租户管理员通过角色的 `system:console:access` 获得管理端权限     |
+| `user_refresh_tokens`                         | 租户用户 Refresh Token 哈希、会话族、轮换/撤销状态、IP/UA                                |
+| `resource_grants`                             | 多态授权：`resource_type`（agent/skill/tool/component/prompt）+ `resource_id` + 可空 `tenant_id` + 可空 `role_id`；`tenant_id` 非空且 `role_id=NULL` 表示整个租户，`tenant_id=NULL` 表示平台角色授权 |
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
 | `agents`                                      | 智能体，`config` 为 JSONB 完整配置                                                       |
-| `skills` / `tools` / `components` / `prompts` | 四类资源表                                                                               |
+| `skills` / `tools` / `components` / `prompts` | 四类资源表；`agent_id` 为数据归属的智能体（可空，历史数据通过迁移回填）                   |
 | `skill_files`                                 | 技能包内文本文件；`(skill_id, path)` 唯一，随技能级联删除，归属由所属技能决定              |
-| `agent_tools` / `agent_skills`                | 智能体与工具/技能的关联表，级联删除                                                      |
+| `agent_tools` / `agent_skills`                | 旧版智能体关联表，仅兼容保留（deprecated）；新代码以资源 `agent_id` 为准                   |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
 约定：
 
-- 资源、管理员与审计记录都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有。
+- 资源与审计记录都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有；平台账号表 `admin_users` 不保存租户维度，通过 `role_id` 绑定平台角色。
 - 资源名称与用户名按作用域唯一：唯一索引为 `(COALESCE(tenant_id, 0), lower(name))` 与 `(COALESCE(tenant_id, 0), username)`，不同租户可以同名；应用层额外禁止租户与产品级资源重名。
 - 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
 - 列表默认按 `updated_at DESC, id DESC` 排序。
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
+- 迁移 `0006_roles_and_resource_access` 新增角色、最终用户、授权表与资源 `agent_id`，并为存量数据回填系统角色、归属与租户授权；DDL 支持 downgrade，但数据回填不可逆，升级前必须备份并在预发库演练。
+- 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
+- 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
 
 ### 9.2 迁移命令
 
@@ -1237,7 +1378,7 @@ TENANT_CODE=acme uv run python -m scripts.create_admin
 # 自动化环境可跳过首登改密（仅测试/演示）
 ADMIN_MUST_CHANGE_PASSWORD=false uv run python -m scripts.create_admin
 
-# 写入本地演示资源（幂等，可重复执行；写入的是产品级资源，所有租户可见只读）
+# 写入本地演示资源（幂等，可重复执行；写入产品级资源，需授权后租户才可见）
 uv run python -m scripts.seed_demo
 
 # 技能包运维：目录导入 / 导出 / 克隆到租户 / 列文件
@@ -1256,12 +1397,16 @@ uv run python -m scripts.skill_package list --id 3
 |-----------------------------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 登录                        | 账号密码登录、本地作用域切换（回环主机用下拉框/`?tenant=`，子域名主机跳转对应域名；部署环境仅域名）、环境与解析来源标识、锁定提示、登录后回跳、首次登录强制改密 |
 | 会话                        | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销                                                                                               |
-| 智能体管理                  | 搜索、状态筛选、分页、新建、配置、启用/停用、删除                                                                                                               |
-| 智能体配置                  | 基础信息、模型、角色与提示词、记忆、对话体验（含 FAQ）、发布渠道、工具与技能、知识库、其他设置、扩展组件                                                        |
-| 技能 / 工具 / 组件 / 提示词 | 增删改查、搜索、状态筛选、分页；viewer 只读                                                                                                                     |
+| 智能体管理                  | 搜索、状态筛选（平台视角含“仅已授权”）、分页、新建、配置、启用/停用、删除                                                                                        |
+| 智能体配置                  | Tabs：配置（基础信息、模型、角色与提示词、记忆、对话体验、发布渠道、知识库等）、技能与资源                                                                       |
+| 技能与资源                  | 在智能体详情内管理所属技能/工具/组件/提示词；增删改查、搜索、分页、克隆到其他智能体；按 `button:{resource}:*` 权限控制操作入口                                  |
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
-| 管理员管理                  | 列表、创建、角色/状态调整、重置密码（仅 superadmin）；产品级平台可按租户归属管理账号                                                                            |
-| 租户管理                    | 租户列表、新建、编辑名称与启用状态（仅产品级平台 superadmin）                                                                                                   |
+| 授权管理                    | 独立菜单按资源类型集中授权；资源列表与详情页不再提供授权入口；支持授权状态筛选、多选批量追加/覆盖/移除；平台视角按租户逐个配置，租户视角仅本租户角色               |
+| 角色管理                    | 平台/租户各自维护角色增删改与复制；详情页按权限目录维护功能权限；系统角色不可删除、不可停用；平台角色可授权平台级资源（`button:role:*`）                       |
+| 用户管理                    | 租户管理员与普通用户统一账号：增删改、多角色绑定、重置密码、启停（`button:user:*`）                                                                             |
+| 管理员账号                  | 平台维护产品级账号，租户维护拥有管理角色的用户；列表、创建、角色/状态调整、重置密码、删除（`button:admin-user:*`）                                               |
+| 租户管理                    | 租户列表、新建、编辑名称与启用状态（`button:tenant:*`，仅产品级平台角色可授予）                                                                                  |
+| 菜单与路由                  | 菜单由 `/admin/context` 的 `menus`（`menu:*`）驱动，路由由 `page:*` 权限守卫；无权限路由返回 404                                                                |
 | 多租户标识                  | 产品级资源显示「平台级」，租户内部只读；租户自有资源显示「本租户」                                                                                              |
 | 健壮性                      | 路由懒加载、错误边界、404 页面、请求超时与重试                                                                                                                  |
 
@@ -1272,12 +1417,18 @@ uv run python -m scripts.skill_package list --id 3
 /change-password
 /agents                  智能体列表
 /agents/new              新建智能体
-/agents/:id/edit         智能体配置
-/skills  /tools  /components  /prompts
-/users                   管理员管理（superadmin）
-/tenants                 租户管理（产品级 superadmin）
+/agents/:id/edit         智能体配置 + 技能与资源
+/grants                  授权管理（menu:grants）
+/roles                   角色管理（menu:roles；平台显示平台角色，租户显示本租户角色）
+/users                   用户管理（menu:users，租户）
+/admin-users             管理员账号（menu:admin-users）
+/tenants                 租户管理（menu:tenants，产品级）
 *                        404
 ```
+
+菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, admin-users, audit`。自定义角色按实际授权显示，前端只负责图标与文案映射，无权限路由返回 404。
+
+授权管理页同样按视角收敛：平台只列平台级资源，租户只列本租户自有资源；列表展示授权汇总与授权状态，翻页保留勾选（单次最多 100 个），可批量追加/覆盖/移除。行内「配置授权」抽屉按租户配置访问范围（平台为「该租户不可见 / 整个租户 / 指定角色」，租户为「全部角色可见（默认）/ 指定角色」），保存只写入当前租户并刷新汇总。
 
 ---
 
@@ -1299,7 +1450,7 @@ uv run alembic check                # 迁移漂移检查
 
 测试会自动创建独立数据库 `boxia_agent_test`，每次会话重建并执行全部迁移，每个用例前清理数据，互不影响。测试默认连接 `postgres:postgres@127.0.0.1:5432`，且账号需要有建库权限；如果你的本地配置不同，需要修改 `backend/tests/conftest.py` 顶部的连接配置。
 
-覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、产品级资源只读复用、租户账号与审计隔离）、admin/user 站点路由隔离（`tests/test_site_isolation.py`）、错误模型、健康检查等。
+覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、租户账号与审计隔离）、角色与用户管理、管理员账号、授权汇总/批量授权/租户作用域与可见性矩阵、资源克隆、用户门户（`tests/test_roles.py`、`test_users.py`、`test_admin_users.py`、`test_grants.py`、`test_resource_clone.py`、`test_user_portal.py`）、admin/user 站点路由隔离（`tests/test_site_isolation.py`）、错误模型、健康检查等。
 
 ### 11.2 管理端
 
@@ -1310,6 +1461,17 @@ pnpm run typecheck
 pnpm run lint
 pnpm run format:check
 pnpm run test:coverage
+pnpm run build
+```
+
+用户端（`frontend/user`）：
+
+```bash
+cd frontend/user
+
+pnpm run typecheck
+pnpm run lint
+pnpm test
 pnpm run build
 ```
 
@@ -1353,9 +1515,9 @@ APP_ENV=local ROOT_DOMAIN=localhost ALLOW_TENANT_HEADER=true \
   uv run uvicorn web.app_admin:app --host 127.0.0.1 --port 8000
 ```
 
-覆盖场景：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读。
+覆盖场景：登录失败、会话恢复、登出跳转、智能体内技能 CRUD、智能体保存回显、404、首登改密、viewer 只读（无写入口、越权页面 404）。
 
-多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、产品级资源在租户内只读。
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、平台智能体授权后才在租户可见、租户管理员管理角色与用户。
 
 ### 11.4 CI 与提交前检查
 
@@ -1451,18 +1613,24 @@ web/deps/auth.py
   ├─ 解析 Bearer Token
   ├─ 校验签名、过期时间、token_version
   ├─ 校验令牌作用域与当前域名一致（跨作用域 401）
-  ├─ 查询数据库中的账号状态与角色
-  └─ 写操作的接口再校验角色（viewer 拒绝）
+  ├─ 查询数据库中的账号、角色与功能权限编码
+  ├─ 构建 AdminPrincipal + AccessScope（tenant_id、role_id、是否平台）
+  └─ 接口再按 page:*/button:*/资源读写权限校验（不满足返回 403）
   ▼
 web/admin/routers/agents.py（请求/响应模型）
   ▼
-application/agent_service.py（业务规则、默认值、关联校验、作用域可写校验）
+Scoped UnitOfWork：在同一 Session 上重建仓储并应用作用域
   ▼
-infrastructure/repository/postgres_agent_repository.py（按 tenant_id 过滤可见/可写）
+application/agent_service.py（业务规则、默认值、归属校验、克隆与授权）
+  ▼
+infrastructure/repository/postgres_agent_repository.py
+  ├─ tenant_id 过滤（平台只看产品级，租户看本租户 + 被授权产品级）
+  ├─ resource_grants EXISTS 子查询按角色收窄，不产生行膨胀
+  └─ 未授权详情统一返回 404
   ▼
 UnitOfWork.commit()
-  ├─ 业务数据
-  └─ 审计日志（同一事务）
+  ├─ 业务数据（资源、授权、审计同一事务）
+  └─ 审计日志
 ```
 
 ### 12.5 刷新令牌的轮换流程
@@ -1589,7 +1757,7 @@ alembic upgrade head
 6. **多租户作用域隔离**
    - 同一套代码按二级域名区分产品级与租户级，不需要为每个租户部署一套服务。
    - 作用域在请求入口解析一次，贯穿认证、RBAC、仓储三层校验，令牌跨作用域直接拒绝。
-   - 产品级资源对所有租户只读复用；租户之间的数据、账号、审计完全隔离，同名资源按作用域唯一。
+   - 产品级智能体必须授权给租户、资源可再按角色收窄；租户之间的数据、账号、审计完全隔离，同名资源按作用域唯一。
    - 仅本地回环主机保留请求头切换作为调试逃生口；开发/测试/线上只认域名，配置错误启动即失败。
 
 ### 13.6 难点与取舍
@@ -1630,7 +1798,7 @@ Access 用 JWT（HS256），默认 30 分钟，前端只存内存；Refresh 是�
 
 **Q7：RBAC 怎么实现？**
 
-角色存数据库，每次请求解析令牌后查实时账号和角色；路由层统一挂管理员鉴权，写接口再校验 `admin`/`superadmin`，管理员管理和审计只允许 `superadmin`。不信任令牌里的角色快照，避免改角色后旧令牌继续生效。
+角色存数据库，每次请求解析令牌后查实时账号和角色；路由层统一挂管理员鉴权，写接口再校验 `admin`/`superadmin`，管理员账号、租户、角色、授权和审计只允许 `superadmin`。不信任令牌里的角色快照，避免改角色后旧令牌继续生效。
 
 **Q8：审计日志怎么保证不丢？**
 
@@ -1964,14 +2132,14 @@ docker compose -f ops/docker-compose.yml logs migrate
 - [ ] 通过 HTTPS 打开 `https://adminsystem.<根域名>`，使用首个管理员登录并完成改密
 - [ ] 在「租户管理」创建一个租户，确认租户子域名可正常打开
 - [ ] 用该租户管理员登录租户子域名，确认看不到「租户管理」入口
-- [ ] 在平台侧创建一条产品级技能，确认租户内可见但不能修改
-- [ ] 在租户内创建一条技能，确认另一个租户看不到
-- [ ] 在平台侧创建一条技能，再创建一个智能体并关联该技能
+- [ ] 在平台侧创建一个产品级智能体，确认未授权时租户列表不可见；授权给租户角色后可见但只读
+- [ ] 在租户内创建一条技能并归属本租户智能体，确认另一个租户看不到
+- [ ] 在租户内创建自定义角色与最终用户，绑定角色后用用户端登录，确认只看到已授权且启用的智能体
 - [ ] 用 viewer 账号验证写接口返回 403
-- [ ] 用 superadmin 查看审计日志，确认租户审计只在租户内可见
+- [ ] 用 superadmin 查看审计日志，确认租户审计只在租户内可见，授权变更留有 `grant.updated` 记录
 - [ ] 确认 `/docs` 在生产不可访问（`DOCS_ENABLED=false`）
 - [ ] 确认 `/metrics` 从外部不可访问
-- [ ] 打开用户端站点（`USER_HTTP_PORT`，示例 8081），确认 Agent Chat 页面可访问；带 `USER_API_TOKEN` 调用 `/api/v1/user/me` 正常，不带返回 401
+- [ ] 打开用户端站点（`USER_HTTP_PORT`，示例 8081），用最终用户账号登录，确认智能体列表与详情可用；未登录调用 `/api/v1/user/me` 返回 401
 - [ ] 路由隔离：管理端站点访问 `/api/v1/user/me` 返回 404；用户端站点访问 `/api/v1/admin/*`、`/api/v1/public/*` 返回 404
 
 ### 14.9 升级与回滚
@@ -2123,15 +2291,9 @@ uv run alembic check
 
 先确认表结构与 `0001_baseline` 一致，执行 `uv run alembic stamp 0001_baseline`，再 `upgrade head`。
 
-**Q7：如何修改用户端接口令牌**
+**Q7：如何创建或修改用户端登录账号**
 
-在 `backend/.env` 中设置 `USER_API_TOKEN`（生产环境至少 32 字符），请求时带：
-
-```http
-Authorization: Bearer <USER_API_TOKEN>
-```
-
-未配置时，用户端接口返回“服务端未配置 USER_API_TOKEN，暂不可用”。用户端站点还要求请求来自租户子域名，平台域名或未知域名会返回 404。
+用户端不再使用静态令牌。由租户管理员在管理端「用户管理」创建账号并绑定租户角色，最终用户在用户端登录页输入账号密码获取 JWT；重置密码也在同一页面完成。用户端要求请求来自租户子域名，平台域名或未知域名会返回 404/403。
 
 **Q8：怎样确认自己没有把密码提交到 Git**
 
@@ -2146,7 +2308,7 @@ git diff --cached | grep -iE "password|secret|token"
 
 **Q9：不同租户可以有同名资源或同名账号吗**
 
-可以。资源名和用户名的唯一索引都带作用域：`(COALESCE(tenant_id,0), lower(name))`、`(COALESCE(tenant_id,0), username)`。同一作用域内仍然唯一；租户不能与产品级资源重名，因为产品级资源对所有租户可见。
+可以。资源名和用户名的唯一索引都带作用域：`(COALESCE(tenant_id,0), lower(name))`、`(COALESCE(tenant_id,0), username)`。同一作用域内仍然唯一；租户不能与产品级资源重名，避免产品级资源授权给该租户后出现同名歧义。
 
 **Q10：怎么新增租户，编码能改吗**
 

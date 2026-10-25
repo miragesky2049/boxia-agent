@@ -1,37 +1,27 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Select, Space, Switch, Table, Tag } from 'antd'
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
-import { listTenants } from '../api/tenant'
-import type { AdminRole, AdminUser, Tenant } from '../api/types'
-import { createUser, listUsers, resetUserPassword, updateUser } from '../api/users'
+import { rolesApi } from '../api/access'
+import type { User } from '../api/types'
+import { usersApi } from '../api/users'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
-const ROLE_META: Record<AdminRole, { label: string; color: string }> = {
-  superadmin: { label: '超级管理员', color: 'red' },
-  admin: { label: '管理员', color: 'blue' },
-  viewer: { label: '只读', color: 'default' },
-}
-
-const ROLE_OPTIONS = (Object.keys(ROLE_META) as AdminRole[]).map((value) => ({
-  value,
-  label: ROLE_META[value].label,
-}))
-
 interface CreateFormValues {
   username: string
-  display_name: string
   password: string
-  role: AdminRole
-  tenant_id?: number
+  display_name: string
+  role_ids: number[]
+  is_active: boolean
 }
 
 interface EditFormValues {
   display_name: string
-  role: AdminRole
+  role_ids: number[]
+  is_active: boolean
 }
 
 interface ResetFormValues {
@@ -40,20 +30,24 @@ interface ResetFormValues {
 }
 
 export default function UsersPage() {
-  const { user: currentUser } = useAuth()
-  const { isPlatform, context } = useTenant()
   const { message } = App.useApp()
-  const [tenants, setTenants] = useState<Tenant[]>([])
-  const [items, setItems] = useState<AdminUser[]>([])
+  const { user: currentUser, hasPermission } = useAuth()
+  const canCreate = hasPermission('button:user:create')
+  const canUpdate = hasPermission('button:user:update')
+  const canDelete = hasPermission('button:user:delete')
+  const showActions = canUpdate || canDelete
+  const { context } = useTenant()
+  const [items, setItems] = useState<User[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
+  const [roleOptions, setRoleOptions] = useState<{ label: string; value: number }[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
-  const [editing, setEditing] = useState<AdminUser | null>(null)
-  const [resetTarget, setResetTarget] = useState<AdminUser | null>(null)
+  const [editing, setEditing] = useState<User | null>(null)
+  const [resetTarget, setResetTarget] = useState<User | null>(null)
   const [createForm] = Form.useForm<CreateFormValues>()
   const [editForm] = Form.useForm<EditFormValues>()
   const [resetForm] = Form.useForm<ResetFormValues>()
@@ -61,11 +55,10 @@ export default function UsersPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await listUsers({
+      const result = await usersApi.list({
         page,
         page_size: pageSize,
         keyword: keyword || undefined,
-        all_tenants: isPlatform || undefined,
       })
       setItems(result.items)
       setTotal(result.total)
@@ -74,42 +67,46 @@ export default function UsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, isPlatform, message])
+  }, [page, pageSize, keyword, message])
 
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
-    if (!isPlatform) {
-      setTenants([])
-      return
-    }
-    listTenants({ page: 1, page_size: 100 })
-      .then((result) => setTenants(result.items))
-      .catch(() => setTenants([]))
-  }, [isPlatform])
+    rolesApi
+      .list()
+      .then((roles) =>
+        setRoleOptions(
+          roles
+            .filter((role) => role.is_active)
+            .map((role) => ({ label: role.name, value: role.id })),
+        ),
+      )
+      .catch(() => setRoleOptions([]))
+  }, [])
 
-  const tenantName = useCallback(
-    (tenantId: number | null) => {
-      if (tenantId === null) return '产品级平台'
-      return tenants.find((tenant) => tenant.id === tenantId)?.name ?? `租户 #${tenantId}`
-    },
-    [tenants],
+  const roleNames = useCallback(
+    (roleIds: number[]) =>
+      (roleIds.length ? roleIds : []).map(
+        (roleId) =>
+          roleOptions.find((option) => option.value === roleId)?.label ?? `角色 #${roleId}`,
+      ),
+    [roleOptions],
   )
 
   const handleCreate = async () => {
     const values = await createForm.validateFields()
     setSaving(true)
     try {
-      await createUser({
+      await usersApi.create({
         username: values.username.trim(),
-        display_name: values.display_name.trim(),
         password: values.password,
-        role: values.role,
-        tenant_id: isPlatform ? values.tenant_id || null : undefined,
+        display_name: values.display_name.trim() || values.username.trim(),
+        role_ids: values.role_ids,
+        is_active: values.is_active,
       })
-      message.success('账号已创建，首次登录需修改密码')
+      message.success('用户已创建')
       setCreateOpen(false)
       createForm.resetFields()
       await load()
@@ -125,9 +122,10 @@ export default function UsersPage() {
     const values = await editForm.validateFields()
     setSaving(true)
     try {
-      await updateUser(editing.id, {
+      await usersApi.update(editing.id, {
         display_name: values.display_name.trim(),
-        role: values.role,
+        role_ids: values.role_ids,
+        is_active: values.is_active,
       })
       message.success('已保存')
       setEditing(null)
@@ -139,13 +137,23 @@ export default function UsersPage() {
     }
   }
 
-  const handleToggle = async (record: AdminUser, enabled: boolean) => {
+  const handleToggle = async (record: User, enabled: boolean) => {
     try {
-      await updateUser(record.id, { is_active: enabled })
-      message.success(enabled ? '已启用' : '已禁用，相关会话立即失效')
+      await usersApi.update(record.id, { is_active: enabled })
+      message.success(enabled ? '已启用' : '已禁用，该用户会话立即失效')
       await load()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '操作失败')
+    }
+  }
+
+  const handleDelete = async (record: User) => {
+    try {
+      await usersApi.remove(record.id)
+      message.success('已删除')
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除失败')
     }
   }
 
@@ -154,8 +162,8 @@ export default function UsersPage() {
     const values = await resetForm.validateFields()
     setSaving(true)
     try {
-      await resetUserPassword(resetTarget.id, values.new_password)
-      message.success('密码已重置，该账号所有会话已失效')
+      await usersApi.resetPassword(resetTarget.id, values.new_password)
+      message.success('密码已重置，该用户所有会话已失效')
       setResetTarget(null)
       resetForm.resetFields()
     } catch (error) {
@@ -165,15 +173,15 @@ export default function UsersPage() {
     }
   }
 
-  const columns: ColumnsType<AdminUser> = [
+  const columns: ColumnsType<User> = [
     {
       title: '账号',
       key: 'account',
       width: 220,
-      render: (_: unknown, record: AdminUser) => (
+      render: (_: unknown, record: User) => (
         <div>
           <div className="resource-name">
-            {record.display_name}
+            {record.display_name || record.username}
             {record.id === currentUser?.id && (
               <Tag color="green" bordered={false} style={{ marginLeft: 8 }}>
                 当前账号
@@ -186,52 +194,41 @@ export default function UsersPage() {
     },
     {
       title: '角色',
-      dataIndex: 'role',
-      key: 'role',
-      width: 120,
-      render: (role: AdminRole) => {
-        const meta = ROLE_META[role]
-        return <Tag color={meta.color}>{meta.label}</Tag>
-      },
-    },
-    ...(isPlatform
-      ? [
-          {
-            title: '归属',
-            key: 'tenant',
-            width: 160,
-            render: (_: unknown, record: AdminUser) =>
-              record.tenant_id === null ? (
-                <Tag color="geekblue">产品级</Tag>
-              ) : (
-                <Tag color="green">{tenantName(record.tenant_id)}</Tag>
-              ),
-          },
-        ]
-      : []),
-    {
-      title: '密码状态',
-      dataIndex: 'must_change_password',
-      key: 'must_change_password',
-      width: 120,
-      render: (must: boolean) =>
-        must ? <Tag color="orange">待修改</Tag> : <Tag color="success">已设置</Tag>,
+      key: 'roles',
+      width: 200,
+      render: (_: unknown, record: User) => (
+        <Space size={4} wrap>
+          {roleNames(record.role_ids).map((name) => (
+            <Tag key={name} color="green">
+              {name}
+            </Tag>
+          ))}
+        </Space>
+      ),
     },
     {
       title: '启用',
       dataIndex: 'is_active',
       key: 'is_active',
       width: 100,
-      render: (enabled: boolean, record: AdminUser) => (
+      render: (enabled: boolean, record: User) => (
         <Switch
           size="small"
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="禁用"
-          disabled={record.id === currentUser?.id}
+          disabled={!canUpdate || record.id === currentUser?.id}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
+    },
+    {
+      title: '最近登录',
+      dataIndex: 'last_login_at',
+      key: 'last_login_at',
+      width: 170,
+      render: (value: string | null) =>
+        value ? dayjs(value).format('YYYY-MM-DD HH:mm') : '从未登录',
     },
     {
       title: '创建时间',
@@ -240,48 +237,78 @@ export default function UsersPage() {
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    {
-      title: '操作',
-      key: 'actions',
-      width: 170,
-      render: (_: unknown, record: AdminUser) => (
-        <Space size={4}>
-          <Button
-            type="link"
-            size="small"
-            onClick={() => {
-              setEditing(record)
-              editForm.setFieldsValue({ display_name: record.display_name, role: record.role })
-            }}
-          >
-            编辑
-          </Button>
-          <Button type="link" size="small" onClick={() => setResetTarget(record)}>
-            重置密码
-          </Button>
-        </Space>
-      ),
-    },
+    ...(showActions
+      ? [
+          {
+            title: '操作',
+            key: 'actions',
+            width: 190,
+            render: (_: unknown, record: User) => (
+              <Space size={4}>
+                {canUpdate && (
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => {
+                      setEditing(record)
+                      editForm.setFieldsValue({
+                        display_name: record.display_name,
+                        role_ids: record.role_ids,
+                        is_active: record.is_active,
+                      })
+                    }}
+                  >
+                    编辑
+                  </Button>
+                )}
+                {canUpdate && (
+                  <Button type="link" size="small" onClick={() => setResetTarget(record)}>
+                    重置密码
+                  </Button>
+                )}
+                {canDelete && (
+                  <Popconfirm
+                    title="确认删除该用户？"
+                    okText="删除"
+                    cancelText="取消"
+                    okButtonProps={{ danger: true }}
+                    disabled={record.id === currentUser?.id}
+                    onConfirm={() => handleDelete(record)}
+                  >
+                    <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
+                      删除
+                    </Button>
+                  </Popconfirm>
+                )}
+              </Space>
+            ),
+          },
+        ]
+      : []),
   ]
 
   return (
     <div className="page-card">
       <div className="page-header">
         <div>
-          <h2 className="page-header__title">管理员管理</h2>
-          <p className="page-header__desc">维护管理员账号、角色与启用状态，仅超级管理员可访问。</p>
+          <h2 className="page-header__title">用户管理</h2>
+          <p className="page-header__desc">
+            租户管理员与普通用户统一为同一账号体系，通过角色赋予管理或使用权限。
+          </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            createForm.resetFields()
-            createForm.setFieldsValue({ role: 'admin', tenant_id: 0 })
-            setCreateOpen(true)
-          }}
-        >
-          新建账号
-        </Button>
+        {canCreate && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              createForm.resetFields()
+              createForm.setFieldsValue({ is_active: true, display_name: '', role_ids: [] })
+              setCreateOpen(true)
+            }}
+          >
+            新建用户
+          </Button>
+        )}
       </div>
 
       <div className="page-toolbar">
@@ -296,7 +323,7 @@ export default function UsersPage() {
         />
       </div>
 
-      <Table<AdminUser>
+      <Table<User>
         rowKey="id"
         columns={columns}
         dataSource={items}
@@ -307,7 +334,7 @@ export default function UsersPage() {
           total,
           showSizeChanger: true,
           pageSizeOptions: ['10', '20', '50'],
-          showTotal: (count) => `共 ${count} 个账号`,
+          showTotal: (count) => `共 ${count} 个用户`,
           onChange: (nextPage, nextSize) => {
             setPage(nextSize !== pageSize ? 1 : nextPage)
             setPageSize(nextSize)
@@ -316,7 +343,7 @@ export default function UsersPage() {
       />
 
       <Modal
-        title="新建管理员"
+        title="新建用户"
         open={createOpen}
         onOk={handleCreate}
         onCancel={() => setCreateOpen(false)}
@@ -328,20 +355,16 @@ export default function UsersPage() {
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
           <Form.Item
             name="username"
-            label="账号"
+            label="登录账号"
             rules={[
-              { required: true, message: '请输入账号' },
+              { required: true, message: '请输入登录账号' },
               { min: 3, max: 64, message: '账号长度为 3-64 个字符' },
             ]}
           >
-            <Input placeholder="登录账号" autoComplete="off" />
+            <Input autoComplete="off" />
           </Form.Item>
-          <Form.Item
-            name="display_name"
-            label="显示名"
-            rules={[{ required: true, message: '请输入显示名' }]}
-          >
-            <Input placeholder="展示在管理后台的名称" />
+          <Form.Item name="display_name" label="显示名">
+            <Input placeholder="留空时使用登录账号" maxLength={64} />
           </Form.Item>
           <Form.Item
             name="password"
@@ -350,37 +373,25 @@ export default function UsersPage() {
               { required: true, message: '请输入初始密码' },
               passwordRule(context?.password_policy),
             ]}
-            extra="管理员首次登录后必须修改密码。"
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
-            <Select options={ROLE_OPTIONS} />
+          <Form.Item
+            name="role_ids"
+            label="角色"
+            rules={[{ required: true, message: '请至少选择一个角色' }]}
+            extra="赋予超级管理员或管理员角色后，该账号可登录管理端。"
+          >
+            <Select mode="multiple" options={roleOptions} />
           </Form.Item>
-          {isPlatform && (
-            <Form.Item
-              name="tenant_id"
-              label="归属"
-              extra="产品级账号仅能登录产品级平台；租户账号只能登录对应租户子域名。"
-            >
-              <Select
-                allowClear
-                placeholder="默认归属产品级平台"
-                options={[
-                  { label: '产品级平台', value: 0 },
-                  ...tenants.map((tenant) => ({
-                    label: `${tenant.name}（${tenant.code}）`,
-                    value: tenant.id,
-                  })),
-                ]}
-              />
-            </Form.Item>
-          )}
+          <Form.Item name="is_active" label="启用" valuePropName="checked">
+            <Switch />
+          </Form.Item>
         </Form>
       </Modal>
 
       <Modal
-        title="编辑管理员"
+        title="编辑用户"
         open={Boolean(editing)}
         onOk={handleEdit}
         onCancel={() => setEditing(null)}
@@ -395,10 +406,18 @@ export default function UsersPage() {
             label="显示名"
             rules={[{ required: true, message: '请输入显示名' }]}
           >
-            <Input />
+            <Input maxLength={64} />
           </Form.Item>
-          <Form.Item name="role" label="角色" rules={[{ required: true, message: '请选择角色' }]}>
-            <Select options={ROLE_OPTIONS} />
+          <Form.Item
+            name="role_ids"
+            label="角色"
+            rules={[{ required: true, message: '请至少选择一个角色' }]}
+            extra="修改角色会立即使该用户现有会话失效。"
+          >
+            <Select mode="multiple" options={roleOptions} />
+          </Form.Item>
+          <Form.Item name="is_active" label="启用" valuePropName="checked">
+            <Switch />
           </Form.Item>
         </Form>
       </Modal>
@@ -421,7 +440,7 @@ export default function UsersPage() {
               { required: true, message: '请输入新密码' },
               passwordRule(context?.password_policy),
             ]}
-            extra="重置后该账号需在下次登录时再次修改密码。"
+            extra="重置后该用户所有会话立即失效。"
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>

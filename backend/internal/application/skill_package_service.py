@@ -10,6 +10,7 @@ from __future__ import annotations
 import copy
 import io
 import zipfile
+from collections.abc import Sequence
 
 from internal.application.errors import (
     ConflictError,
@@ -164,8 +165,13 @@ class SkillPackageService:
                 archive.writestr(info, file.content)
         return buffer.getvalue()
 
-    def clone_to_current_tenant(self, skill_id: int, name: str | None = None) -> Skill:
-        """把可见技能克隆到当前租户；平台级技能保持只读，不建立跨租户引用。"""
+    def clone_to_current_tenant(
+        self,
+        skill_id: int,
+        name: str | None = None,
+        actor_role_ids: Sequence[int] = (),
+    ) -> Skill:
+        """把可见技能克隆到当前租户并授权给创建者角色；平台级技能保持只读。"""
         source = self._require_readable(skill_id)
         if self._context.is_platform:
             raise ValidationError("产品级平台无需克隆，请直接维护产品级技能")
@@ -190,6 +196,13 @@ class SkillPackageService:
             self._uow.skill_files.replace_all(
                 created.id, [(file.path, file.content) for file in files]
             )
+        tenant_id = getattr(created, "tenant_id", None)
+        role_ids = sorted({int(role_id) for role_id in actor_role_ids})
+        if tenant_id is not None:
+            for role_id in role_ids:
+                self._uow.resource_grants.add_for_role(
+                    role_id, tenant_id, "skill", [created.id], None
+                )
         self._uow.commit()
         return created
 

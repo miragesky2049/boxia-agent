@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined } from '@ant-design/icons'
-import { Anchor, App, Button, Form, Space, Spin, Tag } from 'antd'
+import { Anchor, App, Button, Form, Space, Spin, Tabs, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { createAgent, getAgent, updateAgent } from '../../api/agents'
@@ -7,6 +7,8 @@ import { componentsApi, skillsApi, toolsApi } from '../../api/resources'
 import type { AgentConfig, AgentPayload, ComponentResource, Skill, Tool } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 import { useTenant } from '../../tenant/TenantContext'
+import AgentResourcesTab from './AgentResourcesTab'
+import AgentTenantsTab from './AgentTenantsTab'
 import BasicSection from './sections/BasicSection'
 import ChannelSection from './sections/ChannelSection'
 import ConversationSection from './sections/ConversationSection'
@@ -97,13 +99,16 @@ export default function AgentEditPage() {
   const isEdit = agentId !== undefined && !Number.isNaN(agentId)
   const navigate = useNavigate()
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:agent:create')
+  const canUpdate = hasPermission('button:agent:update')
   const { isPlatform } = useTenant()
   const [form] = Form.useForm<AgentFormValues>()
   const [loading, setLoading] = useState(isEdit)
   const [saving, setSaving] = useState(false)
   const [platformResource, setPlatformResource] = useState(false)
-  const readonly = !canWrite || (!isPlatform && platformResource)
+  const canSubmit = isEdit ? canUpdate : canCreate
+  const readonly = !canSubmit || (!isPlatform && platformResource)
   const [tools, setTools] = useState<Tool[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [components, setComponents] = useState<ComponentResource[]>([])
@@ -197,70 +202,95 @@ export default function AgentEditPage() {
   }
 
   return (
-    <Form<AgentFormValues>
-      form={form}
-      layout="vertical"
-      scrollToFirstError
-      onFinish={handleFinish}
-      disabled={readonly}
-      className="agent-edit"
-    >
-      <Spin spinning={loading}>
-        <div className="agent-edit__header">
-          <Space size={12} align="center">
-            <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/agents')} />
-            <div>
-              <h2 className="page-header__title">{isEdit ? '配置智能体' : '新建智能体'}</h2>
-              <p className="page-header__desc">完成各栏目配置后保存，配置将实时持久化到数据库。</p>
-            </div>
-            {platformResource && <Tag color="geekblue">平台级</Tag>}
-          </Space>
-          <Space>
-            <Button onClick={() => navigate('/agents')}>返回</Button>
-            {!readonly && (
-              <Button type="primary" htmlType="submit" loading={saving}>
-                保存配置
-              </Button>
-            )}
-            {readonly && canWrite && <Tag bordered={false}>产品级资源只读</Tag>}
-          </Space>
-        </div>
-
-        <div className="agent-edit__body">
-          <div className="agent-edit__main">
-            <BasicSection />
-            <ModelSection />
-            <PromptSection />
-            <MemorySection />
-            <ConversationSection />
-            <ChannelSection />
-            <ToolSkillSection tools={tools} skills={skills} />
-            <KnowledgeSection />
-            <OtherSection />
-            <ExtensionSection components={components} />
-
-            <div className="agent-edit__footer">
-              <Space>
-                <Button onClick={() => navigate('/agents')}>返回</Button>
-                {!readonly && (
-                  <Button type="primary" htmlType="submit" loading={saving}>
-                    保存配置
-                  </Button>
-                )}
-              </Space>
-            </div>
+    <div className="agent-edit">
+      <div className="agent-edit__header">
+        <Space size={12} align="center">
+          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/agents')} />
+          <div>
+            <h2 className="page-header__title">{isEdit ? '配置智能体' : '新建智能体'}</h2>
+            <p className="page-header__desc">
+              配置智能体属性，并在同一页面维护其技能、工具、组件与提示词。
+            </p>
           </div>
+          {platformResource && <Tag color="geekblue">平台级</Tag>}
+        </Space>
+        <Space>
+          <Button onClick={() => navigate('/agents')}>返回</Button>
+          {!readonly && (
+            <Button type="primary" loading={saving} onClick={() => form.submit()}>
+              保存配置
+            </Button>
+          )}
+          {readonly && canSubmit && <Tag bordered={false}>产品级资源只读</Tag>}
+        </Space>
+      </div>
 
-          <aside className="agent-edit__aside">
-            <Anchor
-              affix={false}
-              items={ANCHOR_ITEMS}
-              targetOffset={96}
-              className="agent-edit__anchor"
-            />
-          </aside>
-        </div>
-      </Spin>
-    </Form>
+      <Tabs
+        defaultActiveKey="config"
+        items={[
+          {
+            key: 'config',
+            label: '配置',
+            children: (
+              <Form<AgentFormValues>
+                form={form}
+                layout="vertical"
+                scrollToFirstError
+                onFinish={handleFinish}
+                disabled={readonly}
+              >
+                <Spin spinning={loading}>
+                  <div className="agent-edit__body">
+                    <div className="agent-edit__main">
+                      <BasicSection />
+                      <ModelSection />
+                      <PromptSection />
+                      <MemorySection />
+                      <ConversationSection />
+                      <ChannelSection />
+                      <ToolSkillSection tools={tools} skills={skills} />
+                      <KnowledgeSection />
+                      <OtherSection />
+                      <ExtensionSection components={components} />
+                    </div>
+
+                    <aside className="agent-edit__aside">
+                      <Anchor
+                        affix={false}
+                        items={ANCHOR_ITEMS}
+                        targetOffset={96}
+                        className="agent-edit__anchor"
+                      />
+                    </aside>
+                  </div>
+                </Spin>
+              </Form>
+            ),
+          },
+          {
+            key: 'resources',
+            label: '技能与资源',
+            children: (
+              <Spin spinning={loading}>
+                <AgentResourcesTab agentId={isEdit ? agentId : undefined} />
+              </Spin>
+            ),
+          },
+          ...(isEdit && isPlatform && platformResource
+            ? [
+                {
+                  key: 'tenants',
+                  label: '开通租户',
+                  children: (
+                    <Spin spinning={loading}>
+                      <AgentTenantsTab agentId={agentId as number} />
+                    </Spin>
+                  ),
+                },
+              ]
+            : []),
+        ]}
+      />
+    </div>
   )
 }
