@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from datetime import UTC, datetime
 from uuid import UUID
 
 from internal.application.audit import record_audit
@@ -186,7 +187,9 @@ class UserAdminService:
         tenant_id = self._require_tenant()
         target = self._get_owned(user_id, tenant_id)
         validate_password_strength(new_password, target.username)
-        self._uow.users.update_password(user_id, hash_password(new_password))
+        self._uow.users.update_password(
+            user_id, hash_password(new_password), False, datetime.now(UTC)
+        )
         self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
         record_audit(
             self._uow,

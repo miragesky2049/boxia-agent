@@ -513,7 +513,9 @@ class AuthService:
         if verify_password(new_password, user.password_hash):
             raise UnauthorizedError("新密码不能与当前密码相同")
 
-        self._uow.users.update_password(user.id, hash_password(new_password))
+        self._uow.users.update_password(
+            user.id, hash_password(new_password), False, datetime.now(UTC)
+        )
         self._uow.user_refresh_tokens.revoke_all_for_user(user.id)
         record_audit(
             self._uow,
@@ -658,8 +660,8 @@ class AuthService:
             token_version=user.token_version,
             failed_login_count=user.failed_login_count,
             locked_until=user.locked_until,
-            must_change_password=False,
-            password_changed_at=None,
+            must_change_password=user.must_change_password,
+            password_changed_at=user.password_changed_at,
             tenant_id=user.tenant_id,
             role_id=primary.id,
             role_code=primary.code,

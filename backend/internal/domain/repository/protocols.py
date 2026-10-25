@@ -396,8 +396,14 @@ class UserRepository(Protocol):
     ) -> datetime | None:
         """累计失败次数，达到阈值后锁定。"""
 
-    def update_password(self, user_id: UUID, password_hash: str) -> None:
-        """更新密码并递增令牌版本。"""
+    def update_password(
+        self,
+        user_id: UUID,
+        password_hash: str,
+        must_change_password: bool,
+        changed_at: datetime,
+    ) -> None:
+        """更新密码、改密标记与时间，并递增令牌版本。"""
 
     def bump_token_version(self, user_id: UUID) -> int:
         """递增令牌版本。"""

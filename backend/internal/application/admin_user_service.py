@@ -156,7 +156,9 @@ class AdminUserService:
             tenant_id = self._require_tenant()
             tenant_admin = self._get_tenant_admin(user_id, tenant_id)
             validate_password_strength(new_password, tenant_admin.username)
-            self._uow.users.update_password(user_id, hash_password(new_password))
+            self._uow.users.update_password(
+                user_id, hash_password(new_password), True, datetime.now(UTC)
+            )
             self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
         record_audit(
             self._uow,
@@ -285,6 +287,8 @@ class AdminUserService:
                 "display_name": display_name.strip() or username,
                 "is_active": True,
                 "role_id": matched_role.id,
+                "must_change_password": True,
+                "password_changed_at": datetime.now(UTC),
             }
         )
         self._uow.users.replace_roles(user.id, tenant_id, [matched_role.id])
@@ -507,8 +511,8 @@ class AdminUserService:
             token_version=user.token_version,
             failed_login_count=user.failed_login_count,
             locked_until=user.locked_until,
-            must_change_password=False,
-            password_changed_at=None,
+            must_change_password=user.must_change_password,
+            password_changed_at=user.password_changed_at,
             tenant_id=user.tenant_id,
             role_id=role.id,
             role_code=role.code,
