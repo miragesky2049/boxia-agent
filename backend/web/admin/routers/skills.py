@@ -1,5 +1,7 @@
 """技能管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Body, Depends, Query, Request, Response, status
 
 from internal.domain.entity.common import Page
@@ -31,7 +33,7 @@ def list_skills(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
-    agent_id: int | None = Query(None, ge=1),
+    agent_id: UUID | None = Query(None),
 ) -> PageOut[SkillOut]:
     """分页查询技能；agent_id 限定所属智能体。"""
     result = service.list(page, page_size, keyword, is_enabled, agent_id)
@@ -58,7 +60,7 @@ def create_skill(
     response_model=SkillOut,
     dependencies=[Depends(require_permission("skill:read"))],
 )
-def get_skill(skill_id: int, service: SkillServiceDep) -> SkillOut:
+def get_skill(skill_id: UUID, service: SkillServiceDep) -> SkillOut:
     """查询技能详情。"""
     return SkillOut.model_validate(service.get(skill_id))
 
@@ -68,7 +70,7 @@ def get_skill(skill_id: int, service: SkillServiceDep) -> SkillOut:
     response_model=SkillOut,
     dependencies=[Depends(require_permission("skill:update"))],
 )
-def update_skill(skill_id: int, payload: SkillPayload, service: SkillServiceDep) -> SkillOut:
+def update_skill(skill_id: UUID, payload: SkillPayload, service: SkillServiceDep) -> SkillOut:
     """更新技能。"""
     return SkillOut.model_validate(service.update(skill_id, payload.model_dump()))
 
@@ -78,7 +80,7 @@ def update_skill(skill_id: int, payload: SkillPayload, service: SkillServiceDep)
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission("skill:delete"))],
 )
-def delete_skill(skill_id: int, service: SkillServiceDep) -> None:
+def delete_skill(skill_id: UUID, service: SkillServiceDep) -> None:
     """删除技能（包内文件随外键级联删除）。"""
     service.delete(skill_id)
 
@@ -89,7 +91,7 @@ def delete_skill(skill_id: int, service: SkillServiceDep) -> None:
     dependencies=[Depends(require_permission("skill:read"))],
 )
 def list_skill_files(
-    skill_id: int,
+    skill_id: UUID,
     service: SkillPackageServiceDep,
     prefix: str | None = Query(None, max_length=512),
 ) -> SkillFileListOut:
@@ -109,7 +111,7 @@ def list_skill_files(
     dependencies=[Depends(require_permission("skill:read"))],
 )
 def read_skill_file(
-    skill_id: int,
+    skill_id: UUID,
     service: SkillPackageServiceDep,
     path: str = Query(..., min_length=1, max_length=512),
 ) -> SkillFileOut:
@@ -123,7 +125,7 @@ def read_skill_file(
     dependencies=[Depends(require_permission("skill:update"))],
 )
 def write_skill_file(
-    skill_id: int,
+    skill_id: UUID,
     payload: SkillFileWriteRequest,
     service: SkillPackageServiceDep,
 ) -> SkillFileOut:
@@ -143,7 +145,7 @@ def write_skill_file(
     dependencies=[Depends(require_permission("skill:update"))],
 )
 def delete_skill_file(
-    skill_id: int,
+    skill_id: UUID,
     service: SkillPackageServiceDep,
     path: str = Query(..., min_length=1, max_length=512),
 ) -> None:
@@ -157,7 +159,7 @@ def delete_skill_file(
     dependencies=[Depends(require_permission("skill:update"))],
 )
 def import_skill_package(
-    skill_id: int,
+    skill_id: UUID,
     service: SkillPackageServiceDep,
     body: bytes = Body(..., media_type="application/zip"),
 ) -> list[SkillFileMetaOut]:
@@ -169,7 +171,7 @@ def import_skill_package(
     "/{skill_id}/export",
     dependencies=[Depends(require_permission("skill:read"))],
 )
-def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Response:
+def export_skill_package(skill_id: UUID, service: SkillPackageServiceDep) -> Response:
     """导出技能包为 zip。"""
     data = service.export_zip(skill_id)
     return Response(
@@ -186,7 +188,7 @@ def export_skill_package(skill_id: int, service: SkillPackageServiceDep) -> Resp
     dependencies=[Depends(require_permission("skill:create"))],
 )
 def clone_skill(
-    skill_id: int,
+    skill_id: UUID,
     payload: SkillCloneRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -196,9 +198,7 @@ def clone_skill(
     """指定 agent_id 时克隆到目标智能体；否则克隆到当前租户。"""
     if payload.agent_id is None:
         return SkillOut.model_validate(
-            package_service.clone_to_current_tenant(
-                skill_id, payload.name, principal.role_ids
-            )
+            package_service.clone_to_current_tenant(skill_id, payload.name, principal.role_ids)
         )
     ip, user_agent = client_meta(request)
     clone = service.clone_to_agent(

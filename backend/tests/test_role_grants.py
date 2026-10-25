@@ -2,10 +2,12 @@
 
 import importlib.util
 from pathlib import Path
+from uuid import UUID
 
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
 from tests.helpers import (
     USER_PASSWORD,
@@ -29,7 +31,7 @@ def _create_skill(site: TestClient, headers: dict[str, str], name: str) -> dict:
 
 
 def _create_admin_with_role(
-    site: TestClient, headers: dict[str, str], username: str, role_id: int
+    site: TestClient, headers: dict[str, str], username: str, role_id: UUID
 ) -> dict[str, str]:
     created = site.post(
         "/api/v1/admin/users",
@@ -50,7 +52,7 @@ def _create_admin_with_role(
     return {"Authorization": f"Bearer {login.json()['access_token']}"}
 
 
-def _summary(site: TestClient, headers: dict[str, str], role_id: int) -> dict[str, int]:
+def _summary(site: TestClient, headers: dict[str, str], role_id: UUID) -> dict[str, int]:
     response = site.get(
         f"/api/v1/admin/roles/{role_id}/grants/summary", headers=headers
     )
@@ -61,7 +63,7 @@ def _summary(site: TestClient, headers: dict[str, str], role_id: int) -> dict[st
 def _grant_items(
     site: TestClient,
     headers: dict[str, str],
-    role_id: int,
+    role_id: UUID,
     resource_type: str,
     granted_only: bool = True,
 ) -> list[dict]:
@@ -348,12 +350,26 @@ def _load_migration_module():
 
 
 def _run_backfill(statements: list[str]) -> None:
+    """在当前 schema 上重放历史迁移 SQL。
+
+    历史迁移的 INSERT 不写 id，依赖当时的主键默认值；主键改为应用层 UUID 后
+    不再有默认值，这里临时挂 gen_random_uuid()，重放结束后恢复原状。
+    """
     with get_engine().begin() as conn:
-        for statement in statements:
-            conn.execute(text(statement))
+        conn.execute(
+            text(
+                "ALTER TABLE resource_grants ALTER COLUMN id "
+                "SET DEFAULT gen_random_uuid()"
+            )
+        )
+        try:
+            for statement in statements:
+                conn.execute(text(statement))
+        finally:
+            conn.execute(text("ALTER TABLE resource_grants ALTER COLUMN id DROP DEFAULT"))
 
 
-def _skill_grant_role_ids(skill_id: int) -> set[int | None]:
+def _skill_grant_role_ids(skill_id: UUID) -> set[str | None]:
     with get_engine().connect() as conn:
         rows = conn.execute(
             text(
@@ -362,7 +378,7 @@ def _skill_grant_role_ids(skill_id: int) -> set[int | None]:
             ),
             {"resource_id": skill_id},
         ).scalars()
-        return {None if item is None else int(item) for item in rows}
+        return {None if item is None else str(item) for item in rows}
 
 
 def test_migration_backfills_zero_grant_resources_idempotently(
@@ -382,25 +398,26 @@ def test_migration_backfills_zero_grant_resources_idempotently(
                 "DELETE FROM resource_grants "
                 "WHERE resource_type = 'skill' AND resource_id = :resource_id"
             ),
-            {"resource_id": empty_skill["id"]},
+            {"resource_id": UUID(empty_skill["id"])},
         )
         conn.execute(
             text(
                 "DELETE FROM resource_grants "
                 "WHERE resource_type = 'skill' AND resource_id = :resource_id"
             ),
-            {"resource_id": narrowed_skill["id"]},
+            {"resource_id": UUID(narrowed_skill["id"])},
         )
         conn.execute(
             text(
                 "INSERT INTO resource_grants "
-                "(resource_type, resource_id, tenant_id, role_id) "
-                "VALUES ('skill', :resource_id, :tenant_id, :role_id)"
+                "(id, resource_type, resource_id, tenant_id, role_id) "
+                "VALUES (:id, 'skill', :resource_id, :tenant_id, :role_id)"
             ),
             {
-                "resource_id": narrowed_skill["id"],
-                "tenant_id": roles["viewer"]["tenant_id"],
-                "role_id": roles["viewer"]["id"],
+                "id": new_uuid(),
+                "resource_id": UUID(narrowed_skill["id"]),
+                "tenant_id": UUID(roles["viewer"]["tenant_id"]),
+                "role_id": UUID(roles["viewer"]["id"]),
             },
         )
 
@@ -408,11 +425,11 @@ def test_migration_backfills_zero_grant_resources_idempotently(
     _run_backfill(module._UPGRADE)
 
     # 零授权资源按该租户全部现有关键角色回填
-    assert _skill_grant_role_ids(empty_skill["id"]) == all_role_ids
+    assert _skill_grant_role_ids(UUID(empty_skill["id"])) == all_role_ids
     # 已按角色收窄的资源不会被放大
-    assert _skill_grant_role_ids(narrowed_skill["id"]) == {roles["viewer"]["id"]}
+    assert _skill_grant_role_ids(UUID(narrowed_skill["id"])) == {roles["viewer"]["id"]}
 
     # 重复执行保持幂等
     _run_backfill(module._UPGRADE)
-    assert _skill_grant_role_ids(empty_skill["id"]) == all_role_ids
-    assert _skill_grant_role_ids(narrowed_skill["id"]) == {roles["viewer"]["id"]}
+    assert _skill_grant_role_ids(UUID(empty_skill["id"])) == all_role_ids
+    assert _skill_grant_role_ids(UUID(narrowed_skill["id"])) == {roles["viewer"]["id"]}

@@ -10,7 +10,7 @@ USERS_URL = "/api/v1/admin/admin-users"
 OPERATOR_PASSWORD = "Editor-pass-123"
 
 
-def _role_id(client: TestClient, headers: dict[str, str], code: str) -> int:
+def _role_id(client: TestClient, headers: dict[str, str], code: str) -> str:
     roles = client.get("/api/v1/admin/roles", headers=headers).json()
     return next(item["id"] for item in roles if item["code"] == code)
 
@@ -194,7 +194,7 @@ def test_platform_account_rejects_tenant_role(
             "username": "platform-bad-role",
             "password": OPERATOR_PASSWORD,
             "display_name": "错误绑定",
-            "role_id": tenant_viewer_id,
+            "role_id": str(tenant_viewer_id),
         },
         headers=auth_headers,
     )

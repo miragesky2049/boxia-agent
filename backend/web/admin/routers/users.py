@@ -1,5 +1,7 @@
 """租户最终用户管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.access import User
@@ -67,7 +69,7 @@ def create_user(
     dependencies=[Depends(require_permission("button:user:update"))],
 )
 def update_user(
-    user_id: int,
+    user_id: UUID,
     payload: UserUpdateRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -94,7 +96,7 @@ def update_user(
     dependencies=[Depends(require_permission("button:user:update"))],
 )
 def reset_user_password(
-    user_id: int,
+    user_id: UUID,
     payload: UserResetPasswordRequest,
     principal: AdminAuthDep,
     request: Request,
@@ -118,7 +120,7 @@ def reset_user_password(
     dependencies=[Depends(require_permission("button:user:delete"))],
 )
 def delete_user(
-    user_id: int,
+    user_id: UUID,
     principal: AdminAuthDep,
     request: Request,
     service: UserAdminServiceDep,

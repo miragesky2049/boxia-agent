@@ -5,11 +5,11 @@ import { AuthProvider, useAuth } from './AuthContext'
 import { setRefreshToken } from './tokenStore'
 
 const profile: UserProfile = {
-  id: 7,
+  id: '7',
   username: 'alice',
   display_name: '爱丽丝',
-  tenant_id: 2,
-  role_id: 3,
+  tenant_id: '2',
+  role_id: '3',
   role_code: 'member',
   role_name: '成员',
   permissions: ['read'],

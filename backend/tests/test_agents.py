@@ -3,7 +3,7 @@
 from fastapi.testclient import TestClient
 
 
-def _create_tool(client: TestClient, headers: dict[str, str], name: str = "工具A") -> int:
+def _create_tool(client: TestClient, headers: dict[str, str], name: str = "工具A") -> str:
     response = client.post(
         "/api/v1/admin/tools",
         json={"name": name, "description": "", "type": "http", "config": {}},
@@ -13,7 +13,7 @@ def _create_tool(client: TestClient, headers: dict[str, str], name: str = "工�
     return response.json()["id"]
 
 
-def _create_skill(client: TestClient, headers: dict[str, str], name: str = "技能A") -> int:
+def _create_skill(client: TestClient, headers: dict[str, str], name: str = "技能A") -> str:
     response = client.post(
         "/api/v1/admin/skills",
         json={"name": name, "description": "", "content": "", "config": {}},
@@ -132,7 +132,7 @@ def test_relations_replaced_on_update(client: TestClient, auth_headers) -> None:
 
 
 def test_relations_missing_tool(client: TestClient, auth_headers) -> None:
-    response = _create_agent(client, auth_headers, tool_ids=[999999])
+    response = _create_agent(client, auth_headers, tool_ids=["0190f5a0-0000-7000-8000-000000000000"])
 
     assert response.status_code == 422
     assert response.json()["code"] == "VALIDATION_ERROR"
@@ -140,7 +140,9 @@ def test_relations_missing_tool(client: TestClient, auth_headers) -> None:
 
 
 def test_relations_missing_skill(client: TestClient, auth_headers) -> None:
-    response = _create_agent(client, auth_headers, skill_ids=[888888])
+    response = _create_agent(
+        client, auth_headers, skill_ids=["0190f5a0-0000-7000-8000-000000000001"]
+    )
 
     assert response.status_code == 422
     assert "技能不存在" in response.json()["detail"]
@@ -233,16 +235,16 @@ def test_update_agent(client: TestClient, auth_headers) -> None:
 
 
 def test_agent_not_found(client: TestClient, auth_headers) -> None:
-    assert client.get("/api/v1/admin/agents/999999", headers=auth_headers).status_code == 404
+    assert client.get("/api/v1/admin/agents/0190f5a0-0000-7000-8000-000000000000", headers=auth_headers).status_code == 404
     assert (
         client.put(
-            "/api/v1/admin/agents/999999",
+            "/api/v1/admin/agents/0190f5a0-0000-7000-8000-000000000000",
             json={"name": "不存在"},
             headers=auth_headers,
         ).status_code
         == 404
     )
-    assert client.delete("/api/v1/admin/agents/999999", headers=auth_headers).status_code == 404
+    assert client.delete("/api/v1/admin/agents/0190f5a0-0000-7000-8000-000000000000", headers=auth_headers).status_code == 404
 
 
 def test_agent_validation_error(client: TestClient, auth_headers) -> None:

@@ -6,7 +6,7 @@ import { listAgentTenants } from '../../api/agents'
 import type { AgentOpenedTenant } from '../../api/types'
 import { useTenant } from '../../tenant/TenantContext'
 
-export default function AgentTenantsTab({ agentId }: { agentId: number }) {
+export default function AgentTenantsTab({ agentId }: { agentId: string }) {
   const { message } = App.useApp()
   const { context } = useTenant()
   const [items, setItems] = useState<AgentOpenedTenant[]>([])

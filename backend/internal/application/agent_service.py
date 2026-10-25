@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
+from uuid import UUID
 
 from internal.application.errors import (
     ConflictError,
@@ -37,14 +38,14 @@ class AgentService:
         items, total = self._uow.agents.list_page(page, page_size, keyword, is_enabled)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
-    def get(self, agent_id: int) -> Agent:
+    def get(self, agent_id: UUID) -> Agent:
         """查询详情。"""
         agent = self._uow.agents.get(agent_id)
         if agent is None:
             raise NotFoundError("智能体不存在")
         return agent
 
-    def create(self, values: dict, actor_role_ids: Sequence[int] = ()) -> Agent:
+    def create(self, values: dict, actor_role_ids: Sequence[UUID] = ()) -> Agent:
         """创建智能体，并授权给创建者角色以保证创建者立即可见。"""
         if self._uow.agents.name_exists(values["name"]):
             raise ConflictError("智能体名称已存在")
@@ -54,7 +55,7 @@ class AgentService:
         self._uow.commit()
         return agent
 
-    def update(self, agent_id: int, values: dict) -> Agent:
+    def update(self, agent_id: UUID, values: dict) -> Agent:
         """更新智能体；产品级智能体仅产品级平台可维护。"""
         existing = self._uow.agents.get(agent_id)
         if existing is None:
@@ -69,7 +70,7 @@ class AgentService:
         self._uow.commit()
         return updated
 
-    def delete(self, agent_id: int) -> None:
+    def delete(self, agent_id: UUID) -> None:
         """删除智能体；产品级智能体仅产品级平台可维护。"""
         existing = self._uow.agents.get(agent_id)
         if existing is None:
@@ -90,16 +91,14 @@ class AgentService:
         self._uow.resource_grants.delete_for_resource("agent", agent_id)
         self._uow.commit()
 
-    def _grant_actor(self, agent: Agent, actor_role_ids: Sequence[int]) -> None:
+    def _grant_actor(self, agent: Agent, actor_role_ids: Sequence[UUID]) -> None:
         """把租户自有智能体授权给创建者角色；平台智能体不自动授权。"""
         tenant_id = getattr(agent, "tenant_id", None)
-        role_ids = sorted({int(role_id) for role_id in actor_role_ids})
+        role_ids = sorted(set(actor_role_ids))
         if tenant_id is None or not role_ids:
             return
         for role_id in role_ids:
-            self._uow.resource_grants.add_for_role(
-                role_id, tenant_id, "agent", [agent.id], None
-            )
+            self._uow.resource_grants.add_for_role(role_id, tenant_id, "agent", [agent.id], None)
 
     def _ensure_manageable(self, agent: Agent) -> None:
         """校验当前作用域是否有权维护该智能体。"""
@@ -109,8 +108,8 @@ class AgentService:
     def _with_validated_relations(self, values: dict) -> dict:
         """校验关联的工具/技能存在，并去重。"""
         payload = dict(values)
-        tool_ids = sorted({int(item) for item in payload.get("tool_ids", [])})
-        skill_ids = sorted({int(item) for item in payload.get("skill_ids", [])})
+        tool_ids = sorted({UUID(str(item)) for item in payload.get("tool_ids", [])})
+        skill_ids = sorted({UUID(str(item)) for item in payload.get("skill_ids", [])})
 
         missing_tools = set(tool_ids) - self._uow.tools.ids_exist(tool_ids)
         if missing_tools:

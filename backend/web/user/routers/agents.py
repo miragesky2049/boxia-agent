@@ -1,5 +1,7 @@
 """用户端智能体查询接口：仅返回当前角色可见且启用的内容。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Query
 
 from internal.domain.entity.common import Page
@@ -30,7 +32,7 @@ def list_agents(
 
 
 @router.get("/{agent_id}", response_model=UserAgentDetailOut)
-def get_agent(agent_id: int, service: UserPortalServiceDep) -> UserAgentDetailOut:
+def get_agent(agent_id: UUID, service: UserPortalServiceDep) -> UserAgentDetailOut:
     """查询智能体详情及已授权的技能/工具/组件/提示词。"""
     bundle = service.get_agent(agent_id)
     return UserAgentDetailOut(

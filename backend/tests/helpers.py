@@ -1,5 +1,7 @@
 """跨测试文件复用的租户、账号与资源构造工具。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 TENANT_ADMIN_PASSWORD = "Tenant-password-123"
@@ -52,7 +54,7 @@ def create_user(
     headers: dict[str, str],
     *,
     username: str = "acme-user",
-    role_id: int,
+    role_id: UUID,
     password: str = USER_PASSWORD,
     display_name: str = "用户",
     is_active: bool = True,
@@ -99,7 +101,7 @@ def grant_resource(
     headers: dict[str, str],
     *,
     resource_type: str,
-    resource_id: int,
+    resource_id: UUID,
     grants: list[dict],
 ) -> dict:
     """平台或租户整体替换资源授权。"""

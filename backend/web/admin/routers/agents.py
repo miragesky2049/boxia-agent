@@ -1,5 +1,7 @@
 """智能体管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, status
 
 from internal.application.tenant_service import AgentTenantView
@@ -51,7 +53,7 @@ def create_agent(
     response_model=AgentOut,
     dependencies=[Depends(require_permission("agent:read"))],
 )
-def get_agent(agent_id: int, service: AgentServiceDep) -> AgentOut:
+def get_agent(agent_id: UUID, service: AgentServiceDep) -> AgentOut:
     """查询智能体详情。"""
     return AgentOut.model_validate(service.get(agent_id))
 
@@ -61,7 +63,7 @@ def get_agent(agent_id: int, service: AgentServiceDep) -> AgentOut:
     response_model=AgentOut,
     dependencies=[Depends(require_permission("agent:update"))],
 )
-def update_agent(agent_id: int, payload: AgentPayload, service: AgentServiceDep) -> AgentOut:
+def update_agent(agent_id: UUID, payload: AgentPayload, service: AgentServiceDep) -> AgentOut:
     """更新智能体（含配置与工具/技能关联）。"""
     return AgentOut.model_validate(service.update(agent_id, payload.model_dump()))
 
@@ -71,7 +73,7 @@ def update_agent(agent_id: int, payload: AgentPayload, service: AgentServiceDep)
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission("agent:delete"))],
 )
-def delete_agent(agent_id: int, service: AgentServiceDep) -> None:
+def delete_agent(agent_id: UUID, service: AgentServiceDep) -> None:
     """删除智能体。"""
     service.delete(agent_id)
 
@@ -85,7 +87,7 @@ def delete_agent(agent_id: int, service: AgentServiceDep) -> None:
     ],
 )
 def list_agent_tenants(
-    agent_id: int,
+    agent_id: UUID,
     service: TenantServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),

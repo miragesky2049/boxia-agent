@@ -2,10 +2,10 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import (
     CHAR,
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
@@ -14,12 +14,13 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    Uuid,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 
 class SkillModel(Base):
@@ -28,14 +29,14 @@ class SkillModel(Base):
     __tablename__ = "skills"
     __table_args__ = (Index("ix_skills_tenant_agent", "tenant_id", "agent_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
-    agent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    agent_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -54,9 +55,9 @@ class SkillFileModel(Base):
     __tablename__ = "skill_files"
     __table_args__ = (UniqueConstraint("skill_id", "path", name="ux_skill_files_path"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    skill_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("skills.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    skill_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("skills.id", ondelete="CASCADE"), nullable=False
     )
     path: Mapped[str] = mapped_column(String(512), nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -75,14 +76,14 @@ class ToolModel(Base):
     __tablename__ = "tools"
     __table_args__ = (Index("ix_tools_tenant_agent", "tenant_id", "agent_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
-    agent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    agent_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -101,14 +102,14 @@ class ComponentModel(Base):
     __tablename__ = "components"
     __table_args__ = (Index("ix_components_tenant_agent", "tenant_id", "agent_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
-    agent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    agent_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
@@ -127,14 +128,14 @@ class PromptModel(Base):
     __tablename__ = "prompts"
     __table_args__ = (Index("ix_prompts_tenant_agent", "tenant_id", "agent_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    tenant_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
-    agent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
+    agent_id: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")

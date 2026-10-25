@@ -35,13 +35,13 @@ async function adminToken(request: APIRequestContext): Promise<string> {
   return body.access_token
 }
 
-async function ensureViewer(request: APIRequestContext, token: string): Promise<number> {
+async function ensureViewer(request: APIRequestContext, token: string): Promise<string> {
   const auth = { Authorization: `Bearer ${token}` }
   const listResponse = await request.get(
     `/api/v1/admin/admin-users?keyword=${VIEWER_USERNAME}`,
     { headers: auth },
   )
-  const list = (await listResponse.json()) as { items: { id: number; username: string }[] }
+  const list = (await listResponse.json()) as { items: { id: string; username: string }[] }
   const existing = list.items.find((item) => item.username === VIEWER_USERNAME)
 
   if (!existing) {
@@ -55,7 +55,7 @@ async function ensureViewer(request: APIRequestContext, token: string): Promise<
       },
     })
     expect(created.status()).toBe(201)
-    return ((await created.json()) as { id: number }).id
+    return ((await created.json()) as { id: string }).id
   }
 
   const reset = await request.post(`/api/v1/admin/admin-users/${existing.id}/password`, {
@@ -70,7 +70,7 @@ async function createAgent(
   request: APIRequestContext,
   token: string,
   name: string,
-): Promise<number> {
+): Promise<string> {
   const created = await request.post('/api/v1/admin/agents', {
     headers: { Authorization: `Bearer ${token}` },
     data: {
@@ -81,7 +81,7 @@ async function createAgent(
     },
   })
   expect(created.status()).toBe(201)
-  return ((await created.json()) as { id: number }).id
+  return ((await created.json()) as { id: string }).id
 }
 
 test.describe('认证流程', () => {

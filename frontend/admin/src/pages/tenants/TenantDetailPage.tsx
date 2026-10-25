@@ -15,7 +15,7 @@ interface AgentStats {
 
 export default function TenantDetailPage() {
   const { id } = useParams<{ id: string }>()
-  const tenantId = id ? Number(id) : NaN
+  const tenantId = id ?? ''
   const navigate = useNavigate()
   const [searchParams, setSearchParams] = useSearchParams()
   const { message } = App.useApp()
@@ -51,7 +51,7 @@ export default function TenantDetailPage() {
   }, [tenantId])
 
   useEffect(() => {
-    if (Number.isNaN(tenantId)) {
+    if (!tenantId) {
       navigate('/tenants', { replace: true })
       return
     }

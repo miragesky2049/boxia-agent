@@ -71,7 +71,7 @@ type RoleDetailSection = 'permissions' | 'data'
 
 export default function RoleDetailPage() {
   const { id } = useParams()
-  const roleId = Number(id)
+  const roleId = id ?? ''
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
@@ -86,7 +86,7 @@ export default function RoleDetailPage() {
   const [keyword, setKeyword] = useState('')
   const [grantedOnly, setGrantedOnly] = useState(false)
   const [loading, setLoading] = useState(false)
-  const [pendingIds, setPendingIds] = useState<number[]>([])
+  const [pendingIds, setPendingIds] = useState<string[]>([])
   const [catalog, setCatalog] = useState<PermissionResource[]>([])
   const [selectedCodes, setSelectedCodes] = useState<string[]>([])
   const [savedCodes, setSavedCodes] = useState<string[]>([])
@@ -101,7 +101,7 @@ export default function RoleDetailPage() {
   const readonly = isSuperAdmin || !canGrant
 
   const loadRole = useCallback(async () => {
-    if (!Number.isFinite(roleId)) {
+    if (!roleId) {
       message.error('角色不存在')
       navigate('/roles', { replace: true })
       return
@@ -122,7 +122,7 @@ export default function RoleDetailPage() {
   }, [roleId, message, navigate])
 
   const loadPermissions = useCallback(async () => {
-    if (!Number.isFinite(roleId)) return
+    if (!roleId) return
     setPermissionLoading(true)
     try {
       const [resources, granted] = await Promise.all([
@@ -140,7 +140,7 @@ export default function RoleDetailPage() {
   }, [roleId, message])
 
   const loadGrants = useCallback(async () => {
-    if (!Number.isFinite(roleId)) return
+    if (!roleId) return
     setLoading(true)
     try {
       const result = await rolesApi.listGrants(roleId, {
@@ -160,7 +160,7 @@ export default function RoleDetailPage() {
   }, [roleId, resourceType, page, pageSize, keyword, grantedOnly, message])
 
   const refreshSummary = useCallback(async () => {
-    if (!Number.isFinite(roleId)) return
+    if (!roleId) return
     try {
       const summary = await rolesApi.grantSummary(roleId)
       setCounts(summary.counts)

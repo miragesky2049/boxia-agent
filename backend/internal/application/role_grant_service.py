@@ -6,6 +6,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
@@ -17,14 +18,14 @@ from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 
 # 模块级别名：避免类内 list 方法遮蔽内置类型
-ResourceIdList = list[int]
+ResourceIdList = list[UUID]
 
 
 @dataclass(frozen=True)
 class RoleGrantResource:
     """角色授权列表项：资源信息 + 是否已授权。"""
 
-    resource_id: int
+    resource_id: UUID
     name: str
     description: str
     is_platform: bool
@@ -42,7 +43,7 @@ class RoleGrantService:
 
     def list(
         self,
-        role_id: int,
+        role_id: UUID,
         resource_type: str,
         page: int,
         page_size: int,
@@ -73,24 +74,22 @@ class RoleGrantService:
             page_size=page_size,
         )
 
-    def summary(self, role_id: int) -> dict[str, int]:
+    def summary(self, role_id: UUID) -> dict[str, int]:
         """按资源类型统计角色的有效授权数量。"""
         role = self._require_role(role_id)
         implicit_full = self._has_all_resources(role)
         return {
-            resource_type: self._granted_count(
-                role, resource_type, implicit_full=implicit_full
-            )
+            resource_type: self._granted_count(role, resource_type, implicit_full=implicit_full)
             for resource_type in RESOURCE_TYPES
         }
 
     def replace(
         self,
-        role_id: int,
+        role_id: UUID,
         resource_type: str,
-        resource_ids: Sequence[int],
+        resource_ids: Sequence[UUID],
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -124,11 +123,11 @@ class RoleGrantService:
 
     def add(
         self,
-        role_id: int,
+        role_id: UUID,
         resource_type: str,
-        resource_ids: Sequence[int],
+        resource_ids: Sequence[UUID],
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -169,11 +168,11 @@ class RoleGrantService:
 
     def remove(
         self,
-        role_id: int,
+        role_id: UUID,
         resource_type: str,
-        resource_id: int,
+        resource_id: UUID,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -188,13 +187,9 @@ class RoleGrantService:
                 role.id, resource_type, resource_id
             ):
                 raise NotFoundError("授权不存在")
-        elif self._uow.resource_grants.has_tenant_wide(
-            resource_type, resource_id, role.tenant_id
-        ):
+        elif self._uow.resource_grants.has_tenant_wide(resource_type, resource_id, role.tenant_id):
             self._demote_tenant_wide(role, resource_type, resource_id, actor_id)
-        elif not self._uow.resource_grants.remove_for_role(
-            role.id, resource_type, resource_id
-        ):
+        elif not self._uow.resource_grants.remove_for_role(role.id, resource_type, resource_id):
             raise NotFoundError("授权不存在")
         self._record_audit(
             role,
@@ -208,7 +203,7 @@ class RoleGrantService:
         )
         self._uow.commit()
 
-    def _scope(self) -> int | None:
+    def _scope(self) -> UUID | None:
         """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
         if self._context.is_platform:
             return None
@@ -216,19 +211,19 @@ class RoleGrantService:
             raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 
-    def _require_role(self, role_id: int) -> Role:
+    def _require_role(self, role_id: UUID) -> Role:
         role = self._uow.roles.get_by_id(role_id)
         if role is None or role.tenant_id != self._scope():
             raise NotFoundError("角色不存在")
         return role
 
-    def _require_writable_role(self, role_id: int) -> Role:
+    def _require_writable_role(self, role_id: UUID) -> Role:
         role = self._require_role(role_id)
         if self._has_all_resources(role):
             raise ValidationError("超级管理员角色默认拥有全部资源，不可单独授权")
         return role
 
-    def _granted_ids(self, role: Role, resource_type: str) -> set[int]:
+    def _granted_ids(self, role: Role, resource_type: str) -> set[UUID]:
         """角色已授权资源 ID：平台角色看平台授权，租户角色合并整租户授权。"""
         if role.tenant_id is None:
             return self._uow.resource_grants.list_platform_granted_resource_ids(
@@ -238,9 +233,7 @@ class RoleGrantService:
             role.id, role.tenant_id, resource_type
         )
 
-    def _granted_count(
-        self, role: Role, resource_type: str, *, implicit_full: bool = False
-    ) -> int:
+    def _granted_count(self, role: Role, resource_type: str, *, implicit_full: bool = False) -> int:
         """角色已授权资源数量；全量数据权限角色按作用域全量统计。"""
         if implicit_full:
             repository = self._resource_repository(resource_type)
@@ -256,7 +249,7 @@ class RoleGrantService:
         return DATA_ALL in self._uow.role_permissions.list_codes_for_role(role.id)
 
     def _demote_tenant_wide(
-        self, role: Role, resource_type: str, resource_id: int, actor_id: int
+        self, role: Role, resource_type: str, resource_id: UUID, actor_id: UUID
     ) -> None:
         """把整租户授权拆成除目标角色外其余角色的显式授权。"""
         tenant_id = role.tenant_id
@@ -274,9 +267,7 @@ class RoleGrantService:
     @staticmethod
     def _ensure_resource_type(resource_type: str) -> None:
         if resource_type not in RESOURCE_TYPES:
-            raise ValidationError(
-                f"资源类型必须是 {', '.join(RESOURCE_TYPES)} 之一"
-            )
+            raise ValidationError(f"资源类型必须是 {', '.join(RESOURCE_TYPES)} 之一")
 
     def _resource_repository(self, resource_type: str) -> Any:
         self._ensure_resource_type(resource_type)
@@ -290,8 +281,8 @@ class RoleGrantService:
         return repositories[resource_type]
 
     @staticmethod
-    def _validate_ids(repository: Any, resource_ids: Sequence[int]) -> ResourceIdList:
-        ids = sorted({int(resource_id) for resource_id in resource_ids})
+    def _validate_ids(repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:
+        ids = sorted(set(resource_ids))
         if not ids:
             return []
         if repository.ids_grantable(ids) != set(ids):
@@ -317,7 +308,7 @@ class RoleGrantService:
         *,
         action: str,
         detail: dict,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,

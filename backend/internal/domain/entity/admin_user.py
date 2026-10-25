@@ -2,13 +2,14 @@
 
 from dataclasses import dataclass
 from datetime import datetime
+from uuid import UUID
 
 
 @dataclass(frozen=True)
 class AdminUser:
     """管理后台账号。"""
 
-    id: int
+    id: UUID
     username: str
     password_hash: str
     display_name: str
@@ -21,8 +22,8 @@ class AdminUser:
     locked_until: datetime | None = None
     must_change_password: bool = False
     password_changed_at: datetime | None = None
-    tenant_id: int | None = None
-    role_id: int | None = None
+    tenant_id: UUID | None = None
+    role_id: UUID | None = None
     role_code: str = ""
     role_name: str = ""
 

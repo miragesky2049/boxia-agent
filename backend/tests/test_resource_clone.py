@@ -1,5 +1,7 @@
 """资源归属与克隆：agent_id 校验、技能包复制、授权复制与跨租户限制。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from tests.helpers import (
@@ -15,7 +17,7 @@ def _skill(
     site: TestClient,
     headers: dict[str, str],
     name: str,
-    agent_id: int | None = None,
+    agent_id: UUID | None = None,
     content: str = "",
 ):
     payload: dict = {"name": name, "description": "", "content": content, "config": {}}

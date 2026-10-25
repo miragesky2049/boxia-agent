@@ -1,5 +1,7 @@
 """权限资源目录与角色权限请求/响应模型。"""
 
+from uuid import UUID
+
 from pydantic import BaseModel, ConfigDict, Field
 
 
@@ -8,7 +10,7 @@ class PermissionResourceOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     code: str
     name: str
     category: str

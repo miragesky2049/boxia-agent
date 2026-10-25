@@ -1,6 +1,7 @@
 """用户端智能体与资源响应模型。"""
 
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -10,7 +11,7 @@ class UserSkillOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     name: str
     description: str
     content: str
@@ -23,7 +24,7 @@ class UserToolOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     name: str
     description: str
     type: str
@@ -40,7 +41,7 @@ class UserPromptOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     name: str
     description: str
     content: str
@@ -54,7 +55,7 @@ class UserAgentSummaryOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     name: str
     avatar_url: str
     description: str

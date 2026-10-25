@@ -47,7 +47,7 @@ class AccessContext:
     roles: tuple[Role, ...] = ()
 
     @property
-    def role_ids(self) -> tuple[int, ...]:
+    def role_ids(self) -> tuple[UUID, ...]:
         """全部有效角色 ID；平台账号退回主角色。"""
         if self.roles:
             return tuple(role.id for role in self.roles)
@@ -65,7 +65,7 @@ class AuthService:
         self,
         username: str,
         password: str,
-        tenant_id: int | None = None,
+        tenant_id: UUID | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenPair:
@@ -77,7 +77,7 @@ class AuthService:
     def refresh(
         self,
         refresh_token: str,
-        tenant_id: int | None = None,
+        tenant_id: UUID | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> TokenPair:
@@ -88,10 +88,10 @@ class AuthService:
 
     def logout(
         self,
-        user_id: int,
+        user_id: UUID,
         username: str,
         session_id: UUID,
-        tenant_id: int | None = None,
+        tenant_id: UUID | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> None:
@@ -113,10 +113,10 @@ class AuthService:
 
     def change_password(
         self,
-        user_id: int,
+        user_id: UUID,
         current_password: str,
         new_password: str,
-        tenant_id: int | None = None,
+        tenant_id: UUID | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> None:
@@ -126,21 +126,20 @@ class AuthService:
                 user_id, current_password, new_password, tenant_id, ip, user_agent
             )
             return
-        self._change_platform_password(
-            user_id, current_password, new_password, ip, user_agent
-        )
+        self._change_platform_password(user_id, current_password, new_password, ip, user_agent)
 
     def authenticate_access_token(self, token: str) -> AccessContext:
         """校验访问令牌并确认会话、账号状态仍有效。"""
         payload = decode_access_token(token)
         try:
-            user_id = int(payload["sub"])
+            user_id = UUID(str(payload["sub"]))
             token_version = int(payload["ver"])
             session_id = UUID(str(payload["sid"]))
+            raw_tenant_id = payload.get("tid") or ""
+            token_tenant_id = UUID(str(raw_tenant_id)) if raw_tenant_id else None
         except (KeyError, TypeError, ValueError) as exc:
             raise UnauthorizedError("身份凭证无效") from exc
 
-        token_tenant_id = int(payload.get("tid") or 0) or None
         if token_tenant_id is not None:
             return self._authenticate_tenant(user_id, token_version, session_id, token_tenant_id)
 
@@ -166,7 +165,7 @@ class AuthService:
             raise UnauthorizedError("账号角色已失效，请联系管理员")
         return role
 
-    def get_profile(self, user_id: int, tenant_id: int | None = None) -> AdminUser:
+    def get_profile(self, user_id: UUID, tenant_id: UUID | None = None) -> AdminUser:
         """查询当前管理员信息；租户账号由 users + 角色映射。"""
         if tenant_id is None:
             platform_user = self._uow.admin_users.get_by_id(user_id)
@@ -184,7 +183,7 @@ class AuthService:
         self,
         username: str,
         password: str,
-        tenant_id: int | None,
+        tenant_id: UUID | None,
         ip: str | None,
         user_agent: str | None,
     ) -> TokenPair:
@@ -230,8 +229,12 @@ class AuthService:
         role = self._resolve_platform_role(user)
         if CONSOLE_ACCESS not in self._role_codes((role,))[role.id]:
             self._record_login_failure(
-                user.id, user.username, ip, user_agent,
-                reason="no_console_access", tenant_id=tenant_id,
+                user.id,
+                user.username,
+                ip,
+                user_agent,
+                reason="no_console_access",
+                tenant_id=tenant_id,
             )
             raise ForbiddenError("账号未获得管理端访问权限")
 
@@ -253,7 +256,7 @@ class AuthService:
         self,
         username: str,
         password: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None,
         user_agent: str | None,
     ) -> TokenPair:
@@ -300,8 +303,12 @@ class AuthService:
         role_codes = self._role_codes(roles)
         if not self._has_console_access(roles, role_codes):
             self._record_login_failure(
-                user.id, user.username, ip, user_agent,
-                reason="no_console_access", tenant_id=tenant_id,
+                user.id,
+                user.username,
+                ip,
+                user_agent,
+                reason="no_console_access",
+                tenant_id=tenant_id,
             )
             raise ForbiddenError("账号未获得管理端访问权限")
         primary = self._primary_role(roles, role_codes)
@@ -322,7 +329,7 @@ class AuthService:
     def _refresh_platform(
         self,
         refresh_token: str,
-        tenant_id: int | None,
+        tenant_id: UUID | None,
         ip: str | None,
         user_agent: str | None,
     ) -> TokenPair:
@@ -378,7 +385,7 @@ class AuthService:
     def _refresh_tenant(
         self,
         refresh_token: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None,
         user_agent: str | None,
     ) -> TokenPair:
@@ -430,10 +437,10 @@ class AuthService:
 
     def _authenticate_tenant(
         self,
-        user_id: int,
+        user_id: UUID,
         token_version: int,
         session_id: UUID,
-        token_tenant_id: int,
+        token_tenant_id: UUID,
     ) -> AccessContext:
         user = self._uow.users.get_by_id(user_id)
         if user is None or not user.is_active:
@@ -458,7 +465,7 @@ class AuthService:
 
     def _change_platform_password(
         self,
-        user_id: int,
+        user_id: UUID,
         current_password: str,
         new_password: str,
         ip: str | None,
@@ -490,10 +497,10 @@ class AuthService:
 
     def _change_tenant_password(
         self,
-        user_id: int,
+        user_id: UUID,
         current_password: str,
         new_password: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None,
         user_agent: str | None,
     ) -> None:
@@ -526,7 +533,7 @@ class AuthService:
         ip: str | None,
         user_agent: str | None,
         family_id: UUID | None = None,
-        rotated_from: int | None = None,
+        rotated_from: UUID | None = None,
     ) -> TokenPair:
         """创建平台账号刷新令牌（轮换场景保留同一 family）。"""
         family = family_id or uuid4()
@@ -564,7 +571,7 @@ class AuthService:
         ip: str | None,
         user_agent: str | None,
         family_id: UUID | None = None,
-        rotated_from: int | None = None,
+        rotated_from: UUID | None = None,
     ) -> TokenPair:
         """租户管理员复用用户刷新令牌表，签发管理端访问令牌。"""
         family = family_id or uuid4()
@@ -614,17 +621,12 @@ class AuthService:
             raise error_cls("账号角色已失效，请联系管理员")
         return tuple(roles)
 
-    def _role_codes(self, roles: tuple[Role, ...]) -> dict[int, set[str]]:
+    def _role_codes(self, roles: tuple[Role, ...]) -> dict[UUID, set[str]]:
         """按角色读取权限编码，供主角色选择与登录准入判断使用。"""
-        return {
-            role.id: self._uow.role_permissions.list_codes_for_role(role.id)
-            for role in roles
-        }
+        return {role.id: self._uow.role_permissions.list_codes_for_role(role.id) for role in roles}
 
     @staticmethod
-    def _has_console_access(
-        roles: tuple[Role, ...], role_codes: dict[int, set[str]]
-    ) -> bool:
+    def _has_console_access(roles: tuple[Role, ...], role_codes: dict[UUID, set[str]]) -> bool:
         """任一有效角色授予管理端访问权限即可登录。"""
         return any(CONSOLE_ACCESS in role_codes.get(role.id, set()) for role in roles)
 
@@ -634,7 +636,7 @@ class AuthService:
             raise ForbiddenError("账号未获得管理端访问权限")
 
     @staticmethod
-    def _primary_role(roles: tuple[Role, ...], role_codes: dict[int, set[str]]) -> Role:
+    def _primary_role(roles: tuple[Role, ...], role_codes: dict[UUID, set[str]]) -> Role:
         """优先选择拥有全量数据权限的角色作为主角色，否则取首个有效角色。"""
         for role in roles:
             if DATA_ALL in role_codes.get(role.id, set()):
@@ -666,12 +668,12 @@ class AuthService:
 
     def _record_login_failure(
         self,
-        user_id: int | None,
+        user_id: UUID | None,
         username: str,
         ip: str | None,
         user_agent: str | None,
         reason: str,
-        tenant_id: int | None = None,
+        tenant_id: UUID | None = None,
     ) -> None:
         """记录登录失败审计（与失败计数同事务提交）。"""
         record_audit(
@@ -687,7 +689,7 @@ class AuthService:
         self._uow.commit()
 
     def _record_refresh_replay(
-        self, user_id: int, tenant_id: int, ip: str | None, user_agent: str | None
+        self, user_id: UUID, tenant_id: UUID, ip: str | None, user_agent: str | None
     ) -> None:
         """记录刷新令牌重放并撤销会话族。"""
         record_audit(

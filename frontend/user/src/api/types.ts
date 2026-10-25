@@ -1,11 +1,11 @@
 /** 用户端接口数据类型，与后端 web/user/schemas 保持一致。 */
 
 export interface User {
-  id: number
+  id: string
   username: string
   display_name: string
-  tenant_id: number
-  role_id: number
+  tenant_id: string
+  role_id: string
 }
 
 export interface UserProfile extends User {
@@ -31,7 +31,7 @@ export interface PageResult<T> {
 }
 
 export interface UserAgentSummary {
-  id: number
+  id: string
   name: string
   avatar_url: string
   description: string
@@ -39,7 +39,7 @@ export interface UserAgentSummary {
 }
 
 export interface UserSkill {
-  id: number
+  id: string
   name: string
   description: string
   content: string
@@ -48,7 +48,7 @@ export interface UserSkill {
 }
 
 export interface UserTool {
-  id: number
+  id: string
   name: string
   description: string
   type: string
@@ -59,7 +59,7 @@ export interface UserTool {
 export type UserComponent = UserTool
 
 export interface UserPrompt {
-  id: number
+  id: string
   name: string
   description: string
   content: string

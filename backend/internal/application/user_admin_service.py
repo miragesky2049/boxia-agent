@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from collections.abc import Sequence
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -21,7 +22,7 @@ from internal.infrastructure.security.password import hash_password, validate_pa
 
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 # 模块级别名：避免类内 list 方法遮蔽内置类型
-RoleIdList = list[int]
+RoleIdList = list[UUID]
 
 
 class UserAdminService:
@@ -45,9 +46,9 @@ class UserAdminService:
         username: str,
         password: str,
         display_name: str,
-        role_ids: Sequence[int],
+        role_ids: Sequence[UUID],
         is_active: bool,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -91,12 +92,12 @@ class UserAdminService:
 
     def update(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
         display_name: str | None,
-        role_ids: Sequence[int] | None,
+        role_ids: Sequence[UUID] | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -143,9 +144,9 @@ class UserAdminService:
 
     def delete(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -173,10 +174,10 @@ class UserAdminService:
 
     def reset_password(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
         new_password: str,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -200,14 +201,14 @@ class UserAdminService:
         )
         self._uow.commit()
 
-    def _require_tenant(self) -> int:
+    def _require_tenant(self) -> UUID:
         if self._context.is_platform or self._context.tenant_id is None:
             raise ForbiddenError("最终用户仅可由租户平台维护")
         return self._context.tenant_id
 
-    def _require_roles(self, role_ids: Sequence[int], tenant_id: int) -> RoleIdList:
+    def _require_roles(self, role_ids: Sequence[UUID], tenant_id: UUID) -> RoleIdList:
         """校验角色均属于本租户且启用，去重后保持请求顺序。"""
-        unique_ids = [int(role_id) for role_id in dict.fromkeys(role_ids)]
+        unique_ids = list(dict.fromkeys(role_ids))
         if not unique_ids:
             raise ValidationError("请至少选择一个角色")
         for role_id in unique_ids:
@@ -218,7 +219,7 @@ class UserAdminService:
                 raise ValidationError("角色已停用")
         return unique_ids
 
-    def _get_owned(self, user_id: int, tenant_id: int) -> User:
+    def _get_owned(self, user_id: UUID, tenant_id: UUID) -> User:
         target = self._uow.users.get_by_id(user_id)
         if target is None or target.tenant_id != tenant_id:
             raise NotFoundError("最终用户不存在")

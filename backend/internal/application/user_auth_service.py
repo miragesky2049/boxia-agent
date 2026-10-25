@@ -45,7 +45,7 @@ class UserAccessContext:
     roles: tuple[Role, ...] = ()
 
     @property
-    def role_ids(self) -> tuple[int, ...]:
+    def role_ids(self) -> tuple[UUID, ...]:
         """全部有效角色 ID，用于收敛资源可见范围。"""
         return tuple(role.id for role in self.roles) or (self.role.id,)
 
@@ -61,7 +61,7 @@ class UserAuthService:
         self,
         username: str,
         password: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> UserTokenPair:
@@ -123,7 +123,7 @@ class UserAuthService:
     def refresh(
         self,
         refresh_token: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> UserTokenPair:
@@ -170,9 +170,9 @@ class UserAuthService:
 
     def logout(
         self,
-        user_id: int,
+        user_id: UUID,
         username: str,
-        tenant_id: int,
+        tenant_id: UUID,
         session_id: UUID,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -194,10 +194,10 @@ class UserAuthService:
         """校验用户令牌并确认账号、角色与会话仍有效。"""
         payload = decode_user_access_token(token)
         try:
-            user_id = int(payload["sub"])
+            user_id = UUID(str(payload["sub"]))
             token_version = int(payload["ver"])
             session_id = UUID(str(payload["sid"]))
-            token_tenant_id = int(payload.get("tid") or 0)
+            token_tenant_id = UUID(str(payload["tid"]))
         except (KeyError, TypeError, ValueError) as exc:
             raise UnauthorizedError("身份凭证无效") from exc
 
@@ -246,7 +246,7 @@ class UserAuthService:
         ip: str | None,
         user_agent: str | None,
         family_id: UUID | None = None,
-        rotated_from: int | None = None,
+        rotated_from: UUID | None = None,
     ) -> UserTokenPair:
         """创建刷新令牌（轮换场景保留同一 family）并签发访问令牌。"""
         family = family_id or uuid4()
@@ -284,9 +284,9 @@ class UserAuthService:
 
     def _record_login_failure(
         self,
-        user_id: int | None,
+        user_id: UUID | None,
         username: str,
-        tenant_id: int,
+        tenant_id: UUID,
         ip: str | None,
         user_agent: str | None,
         reason: str,
@@ -305,7 +305,7 @@ class UserAuthService:
         self._uow.commit()
 
     def _record_refresh_replay(
-        self, user_id: int, tenant_id: int, ip: str | None, user_agent: str | None
+        self, user_id: UUID, tenant_id: UUID, ip: str | None, user_agent: str | None
     ) -> None:
         """记录刷新令牌重放并撤销会话族。"""
         record_audit(
