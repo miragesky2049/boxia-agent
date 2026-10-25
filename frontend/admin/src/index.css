@@ -38,6 +38,75 @@ body,
   -webkit-line-clamp: 2;
 }
 
+.permission-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.permission-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.permission-toolbar__actions {
+  margin-left: auto;
+}
+
+.permission-summary {
+  color: #86909c;
+  font-size: 13px;
+}
+
+.permission-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 8px 12px;
+}
+
+.permission-item {
+  align-items: flex-start;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid #e5e6eb;
+  border-radius: 6px;
+  background: #fff;
+  transition:
+    border-color 0.2s,
+    background-color 0.2s;
+}
+
+.permission-item:hover {
+  border-color: #91caff;
+  background: #f7fbff;
+}
+
+.permission-item:has(.ant-checkbox-checked) {
+  border-color: #91caff;
+  background: #f0f7ff;
+}
+
+.permission-item .ant-checkbox + span {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.permission-item__name {
+  color: #1d2129;
+  font-size: 14px;
+}
+
+.permission-item__code {
+  color: #86909c;
+  font-size: 12px;
+  word-break: break-all;
+}
+
 .agent-cell {
   display: flex;
   align-items: center;
