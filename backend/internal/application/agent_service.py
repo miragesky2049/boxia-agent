@@ -30,14 +30,11 @@ class AgentService:
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        authorized: bool = False,
     ) -> Page[Agent]:
-        """分页查询；authorized 仅产品级视角用于筛选已授权智能体。"""
+        """分页查询智能体。"""
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        items, total = self._uow.agents.list_page(
-            page, page_size, keyword, is_enabled, authorized=authorized
-        )
+        items, total = self._uow.agents.list_page(page, page_size, keyword, is_enabled)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     def get(self, agent_id: int) -> Agent:

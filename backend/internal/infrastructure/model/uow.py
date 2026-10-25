@@ -6,6 +6,7 @@ from internal.domain.entity.resource import Component, Prompt, Skill, Tool
 from internal.domain.repository.protocols import (
     AdminUserRepository,
     AgentRepository,
+    AgentTenantOpeningRepository,
     AuditLogRepository,
     PermissionResourceRepository,
     RefreshTokenRepository,
@@ -23,6 +24,9 @@ from internal.infrastructure.repository.postgres_admin_user_repository import (
     PostgresAdminUserRepository,
 )
 from internal.infrastructure.repository.postgres_agent_repository import PostgresAgentRepository
+from internal.infrastructure.repository.postgres_agent_tenant_opening_repository import (
+    PostgresAgentTenantOpeningRepository,
+)
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
@@ -85,6 +89,10 @@ class SqlAlchemyUnitOfWork:
             self.session
         )
         self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
+        # 开通关系不参与角色收敛，租户侧查询由应用层按需过滤。
+        self.agent_openings: AgentTenantOpeningRepository = PostgresAgentTenantOpeningRepository(
+            self.session
+        )
         self.skills: ResourceRepository[Skill] = PostgresSkillRepository(self.session, tenant_id)
         self.skill_files: SkillFileRepository = PostgresSkillFileRepository(self.session)
         self.tools: ResourceRepository[Tool] = PostgresToolRepository(self.session, tenant_id)

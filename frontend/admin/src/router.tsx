@@ -14,6 +14,7 @@ const UsersPage = lazy(() => import('./pages/UsersPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const UserGrantsPage = lazy(() => import('./pages/grants/UserGrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
+const TenantDetailPage = lazy(() => import('./pages/tenants/TenantDetailPage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
 const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 
@@ -108,6 +109,14 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:tenants" platformOnly>
                   <TenantsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/tenants/:id"
+              element={
+                <RequirePermission permission="page:tenants" platformOnly>
+                  <TenantDetailPage />
                 </RequirePermission>
               }
             />

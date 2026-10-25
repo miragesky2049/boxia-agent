@@ -9,9 +9,11 @@ from sqlalchemy import (
     Column,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Table,
     Text,
+    UniqueConstraint,
     func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -52,4 +54,28 @@ class AgentModel(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )
+
+
+class AgentTenantOpeningModel(Base):
+    """agent_tenant_openings 表：平台智能体对租户的开通关系。"""
+
+    __tablename__ = "agent_tenant_openings"
+    __table_args__ = (
+        UniqueConstraint("agent_id", "tenant_id", name="ux_agent_tenant_openings"),
+        Index("ix_agent_tenant_openings_tenant", "tenant_id", "agent_id"),
+    )
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    agent_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("agents.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
+    opened_by: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("admin_users.id", ondelete="SET NULL")
+    )
+    opened_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
     )

@@ -72,6 +72,40 @@ export interface TenantUpdatePayload {
   is_active?: boolean
 }
 
+export interface TenantAgent {
+  id: number
+  name: string
+  avatar_url: string
+  description: string
+  is_enabled: boolean
+  is_opened: boolean
+  opened_at: string | null
+  opened_by: number | null
+}
+
+export interface TenantAgentOpenResult {
+  agent_id: number
+  tenant_id: number
+  is_opened: boolean
+  opened_at: string | null
+}
+
+export interface TenantAgentBatchOpenResult {
+  tenant_id: number
+  opened: boolean
+  count: number
+  agent_ids: number[]
+}
+
+export interface AgentOpenedTenant {
+  id: number
+  code: string
+  name: string
+  is_active: boolean
+  opened_at: string
+  opened_by: number | null
+}
+
 export interface AdminUser {
   id: number
   username: string

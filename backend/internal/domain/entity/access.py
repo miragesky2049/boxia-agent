@@ -84,6 +84,17 @@ class ResourceGrant:
 
 
 @dataclass(frozen=True)
+class AgentTenantOpening:
+    """平台智能体对租户的开通关系；不代表角色级可见性。"""
+
+    id: int
+    agent_id: int
+    tenant_id: int
+    opened_by: int | None
+    opened_at: datetime
+
+
+@dataclass(frozen=True)
 class GrantSummary:
     """资源授权汇总：用于授权管理列表，避免逐条加载授权明细。"""
 

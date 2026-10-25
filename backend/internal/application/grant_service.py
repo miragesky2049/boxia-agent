@@ -127,6 +127,13 @@ class GrantService:
             self._uow.resource_grants.replace_for_resource(
                 resource_type, resource_id, normalized, actor_id
             )
+            if resource_type == "agent":
+                # 兼容旧的产品级授权入口：授权中的租户即视为已开通该产品智能体
+                self._uow.agent_openings.sync_for_resource(
+                    resource_id,
+                    {tenant_id for tenant_id, _ in normalized},
+                    actor_id,
+                )
             tenant_id = None
         else:
             if resource.tenant_id is None:
@@ -198,6 +205,12 @@ class GrantService:
             self._uow.resource_grants.replace_for_tenant(
                 resource_type, resource_id, target_tenant, new_roles, actor_id
             )
+            if resource_type == "agent" and self._context.is_platform:
+                # 批量授权同时维护开通关系：清空授权即关闭，其余模式一律保持开通
+                if new_roles == []:
+                    self._uow.agent_openings.close(resource_id, target_tenant)
+                else:
+                    self._uow.agent_openings.open(resource_id, target_tenant, actor_id)
             record_audit(
                 self._uow,
                 action="grant.updated",

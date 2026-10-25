@@ -8,6 +8,7 @@ import type { AgentConfig, AgentPayload, ComponentResource, Skill, Tool } from '
 import { useAuth } from '../../auth/AuthContext'
 import { useTenant } from '../../tenant/TenantContext'
 import AgentResourcesTab from './AgentResourcesTab'
+import AgentTenantsTab from './AgentTenantsTab'
 import BasicSection from './sections/BasicSection'
 import ChannelSection from './sections/ChannelSection'
 import ConversationSection from './sections/ConversationSection'
@@ -275,6 +276,19 @@ export default function AgentEditPage() {
               </Spin>
             ),
           },
+          ...(isEdit && isPlatform && platformResource
+            ? [
+                {
+                  key: 'tenants',
+                  label: '开通租户',
+                  children: (
+                    <Spin spinning={loading}>
+                      <AgentTenantsTab agentId={agentId as number} />
+                    </Spin>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>

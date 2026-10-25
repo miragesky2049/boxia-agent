@@ -192,6 +192,21 @@ class PostgresResourceGrantRepository:
         )
         self._session.flush()
 
+    def delete_for_tenant_resources(
+        self, resource_type: str, resource_ids: list[int], tenant_id: int
+    ) -> None:
+        """批量删除某租户对多个资源的授权，不影响其他租户。"""
+        if not resource_ids:
+            return
+        self._session.execute(
+            delete(ResourceGrantModel).where(
+                ResourceGrantModel.resource_type == resource_type,
+                ResourceGrantModel.resource_id.in_(resource_ids),
+                ResourceGrantModel.tenant_id == tenant_id,
+            )
+        )
+        self._session.flush()
+
     def delete_for_resource(self, resource_type: str, resource_id: int) -> None:
         """删除资源全部授权。"""
         self._session.execute(
