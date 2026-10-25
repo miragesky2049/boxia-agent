@@ -52,19 +52,21 @@ def _encode(claims: dict, secret: str | None = None) -> str:
     return jwt.encode(payload, secret or settings.jwt_secret.get_secret_value(), algorithm="HS256")
 
 
-def _insert_user(username: str, role: str) -> None:
+def _insert_user(username: str, role_code: str) -> None:
     with get_engine().begin() as conn:
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role, must_change_password) "
-                "VALUES (:username, :hash, :display_name, :role, FALSE)"
+                "(username, password_hash, display_name, role_id, must_change_password) "
+                "VALUES (:username, :hash, :display_name, "
+                "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = :role_code), "
+                "        FALSE)"
             ),
             {
                 "username": username,
                 "hash": hash_password(ADMIN_PASSWORD),
                 "display_name": username,
-                "role": role,
+                "role_code": role_code,
             },
         )
 
@@ -77,7 +79,7 @@ def test_login_success(client: TestClient) -> None:
     assert body["refresh_token"].startswith("bxt_")
     assert body["refresh_expires_in"] > 0
     assert body["user"]["username"] == ADMIN_USERNAME
-    assert body["user"]["role"] == "superadmin"
+    assert body["user"]["role_code"] == "superadmin"
     assert body["user"]["must_change_password"] is False
 
 
@@ -135,7 +137,7 @@ def test_me_success(client: TestClient, auth_headers: dict[str, str]) -> None:
 
     assert response.status_code == 200
     assert response.json()["username"] == ADMIN_USERNAME
-    assert response.json()["role"] == "superadmin"
+    assert response.json()["role_code"] == "superadmin"
 
 
 @pytest.mark.parametrize(

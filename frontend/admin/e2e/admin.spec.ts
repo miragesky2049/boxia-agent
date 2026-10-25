@@ -37,14 +37,15 @@ async function adminToken(request: APIRequestContext): Promise<string> {
 
 async function ensureViewer(request: APIRequestContext, token: string): Promise<number> {
   const auth = { Authorization: `Bearer ${token}` }
-  const listResponse = await request.get(`/api/v1/admin/users?keyword=${VIEWER_USERNAME}`, {
-    headers: auth,
-  })
+  const listResponse = await request.get(
+    `/api/v1/admin/admin-users?keyword=${VIEWER_USERNAME}`,
+    { headers: auth },
+  )
   const list = (await listResponse.json()) as { items: { id: number; username: string }[] }
   const existing = list.items.find((item) => item.username === VIEWER_USERNAME)
 
   if (!existing) {
-    const created = await request.post('/api/v1/admin/users', {
+    const created = await request.post('/api/v1/admin/admin-users', {
       headers: auth,
       data: {
         username: VIEWER_USERNAME,
@@ -57,12 +58,30 @@ async function ensureViewer(request: APIRequestContext, token: string): Promise<
     return ((await created.json()) as { id: number }).id
   }
 
-  const reset = await request.post(`/api/v1/admin/users/${existing.id}/password`, {
+  const reset = await request.post(`/api/v1/admin/admin-users/${existing.id}/password`, {
     headers: auth,
     data: { new_password: VIEWER_INITIAL_PASSWORD },
   })
   expect(reset.status()).toBe(204)
   return existing.id
+}
+
+async function createAgent(
+  request: APIRequestContext,
+  token: string,
+  name: string,
+): Promise<number> {
+  const created = await request.post('/api/v1/admin/agents', {
+    headers: { Authorization: `Bearer ${token}` },
+    data: {
+      name,
+      description: '由 Playwright 创建',
+      is_enabled: true,
+      config: {},
+    },
+  })
+  expect(created.status()).toBe(201)
+  return ((await created.json()) as { id: number }).id
 }
 
 test.describe('认证流程', () => {
@@ -88,43 +107,56 @@ test.describe('认证流程', () => {
     await page.getByRole('menuitem', { name: '退出登录' }).click()
     await expect(page).toHaveURL(/\/login/)
 
-    await page.goto('/skills')
-    await expect(page).toHaveURL(/\/login\?next=%2Fskills/)
+    await page.goto('/agents')
+    await expect(page).toHaveURL(/\/login\?next=%2Fagents/)
   })
 })
 
 test.describe('资源与智能体', () => {
-  test('技能支持新建、编辑与删除', async ({ page }) => {
+  test('技能在智能体详情内新建、编辑与删除', async ({ page, request }) => {
+    const token = await adminToken(request)
+    const agentName = `E2E 资源智能体 ${Date.now()}`
+    const agentId = await createAgent(request, token, agentName)
     const suffix = Date.now()
     const name = `E2E 技能 ${suffix}`
     const updatedName = `${name} 已更新`
 
-    await login(page)
-    await page.goto('/skills')
-    await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible()
+    try {
+      await login(page)
+      await page.goto(`/agents/${agentId}/edit`)
+      await page.getByRole('tab', { name: '技能与资源' }).click()
+      await page.getByRole('tab', { name: '技能', exact: true }).click()
+      await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible()
 
-    await page.getByRole('button', { name: '新建技能' }).click()
-    await page.getByLabel('技能名称').fill(name)
-    await page.getByLabel('描述').fill('由 Playwright 创建')
-    await page.getByRole('button', { name: /保\s*存/ }).click()
-    await expect(page.getByText('创建成功')).toBeVisible()
+      await page.getByRole('button', { name: '新建技能' }).click()
+      let dialog = page.getByRole('dialog', { name: '新建技能' })
+      await dialog.getByLabel('技能名称').fill(name)
+      await dialog.getByLabel('描述').fill('由 Playwright 创建')
+      await dialog.getByRole('button', { name: '保存' }).click()
+      await expect(page.getByText('创建成功')).toBeVisible()
 
-    const row = page.getByRole('row', { name: new RegExp(name) })
-    await expect(row).toBeVisible()
-    await row.getByRole('button', { name: /编\s*辑/ }).click()
-    await page.getByLabel('技能名称').fill(updatedName)
-    await page.getByRole('button', { name: /保\s*存/ }).click()
-    await expect(page.getByText('保存成功')).toBeVisible()
-    await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toBeVisible()
+      const row = page.getByRole('row', { name: new RegExp(name) })
+      await expect(row).toBeVisible()
+      await row.getByRole('button', { name: /编\s*辑/ }).click()
+      dialog = page.getByRole('dialog', { name: '编辑技能' })
+      await dialog.getByLabel('技能名称').fill(updatedName)
+      await dialog.getByRole('button', { name: '保存' }).click()
+      await expect(page.getByText('保存成功')).toBeVisible()
+      await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toBeVisible()
 
-    const updatedRow = page.getByRole('row', { name: new RegExp(updatedName) })
-    await updatedRow.getByRole('button', { name: /删\s*除/ }).click()
-    await page
-      .locator('.ant-popconfirm')
-      .getByRole('button', { name: /删\s*除/ })
-      .click()
-    await expect(page.getByText('已删除')).toBeVisible()
-    await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toHaveCount(0)
+      const updatedRow = page.getByRole('row', { name: new RegExp(updatedName) })
+      await updatedRow.getByRole('button', { name: /删\s*除/ }).click()
+      await page
+        .locator('.ant-popconfirm')
+        .getByRole('button', { name: /删\s*除/ })
+        .click()
+      await expect(page.getByText('已删除')).toBeVisible()
+      await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toHaveCount(0)
+    } finally {
+      await request.delete(`/api/v1/admin/agents/${agentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    }
   })
 
   test('智能体保存后再次打开可回显', async ({ page }) => {
@@ -167,12 +199,11 @@ test.describe('改密与只读权限', () => {
 
     await login(page, VIEWER_USERNAME, VIEWER_NEW_PASSWORD)
     await expect(page).toHaveURL(/\/agents$/)
-
-    await page.goto('/skills')
-    await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible()
-    await expect(page.getByRole('button', { name: '新建技能' })).toHaveCount(0)
+    await expect(page.getByRole('button', { name: '新建智能体' })).toHaveCount(0)
 
     await page.goto('/users')
+    await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
+    await page.goto('/roles')
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
   })
 })

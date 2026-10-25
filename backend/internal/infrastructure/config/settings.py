@@ -64,6 +64,8 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_issuer: str = "boxia-agent"
     jwt_audience: str = "boxia-admin"
+    # 最终用户令牌使用独立受众，避免管理端与用户端令牌互相冒用
+    user_jwt_audience: str = "boxia-user"
     access_token_minutes: int = Field(default=30, ge=1, le=120)
     refresh_token_days: int = Field(default=14, ge=1, le=90)
 
@@ -99,7 +101,6 @@ class Settings(BaseSettings):
 
     docs_enabled: bool | None = None
     legacy_api_enabled: bool = True
-    user_api_token: SecretStr | None = None
 
     @property
     def is_prod(self) -> bool:
@@ -174,8 +175,6 @@ class Settings(BaseSettings):
             raise ValueError("生产环境 JWT_SECRET 至少 32 字符且不得使用示例值")
         if "*" in self.cors_origin_list:
             raise ValueError("生产环境 CORS_ORIGINS 不允许通配符")
-        if self.user_api_token and len(self.user_api_token.get_secret_value()) < 32:
-            raise ValueError("生产环境 USER_API_TOKEN 至少 32 字符")
         return self
 
 

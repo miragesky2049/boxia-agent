@@ -17,10 +17,12 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import type { ReactNode } from 'react'
 import { useCallback, useEffect, useState } from 'react'
+import { listAgents } from '../api/agents'
 import type { ResourceApi } from '../api/resources'
-import type { ResourceBase } from '../api/types'
+import type { AgentSummary, ResourceBase, ResourceType } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
+import AuthorizationDrawer from './AuthorizationDrawer'
 
 export type FormFieldType = 'text' | 'textarea' | 'switch' | 'select' | 'tags' | 'json' | 'number'
 
@@ -57,6 +59,12 @@ interface ResourceListPageProps<T extends ResourceBase, P> {
   fields: FormField[]
   defaults: P
   createText?: string
+  /** 固定归属智能体：列表按该智能体过滤，新建时自动写入归属。 */
+  agentId?: number
+  /** 资源类型；克隆操作需要它定位资源接口。 */
+  resourceType?: ResourceType
+  /** 是否展示克隆到其他智能体的操作。 */
+  enableClone?: boolean
   /** 行级自定义操作，渲染在编辑/删除之前；只读角色也会展示。 */
   extraActions?: (record: T, helpers: RowActionHelpers) => ReactNode
 }
@@ -82,10 +90,17 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   fields,
   defaults,
   createText = '新建',
+  agentId,
+  resourceType,
+  enableClone = false,
   extraActions,
 }: ResourceListPageProps<T, P>) {
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = resourceType ? hasPermission(`button:${resourceType}:create`) : false
+  const canUpdate = resourceType ? hasPermission(`button:${resourceType}:update`) : false
+  const canDelete = resourceType ? hasPermission(`button:${resourceType}:delete`) : false
+  const canEdit = canUpdate || canDelete
   const { isPlatform } = useTenant()
   const [form] = Form.useForm<FormValues>()
   const [items, setItems] = useState<T[]>([])
@@ -98,6 +113,11 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<T | null>(null)
   const [saving, setSaving] = useState(false)
+  const [cloneSource, setCloneSource] = useState<T | null>(null)
+  const [cloneAgents, setCloneAgents] = useState<AgentSummary[]>([])
+  const [cloning, setCloning] = useState(false)
+  const [grantTarget, setGrantTarget] = useState<T | null>(null)
+  const [cloneForm] = Form.useForm<{ agent_id: number; name?: string }>()
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -107,6 +127,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
         page_size: pageSize,
         keyword: keyword || undefined,
         is_enabled: enabledFilter === undefined ? undefined : enabledFilter === 'true',
+        agent_id: agentId,
       })
       setItems(result.items)
       setTotal(result.total)
@@ -115,7 +136,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
     } finally {
       setLoading(false)
     }
-  }, [api, page, pageSize, keyword, enabledFilter, message])
+  }, [api, page, pageSize, keyword, enabledFilter, agentId, message])
 
   useEffect(() => {
     void load()
@@ -137,6 +158,8 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   const handleSubmit = async () => {
     const values = await form.validateFields()
     const payload: Record<string, unknown> = { ...(defaults as FormValues), ...values }
+    // 智能体详情内创建的资源必须绑定归属智能体
+    if (agentId !== undefined && !editing) payload.agent_id = agentId
     for (const field of fields) {
       if (field.type === 'json' && typeof payload[field.name] === 'string') {
         const raw = (payload[field.name] as string).trim()
@@ -182,6 +205,38 @@ export default function ResourceListPage<T extends ResourceBase, P>({
       message.error(error instanceof Error ? error.message : '删除失败')
     }
   }
+
+  const openClone = async (record: T) => {
+    setCloneSource(record)
+    cloneForm.setFieldsValue({ agent_id: undefined, name: undefined })
+    try {
+      const result = await listAgents({ page: 1, page_size: 100 })
+      setCloneAgents(result.items)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载智能体失败')
+    }
+  }
+
+  const handleClone = async () => {
+    if (!cloneSource || !resourceType) return
+    const values = await cloneForm.validateFields()
+    setCloning(true)
+    try {
+      await api.clone(cloneSource.id, {
+        agent_id: values.agent_id,
+        name: values.name?.trim() || null,
+      })
+      message.success('克隆成功，副本与原资源相互独立')
+      setCloneSource(null)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '克隆失败')
+    } finally {
+      setCloning(false)
+    }
+  }
+
+  const showExtraActions = Boolean(resourceType || enableClone || extraActions)
 
   const tableColumns: ColumnsType<T> = [
     {
@@ -232,39 +287,47 @@ export default function ResourceListPage<T extends ResourceBase, P>({
       width: 170,
       render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
     },
-    ...(canWrite || extraActions
+    ...(canEdit || showExtraActions || (isPlatform && resourceType)
       ? [
           {
             title: '操作',
             key: 'actions',
-            width: extraActions ? 240 : 130,
+            width: showExtraActions ? 320 : 130,
             render: (_: unknown, record: T) => {
               const readonly = record.is_platform && !isPlatform
               return (
-                <Space size={4}>
+                <Space size={4} wrap>
                   {extraActions?.(record, { reload: load })}
-                  {canWrite &&
-                    (readonly ? (
-                      <Tag bordered={false}>产品级资源只读</Tag>
-                    ) : (
-                      <>
-                        <Button type="link" size="small" onClick={() => openEdit(record)}>
-                          编辑
-                        </Button>
-                        <Popconfirm
-                          title="确认删除？"
-                          description="删除后不可恢复。"
-                          okText="删除"
-                          cancelText="取消"
-                          okButtonProps={{ danger: true }}
-                          onConfirm={() => handleDelete(record)}
-                        >
-                          <Button type="link" size="small" danger>
-                            删除
-                          </Button>
-                        </Popconfirm>
-                      </>
-                    ))}
+                  {isPlatform && resourceType && (
+                    <Button type="link" size="small" onClick={() => setGrantTarget(record)}>
+                      授权
+                    </Button>
+                  )}
+                  {resourceType && enableClone && canCreate && (
+                    <Button type="link" size="small" onClick={() => void openClone(record)}>
+                      克隆
+                    </Button>
+                  )}
+                  {readonly && canEdit && <Tag bordered={false}>产品级资源只读</Tag>}
+                  {!readonly && canUpdate && (
+                    <Button type="link" size="small" onClick={() => openEdit(record)}>
+                      编辑
+                    </Button>
+                  )}
+                  {!readonly && canDelete && (
+                    <Popconfirm
+                      title="确认删除？"
+                      description="删除后不可恢复。"
+                      okText="删除"
+                      cancelText="取消"
+                      okButtonProps={{ danger: true }}
+                      onConfirm={() => handleDelete(record)}
+                    >
+                      <Button type="link" size="small" danger>
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  )}
                 </Space>
               )
             },
@@ -280,7 +343,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
           <h2 className="page-header__title">{title}</h2>
           <p className="page-header__desc">{description}</p>
         </div>
-        {canWrite && (
+        {canCreate && (
           <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
             {createText}
           </Button>
@@ -393,6 +456,46 @@ export default function ResourceListPage<T extends ResourceBase, P>({
           })}
         </Form>
       </Modal>
+
+      <Modal
+        title={`克隆${title.replace('管理', '')}`}
+        open={cloneSource !== null}
+        onOk={handleClone}
+        onCancel={() => setCloneSource(null)}
+        confirmLoading={cloning}
+        okText="克隆"
+        cancelText="取消"
+        forceRender
+        destroyOnHidden
+      >
+        <Form form={cloneForm} layout="vertical">
+          <Form.Item
+            name="agent_id"
+            label="目标智能体"
+            rules={[{ required: true, message: '请选择目标智能体' }]}
+            extra="克隆会生成独立副本，之后修改互不影响。"
+          >
+            <Select
+              placeholder="选择目标智能体"
+              options={cloneAgents.map((agent) => ({ label: agent.name, value: agent.id }))}
+            />
+          </Form.Item>
+          <Form.Item name="name" label="副本名称" extra="留空时自动使用“原名（副本）”。">
+            <Input placeholder="可选" maxLength={100} />
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {isPlatform && resourceType && grantTarget && (
+        <AuthorizationDrawer
+          open={grantTarget !== null}
+          onClose={() => setGrantTarget(null)}
+          onSaved={() => void load()}
+          resourceType={resourceType}
+          resourceId={grantTarget.id}
+          resourceName={grantTarget.name}
+        />
+      )}
     </div>
   )
 }

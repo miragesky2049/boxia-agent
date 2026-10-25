@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import RequireAuth from './auth/RequireAuth'
-import RequireRole from './auth/RequireRole'
+import RequirePermission from './auth/RequirePermission'
 import PageLoading from './components/PageLoading'
 import AdminLayout from './layouts/AdminLayout'
 
@@ -10,12 +10,13 @@ const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
 const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
-const SkillsPage = lazy(() => import('./pages/SkillsPage'))
-const ToolsPage = lazy(() => import('./pages/ToolsPage'))
-const ComponentsPage = lazy(() => import('./pages/ComponentsPage'))
-const PromptsPage = lazy(() => import('./pages/PromptsPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
+const UserGrantsPage = lazy(() => import('./pages/grants/UserGrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
+const TenantDetailPage = lazy(() => import('./pages/tenants/TenantDetailPage'))
+const RolesPage = lazy(() => import('./pages/RolesPage'))
+const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 
 export default function AppRouter() {
   return (
@@ -39,27 +40,84 @@ export default function AppRouter() {
             }
           >
             <Route path="/" element={<Navigate to="/agents" replace />} />
-            <Route path="/agents" element={<AgentListPage />} />
-            <Route path="/agents/new" element={<AgentEditPage />} />
-            <Route path="/agents/:id/edit" element={<AgentEditPage />} />
-            <Route path="/skills" element={<SkillsPage />} />
-            <Route path="/tools" element={<ToolsPage />} />
-            <Route path="/components" element={<ComponentsPage />} />
-            <Route path="/prompts" element={<PromptsPage />} />
+            <Route
+              path="/agents"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentListPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/agents/new"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/agents/:id/edit"
+              element={
+                <RequirePermission permission="page:agents">
+                  <AgentEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/grants"
+              element={
+                <RequirePermission permission="page:grants" tenantOnly>
+                  <UserGrantsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/roles"
+              element={
+                <RequirePermission permission="page:roles">
+                  <RolesPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/roles/:id"
+              element={
+                <RequirePermission permission="page:roles">
+                  <RoleDetailPage />
+                </RequirePermission>
+              }
+            />
             <Route
               path="/users"
               element={
-                <RequireRole role="superadmin">
+                <RequirePermission permission="page:users">
                   <UsersPage />
-                </RequireRole>
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/admin-users"
+              element={
+                <RequirePermission permission="page:admin-users">
+                  <AdminUsersPage />
+                </RequirePermission>
               }
             />
             <Route
               path="/tenants"
               element={
-                <RequireRole role="superadmin" platformOnly>
+                <RequirePermission permission="page:tenants" platformOnly>
                   <TenantsPage />
-                </RequireRole>
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/tenants/:id"
+              element={
+                <RequirePermission permission="page:tenants" platformOnly>
+                  <TenantDetailPage />
+                </RequirePermission>
               }
             />
           </Route>

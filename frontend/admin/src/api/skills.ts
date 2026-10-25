@@ -39,10 +39,10 @@ export const skillPackageApi = {
       responseType: 'blob',
     })
   },
-  async clone(skillId: number, name?: string): Promise<Skill> {
+  async clone(skillId: number, name: string | undefined, agentId: number): Promise<Skill> {
     return request<Skill>(`/admin/skills/${skillId}/clone`, {
       method: 'POST',
-      body: JSON.stringify({ name: name?.trim() || null }),
+      body: JSON.stringify({ name: name?.trim() || null, agent_id: agentId }),
     })
   },
 }

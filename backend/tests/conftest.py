@@ -15,10 +15,12 @@ os.environ["DATABASE_URL"] = f"postgresql+psycopg://postgres:postgres@127.0.0.1:
 os.environ["JWT_SECRET"] = "test-jwt-secret-0123456789abcdef0123456789abcdef"
 os.environ["ACCESS_TOKEN_MINUTES"] = "60"
 os.environ["BCRYPT_ROUNDS"] = "4"
-os.environ["USER_API_TOKEN"] = "test-user-token-0123456789abcdef"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["ROOT_DOMAIN"] = "example.com"
 os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "adminsystem"
+# 本机 Windows + Docker 环境下 TRUNCATE 全库偶发超过默认 5s，测试环境放宽等待上限
+os.environ["STATEMENT_TIMEOUT_MS"] = "60000"
+os.environ["LOCK_TIMEOUT_MS"] = "30000"
 # 部署环境只按域名识别租户；集成用例统一使用 tenant_client 的子域名访问
 os.environ["ALLOW_TENANT_HEADER"] = "false"
 
@@ -30,8 +32,14 @@ import pytest  # noqa: E402
 from alembic import command  # noqa: E402
 from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
-from sqlalchemy import text  # noqa: E402
+from sqlalchemy import bindparam, text  # noqa: E402
 
+from internal.domain.entity.permission import (  # noqa: E402
+    PERMISSION_CATALOG,
+    PLATFORM_ADMIN_CODES,
+    PLATFORM_SUPERADMIN_CODES,
+    PLATFORM_VIEWER_CODES,
+)
 from internal.infrastructure.model.database import dispose_engine, get_engine  # noqa: E402
 from internal.infrastructure.security.password import hash_password  # noqa: E402
 from internal.infrastructure.trace.exporter import get_tracer_provider  # noqa: E402
@@ -39,7 +47,6 @@ from web.app import create_app  # noqa: E402
 
 ADMIN_APP = create_app("admin")
 USER_APP = create_app("user")
-USER_API_TOKEN = os.environ["USER_API_TOKEN"]
 
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Admin-password-123"
@@ -83,11 +90,53 @@ def _reset_data():
         tables = ", ".join(sorted(existing))
         if tables:
             conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
+        # TRUNCATE 会清掉迁移种子，需重建权限目录、平台系统角色与角色权限关系
+        conn.execute(
+            text(
+                "INSERT INTO permission_resources "
+                "(code, name, category, action, description, sort_order, is_active) "
+                "VALUES (:code, :name, :category, :action, :description, :sort_order, TRUE)"
+            ),
+            [
+                {
+                    "code": item.code,
+                    "name": item.name,
+                    "category": item.category,
+                    "action": item.action,
+                    "description": item.description,
+                    "sort_order": item.sort_order,
+                }
+                for item in PERMISSION_CATALOG
+            ],
+        )
+        conn.execute(
+            text(
+                "INSERT INTO roles "
+                "(tenant_id, code, name, description, is_system, is_active) "
+                "VALUES "
+                "(NULL, 'superadmin', '超级管理员', '平台最高权限，可访问全部平台级资源', TRUE, TRUE), "
+                "(NULL, 'admin', '管理员', '可读写被授权的平台级资源', TRUE, TRUE), "
+                "(NULL, 'viewer', '只读成员', '只读访问被授权的平台级资源', TRUE, TRUE)"
+            )
+        )
+        grant_stmt = text(
+            "INSERT INTO role_permissions (role_id, permission_id) "
+            "SELECT r.id, p.id FROM roles r, permission_resources p "
+            "WHERE r.tenant_id IS NULL AND r.code = :role_code AND p.code IN :codes"
+        ).bindparams(bindparam("codes", expanding=True))
+        for role_code, codes in (
+            ("superadmin", PLATFORM_SUPERADMIN_CODES),
+            ("admin", PLATFORM_ADMIN_CODES),
+            ("viewer", PLATFORM_VIEWER_CODES),
+        ):
+            conn.execute(grant_stmt, {"role_code": role_code, "codes": sorted(codes)})
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role, must_change_password) "
-                "VALUES (:username, :password_hash, :display_name, 'superadmin', FALSE)"
+                "(username, password_hash, display_name, role_id, must_change_password) "
+                "VALUES (:username, :password_hash, :display_name, "
+                "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = 'superadmin'), "
+                "        FALSE)"
             ),
             {
                 "username": ADMIN_USERNAME,
@@ -140,3 +189,23 @@ def auth_headers(client: TestClient) -> dict[str, str]:
     )
     assert response.status_code == 200, response.text
     return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
+@pytest.fixture
+def user_login_headers(user_tenant_client):
+    """最终用户登录：返回按租户子域名登录后的 Bearer 头。"""
+
+    def _login(
+        tenant_code: str,
+        username: str,
+        password: str,
+    ) -> dict[str, str]:
+        client = user_tenant_client(tenant_code)
+        response = client.post(
+            "/api/v1/user/auth/login",
+            json={"username": username, "password": password},
+        )
+        assert response.status_code == 200, response.text
+        return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+    return _login
