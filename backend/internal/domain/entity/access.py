@@ -46,6 +46,8 @@ class User:
     token_version: int = 1
     failed_login_count: int = 0
     locked_until: datetime | None = None
+    must_change_password: bool = False
+    password_changed_at: datetime | None = None
     role_ids: tuple[UUID, ...] = ()
 
     def effective_role_ids(self) -> tuple[UUID, ...]:

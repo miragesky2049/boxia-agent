@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from uuid import UUID
 
 from internal.application.audit import record_audit
@@ -135,6 +136,8 @@ class TenantService:
                 "display_name": admin_display_name.strip() or username,
                 "is_active": True,
                 "role_id": roles["superadmin"].id,
+                "must_change_password": True,
+                "password_changed_at": datetime.now(UTC),
             }
         )
         self._uow.users.replace_roles(admin_user.id, tenant.id, [roles["superadmin"].id])

@@ -90,6 +90,28 @@ def test_tenant_context_and_login(
     assert context.json()["user"]["username"] == f"{TENANT_A}-admin"
 
 
+def test_tenant_admin_password_change_clears_force_flag(
+    client: TestClient, auth_headers: dict[str, str], tenant_client
+) -> None:
+    """租户管理员首登改密后，再次登录不应继续要求改密。"""
+    _create_tenant(client, auth_headers, TENANT_A, "Acme 公司")
+    acme = tenant_client(TENANT_A)
+    new_password = "New-tenant-pass-456"
+
+    tokens = _login(acme, f"{TENANT_A}-admin")
+    assert tokens["user"]["must_change_password"] is True
+
+    response = acme.post(
+        "/api/v1/admin/auth/password",
+        json={"current_password": TENANT_ADMIN_PASSWORD, "new_password": new_password},
+        headers=_bearer(tokens["access_token"]),
+    )
+    assert response.status_code == 204, response.text
+
+    relogin = _login(acme, f"{TENANT_A}-admin", new_password)
+    assert relogin["user"]["must_change_password"] is False
+
+
 def test_platform_account_cannot_login_on_tenant_domain(
     client: TestClient, auth_headers: dict[str, str], tenant_client
 ) -> None:

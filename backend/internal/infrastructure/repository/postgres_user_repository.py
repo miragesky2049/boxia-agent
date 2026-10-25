@@ -137,12 +137,20 @@ class PostgresUserRepository:
         self._session.flush()
         return row.locked_until
 
-    def update_password(self, user_id: UUID, password_hash: str) -> None:
-        """更新密码并递增令牌版本。"""
+    def update_password(
+        self,
+        user_id: UUID,
+        password_hash: str,
+        must_change_password: bool,
+        changed_at: datetime,
+    ) -> None:
+        """更新密码、改密标记与时间，并递增令牌版本。"""
         row = self._session.get(UserModel, user_id)
         if row is None:
             return
         row.password_hash = password_hash
+        row.must_change_password = must_change_password
+        row.password_changed_at = changed_at
         row.token_version += 1
         self._session.flush()
 
@@ -319,5 +327,7 @@ class PostgresUserRepository:
             token_version=row.token_version,
             failed_login_count=row.failed_login_count,
             locked_until=row.locked_until,
+            must_change_password=row.must_change_password,
+            password_changed_at=row.password_changed_at,
             role_ids=role_ids,
         )
