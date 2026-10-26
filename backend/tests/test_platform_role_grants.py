@@ -1,5 +1,7 @@
 """平台角色授权：平台账号可见性、写权限与租户隔离。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from tests.helpers import (
@@ -27,7 +29,7 @@ def _create_platform_account(
     client: TestClient,
     headers: dict[str, str],
     username: str,
-    role_id: int,
+    role_id: UUID,
 ) -> dict[str, str]:
     created = client.post(
         ACCOUNTS_URL,
@@ -51,7 +53,7 @@ def _create_platform_account(
 def _set_permissions(
     client: TestClient,
     headers: dict[str, str],
-    role_id: int,
+    role_id: UUID,
     codes: list[str],
 ) -> None:
     response = client.put(
@@ -62,14 +64,14 @@ def _set_permissions(
     assert response.status_code == 200, response.text
 
 
-def _agent_ids(client: TestClient, headers: dict[str, str]) -> set[int]:
+def _agent_ids(client: TestClient, headers: dict[str, str]) -> set[str]:
     response = client.get("/api/v1/admin/agents", headers=headers)
     assert response.status_code == 200, response.text
-    return {int(item["id"]) for item in response.json()["items"]}
+    return {item["id"] for item in response.json()["items"]}
 
 
 def _grant(
-    client: TestClient, headers: dict[str, str], role_id: int, ids: list[int]
+    client: TestClient, headers: dict[str, str], role_id: UUID, ids: list[UUID]
 ) -> None:
     response = client.post(
         f"{ROLES_URL}/{role_id}/grants/agent",

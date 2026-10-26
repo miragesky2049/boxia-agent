@@ -1,6 +1,7 @@
 """最终用户请求/响应模型。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,13 +11,15 @@ class UserOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int
+    id: UUID
+    tenant_id: UUID
     username: str
     display_name: str
     is_active: bool
-    role_id: int
-    role_ids: list[int] = []
+    role_id: UUID
+    role_ids: list[UUID] = []
+    current_department_id: UUID | None = None
+    current_department_name: str | None = None
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -28,7 +31,7 @@ class UserCreateRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(default="", max_length=64)
-    role_ids: list[int] = Field(min_length=1)
+    role_ids: list[UUID] = Field(min_length=1)
     is_active: bool = True
 
 
@@ -36,7 +39,7 @@ class UserUpdateRequest(BaseModel):
     """更新最终用户请求。"""
 
     display_name: str | None = Field(default=None, max_length=64)
-    role_ids: list[int] | None = Field(default=None, min_length=1)
+    role_ids: list[UUID] | None = Field(default=None, min_length=1)
     is_active: bool | None = None
 
 

@@ -1,26 +1,28 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
+import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { rolesApi } from '../api/access'
-import type { User } from '../api/types'
+import { departmentsApi } from '../api/department'
+import type { Department, User } from '../api/types'
 import { usersApi } from '../api/users'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
+import { buildDepartmentTreeData } from '../utils/departmentTree'
 import { passwordRule } from '../utils/password'
 
 interface CreateFormValues {
   username: string
   password: string
   display_name: string
-  role_ids: number[]
+  role_ids: string[]
   is_active: boolean
 }
 
 interface EditFormValues {
   display_name: string
-  role_ids: number[]
+  role_ids: string[]
   is_active: boolean
 }
 
@@ -36,13 +38,15 @@ export default function UsersPage() {
   const canUpdate = hasPermission('button:user:update')
   const canDelete = hasPermission('button:user:delete')
   const showActions = canUpdate || canDelete
-  const { context } = useTenant()
+  const { context, isPlatform } = useTenant()
   const [items, setItems] = useState<User[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(10)
   const [keyword, setKeyword] = useState('')
-  const [roleOptions, setRoleOptions] = useState<{ label: string; value: number }[]>([])
+  const [departmentTree, setDepartmentTree] = useState<Department[]>([])
+  const [filterDepartmentId, setFilterDepartmentId] = useState<string | undefined>(undefined)
+  const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -59,6 +63,7 @@ export default function UsersPage() {
         page,
         page_size: pageSize,
         keyword: keyword || undefined,
+        department_id: filterDepartmentId,
       })
       setItems(result.items)
       setTotal(result.total)
@@ -67,11 +72,24 @@ export default function UsersPage() {
     } finally {
       setLoading(false)
     }
-  }, [page, pageSize, keyword, message])
+  }, [page, pageSize, keyword, filterDepartmentId, message])
 
   useEffect(() => {
     void load()
   }, [load])
+
+  useEffect(() => {
+    if (isPlatform) return
+    departmentsApi
+      .tree()
+      .then(setDepartmentTree)
+      .catch(() => setDepartmentTree([]))
+  }, [isPlatform])
+
+  const departmentTreeData = useMemo(
+    () => buildDepartmentTreeData(departmentTree),
+    [departmentTree],
+  )
 
   useEffect(() => {
     rolesApi
@@ -87,7 +105,7 @@ export default function UsersPage() {
   }, [])
 
   const roleNames = useCallback(
-    (roleIds: number[]) =>
+    (roleIds: string[]) =>
       (roleIds.length ? roleIds : []).map(
         (roleId) =>
           roleOptions.find((option) => option.value === roleId)?.label ?? `角色 #${roleId}`,
@@ -207,6 +225,12 @@ export default function UsersPage() {
       ),
     },
     {
+      title: '当前部门',
+      key: 'current_department_name',
+      width: 160,
+      render: (_: unknown, record: User) => record.current_department_name || '-',
+    },
+    {
       title: '启用',
       dataIndex: 'is_active',
       key: 'is_active',
@@ -321,6 +345,18 @@ export default function UsersPage() {
             setPage(1)
           }}
         />
+        {!isPlatform && (
+          <TreeSelect
+            allowClear
+            style={{ width: 240 }}
+            placeholder="按部门筛选（含下级）"
+            treeData={departmentTreeData}
+            onChange={(value: string | undefined) => {
+              setFilterDepartmentId(value)
+              setPage(1)
+            }}
+          />
+        )}
       </div>
 
       <Table<User>

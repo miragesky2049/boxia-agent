@@ -1,5 +1,7 @@
 """产品智能体对租户的开通/关闭：开通独立于角色授权，并兼容旧授权接口。"""
 
+from uuid import UUID
+
 from fastapi.testclient import TestClient
 
 from tests.helpers import (
@@ -13,7 +15,7 @@ from tests.helpers import (
 
 
 def _create_admin_with_role(
-    site: TestClient, headers: dict[str, str], username: str, role_id: int
+    site: TestClient, headers: dict[str, str], username: str, role_id: UUID
 ) -> dict[str, str]:
     created = site.post(
         "/api/v1/admin/users",
@@ -35,7 +37,7 @@ def _create_admin_with_role(
 
 
 def _tenant_agents(
-    client: TestClient, headers: dict[str, str], tenant_id: int, **params
+    client: TestClient, headers: dict[str, str], tenant_id: UUID, **params
 ) -> dict:
     response = client.get(
         f"/api/v1/admin/tenants/{tenant_id}/agents",
@@ -47,7 +49,7 @@ def _tenant_agents(
 
 
 def _set_opened(
-    client: TestClient, headers: dict[str, str], tenant_id: int, agent_id: int, opened: bool
+    client: TestClient, headers: dict[str, str], tenant_id: UUID, agent_id: UUID, opened: bool
 ) -> dict:
     response = client.put(
         f"/api/v1/admin/tenants/{tenant_id}/agents/{agent_id}",
@@ -61,8 +63,8 @@ def _set_opened(
 def _batch_set_opened(
     client: TestClient,
     headers: dict[str, str],
-    tenant_id: int,
-    agent_ids: list[int],
+    tenant_id: UUID,
+    agent_ids: list[UUID],
     opened: bool,
 ) -> dict:
     response = client.post(
@@ -74,7 +76,7 @@ def _batch_set_opened(
     return response.json()
 
 
-def _agent_tenants(client: TestClient, headers: dict[str, str], agent_id: int) -> dict:
+def _agent_tenants(client: TestClient, headers: dict[str, str], agent_id: UUID) -> dict:
     response = client.get(f"/api/v1/admin/agents/{agent_id}/tenants", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()
@@ -232,7 +234,7 @@ def test_batch_open_rejects_unknown_agent_and_tenant_scope(
 
     response = client.post(
         f"/api/v1/admin/tenants/{tenant['id']}/agents/batch",
-        json={"agent_ids": [agent["id"], 999999], "opened": True},
+        json={"agent_ids": [agent["id"], "0190f5a0-0000-7000-8000-000000000000"], "opened": True},
         headers=auth_headers,
     )
     assert response.status_code == 404
@@ -300,18 +302,18 @@ def test_openings_scope_and_not_found(
     )
 
     assert (
-        client.get("/api/v1/admin/tenants/999999/agents", headers=auth_headers).status_code
+        client.get("/api/v1/admin/tenants/0190f5a0-0000-7000-8000-000000000000/agents", headers=auth_headers).status_code
         == 404
     )
     assert (
         client.put(
-            f"/api/v1/admin/tenants/{tenant['id']}/agents/999999",
+            f"/api/v1/admin/tenants/{tenant['id']}/agents/0190f5a0-0000-7000-8000-000000000000",
             json={"opened": True},
             headers=auth_headers,
         ).status_code
         == 404
     )
     assert (
-        client.get("/api/v1/admin/agents/999999/tenants", headers=auth_headers).status_code
+        client.get("/api/v1/admin/agents/0190f5a0-0000-7000-8000-000000000000/tenants", headers=auth_headers).status_code
         == 404
     )

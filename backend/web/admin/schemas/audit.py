@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
@@ -11,8 +12,8 @@ class AuditLogOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    actor_id: int | None
+    id: UUID
+    actor_id: UUID | None
     actor_username: str | None
     action: str
     resource_type: str | None
@@ -21,5 +22,5 @@ class AuditLogOut(BaseModel):
     ip: str | None
     user_agent: str | None
     detail: dict[str, Any]
-    tenant_id: int | None = None
+    tenant_id: UUID | None = None
     created_at: datetime

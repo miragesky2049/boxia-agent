@@ -11,23 +11,23 @@ from internal.infrastructure.config.settings import get_settings
 
 
 def create_access_token(
-    user_id: int,
+    user_id: uuid.UUID,
     username: str,
     role: str,
     session_id: uuid.UUID,
     token_version: int,
-    tenant_id: int | None = None,
+    tenant_id: uuid.UUID | None = None,
 ) -> tuple[str, int]:
     """签发管理端访问令牌，返回 (token, 有效期秒数)。
 
-    ``tid`` 为租户 ID，0 表示产品级平台账号；令牌只能在签发时对应的作用域使用。
+    ``tid`` 为租户 ID，空字符串表示产品级平台账号；令牌只能在签发时对应的作用域使用。
     """
     settings = get_settings()
     payload = _base_payload(
         subject=str(user_id),
         username=username,
         scope="admin",
-        tenant_id=tenant_id or 0,
+        tenant_id=str(tenant_id) if tenant_id else "",
         session_id=session_id,
         token_version=token_version,
     )
@@ -36,10 +36,10 @@ def create_access_token(
 
 
 def create_user_access_token(
-    user_id: int,
+    user_id: uuid.UUID,
     username: str,
-    tenant_id: int,
-    role_id: int,
+    tenant_id: uuid.UUID,
+    role_id: uuid.UUID,
     session_id: uuid.UUID,
     token_version: int,
 ) -> tuple[str, int]:
@@ -49,11 +49,11 @@ def create_user_access_token(
         subject=str(user_id),
         username=username,
         scope="user",
-        tenant_id=tenant_id,
+        tenant_id=str(tenant_id),
         session_id=session_id,
         token_version=token_version,
     )
-    payload["rid"] = role_id
+    payload["rid"] = str(role_id)
     return _encode(payload, settings.user_jwt_audience, settings.access_token_minutes)
 
 
@@ -72,7 +72,7 @@ def _base_payload(
     subject: str,
     username: str,
     scope: str,
-    tenant_id: int,
+    tenant_id: str,
     session_id: uuid.UUID,
     token_version: int,
 ) -> dict[str, Any]:

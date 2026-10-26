@@ -15,13 +15,17 @@ router = APIRouter(prefix="/context", tags=["admin-context"])
 
 def _menus(principal: AdminPrincipal) -> list[str]:
     """按 menu:* 权限返回可见菜单 key，前端仅用于渲染。"""
-    menus = [
-        code.split(":", 1)[1]
-        for code in principal.permissions
-        if code.startswith("menu:")
-    ]
+    menus = [code.split(":", 1)[1] for code in principal.permissions if code.startswith("menu:")]
     order = [
-        "agents", "grants", "roles", "users", "admin-users", "tenants", "audit",
+        "agents",
+        "grants",
+        "roles",
+        "users",
+        "departments",
+        "employments",
+        "admin-users",
+        "tenants",
+        "audit",
     ]
     return sorted(menus, key=lambda item: order.index(item) if item in order else len(order))
 

@@ -1,5 +1,7 @@
 """SQLAlchemy 工作单元实现：统一管理会话、仓储与事务边界。"""
 
+from uuid import UUID
+
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.resource import Component, Prompt, Skill, Tool
@@ -8,6 +10,8 @@ from internal.domain.repository.protocols import (
     AgentRepository,
     AgentTenantOpeningRepository,
     AuditLogRepository,
+    DepartmentRepository,
+    EmploymentRepository,
     PermissionResourceRepository,
     RefreshTokenRepository,
     ResourceGrantRepository,
@@ -29,6 +33,12 @@ from internal.infrastructure.repository.postgres_agent_tenant_opening_repository
 )
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
+)
+from internal.infrastructure.repository.postgres_department_repository import (
+    PostgresDepartmentRepository,
+)
+from internal.infrastructure.repository.postgres_employment_repository import (
+    PostgresEmploymentRepository,
 )
 from internal.infrastructure.repository.postgres_permission_resource_repository import (
     PostgresPermissionResourceRepository,
@@ -66,7 +76,7 @@ from internal.infrastructure.repository.postgres_user_repository import (
 class SqlAlchemyUnitOfWork:
     """请求级工作单元，应用服务通过它提交业务事务。"""
 
-    def __init__(self, tenant_id: int | None = None) -> None:
+    def __init__(self, tenant_id: UUID | None = None) -> None:
         # tenant_id 为 None 表示产品级平台上下文，非空表示租户级上下文。
         self.tenant_id = tenant_id
         self.session: Session = get_session_factory()()
@@ -82,9 +92,11 @@ class SqlAlchemyUnitOfWork:
             self.session
         )
         self.users: UserRepository = PostgresUserRepository(self.session)
-        self.user_refresh_tokens: UserRefreshTokenRepository = (
-            PostgresUserRefreshTokenRepository(self.session)
+        self.user_refresh_tokens: UserRefreshTokenRepository = PostgresUserRefreshTokenRepository(
+            self.session
         )
+        self.departments: DepartmentRepository = PostgresDepartmentRepository(self.session)
+        self.employments: EmploymentRepository = PostgresEmploymentRepository(self.session)
         self.resource_grants: ResourceGrantRepository = PostgresResourceGrantRepository(
             self.session
         )
@@ -101,9 +113,7 @@ class SqlAlchemyUnitOfWork:
         )
         self.prompts: ResourceRepository[Prompt] = PostgresPromptRepository(self.session, tenant_id)
 
-    def apply_scope(
-        self, role_ids: tuple[int, ...] = (), apply_role_filter: bool = True
-    ) -> None:
+    def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源与智能体仓储，其余仓储复用同一会话。"""
         self.agents = PostgresAgentRepository(
             self.session, self.tenant_id, role_ids, apply_role_filter

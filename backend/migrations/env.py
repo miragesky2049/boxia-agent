@@ -18,6 +18,8 @@ from internal.infrastructure.model import (  # noqa: E402,F401
     admin_user,
     agent,
     audit_log,
+    department,
+    employment,
     refresh_token,
     resource,
     tenant,

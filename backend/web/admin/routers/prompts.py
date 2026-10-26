@@ -1,5 +1,7 @@
 """提示词管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from internal.domain.entity.common import Page
@@ -24,7 +26,7 @@ def list_prompts(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
-    agent_id: int | None = Query(None, ge=1),
+    agent_id: UUID | None = Query(None),
 ) -> PageOut[PromptOut]:
     """分页查询提示词；agent_id 限定所属智能体。"""
     result = service.list(page, page_size, keyword, is_enabled, agent_id)
@@ -51,7 +53,7 @@ def create_prompt(
     response_model=PromptOut,
     dependencies=[Depends(require_permission("prompt:read"))],
 )
-def get_prompt(prompt_id: int, service: PromptServiceDep) -> PromptOut:
+def get_prompt(prompt_id: UUID, service: PromptServiceDep) -> PromptOut:
     """查询提示词详情。"""
     return PromptOut.model_validate(service.get(prompt_id))
 
@@ -61,7 +63,7 @@ def get_prompt(prompt_id: int, service: PromptServiceDep) -> PromptOut:
     response_model=PromptOut,
     dependencies=[Depends(require_permission("prompt:update"))],
 )
-def update_prompt(prompt_id: int, payload: PromptPayload, service: PromptServiceDep) -> PromptOut:
+def update_prompt(prompt_id: UUID, payload: PromptPayload, service: PromptServiceDep) -> PromptOut:
     """更新提示词。"""
     return PromptOut.model_validate(service.update(prompt_id, payload.model_dump()))
 
@@ -71,7 +73,7 @@ def update_prompt(prompt_id: int, payload: PromptPayload, service: PromptService
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission("prompt:delete"))],
 )
-def delete_prompt(prompt_id: int, service: PromptServiceDep) -> None:
+def delete_prompt(prompt_id: UUID, service: PromptServiceDep) -> None:
     """删除提示词。"""
     service.delete(prompt_id)
 
@@ -83,7 +85,7 @@ def delete_prompt(prompt_id: int, service: PromptServiceDep) -> None:
     dependencies=[Depends(require_permission("prompt:create"))],
 )
 def clone_prompt(
-    prompt_id: int,
+    prompt_id: UUID,
     payload: ResourceCloneRequest,
     principal: AdminAuthDep,
     request: Request,

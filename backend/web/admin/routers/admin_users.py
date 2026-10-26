@@ -1,5 +1,7 @@
 """管理员账号管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.auth import (
@@ -75,7 +77,7 @@ def create_user(
     dependencies=[Depends(require_permission("button:admin-user:update"))],
 )
 def update_user(
-    user_id: int,
+    user_id: UUID,
     payload: AdminUserUpdateRequest,
     request: Request,
     service: AdminUserServiceDep,
@@ -102,7 +104,7 @@ def update_user(
     dependencies=[Depends(require_permission("button:admin-user:delete"))],
 )
 def delete_user(
-    user_id: int,
+    user_id: UUID,
     request: Request,
     service: AdminUserServiceDep,
     principal: AdminAuthDep,
@@ -124,7 +126,7 @@ def delete_user(
     dependencies=[Depends(require_permission("button:admin-user:reset-password"))],
 )
 def reset_user_password(
-    user_id: int,
+    user_id: UUID,
     payload: AdminUserResetPasswordRequest,
     request: Request,
     service: AdminUserServiceDep,

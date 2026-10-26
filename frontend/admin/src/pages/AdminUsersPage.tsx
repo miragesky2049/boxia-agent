@@ -14,12 +14,12 @@ interface CreateFormValues {
   username: string
   display_name: string
   password: string
-  role_id: number
+  role_id: string
 }
 
 interface EditFormValues {
   display_name: string
-  role_id: number
+  role_id: string
 }
 
 interface ResetFormValues {

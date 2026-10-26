@@ -12,6 +12,6 @@ export async function listAgents(
   return request<PageResult<UserAgentSummary>>(`/user/agents${suffix}`)
 }
 
-export async function getAgent(agentId: number): Promise<UserAgentDetail> {
+export async function getAgent(agentId: string): Promise<UserAgentDetail> {
   return request<UserAgentDetail>(`/user/agents/${agentId}`)
 }

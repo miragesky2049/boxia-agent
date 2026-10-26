@@ -1,6 +1,7 @@
 """租户角色的 PostgreSQL 仓储实现。"""
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -16,23 +17,19 @@ class PostgresRoleRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def get_by_id(self, role_id: int) -> Role | None:
+    def get_by_id(self, role_id: UUID) -> Role | None:
         """按主键查询。"""
         row = self._session.get(RoleModel, role_id)
         return self._to_entity(row) if row else None
 
-    def get_by_code(self, tenant_id: int | None, code: str) -> Role | None:
+    def get_by_code(self, tenant_id: UUID | None, code: str) -> Role | None:
         """按作用域与编码查询（忽略大小写）；tenant_id 为空表示平台角色。"""
-        stmt = select(RoleModel).where(
-            func.lower(RoleModel.code) == code.strip().lower()
-        )
+        stmt = select(RoleModel).where(func.lower(RoleModel.code) == code.strip().lower())
         stmt = stmt.where(_tenant_condition(tenant_id))
         row = self._session.scalar(stmt)
         return self._to_entity(row) if row else None
 
-    def list_by_tenant(
-        self, tenant_id: int | None, include_inactive: bool = False
-    ) -> list[Role]:
+    def list_by_tenant(self, tenant_id: UUID | None, include_inactive: bool = False) -> list[Role]:
         """查询作用域内角色列表，系统角色排在前面；tenant_id 为空表示平台角色。"""
         stmt = select(RoleModel).where(_tenant_condition(tenant_id))
         if not include_inactive:
@@ -50,7 +47,7 @@ class PostgresRoleRepository:
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def update(self, role_id: int, values: dict[str, Any]) -> Role | None:
+    def update(self, role_id: UUID, values: dict[str, Any]) -> Role | None:
         """更新角色。"""
         row = self._session.get(RoleModel, role_id)
         if row is None:
@@ -61,7 +58,7 @@ class PostgresRoleRepository:
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def delete(self, role_id: int) -> bool:
+    def delete(self, role_id: UUID) -> bool:
         """删除角色。"""
         row = self._session.get(RoleModel, role_id)
         if row is None:
@@ -71,7 +68,7 @@ class PostgresRoleRepository:
         return True
 
     def code_exists(
-        self, tenant_id: int | None, code: str, exclude_id: int | None = None
+        self, tenant_id: UUID | None, code: str, exclude_id: UUID | None = None
     ) -> bool:
         """作用域内编码是否已存在（忽略大小写）。"""
         stmt = select(RoleModel.id).where(
@@ -83,7 +80,7 @@ class PostgresRoleRepository:
         return self._session.scalar(stmt) is not None
 
     def name_exists(
-        self, tenant_id: int | None, name: str, exclude_id: int | None = None
+        self, tenant_id: UUID | None, name: str, exclude_id: UUID | None = None
     ) -> bool:
         """作用域内名称是否已存在（忽略大小写）。"""
         stmt = select(RoleModel.id).where(
@@ -94,15 +91,13 @@ class PostgresRoleRepository:
             stmt = stmt.where(RoleModel.id != exclude_id)
         return self._session.scalar(stmt) is not None
 
-    def count_references(self, role_id: int) -> int:
+    def count_references(self, role_id: UUID) -> int:
         """统计用户、用户角色关联与平台管理员账号的引用数。"""
         user_count = self._session.scalar(
             select(func.count()).select_from(UserModel).where(UserModel.role_id == role_id)
         )
         relation_count = self._session.scalar(
-            select(func.count())
-            .select_from(UserRoleModel)
-            .where(UserRoleModel.role_id == role_id)
+            select(func.count()).select_from(UserRoleModel).where(UserRoleModel.role_id == role_id)
         )
         admin_count = self._session.scalar(
             select(func.count())
@@ -126,7 +121,7 @@ class PostgresRoleRepository:
         )
 
 
-def _tenant_condition(tenant_id: int | None):
+def _tenant_condition(tenant_id: UUID | None):
     """作用域条件：None 表示平台角色，其余为租户角色。"""
     if tenant_id is None:
         return RoleModel.tenant_id.is_(None)

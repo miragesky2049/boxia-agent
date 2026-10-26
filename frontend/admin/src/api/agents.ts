@@ -18,7 +18,7 @@ export async function listAgents(params: ListParams): Promise<PageResult<AgentSu
 }
 
 export async function listAgentTenants(
-  agentId: number,
+  agentId: string,
   params: { page?: number; page_size?: number; keyword?: string } = {},
 ): Promise<PageResult<AgentOpenedTenant>> {
   const query = new URLSearchParams()
@@ -30,7 +30,7 @@ export async function listAgentTenants(
   )
 }
 
-export async function getAgent(id: number): Promise<Agent> {
+export async function getAgent(id: string): Promise<Agent> {
   return request<Agent>(`/admin/agents/${id}`)
 }
 
@@ -38,13 +38,13 @@ export async function createAgent(payload: AgentPayload): Promise<Agent> {
   return request<Agent>('/admin/agents', { method: 'POST', body: JSON.stringify(payload) })
 }
 
-export async function updateAgent(id: number, payload: AgentPayload): Promise<Agent> {
+export async function updateAgent(id: string, payload: AgentPayload): Promise<Agent> {
   return request<Agent>(`/admin/agents/${id}`, {
     method: 'PUT',
     body: JSON.stringify(payload),
   })
 }
 
-export async function deleteAgent(id: number): Promise<void> {
+export async function deleteAgent(id: string): Promise<void> {
   await request<void>(`/admin/agents/${id}`, { method: 'DELETE' })
 }

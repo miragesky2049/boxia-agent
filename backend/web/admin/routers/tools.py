@@ -1,5 +1,7 @@
 """工具管理接口。"""
 
+from uuid import UUID
+
 from fastapi import APIRouter, Depends, Query, Request, status
 
 from web.admin.schemas.common import PageOut
@@ -22,7 +24,7 @@ def list_tools(
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
     is_enabled: bool | None = Query(None),
-    agent_id: int | None = Query(None, ge=1),
+    agent_id: UUID | None = Query(None),
 ) -> PageOut[ToolOut]:
     """分页查询工具；agent_id 限定所属智能体。"""
     result = service.list(page, page_size, keyword, is_enabled, agent_id)
@@ -54,7 +56,7 @@ def create_tool(
     response_model=ToolOut,
     dependencies=[Depends(require_permission("tool:read"))],
 )
-def get_tool(tool_id: int, service: ToolServiceDep) -> ToolOut:
+def get_tool(tool_id: UUID, service: ToolServiceDep) -> ToolOut:
     """查询工具详情。"""
     return ToolOut.model_validate(service.get(tool_id))
 
@@ -64,7 +66,7 @@ def get_tool(tool_id: int, service: ToolServiceDep) -> ToolOut:
     response_model=ToolOut,
     dependencies=[Depends(require_permission("tool:update"))],
 )
-def update_tool(tool_id: int, payload: ToolPayload, service: ToolServiceDep) -> ToolOut:
+def update_tool(tool_id: UUID, payload: ToolPayload, service: ToolServiceDep) -> ToolOut:
     """更新工具。"""
     return ToolOut.model_validate(service.update(tool_id, payload.model_dump()))
 
@@ -74,7 +76,7 @@ def update_tool(tool_id: int, payload: ToolPayload, service: ToolServiceDep) -> 
     status_code=status.HTTP_204_NO_CONTENT,
     dependencies=[Depends(require_permission("tool:delete"))],
 )
-def delete_tool(tool_id: int, service: ToolServiceDep) -> None:
+def delete_tool(tool_id: UUID, service: ToolServiceDep) -> None:
     """删除工具。"""
     service.delete(tool_id)
 
@@ -86,7 +88,7 @@ def delete_tool(tool_id: int, service: ToolServiceDep) -> None:
     dependencies=[Depends(require_permission("tool:create"))],
 )
 def clone_tool(
-    tool_id: int,
+    tool_id: UUID,
     payload: ResourceCloneRequest,
     principal: AdminAuthDep,
     request: Request,

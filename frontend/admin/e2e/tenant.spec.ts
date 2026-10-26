@@ -21,10 +21,10 @@ async function adminToken(request: APIRequestContext): Promise<string> {
   return ((await response.json()) as { access_token: string }).access_token
 }
 
-async function ensureTenant(request: APIRequestContext, token: string): Promise<number> {
+async function ensureTenant(request: APIRequestContext, token: string): Promise<string> {
   const auth = { Authorization: `Bearer ${token}` }
   const list = await request.get('/api/v1/admin/tenants?page_size=100', { headers: auth })
-  const body = (await list.json()) as { items: { id: number; code: string }[] }
+  const body = (await list.json()) as { items: { id: string; code: string }[] }
   const existing = body.items.find((item) => item.code === TENANT_CODE)
   if (existing) return existing.id
 
@@ -39,7 +39,7 @@ async function ensureTenant(request: APIRequestContext, token: string): Promise<
     },
   })
   expect(created.status()).toBe(201)
-  return ((await created.json()) as { id: number }).id
+  return ((await created.json()) as { id: string }).id
 }
 
 /** 每次测试前把租户管理员重置为已知初始密码。租户管理员已并入 users，平台无法直接重置。 */
@@ -198,7 +198,7 @@ test.describe('多租户', () => {
       data: { name, description: '产品级维护', is_enabled: true, config: {} },
     })
     expect(created.status()).toBe(201)
-    const agentId = ((await created.json()) as { id: number }).id
+    const agentId = ((await created.json()) as { id: string }).id
 
     try {
       await loginTenant(page, request, token)

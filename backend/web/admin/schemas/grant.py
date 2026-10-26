@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -11,20 +12,20 @@ class GrantOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     resource_type: str
-    resource_id: int
-    tenant_id: int | None
-    role_id: int | None = None
-    granted_by: int | None = None
+    resource_id: UUID
+    tenant_id: UUID | None
+    role_id: UUID | None = None
+    granted_by: UUID | None = None
     created_at: datetime
 
 
 class GrantInput(BaseModel):
     """授权项入参。"""
 
-    tenant_id: int = Field(ge=1)
-    role_id: int | None = Field(default=None, ge=1)
+    tenant_id: UUID = Field()
+    role_id: UUID | None = Field(default=None)
 
 
 class GrantReplaceRequest(BaseModel):
@@ -38,7 +39,7 @@ class GrantOverviewOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    resource_id: int
+    resource_id: UUID
     name: str
     description: str
     is_platform: bool
@@ -53,10 +54,10 @@ class GrantBatchRequest(BaseModel):
     """批量授权请求；role_ids 为空表示整个租户（仅平台视角）。"""
 
     resource_type: str = Field(max_length=16)
-    resource_ids: list[int] = Field(min_length=1, max_length=100)
+    resource_ids: list[UUID] = Field(min_length=1, max_length=100)
     mode: Literal["merge", "replace", "clear"]
-    tenant_id: int | None = Field(default=None, ge=1)
-    role_ids: list[int] = Field(default_factory=list)
+    tenant_id: UUID | None = Field(default=None)
+    role_ids: list[UUID] = Field(default_factory=list)
 
 
 class GrantBatchOut(BaseModel):
@@ -68,6 +69,6 @@ class GrantBatchOut(BaseModel):
 class UserRoleGrantRequest(BaseModel):
     """批量给用户授予角色请求。"""
 
-    user_ids: list[int] = Field(min_length=1, max_length=200)
-    role_ids: list[int] = Field(min_length=1, max_length=50)
-    tenant_id: int | None = Field(default=None, ge=1)
+    user_ids: list[UUID] = Field(min_length=1, max_length=200)
+    role_ids: list[UUID] = Field(min_length=1, max_length=50)
+    tenant_id: UUID | None = Field(default=None)

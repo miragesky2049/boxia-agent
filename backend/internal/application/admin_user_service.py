@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from datetime import UTC, datetime
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -63,8 +64,8 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role_id: int,
-        actor_id: int,
+        role_id: UUID,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -75,22 +76,34 @@ class AdminUserService:
             raise ValidationError("用户名需为 3-64 位字母、数字、下划线、点或短横线")
         if self._context.is_platform:
             return self._create_platform_admin(
-                normalized, password, display_name, role_id,
-                actor_id, actor_username, ip, user_agent,
+                normalized,
+                password,
+                display_name,
+                role_id,
+                actor_id,
+                actor_username,
+                ip,
+                user_agent,
             )
         return self._create_tenant_admin(
-            normalized, password, display_name, role_id,
-            actor_id, actor_username, ip, user_agent,
+            normalized,
+            password,
+            display_name,
+            role_id,
+            actor_id,
+            actor_username,
+            ip,
+            user_agent,
         )
 
     def update(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
         display_name: str | None,
-        role_id: int | None,
+        role_id: UUID | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -98,20 +111,32 @@ class AdminUserService:
         """调整显示名、角色与启用状态；禁用或改角色会撤销全部会话。"""
         if self._context.is_platform:
             return self._update_platform_admin(
-                user_id, display_name, role_id, is_active,
-                actor_id, actor_username, ip, user_agent,
+                user_id,
+                display_name,
+                role_id,
+                is_active,
+                actor_id,
+                actor_username,
+                ip,
+                user_agent,
             )
         return self._update_tenant_admin(
-            user_id, display_name, role_id, is_active,
-            actor_id, actor_username, ip, user_agent,
+            user_id,
+            display_name,
+            role_id,
+            is_active,
+            actor_id,
+            actor_username,
+            ip,
+            user_agent,
         )
 
     def reset_password(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
         new_password: str,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -131,7 +156,9 @@ class AdminUserService:
             tenant_id = self._require_tenant()
             tenant_admin = self._get_tenant_admin(user_id, tenant_id)
             validate_password_strength(new_password, tenant_admin.username)
-            self._uow.users.update_password(user_id, hash_password(new_password))
+            self._uow.users.update_password(
+                user_id, hash_password(new_password), True, datetime.now(UTC)
+            )
             self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
         record_audit(
             self._uow,
@@ -148,9 +175,9 @@ class AdminUserService:
 
     def delete(
         self,
-        user_id: int,
+        user_id: UUID,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -193,8 +220,8 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role_id: int,
-        actor_id: int,
+        role_id: UUID,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
@@ -240,8 +267,8 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role_id: int,
-        actor_id: int,
+        role_id: UUID,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
@@ -260,6 +287,8 @@ class AdminUserService:
                 "display_name": display_name.strip() or username,
                 "is_active": True,
                 "role_id": matched_role.id,
+                "must_change_password": True,
+                "password_changed_at": datetime.now(UTC),
             }
         )
         self._uow.users.replace_roles(user.id, tenant_id, [matched_role.id])
@@ -285,11 +314,11 @@ class AdminUserService:
 
     def _update_platform_admin(
         self,
-        user_id: int,
+        user_id: UUID,
         display_name: str | None,
-        role_id: int | None,
+        role_id: UUID | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
@@ -334,11 +363,11 @@ class AdminUserService:
 
     def _update_tenant_admin(
         self,
-        user_id: int,
+        user_id: UUID,
         display_name: str | None,
-        role_id: int | None,
+        role_id: UUID | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,
@@ -391,7 +420,7 @@ class AdminUserService:
             raise NotFoundError("管理员不存在")
         return self._to_admin_user(updated, admin_role)
 
-    def _get_tenant_admin(self, user_id: int, tenant_id: int) -> User:
+    def _get_tenant_admin(self, user_id: UUID, tenant_id: UUID) -> User:
         """读取本租户且拥有管理端访问权限的用户。"""
         target = self._uow.users.get_by_id(user_id)
         if (
@@ -402,13 +431,14 @@ class AdminUserService:
             raise NotFoundError("管理员不存在")
         return target
 
-    def _role_map(self, tenant_id: int) -> dict[int, Role]:
+    def _role_map(self, tenant_id: UUID) -> dict[UUID, Role]:
         """一次读取租户全部角色，避免逐用户查询。"""
-        return {role.id: role for role in self._uow.roles.list_by_tenant(
-            tenant_id, include_inactive=True
-        )}
+        return {
+            role.id: role
+            for role in self._uow.roles.list_by_tenant(tenant_id, include_inactive=True)
+        }
 
-    def _role_scope_meta(self, tenant_id: int) -> tuple[set[int], set[int]]:
+    def _role_scope_meta(self, tenant_id: UUID) -> tuple[set[UUID], set[UUID]]:
         """返回租户内拥有管理端访问、全量数据权限的角色集合。"""
         return (
             self._uow.role_permissions.list_role_ids_with_code(tenant_id, CONSOLE_ACCESS),
@@ -418,9 +448,9 @@ class AdminUserService:
     @staticmethod
     def _pick_admin_role(
         user: User,
-        role_map: dict[int, Role],
-        console_role_ids: set[int],
-        data_all_role_ids: set[int],
+        role_map: dict[UUID, Role],
+        console_role_ids: set[UUID],
+        data_all_role_ids: set[UUID],
     ) -> Role | None:
         """从用户角色中选出管理角色，全量数据权限优先。"""
         admin_roles = [
@@ -436,7 +466,7 @@ class AdminUserService:
                 return role
         return admin_roles[0]
 
-    def _resolve_tenant_admin_role(self, tenant_id: int, role_id: int) -> Role:
+    def _resolve_tenant_admin_role(self, tenant_id: UUID, role_id: UUID) -> Role:
         """解析租户管理员角色，必须是本租户启用且可访问管理端的角色。"""
         matched = self._uow.roles.get_by_id(role_id)
         if matched is None or matched.tenant_id != tenant_id:
@@ -446,13 +476,13 @@ class AdminUserService:
         self._ensure_console_role(matched)
         return matched
 
-    def _require_tenant(self) -> int:
+    def _require_tenant(self) -> UUID:
         tenant_id = self._context.tenant_id
         if self._context.is_platform or tenant_id is None:
             raise ForbiddenError("租户管理员仅可由租户平台维护")
         return tenant_id
 
-    def _resolve_platform_role(self, role_id: int) -> Role:
+    def _resolve_platform_role(self, role_id: UUID) -> Role:
         """解析平台账号绑定角色，必须是启用的平台角色。"""
         matched = self._uow.roles.get_by_id(role_id)
         if matched is None or matched.tenant_id is not None:
@@ -481,8 +511,8 @@ class AdminUserService:
             token_version=user.token_version,
             failed_login_count=user.failed_login_count,
             locked_until=user.locked_until,
-            must_change_password=False,
-            password_changed_at=None,
+            must_change_password=user.must_change_password,
+            password_changed_at=user.password_changed_at,
             tenant_id=user.tenant_id,
             role_id=role.id,
             role_code=role.code,
@@ -502,7 +532,7 @@ class AuditService:
         page: int,
         page_size: int,
         action: str | None,
-        actor_id: int | None,
+        actor_id: UUID | None,
     ) -> Page[AuditLog]:
         """分页查询审计日志：产品级可看全部，租户只看本租户。"""
         page = max(page, 1)

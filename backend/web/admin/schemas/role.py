@@ -1,6 +1,7 @@
 """角色请求/响应模型（平台角色 tenant_id 为空）。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -10,8 +11,8 @@ class RoleOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int | None
+    id: UUID
+    tenant_id: UUID | None
     code: str
     name: str
     description: str

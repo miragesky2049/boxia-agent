@@ -3,13 +3,14 @@
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 
 @dataclass(frozen=True)
 class Skill:
     """技能。"""
 
-    id: int
+    id: UUID
     name: str
     description: str
     content: str
@@ -17,8 +18,8 @@ class Skill:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: int | None = None
-    agent_id: int | None = None
+    tenant_id: UUID | None = None
+    agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -30,8 +31,8 @@ class Skill:
 class SkillFile:
     """技能包内的单个文件，path 为技能包根目录下的相对路径。"""
 
-    id: int
-    skill_id: int
+    id: UUID
+    skill_id: UUID
     path: str
     content: str
     content_hash: str
@@ -45,7 +46,7 @@ class SkillFile:
 class Tool:
     """工具。"""
 
-    id: int
+    id: UUID
     name: str
     description: str
     type: str
@@ -53,8 +54,8 @@ class Tool:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: int | None = None
-    agent_id: int | None = None
+    tenant_id: UUID | None = None
+    agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -66,7 +67,7 @@ class Tool:
 class Component:
     """组件。"""
 
-    id: int
+    id: UUID
     name: str
     description: str
     type: str
@@ -74,8 +75,8 @@ class Component:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: int | None = None
-    agent_id: int | None = None
+    tenant_id: UUID | None = None
+    agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -87,7 +88,7 @@ class Component:
 class Prompt:
     """提示词。"""
 
-    id: int
+    id: UUID
     name: str
     description: str
     content: str
@@ -96,8 +97,8 @@ class Prompt:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: int | None = None
-    agent_id: int | None = None
+    tenant_id: UUID | None = None
+    agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
@@ -109,7 +110,7 @@ class Prompt:
 class Agent:
     """智能体。"""
 
-    id: int
+    id: UUID
     name: str
     avatar_url: str
     description: str
@@ -117,9 +118,10 @@ class Agent:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tool_ids: list[int] = field(default_factory=list)
-    skill_ids: list[int] = field(default_factory=list)
-    tenant_id: int | None = None
+    tool_ids: list[UUID] = field(default_factory=list)
+    skill_ids: list[UUID] = field(default_factory=list)
+    tenant_id: UUID | None = None
+    department_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:

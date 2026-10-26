@@ -16,7 +16,7 @@ import type {
 } from './types'
 
 export interface RoleListParams {
-  tenant_id?: number
+  tenant_id?: string
   include_inactive?: boolean
 }
 
@@ -36,57 +36,57 @@ export const rolesApi = {
     const suffix = query.toString()
     return request<Role[]>(`/admin/roles${suffix ? `?${suffix}` : ''}`)
   },
-  async get(id: number, tenantId?: number): Promise<Role> {
+  async get(id: string, tenantId?: string): Promise<Role> {
     const suffix = tenantId !== undefined ? `?tenant_id=${tenantId}` : ''
     return request<Role>(`/admin/roles/${id}${suffix}`)
   },
   async create(payload: RoleCreatePayload): Promise<Role> {
     return request<Role>('/admin/roles', { method: 'POST', body: JSON.stringify(payload) })
   },
-  async copy(id: number, payload: RoleCopyPayload): Promise<Role> {
+  async copy(id: string, payload: RoleCopyPayload): Promise<Role> {
     return request<Role>(`/admin/roles/${id}/copy`, {
       method: 'POST',
       body: JSON.stringify(payload),
     })
   },
-  async update(id: number, payload: RoleUpdatePayload): Promise<Role> {
+  async update(id: string, payload: RoleUpdatePayload): Promise<Role> {
     return request<Role>(`/admin/roles/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await request<void>(`/admin/roles/${id}`, { method: 'DELETE' })
   },
   async permissions(): Promise<PermissionResource[]> {
     return request<PermissionResource[]>('/admin/permissions')
   },
-  async listPermissions(id: number): Promise<RolePermissionList> {
+  async listPermissions(id: string): Promise<RolePermissionList> {
     return request<RolePermissionList>(`/admin/roles/${id}/permissions`)
   },
-  async replacePermissions(id: number, codes: string[]): Promise<RolePermissionList> {
+  async replacePermissions(id: string, codes: string[]): Promise<RolePermissionList> {
     return request<RolePermissionList>(`/admin/roles/${id}/permissions`, {
       method: 'PUT',
       body: JSON.stringify({ codes }),
     })
   },
-  async addPermissions(id: number, codes: string[]): Promise<RolePermissionList> {
+  async addPermissions(id: string, codes: string[]): Promise<RolePermissionList> {
     return request<RolePermissionList>(`/admin/roles/${id}/permissions`, {
       method: 'POST',
       body: JSON.stringify({ codes }),
     })
   },
-  async removePermission(id: number, code: string): Promise<void> {
+  async removePermission(id: string, code: string): Promise<void> {
     await request<void>(
       `/admin/roles/${id}/permissions/${encodeURIComponent(code)}`,
       { method: 'DELETE' },
     )
   },
-  async grantSummary(id: number): Promise<RoleGrantSummary> {
+  async grantSummary(id: string): Promise<RoleGrantSummary> {
     return request<RoleGrantSummary>(`/admin/roles/${id}/grants/summary`)
   },
   async listGrants(
-    id: number,
+    id: string,
     params: RoleGrantListParams,
   ): Promise<PageResult<RoleGrantResource>> {
     const query = new URLSearchParams({
@@ -101,9 +101,9 @@ export const rolesApi = {
     )
   },
   async addGrants(
-    id: number,
+    id: string,
     resourceType: ResourceType,
-    resourceIds: number[],
+    resourceIds: string[],
   ): Promise<{ updated: number }> {
     return request<{ updated: number }>(`/admin/roles/${id}/grants/${resourceType}`, {
       method: 'POST',
@@ -111,9 +111,9 @@ export const rolesApi = {
     })
   },
   async removeGrant(
-    id: number,
+    id: string,
     resourceType: ResourceType,
-    resourceId: number,
+    resourceId: string,
   ): Promise<void> {
     await request<void>(`/admin/roles/${id}/grants/${resourceType}/${resourceId}`, {
       method: 'DELETE',
@@ -124,8 +124,8 @@ export const rolesApi = {
 export const grantsApi = {
   async list(
     resourceType: ResourceType,
-    resourceId: number,
-    tenantId?: number,
+    resourceId: string,
+    tenantId?: string,
   ): Promise<ResourceGrant[]> {
     const query = new URLSearchParams({
       resource_type: resourceType,

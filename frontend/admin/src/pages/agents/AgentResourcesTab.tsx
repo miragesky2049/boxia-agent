@@ -157,7 +157,7 @@ const PROMPT_DEFAULTS: PromptPayload = {
   category: '',
 }
 
-function SkillList({ agentId }: { agentId: number }) {
+function SkillList({ agentId }: { agentId: string }) {
   const [packageSkill, setPackageSkill] = useState<Skill | null>(null)
   const reloadRef = useRef<() => Promise<void>>(async () => undefined)
 
@@ -195,7 +195,7 @@ function SkillList({ agentId }: { agentId: number }) {
   )
 }
 
-export default function AgentResourcesTab({ agentId }: { agentId?: number }) {
+export default function AgentResourcesTab({ agentId }: { agentId?: string }) {
   if (agentId === undefined) {
     return <div className="page-card">请先保存智能体，再维护技能、工具、组件与提示词。</div>
   }

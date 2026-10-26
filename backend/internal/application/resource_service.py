@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from dataclasses import fields
 from typing import Any, Generic, Protocol, TypeVar, cast
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -22,7 +23,7 @@ class _ResourceEntity(Protocol):
     """资源实体最小契约：通用用例只依赖标识与名称。"""
 
     @property
-    def id(self) -> int: ...
+    def id(self) -> UUID: ...
 
     @property
     def name(self) -> str: ...
@@ -56,23 +57,21 @@ class ResourceService(Generic[T]):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        agent_id: int | None = None,
+        agent_id: UUID | None = None,
     ) -> Page[T]:
         """分页查询；agent_id 限定所属智能体。"""
         page, page_size = _normalize_paging(page, page_size)
-        items, total = self._repository.list_page(
-            page, page_size, keyword, is_enabled, agent_id
-        )
+        items, total = self._repository.list_page(page, page_size, keyword, is_enabled, agent_id)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
-    def get(self, resource_id: int) -> T:
+    def get(self, resource_id: UUID) -> T:
         """查询详情。"""
         item = self._repository.get(resource_id)
         if item is None:
             raise NotFoundError(f"{self._label}不存在")
         return item
 
-    def create(self, values: dict, actor_role_ids: Sequence[int] = ()) -> T:
+    def create(self, values: dict, actor_role_ids: Sequence[UUID] = ()) -> T:
         """创建；所属智能体必须与资源同租户，并授权给创建者角色。"""
         if self._repository.name_exists(values["name"]):
             raise ConflictError(f"{self._label}名称已存在")
@@ -82,7 +81,7 @@ class ResourceService(Generic[T]):
         self._uow.commit()
         return item
 
-    def update(self, resource_id: int, values: dict) -> T:
+    def update(self, resource_id: UUID, values: dict) -> T:
         """全量更新；产品级资源仅产品级平台可维护。"""
         existing = self._repository.get(resource_id)
         if existing is None:
@@ -97,7 +96,7 @@ class ResourceService(Generic[T]):
         self._uow.commit()
         return updated
 
-    def delete(self, resource_id: int) -> None:
+    def delete(self, resource_id: UUID) -> None:
         """删除；产品级资源仅产品级平台可维护。"""
         existing = self._repository.get(resource_id)
         if existing is None:
@@ -110,13 +109,13 @@ class ResourceService(Generic[T]):
 
     def clone_to_agent(
         self,
-        resource_id: int,
+        resource_id: UUID,
         *,
-        agent_id: int,
+        agent_id: UUID,
         name: str | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
-        actor_role_ids: Sequence[int] = (),
+        actor_role_ids: Sequence[UUID] = (),
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> T:
@@ -170,9 +169,7 @@ class ResourceService(Generic[T]):
             return
         grants = [
             grant
-            for grant in self._uow.resource_grants.list_for_resource(
-                self._resource_type, source.id
-            )
+            for grant in self._uow.resource_grants.list_for_resource(self._resource_type, source.id)
             if grant.tenant_id == clone_tenant
         ]
         if any(grant.role_id is None for grant in grants):
@@ -190,18 +187,16 @@ class ResourceService(Generic[T]):
                 None,
             )
 
-    def _grant_actor(self, item: T, actor_role_ids: Sequence[int]) -> None:
+    def _grant_actor(self, item: T, actor_role_ids: Sequence[UUID]) -> None:
         """把租户自有资源授权给创建者角色，保证创建者立即可见；平台资源不授权。"""
         tenant_id = getattr(item, "tenant_id", None)
-        role_ids = sorted({int(role_id) for role_id in actor_role_ids})
+        role_ids = sorted(set(actor_role_ids))
         if tenant_id is None or not role_ids:
             return
         # 克隆已复制授权时不再追加创建者角色，避免放大可见范围
         existing = [
             grant
-            for grant in self._uow.resource_grants.list_for_resource(
-                self._resource_type, item.id
-            )
+            for grant in self._uow.resource_grants.list_for_resource(self._resource_type, item.id)
             if grant.tenant_id == tenant_id
         ]
         if existing:
@@ -217,7 +212,7 @@ class ResourceService(Generic[T]):
         agent_id = payload.get("agent_id")
         if agent_id is None:
             return payload
-        agent = self._uow.agents.get(int(agent_id))
+        agent = self._uow.agents.get(UUID(str(agent_id)))
         if agent is None:
             raise ValidationError("所属智能体不存在或无权访问")
         if not self._context.can_manage(agent.tenant_id):

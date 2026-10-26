@@ -1,12 +1,24 @@
 """审计日志的 PostgreSQL 仓储实现。"""
 
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.audit_log import AuditLog
 from internal.infrastructure.model.audit_log import AuditLogModel
+
+
+def _json_safe(value: Any) -> Any:
+    """把 UUID 等非 JSON 原生类型转换为字符串，审计明细可携带资源 ID。"""
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_json_safe(item) for item in value]
+    return value
 
 
 class PostgresAuditLogRepository:
@@ -17,7 +29,10 @@ class PostgresAuditLogRepository:
 
     def record(self, values: dict[str, Any]) -> None:
         """写入审计记录（调用方负责提交）。"""
-        self._session.add(AuditLogModel(**values))
+        payload = dict(values)
+        # JSONB 列由 psycopg 用标准 json 序列化，UUID 需先转为字符串
+        payload["detail"] = _json_safe(payload.get("detail"))
+        self._session.add(AuditLogModel(**payload))
         self._session.flush()
 
     def list_page(
@@ -25,8 +40,8 @@ class PostgresAuditLogRepository:
         page: int,
         page_size: int,
         action: str | None,
-        actor_id: int | None,
-        tenant_id: int | None = None,
+        actor_id: UUID | None,
+        tenant_id: UUID | None = None,
     ) -> tuple[list[AuditLog], int]:
         """分页查询审计记录；tenant_id 非空时只查该租户。"""
         stmt = select(AuditLogModel)

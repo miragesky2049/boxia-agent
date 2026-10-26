@@ -107,6 +107,4 @@ def change_password(
 @login_router.get("/me", response_model=AdminUserOut)
 def get_current_admin(principal: AdminAuthDep, service: AuthServiceDep) -> AdminUserOut:
     """返回当前登录的管理员信息。"""
-    return AdminUserOut.model_validate(
-        service.get_profile(principal.user_id, principal.tenant_id)
-    )
+    return AdminUserOut.model_validate(service.get_profile(principal.user_id, principal.tenant_id))
