@@ -13,6 +13,7 @@ export interface UserListParams {
   page?: number
   page_size?: number
   keyword?: string
+  department_id?: string
 }
 
 function buildQuery(params: UserListParams): string {
@@ -20,6 +21,7 @@ function buildQuery(params: UserListParams): string {
   query.set('page', String(params.page ?? 1))
   query.set('page_size', String(params.page_size ?? 20))
   if (params.keyword) query.set('keyword', params.keyword)
+  if (params.department_id) query.set('department_id', params.department_id)
   return query.toString()
 }
 
@@ -34,16 +36,16 @@ export const usersApi = {
       body: JSON.stringify(payload),
     })
   },
-  async update(id: number, payload: UserUpdatePayload): Promise<User> {
+  async update(id: string, payload: UserUpdatePayload): Promise<User> {
     return request<User>(`/admin/users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await request<void>(`/admin/users/${id}`, { method: 'DELETE' })
   },
-  async resetPassword(id: number, newPassword: string): Promise<void> {
+  async resetPassword(id: string, newPassword: string): Promise<void> {
     await request<void>(`/admin/users/${id}/password`, {
       method: 'POST',
       body: JSON.stringify({ new_password: newPassword }),
@@ -62,16 +64,16 @@ export const adminUsersApi = {
       body: JSON.stringify(payload),
     })
   },
-  async update(id: number, payload: AdminUserUpdatePayload): Promise<AdminUser> {
+  async update(id: string, payload: AdminUserUpdatePayload): Promise<AdminUser> {
     return request<AdminUser>(`/admin/admin-users/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),
     })
   },
-  async remove(id: number): Promise<void> {
+  async remove(id: string): Promise<void> {
     await request<void>(`/admin/admin-users/${id}`, { method: 'DELETE' })
   },
-  async resetPassword(id: number, newPassword: string): Promise<void> {
+  async resetPassword(id: string, newPassword: string): Promise<void> {
     await request<void>(`/admin/admin-users/${id}/password`, {
       method: 'POST',
       body: JSON.stringify({ new_password: newPassword }),

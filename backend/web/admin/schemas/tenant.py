@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Literal
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,7 +18,7 @@ class TenantOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     code: str
     name: str
     is_active: bool
@@ -45,14 +46,14 @@ class TenantUpdateRequest(BaseModel):
 class TenantAgentOut(BaseModel):
     """租户详情页的产品智能体及其开通状态。"""
 
-    id: int
+    id: UUID
     name: str
     avatar_url: str
     description: str
     is_enabled: bool
     is_opened: bool
     opened_at: datetime | None = None
-    opened_by: int | None = None
+    opened_by: UUID | None = None
 
 
 class TenantAgentOpenRequest(BaseModel):
@@ -64,8 +65,8 @@ class TenantAgentOpenRequest(BaseModel):
 class TenantAgentOpenOut(BaseModel):
     """开通/关闭操作结果。"""
 
-    agent_id: int
-    tenant_id: int
+    agent_id: UUID
+    tenant_id: UUID
     is_opened: bool
     opened_at: datetime | None = None
 
@@ -73,28 +74,28 @@ class TenantAgentOpenOut(BaseModel):
 class TenantAgentBatchOpenRequest(BaseModel):
     """批量开通或关闭租户对产品智能体的访问。"""
 
-    agent_ids: list[int] = Field(min_length=1, max_length=100)
+    agent_ids: list[UUID] = Field(min_length=1, max_length=100)
     opened: bool
 
 
 class TenantAgentBatchOpenOut(BaseModel):
     """批量开通/关闭操作结果。"""
 
-    tenant_id: int
+    tenant_id: UUID
     opened: bool
     count: int
-    agent_ids: list[int]
+    agent_ids: list[UUID]
 
 
 class AgentOpenedTenantOut(BaseModel):
     """智能体详情页展示的已开通租户。"""
 
-    id: int
+    id: UUID
     code: str
     name: str
     is_active: bool
     opened_at: datetime
-    opened_by: int | None = None
+    opened_by: UUID | None = None
 
 
 class PasswordPolicyOut(BaseModel):

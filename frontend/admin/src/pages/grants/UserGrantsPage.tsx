@@ -9,7 +9,7 @@ import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
 
 interface AssignFormValues {
-  role_ids: number[]
+  role_ids: string[]
 }
 
 const MAX_BATCH_SELECTION = 100
@@ -26,7 +26,7 @@ export default function UserGrantsPage() {
   const [roles, setRoles] = useState<Role[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
-  const [selectedRowKeys, setSelectedRowKeys] = useState<number[]>([])
+  const [selectedRowKeys, setSelectedRowKeys] = useState<string[]>([])
   const [targets, setTargets] = useState<User[]>([])
   const [form] = Form.useForm<AssignFormValues>()
 
@@ -64,7 +64,7 @@ export default function UserGrantsPage() {
     .filter((role) => role.is_active)
     .map((role) => ({ label: role.name, value: role.id }))
 
-  const roleNames = (roleIds: number[]) =>
+  const roleNames = (roleIds: string[]) =>
     roleIds.map((roleId) => {
       const role = roles.find((item) => item.id === roleId)
       if (!role) return `角色 #${roleId}`
@@ -218,7 +218,7 @@ export default function UserGrantsPage() {
               message.warning(`单次最多选择 ${MAX_BATCH_SELECTION} 个用户`)
               return
             }
-            setSelectedRowKeys(keys.map(Number))
+            setSelectedRowKeys(keys.map(String))
           },
         }}
         pagination={{

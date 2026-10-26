@@ -60,7 +60,7 @@ interface ResourceListPageProps<T extends ResourceBase, P> {
   defaults: P
   createText?: string
   /** 固定归属智能体：列表按该智能体过滤，新建时自动写入归属。 */
-  agentId?: number
+  agentId?: string
   /** 资源类型；克隆操作需要它定位资源接口。 */
   resourceType?: ResourceType
   /** 是否展示克隆到其他智能体的操作。 */
@@ -117,7 +117,7 @@ export default function ResourceListPage<T extends ResourceBase, P>({
   const [cloneAgents, setCloneAgents] = useState<AgentSummary[]>([])
   const [cloning, setCloning] = useState(false)
   const [grantTarget, setGrantTarget] = useState<T | null>(null)
-  const [cloneForm] = Form.useForm<{ agent_id: number; name?: string }>()
+  const [cloneForm] = Form.useForm<{ agent_id: string; name?: string }>()
 
   const load = useCallback(async () => {
     setLoading(true)

@@ -1,5 +1,7 @@
 """权限资源目录的 PostgreSQL 仓储实现。"""
 
+from uuid import UUID
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -27,9 +29,7 @@ class PostgresPermissionResourceRepository:
         ).all()
         return [self._to_entity(row) for row in rows]
 
-    def list_by_codes(
-        self, codes: set[str] | frozenset[str]
-    ) -> list[PermissionResource]:
+    def list_by_codes(self, codes: set[str] | frozenset[str]) -> list[PermissionResource]:
         """按编码批量读取权限资源。"""
         if not codes:
             return []
@@ -40,7 +40,7 @@ class PostgresPermissionResourceRepository:
         ).all()
         return [self._to_entity(row) for row in rows]
 
-    def list_ids_by_codes(self, codes: set[str] | frozenset[str]) -> dict[str, int]:
+    def list_ids_by_codes(self, codes: set[str] | frozenset[str]) -> dict[str, UUID]:
         """返回编码到主键的映射。"""
         if not codes:
             return {}
@@ -50,7 +50,7 @@ class PostgresPermissionResourceRepository:
                 PermissionResourceModel.is_active.is_(True),
             )
         ).all()
-        return {str(code): int(permission_id) for code, permission_id in rows}
+        return {str(code): permission_id for code, permission_id in rows}
 
     def existing_codes(self, codes: set[str] | frozenset[str]) -> set[str]:
         """返回给定编码中真实存在且启用的部分。"""

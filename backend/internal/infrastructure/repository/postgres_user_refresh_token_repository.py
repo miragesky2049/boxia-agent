@@ -34,7 +34,7 @@ class PostgresUserRefreshTokenRepository:
         )
         return self._to_entity(row) if row else None
 
-    def rotate(self, old_id: int, replaced_by_id: int) -> None:
+    def rotate(self, old_id: UUID, replaced_by_id: UUID) -> None:
         """标记旧令牌已轮换并撤销。"""
         now = datetime.now(UTC)
         row = self._session.get(UserRefreshTokenModel, old_id)
@@ -58,7 +58,7 @@ class PostgresUserRefreshTokenRepository:
         self._session.flush()
         return int(getattr(result, "rowcount", 0) or 0)
 
-    def revoke_all_for_user(self, user_id: int) -> int:
+    def revoke_all_for_user(self, user_id: UUID) -> int:
         """撤销用户全部未撤销令牌。"""
         result = self._session.execute(
             update(UserRefreshTokenModel)

@@ -6,6 +6,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -32,7 +33,7 @@ MAX_BATCH_RESOURCES = 100
 class ResourceGrantOverview:
     """授权管理列表项：资源基础信息 + 授权汇总。"""
 
-    resource_id: int
+    resource_id: UUID
     name: str
     description: str
     is_platform: bool
@@ -88,8 +89,8 @@ class GrantService:
     def list_grants(
         self,
         resource_type: str,
-        resource_id: int,
-        tenant_id: int | None = None,
+        resource_id: UUID,
+        tenant_id: UUID | None = None,
     ) -> list[ResourceGrant]:
         """查询资源授权；平台可指定租户，租户视角只能查看本租户。"""
         self._require_resource(resource_type, resource_id)
@@ -107,10 +108,10 @@ class GrantService:
     def replace(
         self,
         resource_type: str,
-        resource_id: int,
-        grants: list[tuple[int, int | None]],
+        resource_id: UUID,
+        grants: list[tuple[UUID, UUID | None]],
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -141,7 +142,7 @@ class GrantService:
             tenant_id = self._require_tenant()
             if any(role_id is None for _, role_id in grants):
                 raise ValidationError("租户授权必须指定角色")
-            role_ids = [int(role_id) for _, role_id in grants if role_id is not None]
+            role_ids = [role_id for _, role_id in grants if role_id is not None]
             self._validate_tenant_roles(tenant_id, role_ids)
             self._uow.resource_grants.replace_for_tenant(
                 resource_type, resource_id, tenant_id, role_ids, actor_id
@@ -166,12 +167,12 @@ class GrantService:
     def replace_batch(
         self,
         resource_type: str,
-        resource_ids: list[int],
+        resource_ids: list[UUID],
         mode: str,
-        tenant_id: int | None,
-        role_ids: list[int],
+        tenant_id: UUID | None,
+        role_ids: list[UUID],
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -180,7 +181,7 @@ class GrantService:
         repository = self._resource_repository(resource_type)
         if mode not in GRANT_MODES:
             raise ValidationError(f"授权模式必须是 {', '.join(GRANT_MODES)} 之一")
-        ids = sorted({int(resource_id) for resource_id in resource_ids})
+        ids = sorted(set(resource_ids))
         if not ids:
             raise ValidationError("请至少选择一个资源")
         if len(ids) > MAX_BATCH_RESOURCES:
@@ -193,7 +194,7 @@ class GrantService:
 
         # 先按固定顺序加锁，再读取旧授权，避免并发 merge 丢失更新与死锁
         self._uow.resource_grants.lock_resources(resource_type, ids)
-        before_by_resource: dict[int, list[ResourceGrant]] = defaultdict(list)
+        before_by_resource: dict[UUID, list[ResourceGrant]] = defaultdict(list)
         for grant in self._uow.resource_grants.list_for_resources(
             resource_type, ids, target_tenant
         ):
@@ -234,19 +235,19 @@ class GrantService:
 
     def assign_user_roles(
         self,
-        user_ids: list[int],
-        role_ids: list[int],
-        tenant_id: int | None,
+        user_ids: list[UUID],
+        role_ids: list[UUID],
+        tenant_id: UUID | None,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> int:
         """批量给用户追加角色；已存在的角色关联自动跳过。"""
         target_tenant = self._resolve_user_role_tenant(tenant_id)
-        unique_users = sorted({int(item) for item in user_ids})
-        unique_roles = sorted({int(item) for item in role_ids})
+        unique_users = sorted(set(user_ids))
+        unique_roles = sorted(set(role_ids))
         if not unique_users:
             raise ValidationError("请至少选择一个用户")
         if not unique_roles:
@@ -254,9 +255,7 @@ class GrantService:
         if self._uow.users.ids_existing(target_tenant, unique_users) != set(unique_users):
             raise NotFoundError("部分用户不存在或不属于当前租户")
         self._validate_tenant_roles(target_tenant, unique_roles)
-        added = self._uow.users.add_roles_for_users(
-            unique_users, target_tenant, unique_roles
-        )
+        added = self._uow.users.add_roles_for_users(unique_users, target_tenant, unique_roles)
         record_audit(
             self._uow,
             action="user.roles_granted",
@@ -276,7 +275,7 @@ class GrantService:
         self._uow.commit()
         return added
 
-    def _resolve_user_role_tenant(self, tenant_id: int | None) -> int:
+    def _resolve_user_role_tenant(self, tenant_id: UUID | None) -> UUID:
         """用户角色批量授权只允许租户作用域；平台需显式指定租户。"""
         if self._context.is_platform:
             if tenant_id is None:
@@ -292,11 +291,11 @@ class GrantService:
     def _resolve_batch_scope(
         self,
         mode: str,
-        tenant_id: int | None,
-        role_ids: list[int],
-    ) -> tuple[int, list[int] | None]:
+        tenant_id: UUID | None,
+        role_ids: list[UUID],
+    ) -> tuple[UUID, list[UUID] | None]:
         """校验并归一化批量授权目标租户与角色；None 表示整个租户。"""
-        normalized_roles = sorted({int(role_id) for role_id in role_ids})
+        normalized_roles = sorted(set(role_ids))
         if self._context.is_platform:
             if tenant_id is None:
                 raise ValidationError("请选择授权租户")
@@ -320,9 +319,9 @@ class GrantService:
     @staticmethod
     def _merge_roles(
         mode: str,
-        scope_roles: list[int] | None,
+        scope_roles: list[UUID] | None,
         before: list[ResourceGrant],
-    ) -> list[int] | None:
+    ) -> list[UUID] | None:
         """按模式计算某资源对该租户的新授权；None 表示整个租户。"""
         if mode == "clear":
             return []
@@ -360,17 +359,17 @@ class GrantService:
         }
         return repositories[resource_type]
 
-    def _require_resource(self, resource_type: str, resource_id: int) -> Any:
+    def _require_resource(self, resource_type: str, resource_id: UUID) -> Any:
         resource = self._resource_repository(resource_type).get(resource_id)
         if resource is None:
             raise NotFoundError("资源不存在或无权访问")
         return resource
 
     def _validate_platform_grants(
-        self, grants: list[tuple[int, int | None]]
-    ) -> list[tuple[int, int | None]]:
+        self, grants: list[tuple[UUID, UUID | None]]
+    ) -> list[tuple[UUID, UUID | None]]:
         """校验租户存在且角色属于该租户，并去重。"""
-        normalized: set[tuple[int, int | None]] = set()
+        normalized: set[tuple[UUID, UUID | None]] = set()
         for tenant_id, role_id in grants:
             if self._uow.tenants.get_by_id(tenant_id) is None:
                 raise ValidationError(f"租户 {tenant_id} 不存在")
@@ -379,9 +378,9 @@ class GrantService:
                 if role is None or role.tenant_id != tenant_id:
                     raise ValidationError(f"角色 {role_id} 不属于租户 {tenant_id}")
             normalized.add((tenant_id, role_id))
-        return sorted(normalized, key=lambda item: (item[0], item[1] or 0))
+        return sorted(normalized, key=lambda item: (str(item[0]), str(item[1] or "")))
 
-    def _validate_tenant_roles(self, tenant_id: int, role_ids: list[int]) -> None:
+    def _validate_tenant_roles(self, tenant_id: UUID, role_ids: list[UUID]) -> None:
         for role_id in sorted(set(role_ids)):
             role = self._uow.roles.get_by_id(role_id)
             if role is None or role.tenant_id != tenant_id:
@@ -389,17 +388,17 @@ class GrantService:
             if not role.is_active:
                 raise ValidationError(f"角色 {role_id} 已停用")
 
-    def _require_tenant(self) -> int:
+    def _require_tenant(self) -> UUID:
         if self._context.tenant_id is None:
             raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 
 
-def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, int | None]]:
+def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, UUID | None]]:
     return [{"tenant_id": grant.tenant_id, "role_id": grant.role_id} for grant in grants]
 
 
-def _after_view(tenant_id: int, role_ids: list[int] | None) -> list[dict[str, int | None]]:
+def _after_view(tenant_id: UUID, role_ids: list[UUID] | None) -> list[dict[str, UUID | None]]:
     if role_ids is None:
         return [{"tenant_id": tenant_id, "role_id": None}]
     return [{"tenant_id": tenant_id, "role_id": role_id} for role_id in role_ids]

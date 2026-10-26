@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
@@ -30,7 +31,7 @@ class RolePermissionService:
             return [item for item in resources if item.code not in TENANT_ONLY_CODES]
         return [item for item in resources if item.code not in PLATFORM_ONLY_CODES]
 
-    def list_for_role(self, role_id: int) -> list[PermissionResource]:
+    def list_for_role(self, role_id: UUID) -> list[PermissionResource]:
         """查询角色已授予的功能权限。"""
         role = self._require_role(role_id)
         granted = self._uow.role_permissions.list_codes_for_role(role.id)
@@ -38,11 +39,11 @@ class RolePermissionService:
 
     def replace(
         self,
-        role_id: int,
+        role_id: UUID,
         codes: Iterable[str],
         *,
         actor_permissions: frozenset[str],
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -75,11 +76,11 @@ class RolePermissionService:
 
     def add(
         self,
-        role_id: int,
+        role_id: UUID,
         codes: Iterable[str],
         *,
         actor_permissions: frozenset[str],
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -109,10 +110,10 @@ class RolePermissionService:
 
     def remove(
         self,
-        role_id: int,
+        role_id: UUID,
         code: str,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -150,29 +151,21 @@ class RolePermissionService:
         if self._context.is_platform:
             forbidden = normalized & TENANT_ONLY_CODES
             if forbidden:
-                raise ValidationError(
-                    f"平台角色不能授予租户级权限：{', '.join(sorted(forbidden))}"
-                )
+                raise ValidationError(f"平台角色不能授予租户级权限：{', '.join(sorted(forbidden))}")
         else:
             forbidden = normalized & PLATFORM_ONLY_CODES
             if forbidden:
-                raise ValidationError(
-                    f"租户角色不能授予平台级权限：{', '.join(sorted(forbidden))}"
-                )
+                raise ValidationError(f"租户角色不能授予平台级权限：{', '.join(sorted(forbidden))}")
         return normalized
 
     @staticmethod
-    def _ensure_no_escalation(
-        added: set[str], actor_permissions: frozenset[str]
-    ) -> None:
+    def _ensure_no_escalation(added: set[str], actor_permissions: frozenset[str]) -> None:
         """禁止授予调用者自身不具备的权限，防止横向提权。"""
         unauthorized = added - actor_permissions
         if unauthorized:
-            raise ForbiddenError(
-                f"不能授予自身不具备的权限：{', '.join(sorted(unauthorized))}"
-            )
+            raise ForbiddenError(f"不能授予自身不具备的权限：{', '.join(sorted(unauthorized))}")
 
-    def _scope(self) -> int | None:
+    def _scope(self) -> UUID | None:
         """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
         if self._context.is_platform:
             return None
@@ -180,13 +173,13 @@ class RolePermissionService:
             raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 
-    def _require_role(self, role_id: int) -> Role:
+    def _require_role(self, role_id: UUID) -> Role:
         role = self._uow.roles.get_by_id(role_id)
         if role is None or role.tenant_id != self._scope():
             raise NotFoundError("角色不存在")
         return role
 
-    def _require_writable_role(self, role_id: int) -> Role:
+    def _require_writable_role(self, role_id: UUID) -> Role:
         """超级管理员角色默认拥有全部权限，不允许单独调整。"""
         role = self._require_role(role_id)
         if role.is_system and role.code == "superadmin":
@@ -199,7 +192,7 @@ class RolePermissionService:
         *,
         action: str,
         detail: dict,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None,
         user_agent: str | None,

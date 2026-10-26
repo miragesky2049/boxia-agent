@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import UTC, datetime
+from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
@@ -64,7 +66,7 @@ class TenantService:
         """查询启用中的租户（本地调试切换作用域使用）。"""
         return self._uow.tenants.list_active()
 
-    def get(self, tenant_id: int) -> Tenant:
+    def get(self, tenant_id: UUID) -> Tenant:
         """查询租户详情。"""
         self._require_platform()
         tenant = self._uow.tenants.get_by_id(tenant_id)
@@ -80,7 +82,7 @@ class TenantService:
         admin_username: str,
         admin_password: str,
         admin_display_name: str,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -134,11 +136,11 @@ class TenantService:
                 "display_name": admin_display_name.strip() or username,
                 "is_active": True,
                 "role_id": roles["superadmin"].id,
+                "must_change_password": True,
+                "password_changed_at": datetime.now(UTC),
             }
         )
-        self._uow.users.replace_roles(
-            admin_user.id, tenant.id, [roles["superadmin"].id]
-        )
+        self._uow.users.replace_roles(admin_user.id, tenant.id, [roles["superadmin"].id])
         record_audit(
             self._uow,
             action="tenant.created",
@@ -156,11 +158,11 @@ class TenantService:
 
     def update(
         self,
-        tenant_id: int,
+        tenant_id: UUID,
         *,
         name: str | None,
         is_active: bool | None,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -202,7 +204,7 @@ class TenantService:
 
     def list_agents(
         self,
-        tenant_id: int,
+        tenant_id: UUID,
         page: int,
         page_size: int,
         keyword: str | None,
@@ -226,11 +228,11 @@ class TenantService:
 
     def set_agent_opened(
         self,
-        tenant_id: int,
-        agent_id: int,
+        tenant_id: UUID,
+        agent_id: UUID,
         opened: bool,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
@@ -246,9 +248,7 @@ class TenantService:
         else:
             self._uow.agent_openings.close(agent_id, tenant_id)
             # 关闭后清空角色授权，避免重新开通时把历史授权自动复活
-            self._uow.resource_grants.replace_for_tenant(
-                "agent", agent_id, tenant_id, [], actor_id
-            )
+            self._uow.resource_grants.replace_for_tenant("agent", agent_id, tenant_id, [], actor_id)
             opening = None
         record_audit(
             self._uow,
@@ -267,15 +267,15 @@ class TenantService:
 
     def set_agents_opened(
         self,
-        tenant_id: int,
-        agent_ids: list[int],
+        tenant_id: UUID,
+        agent_ids: list[UUID],
         opened: bool,
         *,
-        actor_id: int,
+        actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
-    ) -> list[int]:
+    ) -> list[UUID]:
         """批量开通或关闭产品智能体；关闭时同样清理角色授权。"""
         self._require_platform()
         self._require_tenant_exists(tenant_id)
@@ -293,9 +293,7 @@ class TenantService:
             self._uow.agent_openings.close_many(unique_ids, tenant_id)
             # 与单个关闭保持一致：先锁资源再清理该租户角色授权，避免并发写入复活历史授权
             self._uow.resource_grants.lock_resources("agent", unique_ids)
-            self._uow.resource_grants.delete_for_tenant_resources(
-                "agent", unique_ids, tenant_id
-            )
+            self._uow.resource_grants.delete_for_tenant_resources("agent", unique_ids, tenant_id)
 
         record_audit(
             self._uow,
@@ -313,7 +311,7 @@ class TenantService:
 
     def list_agent_tenants(
         self,
-        agent_id: int,
+        agent_id: UUID,
         page: int,
         page_size: int,
         keyword: str | None,
@@ -334,7 +332,7 @@ class TenantService:
             page_size=page_size,
         )
 
-    def _require_tenant_exists(self, tenant_id: int) -> Tenant:
+    def _require_tenant_exists(self, tenant_id: UUID) -> Tenant:
         tenant = self._uow.tenants.get_by_id(tenant_id)
         if tenant is None:
             raise NotFoundError("租户不存在")

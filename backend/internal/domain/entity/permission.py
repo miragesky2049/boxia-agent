@@ -4,6 +4,7 @@
 """
 
 from dataclasses import dataclass
+from uuid import UUID
 
 PERMISSION_CATEGORIES = (
     "system",
@@ -39,7 +40,7 @@ class PermissionDefinition:
 class PermissionResource:
     """持久化的权限资源目录项。"""
 
-    id: int
+    id: UUID
     code: str
     name: str
     category: str
@@ -67,6 +68,8 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("menu:grants", "用户授权", "menu", "view", 20),
     _perm("menu:roles", "角色管理", "menu", "view", 30),
     _perm("menu:users", "用户管理", "menu", "view", 40),
+    _perm("menu:departments", "部门管理", "menu", "view", 45),
+    _perm("menu:employments", "任职管理", "menu", "view", 46),
     _perm("menu:admin-users", "管理员账号", "menu", "view", 50),
     _perm("menu:tenants", "租户管理", "menu", "view", 60),
     _perm("menu:audit", "审计日志", "menu", "view", 70),
@@ -74,6 +77,8 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("page:grants", "用户授权页面", "page", "view", 120),
     _perm("page:roles", "角色管理页面", "page", "view", 130),
     _perm("page:users", "用户管理页面", "page", "view", 140),
+    _perm("page:departments", "部门管理页面", "page", "view", 145),
+    _perm("page:employments", "任职管理页面", "page", "view", 146),
     _perm("page:admin-users", "管理员账号页面", "page", "view", 150),
     _perm("page:tenants", "租户管理页面", "page", "view", 160),
     _perm("page:audit", "审计日志页面", "page", "view", 170),
@@ -127,6 +132,12 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("prompt:read", "提示词-查看", "prompt", "read", 351),
     _perm("prompt:update", "提示词-修改", "prompt", "update", 352),
     _perm("prompt:delete", "提示词-删除", "prompt", "delete", 353),
+    _perm("button:department:create", "部门-新建", "button", "create", 360),
+    _perm("button:department:update", "部门-编辑", "button", "update", 361),
+    _perm("button:department:delete", "部门-删除", "button", "delete", 362),
+    _perm("button:employment:create", "任职-新建", "button", "create", 370),
+    _perm("button:employment:update", "任职-编辑/调岗/结束任职", "button", "update", 371),
+    _perm("button:employment:delete", "任职-删除", "button", "delete", 372),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)
@@ -143,15 +154,45 @@ PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
         "button:tenant:update",
     }
 )
-# 平台作用域不展示租户用户与用户授权菜单：平台授权入口在资源/角色详情内
+# 平台作用域不展示租户用户、用户授权与组织架构菜单：平台授权入口在资源/角色详情内
 TENANT_ONLY_CODES: frozenset[str] = frozenset(
     {
         "menu:grants",
         "menu:users",
+        "menu:departments",
+        "menu:employments",
         "page:users",
+        "page:departments",
+        "page:employments",
         "button:user:create",
         "button:user:update",
         "button:user:delete",
+        "button:department:create",
+        "button:department:update",
+        "button:department:delete",
+        "button:employment:create",
+        "button:employment:update",
+        "button:employment:delete",
+    }
+)
+
+# 组织架构：只读菜单/页面 与 部门/任职写操作按钮
+_ORG_READ_CODES = frozenset(
+    {
+        "menu:departments",
+        "menu:employments",
+        "page:departments",
+        "page:employments",
+    }
+)
+_ORG_WRITE_CODES = frozenset(
+    {
+        "button:department:create",
+        "button:department:update",
+        "button:department:delete",
+        "button:employment:create",
+        "button:employment:update",
+        "button:employment:delete",
     }
 )
 TENANT_SCOPED_CODES: frozenset[str] = frozenset(PERMISSION_CODES) - PLATFORM_ONLY_CODES
@@ -195,10 +236,14 @@ PLATFORM_ADMIN_CODES: frozenset[str] = (
 )
 PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES | _READ_CODES
 
-# 租户内置角色：仅包含租户作用域权限
+# 租户内置角色：仅包含租户作用域权限，并并入组织架构相关权限
 TENANT_SUPERADMIN_CODES: frozenset[str] = TENANT_SCOPED_CODES
-TENANT_ADMIN_CODES: frozenset[str] = PLATFORM_ADMIN_CODES & TENANT_SCOPED_CODES
-TENANT_VIEWER_CODES: frozenset[str] = PLATFORM_VIEWER_CODES & TENANT_SCOPED_CODES
+TENANT_ADMIN_CODES: frozenset[str] = (
+    PLATFORM_ADMIN_CODES & TENANT_SCOPED_CODES
+) | _ORG_READ_CODES | _ORG_WRITE_CODES
+TENANT_VIEWER_CODES: frozenset[str] = (
+    PLATFORM_VIEWER_CODES & TENANT_SCOPED_CODES
+) | _ORG_READ_CODES
 
 # 角色复制时按作用域保留的默认权限集合
 DEFAULT_ROLE_PERMISSION_CODES: dict[str, dict[str, frozenset[str]]] = {

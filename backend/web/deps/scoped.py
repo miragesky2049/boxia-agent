@@ -1,6 +1,7 @@
 """按调用者角色收敛资源可见性的工作单元依赖。"""
 
 from typing import Annotated
+from uuid import UUID
 
 from fastapi import Depends
 
@@ -10,7 +11,7 @@ from web.deps.auth import AdminAuthDep, AdminPrincipal, UserAuthDep
 from web.deps.db import UowDep
 
 
-def _admin_scope(principal: AdminPrincipal) -> tuple[tuple[int, ...], bool]:
+def _admin_scope(principal: AdminPrincipal) -> tuple[tuple[UUID, ...], bool]:
     """拥有全量数据权限的角色不做资源过滤，其余按全部角色授权收敛。"""
     if DATA_ALL in principal.permissions:
         return (), False

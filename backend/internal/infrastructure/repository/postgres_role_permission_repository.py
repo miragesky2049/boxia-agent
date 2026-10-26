@@ -1,6 +1,7 @@
 """角色权限关系的 PostgreSQL 仓储实现。"""
 
 from typing import cast
+from uuid import UUID
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -20,14 +21,14 @@ class PostgresRolePermissionRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def lock_role(self, role_id: int) -> bool:
+    def lock_role(self, role_id: UUID) -> bool:
         """锁定角色行，串行化同一角色的并发授权写入。"""
         row = self._session.scalar(
             select(RoleModel.id).where(RoleModel.id == role_id).with_for_update()
         )
         return row is not None
 
-    def list_codes_for_role(self, role_id: int) -> set[str]:
+    def list_codes_for_role(self, role_id: UUID) -> set[str]:
         """读取角色已授予的权限编码。"""
         rows = self._session.scalars(
             select(PermissionResourceModel.code)
@@ -39,7 +40,7 @@ class PostgresRolePermissionRepository:
         ).all()
         return {str(code) for code in rows}
 
-    def list_codes_for_roles(self, role_ids: tuple[int, ...]) -> set[str]:
+    def list_codes_for_roles(self, role_ids: tuple[UUID, ...]) -> set[str]:
         """合并读取多个角色的权限编码。"""
         if not role_ids:
             return set()
@@ -53,7 +54,7 @@ class PostgresRolePermissionRepository:
         ).all()
         return {str(code) for code in rows}
 
-    def list_role_ids_with_code(self, tenant_id: int | None, code: str) -> set[int]:
+    def list_role_ids_with_code(self, tenant_id: UUID | None, code: str) -> set[UUID]:
         """读取作用域内拥有指定权限的角色 ID。"""
         stmt = (
             select(RolePermissionModel.role_id)
@@ -69,10 +70,10 @@ class PostgresRolePermissionRepository:
         else:
             stmt = stmt.where(RoleModel.tenant_id == tenant_id)
         rows = self._session.scalars(stmt).all()
-        return {int(role_id) for role_id in rows}
+        return set(rows)
 
     def replace_for_role(
-        self, role_id: int, codes: set[str] | frozenset[str], granted_by: int | None
+        self, role_id: UUID, codes: set[str] | frozenset[str], granted_by: UUID | None
     ) -> None:
         """整体替换角色权限；未在目录中的编码被忽略。"""
         permission_ids = self._permission_ids(codes)
@@ -95,7 +96,7 @@ class PostgresRolePermissionRepository:
         self._session.flush()
 
     def add_for_role(
-        self, role_id: int, codes: set[str] | frozenset[str], granted_by: int | None
+        self, role_id: UUID, codes: set[str] | frozenset[str], granted_by: UUID | None
     ) -> int:
         """追加角色权限，重复授权自动跳过。"""
         permission_ids = self._permission_ids(codes)
@@ -119,7 +120,7 @@ class PostgresRolePermissionRepository:
         self._session.flush()
         return int(result.rowcount or 0)
 
-    def remove_for_role(self, role_id: int, code: str) -> bool:
+    def remove_for_role(self, role_id: UUID, code: str) -> bool:
         """移除角色对单个权限的授权。"""
         permission_id = self._session.scalar(
             select(PermissionResourceModel.id).where(PermissionResourceModel.code == code)
@@ -138,7 +139,7 @@ class PostgresRolePermissionRepository:
         self._session.flush()
         return int(result.rowcount or 0) > 0
 
-    def count_for_role(self, role_id: int) -> int:
+    def count_for_role(self, role_id: UUID) -> int:
         """统计角色权限数量。"""
         total = self._session.scalar(
             select(func.count())
@@ -147,7 +148,7 @@ class PostgresRolePermissionRepository:
         )
         return int(total or 0)
 
-    def _permission_ids(self, codes: set[str] | frozenset[str]) -> list[int]:
+    def _permission_ids(self, codes: set[str] | frozenset[str]) -> list[UUID]:
         if not codes:
             return []
         rows = self._session.scalars(
@@ -158,4 +159,4 @@ class PostgresRolePermissionRepository:
             )
             .order_by(PermissionResourceModel.id.asc())
         ).all()
-        return [int(item) for item in rows]
+        return list(rows)

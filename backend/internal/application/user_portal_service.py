@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any
+from uuid import UUID
 
 from internal.application.errors import ForbiddenError, NotFoundError
 from internal.application.resource_service import MAX_PAGE_SIZE
@@ -29,9 +30,7 @@ class UserPortalService:
         self._uow = uow
         self._context = context
 
-    def list_agents(
-        self, page: int, page_size: int, keyword: str | None = None
-    ) -> Page[Agent]:
+    def list_agents(self, page: int, page_size: int, keyword: str | None = None) -> Page[Agent]:
         """分页查询当前用户可见且启用的智能体。"""
         if self._context.is_platform:
             raise ForbiddenError("用户端仅支持通过租户子域名访问")
@@ -40,7 +39,7 @@ class UserPortalService:
         items, total = self._uow.agents.list_page(page, page_size, keyword, True)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
-    def get_agent(self, agent_id: int) -> AgentBundle:
+    def get_agent(self, agent_id: UUID) -> AgentBundle:
         """查询智能体详情及可见资源；无权限与不存在统一返回 404。"""
         agent = self._uow.agents.get(agent_id)
         if agent is None or not agent.is_enabled:

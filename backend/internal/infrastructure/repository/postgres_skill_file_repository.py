@@ -2,6 +2,7 @@
 
 import hashlib
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session, load_only
@@ -63,7 +64,7 @@ class PostgresSkillFileRepository:
         }
 
     def list_by_skill(
-        self, skill_id: int, prefix: str | None = None, include_content: bool = False
+        self, skill_id: UUID, prefix: str | None = None, include_content: bool = False
     ) -> list[SkillFile]:
         """按路径排序列出技能包文件；默认不加载正文，避免列表接口搬运整包。"""
         stmt = select(SkillFileModel).where(SkillFileModel.skill_id == skill_id)
@@ -85,7 +86,7 @@ class PostgresSkillFileRepository:
         rows = self._session.scalars(stmt.order_by(SkillFileModel.path.asc())).all()
         return [self._to_entity(row, include_content=include_content) for row in rows]
 
-    def get(self, skill_id: int, path: str) -> SkillFile | None:
+    def get(self, skill_id: UUID, path: str) -> SkillFile | None:
         """按相对路径查询文件。"""
         row = self._session.scalar(
             select(SkillFileModel).where(
@@ -94,7 +95,7 @@ class PostgresSkillFileRepository:
         )
         return self._to_entity(row) if row else None
 
-    def upsert(self, skill_id: int, path: str, content: str) -> SkillFile:
+    def upsert(self, skill_id: UUID, path: str, content: str) -> SkillFile:
         """新增或覆盖文件。"""
         row = self._session.scalar(
             select(SkillFileModel).where(
@@ -112,7 +113,7 @@ class PostgresSkillFileRepository:
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def delete(self, skill_id: int, path: str) -> bool:
+    def delete(self, skill_id: UUID, path: str) -> bool:
         """删除文件。"""
         result = self._session.execute(
             delete(SkillFileModel).where(
@@ -121,7 +122,7 @@ class PostgresSkillFileRepository:
         )
         return bool(getattr(result, "rowcount", 0))
 
-    def replace_all(self, skill_id: int, files: list[tuple[str, str]]) -> list[SkillFile]:
+    def replace_all(self, skill_id: UUID, files: list[tuple[str, str]]) -> list[SkillFile]:
         """事务内全量替换技能包文件。"""
         self._session.execute(delete(SkillFileModel).where(SkillFileModel.skill_id == skill_id))
         rows = [
@@ -134,7 +135,7 @@ class PostgresSkillFileRepository:
             self._session.refresh(row)
         return [self._to_entity(row) for row in sorted(rows, key=lambda item: item.path)]
 
-    def stats(self, skill_id: int) -> tuple[int, int]:
+    def stats(self, skill_id: UUID) -> tuple[int, int]:
         """返回文件数与总字节数。"""
         count, total = self._session.execute(
             select(

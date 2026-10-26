@@ -1,20 +1,21 @@
 """管理员账号 ORM 模型。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from sqlalchemy import (
-    BigInteger,
     Boolean,
     DateTime,
     ForeignKey,
     Index,
     Integer,
     String,
+    Uuid,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 
 class AdminUserModel(Base):
@@ -23,13 +24,13 @@ class AdminUserModel(Base):
     __tablename__ = "admin_users"
     __table_args__ = (Index("ix_admin_users_role", "role_id"),)
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     username: Mapped[str] = mapped_column(String(64), nullable=False)
     password_hash: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    role_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False
+    role_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("roles.id", ondelete="RESTRICT"), nullable=False
     )
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

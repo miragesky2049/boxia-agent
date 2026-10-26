@@ -9,7 +9,7 @@ interface AuthorizationDrawerProps {
   open: boolean
   onClose: () => void
   resourceType: ResourceType
-  resourceId: number
+  resourceId: string
   resourceName?: string
   onSaved?: () => void
 }
@@ -38,7 +38,7 @@ export default function AuthorizationDrawer({
   const [selectedTenant, setSelectedTenant] = useState<Tenant | null>(null)
   const [roles, setRoles] = useState<Role[]>([])
   const [accessMode, setAccessMode] = useState<AccessMode>('none')
-  const [selectedRoles, setSelectedRoles] = useState<number[]>([])
+  const [selectedRoles, setSelectedRoles] = useState<string[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
 
@@ -61,15 +61,15 @@ export default function AuthorizationDrawer({
       setSelectedRoles(
         grants
           .map((grant) => grant.role_id)
-          .filter((roleId): roleId is number => roleId !== null)
-          .sort((left, right) => left - right),
+          .filter((roleId): roleId is string => roleId !== null)
+          .sort((left, right) => left.localeCompare(right)),
       )
     },
     [],
   )
 
   const loadAccess = useCallback(
-    async (scopeTenant: number) => {
+    async (scopeTenant: string) => {
       setLoading(true)
       try {
         const [grants, roleList] = await Promise.all([
@@ -247,7 +247,7 @@ export default function AuthorizationDrawer({
               value={selectedTenant?.id}
               options={tenantOptions}
               onSearch={(keyword) => void handleTenantSearch(keyword)}
-              onChange={(value: number) => {
+              onChange={(value: string) => {
                 const tenant = tenants.find((item) => item.id === value) ?? null
                 setSelectedTenant(tenant)
                 if (tenant) void loadAccess(tenant.id)
@@ -284,7 +284,7 @@ export default function AuthorizationDrawer({
                 style={{ width: '100%' }}
                 options={roleOptions}
                 value={selectedRoles}
-                onChange={(value: number[]) => setSelectedRoles(value)}
+                onChange={(value: string[]) => setSelectedRoles(value)}
               />
               <div style={{ color: '#999', marginTop: 6, fontSize: 12 }}>
                 仅所选角色可以看到并使用该资源。

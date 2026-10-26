@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +31,7 @@ def _create_skill(
 def _write_file(
     client: TestClient,
     headers: dict[str, str],
-    skill_id: int,
+    skill_id: UUID,
     path: str,
     content: str,
     expected_hash: str | None = None,
@@ -42,7 +43,7 @@ def _write_file(
 
 
 def _list_files(
-    client: TestClient, headers: dict[str, str], skill_id: int, query: str = ""
+    client: TestClient, headers: dict[str, str], skill_id: UUID, query: str = ""
 ) -> dict:
     response = client.get(f"/api/v1/admin/skills/{skill_id}/files{query}", headers=headers)
     assert response.status_code == 200, response.text
@@ -68,9 +69,9 @@ def _create_tenant(client: TestClient, headers: dict[str, str]) -> dict:
 def _grant_to_tenant(
     client: TestClient,
     headers: dict[str, str],
-    tenant_id: int,
+    tenant_id: UUID,
     resource_type: str,
-    resource_id: int,
+    resource_id: UUID,
 ) -> None:
     """平台把资源授权给整租户，租户内全部角色可见。"""
     response = client.put(
@@ -330,7 +331,7 @@ def test_delete_skill_cascades_files(client: TestClient, auth_headers) -> None:
     with get_engine().connect() as conn:
         remaining = conn.execute(
             text("SELECT count(*) FROM skill_files WHERE skill_id = :skill_id"),
-            {"skill_id": skill["id"]},
+            {"skill_id": UUID(skill["id"])},
         ).scalar_one()
     assert remaining == 0
 

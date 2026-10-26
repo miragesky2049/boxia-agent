@@ -14,6 +14,7 @@ import sys
 
 from sqlalchemy import text
 
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import dispose_engine, get_engine
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
@@ -81,11 +82,12 @@ def main() -> int:
                 conn.execute(
                     text(
                         "INSERT INTO admin_users "
-                        "(username, password_hash, display_name, role_id, is_active, "
+                        "(id, username, password_hash, display_name, role_id, is_active, "
                         "must_change_password, password_changed_at) "
-                        "VALUES (:username, :hash, :name, :role_id, TRUE, :must_change, now())"
+                        "VALUES (:id, :username, :hash, :name, :role_id, TRUE, :must_change, now())"
                     ),
                     {
+                        "id": new_uuid(),
                         "username": username,
                         "hash": password_hash,
                         "name": display_name,

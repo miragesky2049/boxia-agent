@@ -1,6 +1,7 @@
 """技能、工具、组件、提示词的 PostgreSQL 仓储实现。"""
 
 from typing import Any, Generic, TypeVar
+from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
@@ -32,8 +33,8 @@ class PostgresResourceRepository(Generic[TResource]):
     def __init__(
         self,
         session: Session,
-        tenant_id: int | None = None,
-        role_ids: tuple[int, ...] = (),
+        tenant_id: UUID | None = None,
+        role_ids: tuple[UUID, ...] = (),
         apply_role_filter: bool = True,
     ):
         self._session = session
@@ -82,7 +83,7 @@ class PostgresResourceRepository(Generic[TResource]):
             return stmt.where(self.model.tenant_id.is_(None))
         return stmt.where(self.model.tenant_id == self._tenant_id)
 
-    def _get_owned(self, resource_id: int) -> Any | None:
+    def _get_owned(self, resource_id: UUID) -> Any | None:
         row = self._session.get(self.model, resource_id)
         if row is None:
             return None
@@ -96,10 +97,10 @@ class PostgresResourceRepository(Generic[TResource]):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        agent_id: int | None = None,
+        agent_id: UUID | None = None,
         manageable_only: bool = False,
         grant_state: str | None = None,
-        grant_tenant_id: int | None = None,
+        grant_tenant_id: UUID | None = None,
     ) -> tuple[list[TResource], int]:
         """分页查询，关键字模糊匹配名称与描述。
 
@@ -135,7 +136,7 @@ class PostgresResourceRepository(Generic[TResource]):
         ).all()
         return [self._to_entity(row) for row in rows], int(total)
 
-    def get(self, resource_id: int) -> TResource | None:
+    def get(self, resource_id: UUID) -> TResource | None:
         """按主键查询（限定可见范围）。"""
         row = self._session.scalar(
             self._visible(select(self.model)).where(self.model.id == resource_id)
@@ -152,7 +153,7 @@ class PostgresResourceRepository(Generic[TResource]):
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def update(self, resource_id: int, values: dict[str, Any]) -> TResource | None:
+    def update(self, resource_id: UUID, values: dict[str, Any]) -> TResource | None:
         """更新当前作用域自有的记录（提交由 UnitOfWork 负责）。"""
         row = self._get_owned(resource_id)
         if row is None:
@@ -163,7 +164,7 @@ class PostgresResourceRepository(Generic[TResource]):
         self._session.refresh(row)
         return self._to_entity(row)
 
-    def delete(self, resource_id: int) -> bool:
+    def delete(self, resource_id: UUID) -> bool:
         """删除当前作用域自有的记录（提交由 UnitOfWork 负责）。"""
         row = self._get_owned(resource_id)
         if row is None:
@@ -172,7 +173,7 @@ class PostgresResourceRepository(Generic[TResource]):
         self._session.flush()
         return True
 
-    def name_exists(self, name: str, exclude_id: int | None = None) -> bool:
+    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
         """名称在当前归属范围内是否已被占用（忽略大小写）。"""
         stmt = self._owned(select(self.model.id)).where(
             func.lower(self.model.name) == name.strip().lower()
@@ -190,9 +191,7 @@ class PostgresResourceRepository(Generic[TResource]):
         )
         return self._to_entity(row) if row else None
 
-    def list_for_agent(
-        self, agent_id: int, is_enabled: bool | None = None
-    ) -> list[TResource]:
+    def list_for_agent(self, agent_id: UUID, is_enabled: bool | None = None) -> list[TResource]:
         """读取归属于指定智能体的可见资源（用户端运行时使用）。"""
         stmt = self._visible(select(self.model)).where(self.model.agent_id == agent_id)
         if is_enabled is not None:
@@ -200,7 +199,7 @@ class PostgresResourceRepository(Generic[TResource]):
         rows = self._session.scalars(stmt.order_by(self.model.id.asc())).all()
         return [self._to_entity(row) for row in rows]
 
-    def ids_exist(self, ids: list[int], agent_id: int | None = None) -> set[int]:
+    def ids_exist(self, ids: list[UUID], agent_id: UUID | None = None) -> set[UUID]:
         """返回可见范围内真实存在的 id 集合。"""
         if not ids:
             return set()
@@ -208,23 +207,23 @@ class PostgresResourceRepository(Generic[TResource]):
         if agent_id is not None:
             stmt = stmt.where(self.model.agent_id == agent_id)
         rows = self._session.scalars(stmt).all()
-        return {int(item) for item in rows}
+        return set(rows)
 
-    def ids_owned(self, ids: list[int]) -> set[int]:
+    def ids_owned(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中归属于当前作用域的部分（授权写操作校验）。"""
         if not ids:
             return set()
         rows = self._session.scalars(
             self._owned(select(self.model.id)).where(self.model.id.in_(ids))
         ).all()
-        return {int(item) for item in rows}
+        return set(rows)
 
-    def list_ids_for_agent(self, agent_id: int) -> list[int]:
+    def list_ids_for_agent(self, agent_id: UUID) -> list[UUID]:
         """按归属读取智能体下的全部资源 ID，忽略角色可见性过滤。"""
         rows = self._session.scalars(
             self._owned(select(self.model.id)).where(self.model.agent_id == agent_id)
         ).all()
-        return [int(item) for item in rows]
+        return list(rows)
 
     def _grantable(self, stmt):
         """角色授权候选范围：租户自有资源 + 已对本租户可见的平台资源。"""
@@ -249,7 +248,7 @@ class PostgresResourceRepository(Generic[TResource]):
         page: int,
         page_size: int,
         keyword: str | None,
-        ids: list[int] | None = None,
+        ids: list[UUID] | None = None,
     ) -> tuple[list[TResource], int]:
         """分页查询可向本租户角色授权的资源。"""
         stmt = self._grantable(select(self.model))
@@ -270,14 +269,14 @@ class PostgresResourceRepository(Generic[TResource]):
         ).all()
         return [self._to_entity(row) for row in rows], int(total)
 
-    def ids_grantable(self, ids: list[int]) -> set[int]:
+    def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中可向本租户角色授权的部分。"""
         if not ids:
             return set()
         rows = self._session.scalars(
             self._grantable(select(self.model.id)).where(self.model.id.in_(ids))
         ).all()
-        return {int(item) for item in rows}
+        return set(rows)
 
 
 class PostgresSkillRepository(PostgresResourceRepository[Skill]):

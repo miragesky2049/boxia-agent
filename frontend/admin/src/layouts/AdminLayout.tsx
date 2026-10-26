@@ -1,5 +1,6 @@
 import {
   ApartmentOutlined,
+  ClusterOutlined,
   IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
@@ -8,6 +9,7 @@ import {
   SafetyOutlined,
   TeamOutlined,
   UserOutlined,
+  UserSwitchOutlined,
 } from '@ant-design/icons'
 import { Avatar, Dropdown, Layout, Menu, Tag } from 'antd'
 import type { MenuProps } from 'antd'
@@ -24,9 +26,25 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   agents: { icon: <RobotOutlined />, label: '智能体管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
   roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
-  users: { icon: <IdcardOutlined />, label: '用户管理' },
-  'admin-users': { icon: <TeamOutlined />, label: '管理员账号' },
+  users: { icon: <TeamOutlined />, label: '用户管理' },
+  departments: { icon: <ClusterOutlined />, label: '部门管理' },
+  employments: { icon: <IdcardOutlined />, label: '任职管理' },
+  'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
+}
+
+interface MenuGroup {
+  icon: ReactNode
+  label: string
+  children: string[]
+}
+
+const MENU_GROUPS: Record<string, MenuGroup> = {
+  organization: {
+    icon: <ClusterOutlined />,
+    label: '组织架构',
+    children: ['departments', 'employments'],
+  },
 }
 
 const ENV_LABELS = {
@@ -48,15 +66,45 @@ export default function AdminLayout() {
     }
   }, [mustChangePassword, navigate])
 
-  // 菜单以后端返回为准，前端只负责图标与文案映射
-  const menuItems: MenuProps['items'] = menus.flatMap((key) => {
-    const meta = MENU_META[key]
-    return meta ? [{ key: `/${key}`, icon: meta.icon, label: meta.label }] : []
+  // 菜单以后端返回为准，前端只负责图标、文案与分组映射
+  const groupedKeys = new Set(Object.values(MENU_GROUPS).flatMap((group) => group.children))
+  const menuItems: MenuProps['items'] = []
+  menus.forEach((key) => {
+    if (!groupedKeys.has(key)) {
+      const meta = MENU_META[key]
+      if (meta) {
+        menuItems.push({ key: `/${key}`, icon: meta.icon, label: meta.label })
+      }
+      return
+    }
+    const groupEntry = Object.entries(MENU_GROUPS).find(([, group]) =>
+      group.children.includes(key),
+    )
+    if (!groupEntry) return
+    const [groupKey, group] = groupEntry
+    const groupMenuKey = `group:${groupKey}`
+    if (menuItems.some((item) => item && 'key' in item && item.key === groupMenuKey)) return
+    const children: NonNullable<MenuProps['items']> = group.children
+      .filter((child) => menus.includes(child))
+      .flatMap((child) => {
+        const meta = MENU_META[child]
+        return meta ? [{ key: `/${child}`, icon: meta.icon, label: meta.label }] : []
+      })
+    if (children.length > 0) {
+      menuItems.push({
+        key: groupMenuKey,
+        icon: group.icon,
+        label: group.label,
+        children,
+      })
+    }
   })
 
   const selectedKey =
-    menuItems.map((item) => String(item?.key)).find((key) => location.pathname.startsWith(key)) ??
-    '/agents'
+    menus
+      .map((key) => `/${key}`)
+      .sort((left, right) => right.length - left.length)
+      .find((candidate) => location.pathname.startsWith(candidate)) ?? '/agents'
 
   const userMenu: MenuProps['items'] = [
     {

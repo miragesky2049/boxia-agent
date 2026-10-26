@@ -3,10 +3,13 @@ import { Anchor, App, Button, Form, Space, Spin, Tabs, Tag } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { createAgent, getAgent, updateAgent } from '../../api/agents'
+import { departmentsApi } from '../../api/department'
 import { componentsApi, skillsApi, toolsApi } from '../../api/resources'
 import type { AgentConfig, AgentPayload, ComponentResource, Skill, Tool } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 import { useTenant } from '../../tenant/TenantContext'
+import type { DepartmentTreeNode } from '../../utils/departmentTree'
+import { buildDepartmentTreeData } from '../../utils/departmentTree'
 import AgentResourcesTab from './AgentResourcesTab'
 import AgentTenantsTab from './AgentTenantsTab'
 import BasicSection from './sections/BasicSection'
@@ -76,8 +79,9 @@ interface AgentFormValues {
   description?: string
   is_enabled?: boolean
   config: AgentConfig
-  tool_ids?: number[]
-  skill_ids?: number[]
+  tool_ids?: string[]
+  skill_ids?: string[]
+  department_id?: string | null
 }
 
 const ANCHOR_ITEMS = [
@@ -95,8 +99,8 @@ const ANCHOR_ITEMS = [
 
 export default function AgentEditPage() {
   const { id } = useParams<{ id: string }>()
-  const agentId = id ? Number(id) : undefined
-  const isEdit = agentId !== undefined && !Number.isNaN(agentId)
+  const agentId = id
+  const isEdit = Boolean(agentId)
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
@@ -112,21 +116,26 @@ export default function AgentEditPage() {
   const [tools, setTools] = useState<Tool[]>([])
   const [skills, setSkills] = useState<Skill[]>([])
   const [components, setComponents] = useState<ComponentResource[]>([])
+  const [deptTreeData, setDeptTreeData] = useState<DepartmentTreeNode[]>([])
 
   useEffect(() => {
     let active = true
 
     async function loadOptions() {
       try {
-        const [toolResult, skillResult, componentResult] = await Promise.all([
+        const [toolResult, skillResult, componentResult, departmentResult] = await Promise.all([
           toolsApi.list({ page: 1, page_size: 100 }),
           skillsApi.list({ page: 1, page_size: 100 }),
           componentsApi.list({ page: 1, page_size: 100 }),
+          isPlatform
+            ? Promise.resolve([])
+            : departmentsApi.tree().catch(() => []),
         ])
         if (!active) return
         setTools(toolResult.items)
         setSkills(skillResult.items)
         setComponents(componentResult.items)
+        setDeptTreeData(buildDepartmentTreeData(departmentResult))
       } catch (error) {
         message.error(error instanceof Error ? error.message : '加载选项失败')
       }
@@ -142,6 +151,7 @@ export default function AgentEditPage() {
           config: structuredClone(DEFAULT_CONFIG),
           tool_ids: [],
           skill_ids: [],
+          department_id: null,
         })
         return
       }
@@ -157,6 +167,7 @@ export default function AgentEditPage() {
           config: agent.config,
           tool_ids: agent.tool_ids,
           skill_ids: agent.skill_ids,
+          department_id: agent.department_id ?? null,
         })
       } catch (error) {
         message.error(error instanceof Error ? error.message : '加载智能体失败')
@@ -171,7 +182,7 @@ export default function AgentEditPage() {
     return () => {
       active = false
     }
-  }, [agentId, form, isEdit, navigate, message])
+  }, [agentId, form, isEdit, isPlatform, navigate, message])
 
   const handleFinish = async (values: AgentFormValues) => {
     const payload: AgentPayload = {
@@ -182,6 +193,7 @@ export default function AgentEditPage() {
       config: values.config,
       tool_ids: values.tool_ids ?? [],
       skill_ids: values.skill_ids ?? [],
+      department_id: isPlatform ? null : (values.department_id ?? null),
     }
 
     setSaving(true)
@@ -242,7 +254,10 @@ export default function AgentEditPage() {
                 <Spin spinning={loading}>
                   <div className="agent-edit__body">
                     <div className="agent-edit__main">
-                      <BasicSection />
+                      <BasicSection
+                        deptTreeData={deptTreeData}
+                        showDepartment={!isPlatform}
+                      />
                       <ModelSection />
                       <PromptSection />
                       <MemorySection />
@@ -283,7 +298,7 @@ export default function AgentEditPage() {
                   label: '开通租户',
                   children: (
                     <Spin spinning={loading}>
-                      <AgentTenantsTab agentId={agentId as number} />
+                      <AgentTenantsTab agentId={agentId as string} />
                     </Spin>
                   ),
                 },

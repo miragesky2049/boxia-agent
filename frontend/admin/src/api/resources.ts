@@ -13,16 +13,16 @@ import type {
 } from './types'
 
 export interface ClonePayload {
-  agent_id: number
+  agent_id: string
   name?: string | null
 }
 
 export interface ResourceApi<TOut, TPayload> {
   list: (params: ListParams) => Promise<PageResult<TOut>>
   create: (payload: TPayload) => Promise<TOut>
-  update: (id: number, payload: TPayload) => Promise<TOut>
-  remove: (id: number) => Promise<void>
-  clone: (id: number, payload: ClonePayload) => Promise<TOut>
+  update: (id: string, payload: TPayload) => Promise<TOut>
+  remove: (id: string) => Promise<void>
+  clone: (id: string, payload: ClonePayload) => Promise<TOut>
 }
 
 function createResourceApi<TOut, TPayload>(base: string): ResourceApi<TOut, TPayload> {
