@@ -93,6 +93,37 @@ class PostgresUserMgmtUnitGrantRepository:
             self._session.flush()
         return len(payload)
 
+    def replace_for_users(
+        self,
+        tenant_id: UUID,
+        user_ids: list[UUID],
+        unit_ids: list[UUID],
+        granted_by: UUID | None,
+    ) -> None:
+        """整体替换每个目标用户的管理单元授权：先清空再写入；unit_ids 为空即清空。"""
+        if not user_ids:
+            return
+        self._session.execute(
+            UserMgmtUnitGrantModel.__table__.delete().where(
+                UserMgmtUnitGrantModel.tenant_id == tenant_id,
+                UserMgmtUnitGrantModel.user_id.in_(user_ids),
+            )
+        )
+        if unit_ids:
+            payload = [
+                {
+                    "id": new_uuid(),
+                    "tenant_id": tenant_id,
+                    "user_id": user_id,
+                    "unit_id": unit_id,
+                    "granted_by": granted_by,
+                }
+                for user_id in user_ids
+                for unit_id in unit_ids
+            ]
+            self._session.execute(UserMgmtUnitGrantModel.__table__.insert(), payload)
+        self._session.flush()
+
     def remove_grant(self, tenant_id: UUID, user_id: UUID, unit_id: UUID) -> bool:
         """移除某用户对某单元的授权。"""
         result = self._session.execute(

@@ -240,16 +240,20 @@ class GrantService:
         mgmt_unit_ids: list[UUID],
         tenant_id: UUID | None,
         *,
+        mode: str = "append",
         actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> int:
-        """批量给用户追加角色 + 管理单元授权；已存在的关联自动跳过。
+        """批量给用户授予角色 + 管理单元授权。
 
-        角色和管理单元都必填，单事务内同时写入 user_roles 和 user_mgmt_unit_grants。
-        返回新增的角色关联数（管理单元授权数仅写入审计日志）。
+        - mode=append：追加所选角色与管理单元；角色和管理单元都必填，已存在的关联自动跳过。
+        - mode=replace：整体覆盖每个目标用户的角色与管理单元；role_ids 至少一个，mgmt_unit_ids 为空数组表示清空。
+        返回写入的角色关联数（管理单元授权数仅写入审计日志）。
         """
+        if mode not in ("append", "replace"):
+            raise ValidationError("授权模式必须是 append 或 replace")
         target_tenant = self._resolve_user_role_tenant(tenant_id)
         unique_users = sorted(set(user_ids))
         unique_roles = sorted(set(role_ids))
@@ -258,18 +262,32 @@ class GrantService:
             raise ValidationError("请至少选择一个用户")
         if not unique_roles:
             raise ValidationError("请至少选择一个角色")
-        if not unique_units:
-            raise ValidationError("请至少选择一个管理单元")
+        if mode == "append" and not unique_units:
+            raise ValidationError("追加模式下请至少选择一个管理单元")
         if self._uow.users.ids_existing(target_tenant, unique_users) != set(unique_users):
             raise NotFoundError("部分用户不存在或不属于当前租户")
         self._validate_tenant_roles(target_tenant, unique_roles)
         self._validate_tenant_units(target_tenant, unique_units)
-        added_roles = self._uow.users.add_roles_for_users(
-            unique_users, target_tenant, unique_roles
-        )
-        added_units = self._uow.user_mgmt_unit_grants.add_grants(
-            target_tenant, unique_users, unique_units, actor_id
-        )
+
+        added_units: int | None = None
+        if mode == "replace":
+            # 整体替换：逐用户覆盖角色（同时刷新主角色与令牌版本），再批量覆盖管理单元
+            for user_id in unique_users:
+                self._uow.users.replace_roles(user_id, target_tenant, unique_roles)
+                self._uow.users.bump_token_version(user_id)
+                self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
+            self._uow.user_mgmt_unit_grants.replace_for_users(
+                target_tenant, unique_users, unique_units, actor_id
+            )
+            written_roles = len(unique_users) * len(unique_roles)
+        else:
+            written_roles = self._uow.users.add_roles_for_users(
+                unique_users, target_tenant, unique_roles
+            )
+            added_units = self._uow.user_mgmt_unit_grants.add_grants(
+                target_tenant, unique_users, unique_units, actor_id
+            )
+
         record_audit(
             self._uow,
             action="user.roles_granted",
@@ -280,16 +298,17 @@ class GrantService:
             ip=ip,
             user_agent=user_agent,
             detail={
+                "mode": mode,
                 "user_ids": unique_users,
                 "role_ids": unique_roles,
                 "mgmt_unit_ids": unique_units,
-                "added_roles": added_roles,
+                "written_roles": written_roles,
                 "added_units": added_units,
             },
             tenant_id=target_tenant,
         )
         self._uow.commit()
-        return added_roles
+        return written_roles
 
     def _resolve_user_role_tenant(self, tenant_id: UUID | None) -> UUID:
         """用户角色批量授权只允许租户作用域；平台需显式指定租户。"""

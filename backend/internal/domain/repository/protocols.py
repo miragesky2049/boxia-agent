@@ -934,6 +934,15 @@ class UserMgmtUnitGrantRepository(Protocol):
     ) -> int:
         """批量追加（user, unit）授权；已存在的组合自动跳过，返回新增数量。"""
 
+    def replace_for_users(
+        self,
+        tenant_id: UUID,
+        user_ids: list[UUID],
+        unit_ids: list[UUID],
+        granted_by: UUID | None,
+    ) -> None:
+        """整体替换每个目标用户的管理单元授权：先清空再写入；unit_ids 为空即清空。"""
+
     def remove_grant(self, tenant_id: UUID, user_id: UUID, unit_id: UUID) -> bool:
         """移除某用户对某单元的授权。"""
 

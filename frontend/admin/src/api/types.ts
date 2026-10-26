@@ -440,11 +440,15 @@ export interface RoleGrantSummary {
   counts: Record<string, number>
 }
 
+export type UserRoleAssignMode = 'append' | 'replace'
+
 export interface UserRoleAssignPayload {
   user_ids: string[]
   role_ids: string[]
   mgmt_unit_ids: string[]
   tenant_id?: string | null
+  /** append=追加（默认）；replace=整体覆盖每个目标用户的角色与管理单元。 */
+  mode?: UserRoleAssignMode
 }
 
 export interface AuditLog {
