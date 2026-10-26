@@ -308,7 +308,7 @@ export default function AgentVisibilityTab({ agentId }: { agentId: string }) {
         onCancel={() => setDeptModalOpen(false)}
         onOk={confirmDeptModal}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Select
           mode="multiple"
@@ -360,7 +360,7 @@ export default function AgentVisibilityTab({ agentId }: { agentId: string }) {
         onCancel={() => setUserModalOpen(false)}
         onOk={confirmUserModal}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Select
           mode="multiple"
