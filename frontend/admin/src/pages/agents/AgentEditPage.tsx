@@ -127,9 +127,7 @@ export default function AgentEditPage() {
           toolsApi.list({ page: 1, page_size: 100 }),
           skillsApi.list({ page: 1, page_size: 100 }),
           componentsApi.list({ page: 1, page_size: 100 }),
-          isPlatform
-            ? Promise.resolve([])
-            : departmentsApi.tree().catch(() => []),
+          isPlatform ? Promise.resolve([]) : departmentsApi.tree().catch(() => []),
         ])
         if (!active) return
         setTools(toolResult.items)
@@ -254,10 +252,7 @@ export default function AgentEditPage() {
                 <Spin spinning={loading}>
                   <div className="agent-edit__body">
                     <div className="agent-edit__main">
-                      <BasicSection
-                        deptTreeData={deptTreeData}
-                        showDepartment={!isPlatform}
-                      />
+                      <BasicSection deptTreeData={deptTreeData} showDepartment={!isPlatform} />
                       <ModelSection />
                       <PromptSection />
                       <MemorySection />

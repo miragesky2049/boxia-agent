@@ -84,11 +84,12 @@ def assign_user_roles(
     request: Request,
     service: GrantServiceDep,
 ) -> GrantBatchOut:
-    """批量给用户追加角色。"""
+    """批量给用户追加角色 + 管理单元授权。"""
     ip, user_agent = client_meta(request)
     added = service.assign_user_roles(
         payload.user_ids,
         payload.role_ids,
+        payload.mgmt_unit_ids,
         payload.tenant_id,
         actor_id=principal.user_id,
         actor_username=principal.username,

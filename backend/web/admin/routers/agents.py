@@ -44,8 +44,13 @@ def create_agent(
     principal: AdminAuthDep,
     service: AgentServiceDep,
 ) -> AgentOut:
-    """创建智能体，并授权给创建者角色。"""
-    return AgentOut.model_validate(service.create(payload.model_dump(), principal.role_ids))
+    """创建智能体，并授权给创建者角色；同时记录创建者供"本人数据"范围使用。"""
+    agent = service.create(
+        payload.model_dump(),
+        principal.role_ids,
+        actor_user_id=principal.user_id,
+    )
+    return AgentOut.model_validate(agent)
 
 
 @router.get(

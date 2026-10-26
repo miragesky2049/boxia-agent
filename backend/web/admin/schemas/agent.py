@@ -147,3 +147,4 @@ class AgentOut(AgentSummaryOut):
     config: AgentConfig
     tool_ids: list[UUID] = Field(default_factory=list)
     skill_ids: list[UUID] = Field(default_factory=list)
+    created_by: UUID | None = None

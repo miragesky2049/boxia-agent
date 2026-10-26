@@ -6,9 +6,15 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, insert, or_, select
 from sqlalchemy.orm import Session
 
+from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.resource import Agent
-from internal.infrastructure.model.agent import AgentModel, agent_skills, agent_tools
+from internal.infrastructure.model.agent import (
+    AgentModel,
+    agent_skills,
+    agent_tools,
+)
 from internal.infrastructure.model.resource import SkillModel, ToolModel
+from internal.infrastructure.repository.data_scope_filters import agent_row_filter
 from internal.infrastructure.repository.grant_filters import (
     agent_visible,
     has_any_grant,
@@ -26,15 +32,14 @@ class PostgresAgentRepository:
         tenant_id: UUID | None = None,
         role_ids: tuple[UUID, ...] = (),
         apply_role_filter: bool = True,
-        department_scope: frozenset[UUID] | None = None,
+        data_scope: UserDataScope | None = None,
     ):
         self._session = session
         self._tenant_id = tenant_id
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
-        # 部门数据范围预留接入点：非 None 时仅该集合内部门的租户智能体可见，
-        # 未分配部门的租户智能体 fail-closed；本期不接线（apply_scope 不传），行为不变。
-        self._department_scope = department_scope
+        # 行级数据权限快照：仅租户视角叠加；None 表示不叠加行过滤（如拥有全量数据权限）
+        self._data_scope = data_scope
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
@@ -53,16 +58,9 @@ class PostgresAgentRepository:
                 self._apply_role_filter,
             )
         )
-        if self._department_scope is not None:
-            stmt = stmt.where(
-                or_(
-                    AgentModel.tenant_id.is_(None),
-                    and_(
-                        AgentModel.tenant_id == self._tenant_id,
-                        AgentModel.department_id.in_(self._department_scope),
-                    ),
-                )
-            )
+        if self._data_scope is not None:
+            # 行级数据权限：先按资源实例授权收敛，再按管理单元展开后的部门/人员集合收敛
+            stmt = stmt.where(agent_row_filter(self._data_scope))
         return stmt
 
     def _owned(self, stmt):
@@ -128,7 +126,9 @@ class PostgresAgentRepository:
         )
         if row is None:
             return None
-        return self._to_entity(row, self._tool_ids(agent_id), self._skill_ids(agent_id))
+        return self._to_entity(
+            row, self._tool_ids(agent_id), self._skill_ids(agent_id)
+        )
 
     def create(self, values: dict[str, Any]) -> Agent:
         """创建智能体并在同一事务内写入关联，归属当前作用域。"""
@@ -160,7 +160,9 @@ class PostgresAgentRepository:
         self._replace_relations(agent_id, tool_ids, skill_ids)
         self._session.flush()
         self._session.refresh(row)
-        return self._to_entity(row, self._tool_ids(agent_id), self._skill_ids(agent_id))
+        return self._to_entity(
+            row, self._tool_ids(agent_id), self._skill_ids(agent_id)
+        )
 
     def delete(self, agent_id: UUID) -> bool:
         """删除当前作用域自有的智能体（关联表由外键级联删除）。"""
@@ -275,7 +277,9 @@ class PostgresAgentRepository:
 
     @staticmethod
     def _to_entity(
-        row: AgentModel, tool_ids: list[UUID] | None = None, skill_ids: list[UUID] | None = None
+        row: AgentModel,
+        tool_ids: list[UUID] | None = None,
+        skill_ids: list[UUID] | None = None,
     ) -> Agent:
         return Agent(
             id=row.id,
@@ -290,6 +294,7 @@ class PostgresAgentRepository:
             skill_ids=skill_ids or [],
             tenant_id=row.tenant_id,
             department_id=row.department_id,
+            created_by=row.created_by,
         )
 
 

@@ -25,6 +25,17 @@ class UserOut(BaseModel):
     updated_at: datetime
 
 
+class UserOptionOut(BaseModel):
+    """下拉选项用的精简用户信息。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    username: str
+    display_name: str
+    is_active: bool
+
+
 class UserCreateRequest(BaseModel):
     """创建最终用户请求。"""
 

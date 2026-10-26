@@ -45,11 +45,19 @@ class AgentService:
             raise NotFoundError("智能体不存在")
         return agent
 
-    def create(self, values: dict, actor_role_ids: Sequence[UUID] = ()) -> Agent:
+    def create(
+        self,
+        values: dict,
+        actor_role_ids: Sequence[UUID] = (),
+        actor_user_id: UUID | None = None,
+    ) -> Agent:
         """创建智能体，并授权给创建者角色以保证创建者立即可见。"""
         if self._uow.agents.name_exists(values["name"]):
             raise ConflictError("智能体名称已存在")
         values = self._with_validated_relations(values)
+        # 租户智能体记录创建者，供"本人数据"行级范围使用；平台智能体无归属
+        if actor_user_id is not None and not self._context.is_platform:
+            values["created_by"] = actor_user_id
         agent = self._uow.agents.create(values)
         self._grant_actor(agent, actor_role_ids)
         self._uow.commit()
@@ -127,14 +135,15 @@ class AgentService:
         return payload
 
     def _validated_department(self, value: object) -> UUID | None:
-        """平台智能体强制无部门；租户智能体非空时校验部门同租户且启用。"""
+        """平台智能体强制无部门；租户智能体必填且校验同租户启用。"""
         department_id = UUID(str(value)) if value else None
         if self._context.is_platform:
             if department_id is not None:
                 raise ValidationError("产品级智能体不能归属部门")
             return None
         if department_id is None:
-            return None
+            # 租户智能体所属部门必填：行级数据权限（按部门过滤）依赖该列
+            raise ValidationError("租户智能体必须选择所属部门")
         department = self._uow.departments.get(department_id)
         if department is None or department.tenant_id != self._context.tenant_id:
             raise ValidationError("所属部门不存在或不属于当前租户")

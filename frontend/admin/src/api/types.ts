@@ -214,6 +214,13 @@ export interface User {
   updated_at: string
 }
 
+export interface UserOption {
+  id: string
+  username: string
+  display_name: string
+  is_active: boolean
+}
+
 export interface Department {
   id: string
   tenant_id: string
@@ -332,6 +339,7 @@ export interface RoleGrantSummary {
 export interface UserRoleAssignPayload {
   user_ids: string[]
   role_ids: string[]
+  mgmt_unit_ids: string[]
   tenant_id?: string | null
 }
 

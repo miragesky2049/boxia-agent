@@ -71,7 +71,13 @@ class AgentModel(Base):
             "tenant_id IS NOT NULL OR department_id IS NULL",
             name="ck_agents_platform_no_dept",
         ),
+        # 租户智能体所属部门必填：行级数据权限（按部门过滤）依赖该列
+        CheckConstraint(
+            "tenant_id IS NULL OR department_id IS NOT NULL",
+            name="ck_agents_tenant_dept_required",
+        ),
         Index("ix_agents_tenant_department", "tenant_id", "department_id"),
+        Index("ix_agents_tenant_created_by", "tenant_id", "created_by"),
     )
 
     id: Mapped[UuidPrimaryKey]
@@ -84,8 +90,10 @@ class AgentModel(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    # 归属部门仅租户智能体可填，平台智能体必须为空。
+    # 归属部门仅租户智能体可填，平台智能体必须为空；租户智能体必填（行级权限依赖）。
     department_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    # 创建者（租户管理员 users.id），行级数据权限"本人创建"过滤依赖该列。
+    created_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

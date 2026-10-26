@@ -14,12 +14,19 @@ from internal.domain.entity.access import (
 )
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
+from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.department import Department
 from internal.domain.entity.employment import Employment
+from internal.domain.entity.mgmt_unit import (
+    ManagementUnit,
+    MgmtUnitDepartment,
+    MgmtUnitUser,
+)
 from internal.domain.entity.permission import PermissionResource
 from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
 from internal.domain.entity.tenant import Tenant
+from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
 
 TResource = TypeVar("TResource")
 
@@ -754,6 +761,126 @@ class EmploymentRepository(Protocol):
         """返回当前任职部门落在给定部门前缀（本部门及下级）内的用户 ID。"""
 
 
+class MgmtUnitRepository(Protocol):
+    """管理单元仓储：物化路径树 + 部门/人员关联；所有调用均在单一租户作用域内。"""
+
+    def get(self, unit_id: UUID) -> ManagementUnit | None:
+        """按主键查询管理单元。"""
+
+    def get_for_update(
+        self, unit_id: UUID, tenant_id: UUID | None = None
+    ) -> ManagementUnit | None:
+        """按主键加行锁查询管理单元；传入租户时同时限定租户。"""
+
+    def list_all(
+        self, tenant_id: UUID, include_inactive: bool = True
+    ) -> list[ManagementUnit]:
+        """按物化路径顺序返回租户全部管理单元。"""
+
+    def list_active(self, tenant_id: UUID) -> list[ManagementUnit]:
+        """仅返回启用中的管理单元，用于授权勾选弹窗。"""
+
+    def create(self, values: dict[str, Any]) -> ManagementUnit:
+        """创建管理单元。"""
+
+    def update(self, unit_id: UUID, values: dict[str, Any]) -> ManagementUnit | None:
+        """更新管理单元基础字段（不含移动子树）。"""
+
+    def delete(self, unit_id: UUID) -> bool:
+        """物理删除管理单元。"""
+
+    def code_exists(
+        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
+    ) -> bool:
+        """租户内管理单元编码是否已存在（忽略大小写）。"""
+
+    def name_exists_under_parent(
+        self,
+        tenant_id: UUID,
+        parent_id: UUID | None,
+        name: str,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        """同一父单元下名称是否已存在（忽略大小写，根单元父 id 为空）。"""
+
+    def exists_child(self, tenant_id: UUID, unit_id: UUID) -> bool:
+        """是否存在直接子单元。"""
+
+    def list_departments(self, unit_id: UUID) -> list[MgmtUnitDepartment]:
+        """读取管理单元已关联的部门列表。"""
+
+    def list_users(self, unit_id: UUID) -> list[MgmtUnitUser]:
+        """读取管理单元已关联的人员列表。"""
+
+    def replace_departments(
+        self, unit_id: UUID, bindings: list[tuple[UUID, bool]]
+    ) -> None:
+        """整体替换管理单元的部门关联；bindings 为 (department_id, include_subtree) 列表。"""
+
+    def replace_users(self, unit_id: UUID, user_ids: list[UUID]) -> None:
+        """整体替换管理单元的人员关联。"""
+
+    def list_departments_for_units(
+        self, unit_ids: list[UUID]
+    ) -> list[MgmtUnitDepartment]:
+        """批量读取多个单元的部门关联，避免 N+1；仅返回仍启用的单元关联。"""
+
+    def list_users_for_units(self, unit_ids: list[UUID]) -> list[MgmtUnitUser]:
+        """批量读取多个单元的人员关联，避免 N+1。"""
+
+    def count_user_grants(self, tenant_id: UUID, unit_id: UUID) -> int:
+        """统计该单元被授权给了多少用户。"""
+
+    def lock_subtree_and_parent(
+        self,
+        tenant_id: UUID,
+        subtree_prefix: str,
+        new_parent_id: UUID | None,
+    ) -> list[ManagementUnit]:
+        """按 path 顺序锁定待移动子树与目标父行并返回；跨租户父行不在结果中。"""
+
+    def reparent_subtree(
+        self,
+        tenant_id: UUID,
+        moved_id: UUID,
+        old_prefix: str,
+        new_prefix: str,
+        new_parent_id: UUID | None,
+        level_delta: int,
+    ) -> None:
+        """在已加锁前提下整体平移子树 path/level，并更新移动节点的 parent_id。"""
+
+
+class UserMgmtUnitGrantRepository(Protocol):
+    """用户被授权的管理单元仓储。"""
+
+    def list_for_user(self, tenant_id: UUID, user_id: UUID) -> list[UserMgmtUnitGrant]:
+        """读取某用户在本租户被授权的全部管理单元。"""
+
+    def list_for_users(
+        self, tenant_id: UUID, user_ids: list[UUID]
+    ) -> dict[UUID, list[UserMgmtUnitGrant]]:
+        """批量读取多个用户的授权；返回 user_id -> 授权列表。"""
+
+    def list_unit_ids_for_user(self, tenant_id: UUID, user_id: UUID) -> set[UUID]:
+        """读取某用户被授权的单元 id 集合（行过滤用）。"""
+
+    def add_grants(
+        self,
+        tenant_id: UUID,
+        user_ids: list[UUID],
+        unit_ids: list[UUID],
+        granted_by: UUID | None,
+    ) -> int:
+        """批量追加（user, unit）授权；已存在的组合自动跳过，返回新增数量。"""
+
+    def remove_grant(self, tenant_id: UUID, user_id: UUID, unit_id: UUID) -> bool:
+        """移除某用户对某单元的授权。"""
+
+    def list_unit_names(self, tenant_id: UUID, unit_ids: list[UUID]) -> dict[UUID, str]:
+        """批量读取单元 id -> 名称映射（前端展示用）。"""
+
+
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -771,6 +898,8 @@ class UnitOfWork(Protocol):
     agent_openings: AgentTenantOpeningRepository
     departments: DepartmentRepository
     employments: EmploymentRepository
+    mgmt_units: MgmtUnitRepository
+    user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     agents: AgentRepository
     skills: ResourceRepository[Skill]
     skill_files: SkillFileRepository
@@ -780,6 +909,9 @@ class UnitOfWork(Protocol):
 
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源与智能体仓储。"""
+
+    def apply_data_scope(self, snapshot: UserDataScope | None = None) -> None:
+        """按行级数据权限快照重建智能体仓储；None 表示不叠加行过滤。"""
 
     def commit(self) -> None:
         """提交事务。"""

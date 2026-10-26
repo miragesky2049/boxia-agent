@@ -237,6 +237,7 @@ class GrantService:
         self,
         user_ids: list[UUID],
         role_ids: list[UUID],
+        mgmt_unit_ids: list[UUID],
         tenant_id: UUID | None,
         *,
         actor_id: UUID,
@@ -244,18 +245,31 @@ class GrantService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> int:
-        """批量给用户追加角色；已存在的角色关联自动跳过。"""
+        """批量给用户追加角色 + 管理单元授权；已存在的关联自动跳过。
+
+        角色和管理单元都必填，单事务内同时写入 user_roles 和 user_mgmt_unit_grants。
+        返回新增的角色关联数（管理单元授权数仅写入审计日志）。
+        """
         target_tenant = self._resolve_user_role_tenant(tenant_id)
         unique_users = sorted(set(user_ids))
         unique_roles = sorted(set(role_ids))
+        unique_units = sorted(set(mgmt_unit_ids))
         if not unique_users:
             raise ValidationError("请至少选择一个用户")
         if not unique_roles:
             raise ValidationError("请至少选择一个角色")
+        if not unique_units:
+            raise ValidationError("请至少选择一个管理单元")
         if self._uow.users.ids_existing(target_tenant, unique_users) != set(unique_users):
             raise NotFoundError("部分用户不存在或不属于当前租户")
         self._validate_tenant_roles(target_tenant, unique_roles)
-        added = self._uow.users.add_roles_for_users(unique_users, target_tenant, unique_roles)
+        self._validate_tenant_units(target_tenant, unique_units)
+        added_roles = self._uow.users.add_roles_for_users(
+            unique_users, target_tenant, unique_roles
+        )
+        added_units = self._uow.user_mgmt_unit_grants.add_grants(
+            target_tenant, unique_users, unique_units, actor_id
+        )
         record_audit(
             self._uow,
             action="user.roles_granted",
@@ -268,12 +282,14 @@ class GrantService:
             detail={
                 "user_ids": unique_users,
                 "role_ids": unique_roles,
-                "added": added,
+                "mgmt_unit_ids": unique_units,
+                "added_roles": added_roles,
+                "added_units": added_units,
             },
             tenant_id=target_tenant,
         )
         self._uow.commit()
-        return added
+        return added_roles
 
     def _resolve_user_role_tenant(self, tenant_id: UUID | None) -> UUID:
         """用户角色批量授权只允许租户作用域；平台需显式指定租户。"""
@@ -387,6 +403,15 @@ class GrantService:
                 raise ValidationError(f"角色 {role_id} 不属于当前租户")
             if not role.is_active:
                 raise ValidationError(f"角色 {role_id} 已停用")
+
+    def _validate_tenant_units(self, tenant_id: UUID, unit_ids: list[UUID]) -> None:
+        """校验管理单元全部属于当前租户且启用中。"""
+        for unit_id in sorted(set(unit_ids)):
+            unit = self._uow.mgmt_units.get(unit_id)
+            if unit is None or unit.tenant_id != tenant_id:
+                raise ValidationError(f"管理单元 {unit_id} 不属于当前租户")
+            if not unit.is_active:
+                raise ValidationError(f"管理单元 {unit.name} 已停用")
 
     def _require_tenant(self) -> UUID:
         if self._context.tenant_id is None:

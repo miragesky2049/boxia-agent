@@ -23,6 +23,8 @@ from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
+# 下拉选项最多返回的用户数，避免一次性拉全量拖慢弹窗
+OPTIONS_LIMIT = 500
 # 模块级别名：避免类内 list 方法遮蔽内置类型
 RoleIdList = list[UUID]
 UserList = list[User]
@@ -65,6 +67,14 @@ class UserAdminService:
         )
         items = self._attach_departments(tenant_id, items)
         return Page(items=items, total=total, page=page, page_size=page_size)
+
+    def list_options(self, keyword: str | None = None) -> UserList:
+        """下拉选项用：返回本租户启用用户的精简列表，不回填部门信息。"""
+        tenant_id = self._require_tenant()
+        items, _ = self._uow.users.list_page(
+            1, OPTIONS_LIMIT, keyword, tenant_id
+        )
+        return [item for item in items if item.is_active]
 
     def create(
         self,

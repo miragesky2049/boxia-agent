@@ -122,6 +122,8 @@ class Agent:
     skill_ids: list[UUID] = field(default_factory=list)
     tenant_id: UUID | None = None
     department_id: UUID | None = None
+    # 创建者（租户管理员 users.id），行级数据权限"本人创建"过滤依赖该列
+    created_by: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
