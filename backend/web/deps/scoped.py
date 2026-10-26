@@ -7,6 +7,9 @@ from fastapi import Depends
 
 from internal.domain.entity.permission import DATA_ALL
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
+from internal.infrastructure.repository.agent_user_visibility_filter import (
+    UserAgentVisibilityContext,
+)
 from web.deps.auth import AdminAuthDep, AdminPrincipal, UserAuthDep
 from web.deps.data_scope import build_data_scope_snapshot
 from web.deps.db import UowDep
@@ -33,8 +36,18 @@ def get_admin_scoped_uow(
 
 
 def get_user_scoped_uow(uow: UowDep, principal: UserAuthDep) -> SqlAlchemyUnitOfWork:
-    """用户端作用域工作单元：按本人全部角色合并过滤（本期不叠加行级数据范围）。"""
+    """用户端作用域工作单元：按本人角色收敛，并叠加智能体实例级可见范围。"""
     uow.apply_scope(principal.role_ids or (principal.role_id,), True)
+    # 注入当前用户的实例级可见范围：当前任职部门 id + path（无任职则仅按 user_id 命中）
+    brief = uow.employments.get_current_department_brief(
+        principal.tenant_id, principal.user_id
+    )
+    context = UserAgentVisibilityContext(
+        current_user_id=principal.user_id,
+        current_department_id=brief[0] if brief else None,
+        current_department_path=brief[1] if brief else None,
+    )
+    uow.apply_user_visibility(context)
     return uow
 
 

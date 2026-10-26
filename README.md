@@ -821,7 +821,7 @@ boxia-agent/
 | `SKILL_PACKAGE_MAX_TOTAL_BYTES`| `8388608`          | 否       | 单个技能包总大小上限（1 KiB-64 MiB）                                                                                                                  |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `test.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）即可免 DNS 验证 `*.localhost`，其余环境未配置会拒绝启动，见 6.4 |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
-| `PLATFORM_NAME`               | `Agent运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
+| `PLATFORM_NAME`               | `AI智能体运营管理平台` | 否       | 管理端展示的平台名称                                                                                                                                  |
 | `DEFAULT_TENANT_CODE`         | 空                  | 否       | 访问根域名时默认进入的租户；留空则拒绝根域名访问                                                                                                      |
 | `ALLOW_TENANT_HEADER`         | `false`             | 否       | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**，开发/测试/生产开启会拒绝启动                                                            |
 | `CORS_ORIGINS`                | 空                  | 否       | 逗号分隔的允许来源；生产禁止 `*`                                                                                                                      |
@@ -1093,6 +1093,13 @@ Authorization: Bearer <access_token>
 | DELETE | `/admin/{resource}/{id}`        | 删除，返回 204（无 `button:{resource}:delete` 返回 403），同事务清理授权记录              |
 | POST   | `/admin/{resource}/{id}/clone`  | 克隆到目标智能体，入参 `{agent_id, name?}`，返回 201 与独立副本                          |
 
+智能体额外提供 user 端可见范围维护（仅租户智能体，平台智能体调用返回 400）：
+
+| 方法 | 路径                                  | 说明                                                                                  |
+|------|---------------------------------------|---------------------------------------------------------------------------------------|
+| GET  | `/admin/agents/{id}/visibility`        | 查询可见范围：`mode`（`all`/`custom`）、`departments:[{department_id, include_subtree}]`、`user_ids` |
+| PUT  | `/admin/agents/{id}/visibility`        | 全量替换可见范围；`all` 模式忽略部门/人员列表，`custom` 模式按部门（含子树）或指定人员收敛 |
+
 分页响应格式：
 
 ```json
@@ -1107,16 +1114,18 @@ Authorization: Bearer <access_token>
 - `tool_ids` / `skill_ids` 仅为兼容旧数据保留，标注 deprecated；新数据以资源的 `agent_id` 归属为准，列表与详情会合并两种来源。
 - 列表只返回摘要（不含 `config` 和关联 ID），详情返回完整配置。
 - `config` 中缺失的子项由后端补默认值。
+- 响应带 `visibility_mode`（`all`/`custom`，默认 `all`）；仅作用于租户智能体的 user 端可见过滤，管理端列表不受影响。
 
 可见性规则（服务端唯一事实来源）：
 
 | 场景                       | 可见条件                                                                 |
 |----------------------------|--------------------------------------------------------------------------|
 | 平台级智能体 @ 租户        | 存在授权记录，且 `role_id` 为 `NULL` 或命中当前账号角色                    |
-| 租户自有智能体 @ 租户      | 同租户；未配置授权时全角色可见，配置后按授权收紧                           |
+| 租户自有智能体 @ 租户       | 同租户；未配置授权时全角色可见，配置后按授权收紧                           |
 | 平台级资源 @ 租户          | 直接授权命中，或（无直接授权且所属智能体可见）                             |
 | 租户自有资源 @ 租户        | 随所属智能体规则                                                         |
-| 用户端                     | 在租户规则上追加 `is_enabled=true`，角色集合仅本人角色                     |
+| 用户端（管理端账号）       | 在租户规则上追加 `is_enabled=true`，角色集合仅本人角色                     |
+| 用户端（user 端普通用户）   | 在租户规则上叠加智能体实例级可见范围：`all` 直接放行；`custom` 需命中以下任一 —— 当前用户 `id` 出现在 `agent_visibility_users`、当前任职部门 id 直接命中 `agent_visibility_departments`、或当前任职部门 path 前缀命中 `include_subtree=true` 的规则 |
 
 ### 8.3.1 技能包文件接口
 
@@ -1267,6 +1276,7 @@ Authorization: Bearer <access_token>
 - 鉴权：Access Token + Refresh Token，与管理员令牌使用不同 `aud`（`USER_JWT_AUDIENCE`），两端令牌不能互相冒用。
 - 租户作用域：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404/403。登录与刷新令牌都校验租户一致性。
 - 可见性：在租户规则上追加 `is_enabled=true`，角色集合仅本人 `role_id`；未显式授权的智能体不可见。
+- 实例级可见范围：管理端可为租户智能体配置 `visibility_mode=custom` 与可见部门（含子树）/指定人员列表；user 端查询在租户授权之上叠加该过滤，未命中返回 404。无当前任职的用户仅命中 `all` 模式与直接指定的 `user_id` 规则。
 - 用户端站点不挂载 `/admin/**` 与 `/public/**`；用户登录、刷新重放与登出写入审计日志。
 
 ### 8.7 调用示例（Git Bash）
@@ -1338,10 +1348,12 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `user_refresh_tokens`                         | 租户用户 Refresh Token 哈希、会话族、轮换/撤销状态、IP/UA                                |
 | `resource_grants`                             | 多态授权：`resource_type`（agent/skill/tool/component/prompt）+ `resource_id` + 可空 `tenant_id` + 可空 `role_id`；`tenant_id` 非空且 `role_id=NULL` 表示整个租户，`tenant_id=NULL` 表示平台角色授权 |
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
-| `agents`                                      | 智能体，`config` 为 JSONB 完整配置；`department_id` 可空（租户智能体挂接部门，复合 FK `(tenant_id,department_id)`，平台智能体必须为 NULL） |
+| `agents`                                      | 智能体，`config` 为 JSONB 完整配置；`department_id` 可空（租户智能体挂接部门，复合 FK `(tenant_id,department_id)`，平台智能体必须为 NULL）；`visibility_mode`（`all`/`custom`）控制 user 端实例级可见范围，默认 `all` |
 | `skills` / `tools` / `components` / `prompts` | 四类资源表；`agent_id` 为数据归属的智能体（可空，历史数据通过迁移回填）                   |
 | `skill_files`                                 | 技能包内文本文件；`(skill_id, path)` 唯一，随技能级联删除，归属由所属技能决定              |
 | `agent_tools` / `agent_skills`                | 旧版智能体关联表，仅兼容保留（deprecated）；新代码以资源 `agent_id` 为准                   |
+| `agent_visibility_departments`                | 智能体可见部门关联：`(agent_id, department_id)` 复合主键，`include_subtree` 表示是否按部门物化路径前缀命中子树 |
+| `agent_visibility_users`                      | 智能体可见人员关联：`(agent_id, user_id)` 复合主键；被指定用户即使无当前任职也直接命中     |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
 约定：
@@ -1355,6 +1367,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 - 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
 - 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
 - 迁移 `0015_organization` 新增 `departments` / `user_employments` 表、给 `users` 加 `UNIQUE(tenant_id,id)`、给 `agents` 加 `department_id` 列与复合外键，并回填租户侧系统角色的组织架构权限（`menu:departments`、`menu:employments`、`page:departments`、`page:employments`、`button:department:*`、`button:employment:*`）。DDL 支持 downgrade。
+- 迁移 `0020_agent_visibility` 给 `agents` 加 `visibility_mode`（默认 `all`）与 CheckConstraint，新建 `agent_visibility_departments` / `agent_visibility_users` 两张关联表；仅作用于租户智能体的 user 端可见过滤，管理端列表不受影响。DDL 支持 downgrade。
 
 ### 9.2 迁移命令
 
@@ -1404,7 +1417,7 @@ uv run python -m scripts.skill_package list --id 3
 | 登录                        | 账号密码登录、本地作用域切换（回环主机用下拉框/`?tenant=`，子域名主机跳转对应域名；部署环境仅域名）、环境与解析来源标识、锁定提示、登录后回跳、首次登录强制改密 |
 | 会话                        | Access Token 只存内存、自动刷新、跨标签页同步、退出时通知后端撤销                                                                                               |
 | 智能体管理                  | 搜索、状态筛选（平台视角含“仅已授权”）、分页、新建、配置、启用/停用、删除                                                                                        |
-| 智能体配置                  | Tabs：配置（基础信息、模型、角色与提示词、记忆、对话体验、发布渠道、知识库等）、技能与资源                                                                       |
+| 智能体配置                  | Tabs：配置（基础信息、模型、角色与提示词、记忆、对话体验、发布渠道、知识库等）、技能与资源、可见范围（仅租户智能体；全员可见 / 自定义部门含子树 + 指定人员）           |
 | 技能与资源                  | 在智能体详情内管理所属技能/工具/组件/提示词；增删改查、搜索、分页、克隆到其他智能体；按 `button:{resource}:*` 权限控制操作入口                                  |
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 授权管理                    | 独立菜单按资源类型集中授权；资源列表与详情页不再提供授权入口；支持授权状态筛选、多选批量追加/覆盖/移除；平台视角按租户逐个配置，租户视角仅本租户角色               |
@@ -1928,7 +1941,7 @@ ROOT_DOMAIN=example.com
 APP_ENV=prod
 # 产品级平台子域名前缀，最终为 adminsystem.example.com
 PLATFORM_ADMIN_SUBDOMAIN=adminsystem
-PLATFORM_NAME=Agent运营管理平台
+PLATFORM_NAME=AI智能体运营管理平台
 # 部署环境只按域名识别租户；生产开启该项会拒绝启动
 ALLOW_TENANT_HEADER=false
 DOCS_ENABLED=false

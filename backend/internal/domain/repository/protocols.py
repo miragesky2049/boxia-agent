@@ -13,10 +13,12 @@ from internal.domain.entity.access import (
     UserRefreshToken,
 )
 from internal.domain.entity.admin_user import AdminUser
+from internal.domain.entity.agent_visibility import AgentVisibility
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.department import Department
 from internal.domain.entity.employment import Employment
+from internal.domain.entity.hr_dictionary import HrDictionary
 from internal.domain.entity.mgmt_unit import (
     ManagementUnit,
     MgmtUnitDepartment,
@@ -281,6 +283,18 @@ class AgentRepository(Protocol):
 
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中可向本租户角色授权的部分。"""
+
+    def get_visibility(self, agent_id: UUID) -> AgentVisibility | None:
+        """读取智能体 user 端可见范围配置；平台智能体或不存在返回 None。"""
+
+    def replace_visibility(
+        self,
+        agent_id: UUID,
+        mode: str,
+        departments: list[tuple[UUID, bool]],
+        user_ids: list[UUID],
+    ) -> AgentVisibility | None:
+        """事务内全量替换智能体 user 端可见范围；返回最新配置。"""
 
 
 class RoleRepository(Protocol):
@@ -724,7 +738,7 @@ class EmploymentRepository(Protocol):
     """用户任职记录仓储。"""
 
     def get(self, employment_id: UUID) -> Employment | None:
-        """按主键查询任职（含用户与部门展示字段）。"""
+        """按主键查询任职（含用户、部门、汇报上级与字典展示字段）。"""
 
     def list_page(
         self,
@@ -759,6 +773,52 @@ class EmploymentRepository(Protocol):
         self, tenant_id: UUID, department_path_prefix: str
     ) -> set[UUID]:
         """返回当前任职部门落在给定部门前缀（本部门及下级）内的用户 ID。"""
+
+    def get_current_department_brief(
+        self, tenant_id: UUID, user_id: UUID
+    ) -> tuple[UUID, str] | None:
+        """返回用户当前任职的 (部门id, 部门 path)；无当前任职返回 None。"""
+
+
+class HrDictionaryRepository(Protocol):
+    """HR 字典仓储：雇佣类型/岗位职级/岗位序列。"""
+
+    def get(self, dictionary_id: UUID) -> HrDictionary | None:
+        """按主键查询字典项。"""
+
+    def list_by_category(
+        self, tenant_id: UUID, category: str, include_inactive: bool = False
+    ) -> list[HrDictionary]:
+        """按类别读取租户字典项，按 sort_order、id 升序返回。"""
+
+    def list_by_categories(
+        self, tenant_id: UUID, categories: list[str], include_inactive: bool = False
+    ) -> list[HrDictionary]:
+        """批量读取多个类别的字典项。"""
+
+    def get_many(self, dictionary_ids: list[UUID]) -> list[HrDictionary]:
+        """按主键集合批量读取。"""
+
+    def create(self, values: dict[str, Any]) -> HrDictionary:
+        """创建字典项。"""
+
+    def update(self, dictionary_id: UUID, values: dict[str, Any]) -> HrDictionary | None:
+        """更新字典项基础字段。"""
+
+    def delete(self, dictionary_id: UUID) -> bool:
+        """物理删除字典项。"""
+
+    def code_exists(
+        self,
+        tenant_id: UUID,
+        category: str,
+        code: str,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        """同一租户同一类别下编码是否已存在（忽略大小写）。"""
+
+    def count_references(self, dictionary_id: UUID) -> int:
+        """统计该字典项被任职记录引用的次数。"""
 
 
 class MgmtUnitRepository(Protocol):
@@ -898,6 +958,7 @@ class UnitOfWork(Protocol):
     agent_openings: AgentTenantOpeningRepository
     departments: DepartmentRepository
     employments: EmploymentRepository
+    hr_dictionaries: HrDictionaryRepository
     mgmt_units: MgmtUnitRepository
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     agents: AgentRepository
@@ -912,6 +973,9 @@ class UnitOfWork(Protocol):
 
     def apply_data_scope(self, snapshot: UserDataScope | None = None) -> None:
         """按行级数据权限快照重建智能体仓储；None 表示不叠加行过滤。"""
+
+    def apply_user_visibility(self, context: object | None = None) -> None:
+        """按 user 端实例级可见范围重建智能体仓储；None 表示不叠加（仅 user 端调用）。"""
 
     def commit(self) -> None:
         """提交事务。"""

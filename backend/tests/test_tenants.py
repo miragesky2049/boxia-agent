@@ -66,7 +66,7 @@ def test_platform_context(client: TestClient) -> None:
     assert body["root_domain"] == "example.com"
     assert body["platform_admin_subdomain"] == "adminsystem"
     assert body["platform_admin_host"] == "adminsystem.example.com"
-    assert body["platform_name"] == "Agent运营管理平台"
+    assert body["platform_name"] == "AI智能体运营管理平台"
 
 
 def test_tenant_context_and_login(

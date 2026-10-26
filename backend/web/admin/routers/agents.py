@@ -7,7 +7,13 @@ from fastapi import APIRouter, Depends, Query, status
 from internal.application.tenant_service import AgentTenantView
 from internal.domain.entity.common import Page
 from internal.domain.entity.resource import Agent
-from web.admin.schemas.agent import AgentOut, AgentPayload, AgentSummaryOut
+from web.admin.schemas.agent import (
+    AgentOut,
+    AgentPayload,
+    AgentSummaryOut,
+    AgentVisibilityOut,
+    AgentVisibilityPayload,
+)
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import AgentOpenedTenantOut
 from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
@@ -81,6 +87,56 @@ def update_agent(agent_id: UUID, payload: AgentPayload, service: AgentServiceDep
 def delete_agent(agent_id: UUID, service: AgentServiceDep) -> None:
     """删除智能体。"""
     service.delete(agent_id)
+
+
+@router.get(
+    "/{agent_id}/visibility",
+    response_model=AgentVisibilityOut,
+    dependencies=[Depends(require_permission("agent:read"))],
+)
+def get_agent_visibility(
+    agent_id: UUID, service: AgentServiceDep
+) -> AgentVisibilityOut:
+    """查询智能体 user 端可见范围配置。"""
+    visibility = service.get_visibility(agent_id)
+    return AgentVisibilityOut(
+        mode=visibility.mode,
+        departments=[
+            {"department_id": item.department_id, "include_subtree": item.include_subtree}
+            for item in visibility.departments
+        ],
+        user_ids=list(visibility.user_ids),
+    )
+
+
+@router.put(
+    "/{agent_id}/visibility",
+    response_model=AgentVisibilityOut,
+    dependencies=[Depends(require_permission("agent:update"))],
+)
+def save_agent_visibility(
+    agent_id: UUID,
+    payload: AgentVisibilityPayload,
+    service: AgentServiceDep,
+) -> AgentVisibilityOut:
+    """全量替换智能体 user 端可见范围配置（仅租户智能体）。"""
+    saved = service.save_visibility(
+        agent_id,
+        payload.mode,
+        [
+            (item.department_id, item.include_subtree)
+            for item in payload.departments
+        ],
+        list(payload.user_ids),
+    )
+    return AgentVisibilityOut(
+        mode=saved.mode,
+        departments=[
+            {"department_id": item.department_id, "include_subtree": item.include_subtree}
+            for item in saved.departments
+        ],
+        user_ids=list(saved.user_ids),
+    )
 
 
 @router.get(

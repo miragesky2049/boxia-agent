@@ -212,6 +212,17 @@ export interface User {
   last_login_at: string | null
   created_at: string
   updated_at: string
+  // HR 基础字段
+  employee_no: string | null
+  phone: string | null
+  email: string | null
+  gender: string | null
+  birth_date: string | null
+  avatar_url: string
+  remark: string
+  // 用户被授权的管理单元
+  mgmt_unit_ids: string[]
+  mgmt_unit_names: string[]
 }
 
 export interface UserOption {
@@ -260,30 +271,107 @@ export interface Employment {
   is_current: boolean
   started_at: string
   ended_at: string | null
+  // HR 字典外键
+  employment_type_id: string | null
+  job_level_id: string | null
+  job_family_id: string | null
+  manager_id: string | null
+  // 用工基础信息
+  work_location: string | null
+  cost_center: string | null
+  contract_no: string | null
+  weekly_hours: number | null
+  employment_nature: string | null
+  // 试用期与转正
+  probation_started_at: string | null
+  probation_ended_at: string | null
+  regularized_at: string | null
+  // 变动与离职
+  change_type: string | null
+  change_reason: string | null
+  termination_type: string | null
+  remark: string
+  // 展示字段
   user_name: string | null
   user_display_name: string | null
   department_name: string | null
   department_path: string | null
+  manager_name: string | null
+  employment_type_name: string | null
+  job_level_name: string | null
+  job_family_name: string | null
   created_at: string
   updated_at: string
 }
 
-export interface EmploymentCreatePayload {
+export interface HrFieldsPayload {
+  employment_type_id?: string | null
+  job_level_id?: string | null
+  job_family_id?: string | null
+  manager_id?: string | null
+  work_location?: string | null
+  cost_center?: string | null
+  contract_no?: string | null
+  weekly_hours?: number | null
+  employment_nature?: string | null
+  probation_started_at?: string | null
+  probation_ended_at?: string | null
+  regularized_at?: string | null
+  change_reason?: string | null
+  remark?: string | null
+}
+
+export interface EmploymentCreatePayload extends HrFieldsPayload {
   user_id: string
   department_id: string
   position?: string
   started_at?: string
 }
 
-export interface EmploymentUpdatePayload {
+export interface EmploymentUpdatePayload extends HrFieldsPayload {
   position?: string
   started_at?: string
 }
 
-export interface EmploymentTransferPayload {
+export interface EmploymentTransferPayload extends HrFieldsPayload {
   department_id: string
   position?: string
   started_at?: string
+  change_type?: string
+}
+
+export interface EmploymentArchivePayload {
+  ended_at?: string | null
+  termination_type?: string | null
+  change_reason?: string | null
+}
+
+export interface HrDictionary {
+  id: string
+  tenant_id: string
+  category: 'employment_type' | 'job_level' | 'job_family'
+  code: string
+  name: string
+  sort_order: number
+  is_active: boolean
+  remark: string
+  created_at: string
+  updated_at: string
+}
+
+export interface HrDictionaryCreatePayload {
+  category: HrDictionary['category']
+  code: string
+  name: string
+  sort_order: number
+  remark?: string
+}
+
+export interface HrDictionaryUpdatePayload {
+  name?: string
+  sort_order?: number
+  is_active?: boolean
+  remark?: string
 }
 
 export interface UserCreatePayload {
@@ -292,12 +380,28 @@ export interface UserCreatePayload {
   display_name: string
   role_ids: string[]
   is_active: boolean
+  // HR 基础字段
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  gender?: string | null
+  birth_date?: string | null
+  avatar_url?: string
+  remark?: string
 }
 
 export interface UserUpdatePayload {
   display_name?: string
   role_ids?: string[]
   is_active?: boolean
+  // HR 基础字段
+  employee_no?: string | null
+  phone?: string | null
+  email?: string | null
+  gender?: string | null
+  birth_date?: string | null
+  avatar_url?: string
+  remark?: string
 }
 
 export interface ResourceGrant {
@@ -497,6 +601,8 @@ export interface Agent extends AgentSummary {
   config: AgentConfig
   tool_ids: string[]
   skill_ids: string[]
+  created_by?: string | null
+  visibility_mode: 'all' | 'custom'
 }
 
 export interface AgentPayload {
@@ -508,6 +614,25 @@ export interface AgentPayload {
   tool_ids: string[]
   skill_ids: string[]
   department_id?: string | null
+}
+
+export type AgentVisibilityMode = 'all' | 'custom'
+
+export interface AgentVisibilityDepartmentItem {
+  department_id: string
+  include_subtree: boolean
+}
+
+export interface AgentVisibility {
+  mode: AgentVisibilityMode
+  departments: AgentVisibilityDepartmentItem[]
+  user_ids: string[]
+}
+
+export interface AgentVisibilityPayload {
+  mode: AgentVisibilityMode
+  departments: AgentVisibilityDepartmentItem[]
+  user_ids: string[]
 }
 
 export interface ListParams {
