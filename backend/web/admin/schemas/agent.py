@@ -148,3 +148,27 @@ class AgentOut(AgentSummaryOut):
     tool_ids: list[UUID] = Field(default_factory=list)
     skill_ids: list[UUID] = Field(default_factory=list)
     created_by: UUID | None = None
+    visibility_mode: str = "all"
+
+
+class AgentVisibilityDepartmentItem(BaseModel):
+    """可见部门条目。"""
+
+    department_id: UUID
+    include_subtree: bool = True
+
+
+class AgentVisibilityOut(BaseModel):
+    """智能体 user 端可见范围配置。"""
+
+    mode: str = "all"
+    departments: list[AgentVisibilityDepartmentItem] = Field(default_factory=list)
+    user_ids: list[UUID] = Field(default_factory=list)
+
+
+class AgentVisibilityPayload(BaseModel):
+    """智能体 user 端可见范围配置入参。"""
+
+    mode: str = Field(default="all", pattern="^(all|custom)$")
+    departments: list[AgentVisibilityDepartmentItem] = Field(default_factory=list)
+    user_ids: list[UUID] = Field(default_factory=list)

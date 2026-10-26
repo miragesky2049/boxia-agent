@@ -4,6 +4,8 @@ import type {
   AgentOpenedTenant,
   AgentPayload,
   AgentSummary,
+  AgentVisibility,
+  AgentVisibilityPayload,
   ListParams,
   PageResult,
 } from './types'
@@ -47,4 +49,18 @@ export async function updateAgent(id: string, payload: AgentPayload): Promise<Ag
 
 export async function deleteAgent(id: string): Promise<void> {
   await request<void>(`/admin/agents/${id}`, { method: 'DELETE' })
+}
+
+export async function getAgentVisibility(id: string): Promise<AgentVisibility> {
+  return request<AgentVisibility>(`/admin/agents/${id}/visibility`)
+}
+
+export async function saveAgentVisibility(
+  id: string,
+  payload: AgentVisibilityPayload,
+): Promise<AgentVisibility> {
+  return request<AgentVisibility>(`/admin/agents/${id}/visibility`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
 }

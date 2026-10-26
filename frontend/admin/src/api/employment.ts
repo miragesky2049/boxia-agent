@@ -1,6 +1,7 @@
 import { request } from './client'
 import type {
   Employment,
+  EmploymentArchivePayload,
   EmploymentCreatePayload,
   EmploymentTransferPayload,
   EmploymentUpdatePayload,
@@ -50,10 +51,10 @@ export const employmentsApi = {
       body: JSON.stringify(payload),
     })
   },
-  async archive(id: string, endedAt?: string): Promise<Employment> {
+  async archive(id: string, payload: EmploymentArchivePayload = {}): Promise<Employment> {
     return request<Employment>(`/admin/employments/${id}/archive`, {
       method: 'POST',
-      body: JSON.stringify({ ended_at: endedAt ?? null }),
+      body: JSON.stringify(payload),
     })
   },
   async remove(id: string): Promise<void> {

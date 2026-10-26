@@ -2,26 +2,22 @@ import { PlusOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
-  Checkbox,
   Form,
   Input,
   InputNumber,
   Modal,
   Popconfirm,
-  Select,
   Space,
   Switch,
   Table,
-  Tabs,
   Tag,
   TreeSelect,
 } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { departmentsApi } from '../../api/department'
+import { useNavigate } from 'react-router-dom'
 import { mgmtUnitsApi } from '../../api/mgmtUnit'
 import type { MgmtUnit } from '../../api/mgmtUnit'
-import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
 
 interface MgmtUnitFormValues {
@@ -30,10 +26,6 @@ interface MgmtUnitFormValues {
   code?: string | null
   sort_order: number
   is_active?: boolean
-}
-
-interface BindingFormValues {
-  bindings: Array<{ department_id: string; include_subtree: boolean }>
 }
 
 const MAX_LEVEL = 10
@@ -61,6 +53,7 @@ function buildTreeData(
 export default function MgmtUnitsPage() {
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
+  const navigate = useNavigate()
   const canCreate = hasPermission('button:mgmt-unit:create')
   const canUpdate = hasPermission('button:mgmt-unit:update')
   const canDelete = hasPermission('button:mgmt-unit:delete')
@@ -71,15 +64,6 @@ export default function MgmtUnitsPage() {
   const [modalOpen, setModalOpen] = useState(false)
   const [editing, setEditing] = useState<MgmtUnit | null>(null)
   const [form] = Form.useForm<MgmtUnitFormValues>()
-
-  // 部门/人员关联弹窗
-  const [bindingUnit, setBindingUnit] = useState<MgmtUnit | null>(null)
-  const [bindingLoading, setBindingLoading] = useState(false)
-  const [bindingSaving, setBindingSaving] = useState(false)
-  const [deptOptions, setDeptOptions] = useState<{ label: string; value: string }[]>([])
-  const [userOptions, setUserOptions] = useState<{ label: string; value: string }[]>([])
-  const [deptBindings, setDeptBindings] = useState<BindingFormValues['bindings']>([])
-  const [userIds, setUserIds] = useState<string[]>([])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -137,8 +121,10 @@ export default function MgmtUnitsPage() {
           is_active: values.is_active ?? true,
         })
         message.success('管理单元已更新')
+        setModalOpen(false)
+        void load()
       } else {
-        await mgmtUnitsApi.create({
+        const created = await mgmtUnitsApi.create({
           parent_id: values.parent_id ?? null,
           name: values.name,
           code: values.code || null,
@@ -146,9 +132,9 @@ export default function MgmtUnitsPage() {
           attrs: {},
         })
         message.success('管理单元已创建')
+        setModalOpen(false)
+        navigate(`/mgmt-units/${created.id}`)
       }
-      setModalOpen(false)
-      void load()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存失败')
     } finally {
@@ -166,55 +152,6 @@ export default function MgmtUnitsPage() {
     }
   }
 
-  const openBinding = async (unit: MgmtUnit) => {
-    setBindingUnit(unit)
-    setBindingLoading(true)
-    try {
-      const [depts, users, deptResp, userOptions] = await Promise.all([
-        mgmtUnitsApi.listDepartments(unit.id),
-        mgmtUnitsApi.listUsers(unit.id),
-        departmentsApi.tree(),
-        usersApi.options(),
-      ])
-      setDeptBindings(depts.map((d) => ({ department_id: d.department_id, include_subtree: d.include_subtree })))
-      setUserIds(users.map((u) => u.user_id))
-      setDeptOptions(
-        deptResp.map((d) => ({
-          label: `${'　'.repeat(d.level - 1)}${d.name}`,
-          value: d.id,
-        })),
-      )
-      setUserOptions(
-        userOptions.map((u) => ({
-          label: `${u.display_name || u.username}（${u.username}）`,
-          value: u.id,
-        })),
-      )
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载关联失败')
-      setBindingUnit(null)
-    } finally {
-      setBindingLoading(false)
-    }
-  }
-
-  const saveBinding = async () => {
-    if (!bindingUnit) return
-    setBindingSaving(true)
-    try {
-      await Promise.all([
-        mgmtUnitsApi.replaceDepartments(bindingUnit.id, deptBindings),
-        mgmtUnitsApi.replaceUsers(bindingUnit.id, userIds),
-      ])
-      message.success('关联已保存')
-      setBindingUnit(null)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '保存关联失败')
-    } finally {
-      setBindingSaving(false)
-    }
-  }
-
   const columns: ColumnsType<MgmtUnit> = [
     {
       title: '名称',
@@ -223,7 +160,9 @@ export default function MgmtUnitsPage() {
       render: (text: string, unit) => (
         <span>
           {'　'.repeat(unit.level - 1)}
-          {text}
+          <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/mgmt-units/${unit.id}`)}>
+            {text}
+          </Button>
         </span>
       ),
     },
@@ -240,7 +179,7 @@ export default function MgmtUnitsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 320,
+      width: 220,
       render: (_, unit) => (
         <Space>
           {canCreate && unit.level < MAX_LEVEL && (
@@ -249,14 +188,9 @@ export default function MgmtUnitsPage() {
             </Button>
           )}
           {canUpdate && (
-            <>
-              <Button size="small" onClick={() => openEdit(unit)}>
-                编辑
-              </Button>
-              <Button size="small" onClick={() => void openBinding(unit)}>
-                关联部门/人员
-              </Button>
-            </>
+            <Button size="small" onClick={() => openEdit(unit)}>
+              编辑
+            </Button>
           )}
           {canDelete && (
             <Popconfirm
@@ -316,79 +250,6 @@ export default function MgmtUnitsPage() {
             </Form.Item>
           )}
         </Form>
-      </Modal>
-
-      <Modal
-        open={bindingUnit !== null}
-        title={`关联部门/人员：${bindingUnit?.name ?? ''}`}
-        onCancel={() => setBindingUnit(null)}
-        onOk={() => void saveBinding()}
-        confirmLoading={bindingSaving}
-        width={640}
-        loading={bindingLoading}
-        destroyOnClose
-      >
-        <Tabs
-          items={[
-            {
-              key: 'departments',
-              label: '关联部门',
-              children: (
-                <Select
-                  mode="multiple"
-                  style={{ width: '100%' }}
-                  placeholder="选择部门"
-                  value={deptBindings.map((b) => b.department_id)}
-                  options={deptOptions}
-                  onChange={(values: string[]) => {
-                    const next = new Map(deptBindings.map((b) => [b.department_id, b]))
-                    for (const v of values) {
-                      if (!next.has(v)) next.set(v, { department_id: v, include_subtree: false })
-                    }
-                    setDeptBindings(Array.from(next.values()).filter((b) => values.includes(b.department_id)))
-                  }}
-                  optionRender={(option) => {
-                    const value = String(option.value)
-                    const binding = deptBindings.find((b) => b.department_id === value)
-                    return (
-                      <Space>
-                        <span>{option.label}</span>
-                        <Checkbox
-                          checked={binding?.include_subtree ?? false}
-                          onChange={(e) => {
-                            setDeptBindings((prev) =>
-                              prev.map((b) =>
-                                b.department_id === value
-                                  ? { ...b, include_subtree: e.target.checked }
-                                  : b,
-                              ),
-                            )
-                          }}
-                        >
-                          含下级
-                        </Checkbox>
-                      </Space>
-                    )
-                  }}
-                />
-              ),
-            },
-            {
-              key: 'users',
-              label: '关联人员',
-              children: (
-                <Select
-                  mode="multiple"
-                  style={{ width: '100%' }}
-                  placeholder="选择人员"
-                  value={userIds}
-                  options={userOptions}
-                  onChange={(values: string[]) => setUserIds(values)}
-                />
-              ),
-            },
-          ]}
-        />
       </Modal>
     </>
   )

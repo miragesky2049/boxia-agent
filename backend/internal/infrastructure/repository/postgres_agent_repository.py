@@ -6,14 +6,24 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, insert, or_, select
 from sqlalchemy.orm import Session
 
+from internal.domain.entity.agent_visibility import (
+    AgentVisibility,
+    AgentVisibilityDepartment,
+)
 from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.resource import Agent
 from internal.infrastructure.model.agent import (
     AgentModel,
+    AgentVisibilityDepartmentModel,
+    AgentVisibilityUserModel,
     agent_skills,
     agent_tools,
 )
 from internal.infrastructure.model.resource import SkillModel, ToolModel
+from internal.infrastructure.repository.agent_user_visibility_filter import (
+    UserAgentVisibilityContext,
+    agent_user_visible_filter,
+)
 from internal.infrastructure.repository.data_scope_filters import agent_row_filter
 from internal.infrastructure.repository.grant_filters import (
     agent_visible,
@@ -33,6 +43,7 @@ class PostgresAgentRepository:
         role_ids: tuple[UUID, ...] = (),
         apply_role_filter: bool = True,
         data_scope: UserDataScope | None = None,
+        user_visibility: UserAgentVisibilityContext | None = None,
     ):
         self._session = session
         self._tenant_id = tenant_id
@@ -40,6 +51,8 @@ class PostgresAgentRepository:
         self._apply_role_filter = apply_role_filter
         # 行级数据权限快照：仅租户视角叠加；None 表示不叠加行过滤（如拥有全量数据权限）
         self._data_scope = data_scope
+        # user 端实例级可见范围：仅 user 端注入；管理端保持 None
+        self._user_visibility = user_visibility
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
@@ -61,6 +74,15 @@ class PostgresAgentRepository:
         if self._data_scope is not None:
             # 行级数据权限：先按资源实例授权收敛，再按管理单元展开后的部门/人员集合收敛
             stmt = stmt.where(agent_row_filter(self._data_scope))
+        if self._user_visibility is not None:
+            # user 端实例级 ACL：按智能体配置的可见部门/人员收敛（与管理端 data_scope 独立）
+            stmt = stmt.where(
+                agent_user_visible_filter(
+                    self._user_visibility.current_user_id,
+                    self._user_visibility.current_department_id,
+                    self._user_visibility.current_department_path,
+                )
+            )
         return stmt
 
     def _owned(self, stmt):
@@ -295,7 +317,77 @@ class PostgresAgentRepository:
             tenant_id=row.tenant_id,
             department_id=row.department_id,
             created_by=row.created_by,
+            visibility_mode=row.visibility_mode,
         )
+
+    def get_visibility(self, agent_id: UUID) -> AgentVisibility | None:
+        """读取智能体 user 端可见范围配置；智能体不存在返回 None。"""
+        row = self._session.get(AgentModel, agent_id)
+        if row is None or row.tenant_id is None:
+            # 平台智能体无 user 端可见范围概念
+            return None
+        dept_rows = self._session.scalars(
+            select(AgentVisibilityDepartmentModel).where(
+                AgentVisibilityDepartmentModel.agent_id == agent_id
+            )
+        ).all()
+        user_rows = self._session.scalars(
+            select(AgentVisibilityUserModel.user_id).where(
+                AgentVisibilityUserModel.agent_id == agent_id
+            )
+        ).all()
+        return AgentVisibility(
+            mode=row.visibility_mode,
+            departments=[
+                AgentVisibilityDepartment(
+                    department_id=item.department_id,
+                    include_subtree=item.include_subtree,
+                )
+                for item in dept_rows
+            ],
+            user_ids=sorted(user_rows),
+        )
+
+    def replace_visibility(
+        self,
+        agent_id: UUID,
+        mode: str,
+        departments: list[tuple[UUID, bool]],
+        user_ids: list[UUID],
+    ) -> AgentVisibility | None:
+        """事务内全量替换智能体 user 端可见范围；返回最新配置。"""
+        row = self._owned_row(agent_id)
+        if row is None or row.tenant_id is None:
+            return None
+        row.visibility_mode = mode
+        self._session.execute(
+            delete(AgentVisibilityDepartmentModel).where(
+                AgentVisibilityDepartmentModel.agent_id == agent_id
+            )
+        )
+        self._session.execute(
+            delete(AgentVisibilityUserModel).where(
+                AgentVisibilityUserModel.agent_id == agent_id
+            )
+        )
+        if departments:
+            self._session.execute(
+                insert(AgentVisibilityDepartmentModel),
+                [
+                    {"agent_id": agent_id, "department_id": dept_id, "include_subtree": flag}
+                    for dept_id, flag in departments
+                ],
+            )
+        if user_ids:
+            self._session.execute(
+                insert(AgentVisibilityUserModel),
+                [
+                    {"agent_id": agent_id, "user_id": user_id}
+                    for user_id in user_ids
+                ],
+            )
+        self._session.flush()
+        return self.get_visibility(agent_id)
 
 
 def _unique_ids(values: list[UUID]) -> list[UUID]:

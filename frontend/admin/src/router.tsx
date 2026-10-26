@@ -20,6 +20,7 @@ const TenantDetailPage = lazy(() => import('./pages/tenants/TenantDetailPage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
 const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
+const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
 
 export default function AppRouter() {
   return (
@@ -120,6 +121,14 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:mgmt-units" tenantOnly>
                   <MgmtUnitsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/mgmt-units/:id"
+              element={
+                <RequirePermission permission="page:mgmt-units" tenantOnly>
+                  <MgmtUnitDetailPage />
                 </RequirePermission>
               }
             />

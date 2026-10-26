@@ -10,6 +10,7 @@ from internal.application.auth_service import AuthService
 from internal.application.department_service import DepartmentService
 from internal.application.employment_service import EmploymentService
 from internal.application.grant_service import GrantService
+from internal.application.hr_dictionary_service import HrDictionaryService
 from internal.application.mgmt_unit_service import MgmtUnitService
 from internal.application.resource_service import ResourceService
 from internal.application.role_grant_service import RoleGrantService
@@ -119,6 +120,11 @@ def get_employment_service(uow: UowDep, context: RequestContextDep) -> Employmen
     return EmploymentService(uow, context)
 
 
+def get_hr_dictionary_service(uow: UowDep, context: RequestContextDep) -> HrDictionaryService:
+    """HR 字典用例。"""
+    return HrDictionaryService(uow, context)
+
+
 def get_mgmt_unit_service(uow: UowDep, context: RequestContextDep) -> MgmtUnitService:
     """管理单元用例。"""
     return MgmtUnitService(uow, context)
@@ -151,6 +157,7 @@ RolePermissionServiceDep = Annotated[RolePermissionService, Depends(get_role_per
 UserAdminServiceDep = Annotated[UserAdminService, Depends(get_user_service)]
 DepartmentServiceDep = Annotated[DepartmentService, Depends(get_department_service)]
 EmploymentServiceDep = Annotated[EmploymentService, Depends(get_employment_service)]
+HrDictionaryServiceDep = Annotated[HrDictionaryService, Depends(get_hr_dictionary_service)]
 MgmtUnitServiceDep = Annotated[MgmtUnitService, Depends(get_mgmt_unit_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
 UserPortalServiceDep = Annotated[UserPortalService, Depends(get_user_portal_service)]

@@ -5,7 +5,8 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { grantsApi, rolesApi } from '../../api/access'
 import { mgmtUnitsApi } from '../../api/mgmtUnit'
-import type { MgmtUnit, Role, User } from '../../api/types'
+import type { MgmtUnit } from '../../api/mgmtUnit'
+import type { Role, User } from '../../api/types'
 import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
 
@@ -133,10 +134,27 @@ export default function UserGrantsPage() {
       render: (_: unknown, record: User) => (
         <Space size={4} wrap>
           {roleNames(record.role_ids).map((name, index) => (
-            <Tag key={`${record.id}-${index}`} color="green">
+            <Tag key={`${record.id}-role-${index}`} color="green">
               {name}
             </Tag>
           ))}
+        </Space>
+      ),
+    },
+    {
+      title: '管理单元',
+      key: 'mgmt_units',
+      render: (_: unknown, record: User) => (
+        <Space size={4} wrap>
+          {record.mgmt_unit_names && record.mgmt_unit_names.length > 0 ? (
+            record.mgmt_unit_names.map((name, index) => (
+              <Tag key={`${record.id}-unit-${index}`} color="blue">
+                {name}
+              </Tag>
+            ))
+          ) : (
+            <span style={{ color: '#999' }}>-</span>
+          )}
         </Space>
       ),
     },

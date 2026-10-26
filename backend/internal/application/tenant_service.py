@@ -17,12 +17,14 @@ from internal.application.errors import (
 from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.entity.access import SYSTEM_ROLE_SEEDS, AgentTenantOpening
 from internal.domain.entity.common import Page
+from internal.domain.entity.hr_dictionary_seed import DEFAULT_HR_DICTIONARY_ITEMS
 from internal.domain.entity.permission import DEFAULT_ROLE_PERMISSION_CODES
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.entity.resource import Agent
 from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -141,6 +143,20 @@ class TenantService:
             }
         )
         self._uow.users.replace_roles(admin_user.id, tenant.id, [roles["superadmin"].id])
+        # 为新租户预置默认 HR 字典（雇佣类型/岗位职级/岗位序列），与迁移 0019 清单一致
+        for category, code, name, sort_order in DEFAULT_HR_DICTIONARY_ITEMS:
+            self._uow.hr_dictionaries.create(
+                {
+                    "id": new_uuid(),
+                    "tenant_id": tenant.id,
+                    "category": category,
+                    "code": code,
+                    "name": name,
+                    "sort_order": sort_order,
+                    "is_active": True,
+                    "remark": "",
+                }
+            )
         record_audit(
             self._uow,
             action="tenant.created",

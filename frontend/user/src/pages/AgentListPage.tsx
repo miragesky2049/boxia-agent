@@ -1,5 +1,6 @@
+import { RightOutlined } from '@ant-design/icons'
+import { Alert, Card, Col, Empty, Input, Pagination, Row, Skeleton, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
-import type { FormEvent } from 'react'
 import { Link } from 'react-router-dom'
 import { listAgents } from '../api/agents'
 import type { UserAgentSummary } from '../api/types'
@@ -8,7 +9,55 @@ import AppHeader from '../components/AppHeader'
 const PAGE_SIZE = 12
 
 function formatDescription(value: string): string {
-  return value.trim() || '暂无简介'
+  const trimmed = value.trim()
+  return trimmed || '暂无简介'
+}
+
+function AgentAvatar({ agent }: { agent: UserAgentSummary }) {
+  if (agent.avatar_url) {
+    return <img src={agent.avatar_url} alt="" className="agent-card__avatar" />
+  }
+  return (
+    <span className="agent-card__avatar agent-card__avatar--fallback">
+      {agent.name.slice(0, 1).toUpperCase()}
+    </span>
+  )
+}
+
+function AgentCard({ agent }: { agent: UserAgentSummary }) {
+  return (
+    <Col xs={24} sm={12} lg={8} xl={6}>
+      <Link to={`/agents/${agent.id}`} style={{ display: 'block', height: '100%' }}>
+        <Card className="agent-card" styles={{ body: { height: '100%', display: 'flex', flexDirection: 'column' } }}>
+          <div className="agent-card__head">
+            <AgentAvatar agent={agent} />
+            <Typography.Title level={5} style={{ margin: 0 }}>
+              {agent.name}
+            </Typography.Title>
+          </div>
+          <Typography.Paragraph
+            ellipsis={{ rows: 2 }}
+            style={{ margin: 0, color: '#86909c', fontSize: 13 }}
+          >
+            {formatDescription(agent.description)}
+          </Typography.Paragraph>
+          <Typography.Text className="agent-card__link" style={{ color: '#2f6bff' }}>
+            查看详情 <RightOutlined style={{ fontSize: 11 }} />
+          </Typography.Text>
+        </Card>
+      </Link>
+    </Col>
+  )
+}
+
+function AgentCardSkeleton() {
+  return (
+    <Col xs={24} sm={12} lg={8} xl={6}>
+      <Card>
+        <Skeleton active avatar={{ size: 40 }} paragraph={{ rows: 2 }} title={{ width: '40%' }} />
+      </Card>
+    </Col>
+  )
 }
 
 export default function AgentListPage() {
@@ -38,95 +87,96 @@ export default function AgentListPage() {
     void load()
   }, [load])
 
-  const handleSearch = (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
+  const handleSearch = (value: string) => {
     setPage(1)
-    setKeyword(searchInput.trim())
+    setKeyword(value.trim())
   }
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE))
 
   return (
-    <div className="app">
+    <div style={{ minHeight: '100svh', background: '#f7f8fc' }}>
       <AppHeader />
-      <main className="container">
-        <section className="hero">
+      <main style={{ width: 'min(1200px, 100%)', margin: '0 auto', padding: '24px 24px 56px' }}>
+        <section className="hero-banner">
           <div>
             <h1>可用智能体</h1>
             <p>这里只展示你的角色被授权且已启用的智能体。</p>
           </div>
-          <form className="search" onSubmit={handleSearch} role="search">
-            <input
-              value={searchInput}
-              placeholder="搜索智能体名称"
-              maxLength={100}
-              onChange={(event) => setSearchInput(event.target.value)}
-            />
-            <button type="submit" className="button">
-              搜索
-            </button>
-          </form>
+          <Input.Search
+            size="large"
+            placeholder="搜索智能体名称"
+            allowClear
+            style={{ width: 320 }}
+            onSearch={handleSearch}
+            onChange={(event) => setSearchInput(event.target.value)}
+            value={searchInput}
+            enterButton
+          />
         </section>
 
         {error && (
-          <div className="notice notice--error" role="alert">
-            <span>{error}</span>
-            <button type="button" className="button button--ghost" onClick={() => void load()}>
-              重试
-            </button>
-          </div>
+          <Alert
+            type="error"
+            showIcon
+            style={{ marginBottom: 16 }}
+            message={error}
+            action={
+              <button
+                type="button"
+                onClick={() => void load()}
+                style={{
+                  background: 'transparent',
+                  border: '1px solid #d9d9d9',
+                  borderRadius: 6,
+                  padding: '4px 12px',
+                  cursor: 'pointer',
+                  fontSize: 13,
+                }}
+              >
+                重试
+              </button>
+            }
+          />
         )}
 
-        {loading ? (
-          <p className="state-text">正在加载智能体…</p>
-        ) : items.length === 0 ? (
-          <div className="empty">
-            <p>{keyword ? '没有匹配的智能体' : '暂无可用的智能体'}</p>
-            <span>如长时间为空，请联系租户管理员确认角色授权。</span>
-          </div>
-        ) : (
-          <div className="agent-grid">
-            {items.map((agent) => (
-              <Link key={agent.id} to={`/agents/${agent.id}`} className="agent-card">
-                <div className="agent-card__head">
-                  {agent.avatar_url ? (
-                    <img src={agent.avatar_url} alt="" className="agent-card__avatar" />
-                  ) : (
-                    <span className="agent-card__avatar agent-card__avatar--fallback">
-                      {agent.name.slice(0, 1)}
-                    </span>
-                  )}
-                  <h2>{agent.name}</h2>
-                </div>
-                <p>{formatDescription(agent.description)}</p>
-                <span className="agent-card__more">查看详情 →</span>
-              </Link>
+        {!error && loading ? (
+          <Row gutter={[16, 16]}>
+            {Array.from({ length: 8 }).map((_, index) => (
+              <AgentCardSkeleton key={index} />
             ))}
-          </div>
+          </Row>
+        ) : !error && items.length === 0 ? (
+          <Empty
+            description={
+              <span style={{ color: '#86909c' }}>
+                {keyword ? '没有匹配的智能体' : '暂无可用的智能体'}
+                <br />
+                <small>如长时间为空，请联系租户管理员确认角色授权。</small>
+              </span>
+            }
+            style={{ padding: '48px 0' }}
+          />
+        ) : (
+          <Row gutter={[16, 16]}>
+            {items.map((agent) => (
+              <AgentCard key={agent.id} agent={agent} />
+            ))}
+          </Row>
         )}
 
-        {totalPages > 1 && (
-          <nav className="pager" aria-label="分页">
-            <button
-              type="button"
-              className="button button--ghost"
-              disabled={page <= 1 || loading}
-              onClick={() => setPage((current) => Math.max(1, current - 1))}
-            >
-              上一页
-            </button>
-            <span>
-              第 {page} / {totalPages} 页 · 共 {total} 个
-            </span>
-            <button
-              type="button"
-              className="button button--ghost"
-              disabled={page >= totalPages || loading}
-              onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
-            >
-              下一页
-            </button>
-          </nav>
+        {!error && totalPages > 1 && (
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: 32 }}>
+            <Pagination
+              current={page}
+              total={total}
+              pageSize={PAGE_SIZE}
+              onChange={(next) => {
+                setPage(next)
+              }}
+              showSizeChanger={false}
+            />
+          </div>
         )}
       </main>
     </div>

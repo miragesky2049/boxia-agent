@@ -1,11 +1,12 @@
 """租户角色、最终用户与资源授权 ORM 模型。"""
 
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
+    Date,
     DateTime,
     ForeignKey,
     ForeignKeyConstraint,
@@ -78,6 +79,13 @@ class UserModel(Base):
             ondelete="RESTRICT",
         ),
         Index("ix_users_tenant_role", "tenant_id", "role_id"),
+        Index(
+            "ux_users_tenant_employee_no",
+            "tenant_id",
+            "employee_no",
+            unique=True,
+            postgresql_where=text("employee_no IS NOT NULL"),
+        ),
     )
 
     id: Mapped[UuidPrimaryKey]
@@ -99,6 +107,14 @@ class UserModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
+    # HR 基础字段
+    employee_no: Mapped[str | None] = mapped_column(String(64))
+    phone: Mapped[str | None] = mapped_column(String(32))
+    email: Mapped[str | None] = mapped_column(String(128))
+    gender: Mapped[str | None] = mapped_column(String(16))
+    birth_date: Mapped[date | None] = mapped_column(Date)
+    avatar_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")
+    remark: Mapped[str] = mapped_column(Text, nullable=False, default="")
 
 
 class UserRoleModel(Base):

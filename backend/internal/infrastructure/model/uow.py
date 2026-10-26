@@ -13,6 +13,7 @@ from internal.domain.repository.protocols import (
     AuditLogRepository,
     DepartmentRepository,
     EmploymentRepository,
+    HrDictionaryRepository,
     MgmtUnitRepository,
     PermissionResourceRepository,
     RefreshTokenRepository,
@@ -27,6 +28,9 @@ from internal.domain.repository.protocols import (
     UserRepository,
 )
 from internal.infrastructure.model.database import get_session_factory
+from internal.infrastructure.repository.agent_user_visibility_filter import (
+    UserAgentVisibilityContext,
+)
 from internal.infrastructure.repository.postgres_admin_user_repository import (
     PostgresAdminUserRepository,
 )
@@ -42,6 +46,9 @@ from internal.infrastructure.repository.postgres_department_repository import (
 )
 from internal.infrastructure.repository.postgres_employment_repository import (
     PostgresEmploymentRepository,
+)
+from internal.infrastructure.repository.postgres_hr_dictionary_repository import (
+    PostgresHrDictionaryRepository,
 )
 from internal.infrastructure.repository.postgres_mgmt_unit_repository import (
     PostgresMgmtUnitRepository,
@@ -106,6 +113,9 @@ class SqlAlchemyUnitOfWork:
         )
         self.departments: DepartmentRepository = PostgresDepartmentRepository(self.session)
         self.employments: EmploymentRepository = PostgresEmploymentRepository(self.session)
+        self.hr_dictionaries: HrDictionaryRepository = PostgresHrDictionaryRepository(
+            self.session
+        )
         self.mgmt_units: MgmtUnitRepository = PostgresMgmtUnitRepository(self.session)
         self.user_mgmt_unit_grants: UserMgmtUnitGrantRepository = (
             PostgresUserMgmtUnitGrantRepository(self.session)
@@ -117,6 +127,7 @@ class SqlAlchemyUnitOfWork:
         self._scope_role_ids: tuple[UUID, ...] = ()
         self._scope_apply_role_filter: bool = True
         self._data_scope_snapshot: UserDataScope | None = None
+        self._user_visibility: UserAgentVisibilityContext | None = None
         self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
         # 开通关系不参与角色收敛，租户侧查询由应用层按需过滤。
         self.agent_openings: AgentTenantOpeningRepository = PostgresAgentTenantOpeningRepository(
@@ -153,14 +164,20 @@ class SqlAlchemyUnitOfWork:
         self._data_scope_snapshot = snapshot
         self._rebuild_agent_repo()
 
+    def apply_user_visibility(self, context: UserAgentVisibilityContext | None = None) -> None:
+        """按 user 端实例级可见范围重建智能体仓储；None 表示清除叠加。"""
+        self._user_visibility = context
+        self._rebuild_agent_repo()
+
     def _rebuild_agent_repo(self) -> None:
-        """以角色过滤状态 + 行级数据范围统一重建智能体仓储。"""
+        """以角色过滤状态 + 行级数据范围 + user 端可见范围统一重建智能体仓储。"""
         self.agents = PostgresAgentRepository(
             self.session,
             self.tenant_id,
             self._scope_role_ids,
             self._scope_apply_role_filter,
             self._data_scope_snapshot,
+            self._user_visibility,
         )
 
     def commit(self) -> None:
