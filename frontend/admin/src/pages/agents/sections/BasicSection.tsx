@@ -33,12 +33,13 @@ export default function BasicSection({
             <Form.Item
               name="department_id"
               label="所属部门"
-              extra="用于后续按部门做数据范围控制；清空表示不归属任何部门。"
+              rules={[{ required: true, message: '请选择所属部门' }]}
+              extra="用于按部门做行级数据权限过滤；租户智能体必填。"
             >
               <TreeSelect
                 allowClear
                 treeData={deptTreeData}
-                placeholder="不归属任何部门"
+                placeholder="请选择部门"
                 treeDefaultExpandAll
               />
             </Form.Item>

@@ -6,6 +6,7 @@ import type {
   PageResult,
   User,
   UserCreatePayload,
+  UserOption,
   UserUpdatePayload,
 } from './types'
 
@@ -29,6 +30,12 @@ function buildQuery(params: UserListParams): string {
 export const usersApi = {
   async list(params: UserListParams = {}): Promise<PageResult<User>> {
     return request<PageResult<User>>(`/admin/users?${buildQuery(params)}`)
+  },
+  async options(keyword?: string): Promise<UserOption[]> {
+    const query = new URLSearchParams()
+    if (keyword) query.set('keyword', keyword)
+    const suffix = query.toString() ? `?${query.toString()}` : ''
+    return request<UserOption[]>(`/admin/users/options${suffix}`)
   },
   async create(payload: UserCreatePayload): Promise<User> {
     return request<User>('/admin/users', {

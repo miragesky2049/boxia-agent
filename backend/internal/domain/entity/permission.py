@@ -70,6 +70,7 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("menu:users", "用户管理", "menu", "view", 40),
     _perm("menu:departments", "部门管理", "menu", "view", 45),
     _perm("menu:employments", "任职管理", "menu", "view", 46),
+    _perm("menu:mgmt-units", "管理单元", "menu", "view", 47),
     _perm("menu:admin-users", "管理员账号", "menu", "view", 50),
     _perm("menu:tenants", "租户管理", "menu", "view", 60),
     _perm("menu:audit", "审计日志", "menu", "view", 70),
@@ -79,6 +80,7 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("page:users", "用户管理页面", "page", "view", 140),
     _perm("page:departments", "部门管理页面", "page", "view", 145),
     _perm("page:employments", "任职管理页面", "page", "view", 146),
+    _perm("page:mgmt-units", "管理单元页面", "page", "view", 147),
     _perm("page:admin-users", "管理员账号页面", "page", "view", 150),
     _perm("page:tenants", "租户管理页面", "page", "view", 160),
     _perm("page:audit", "审计日志页面", "page", "view", 170),
@@ -138,6 +140,10 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:employment:create", "任职-新建", "button", "create", 370),
     _perm("button:employment:update", "任职-编辑/调岗/结束任职", "button", "update", 371),
     _perm("button:employment:delete", "任职-删除", "button", "delete", 372),
+    _perm("button:mgmt-unit:create", "管理单元-新建", "button", "create", 380),
+    _perm("button:mgmt-unit:update", "管理单元-编辑", "button", "update", 381),
+    _perm("button:mgmt-unit:delete", "管理单元-删除", "button", "delete", 382),
+    _perm("button:mgmt-unit:grant", "管理单元-授权用户", "button", "manage", 384),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)
@@ -161,9 +167,11 @@ TENANT_ONLY_CODES: frozenset[str] = frozenset(
         "menu:users",
         "menu:departments",
         "menu:employments",
+        "menu:mgmt-units",
         "page:users",
         "page:departments",
         "page:employments",
+        "page:mgmt-units",
         "button:user:create",
         "button:user:update",
         "button:user:delete",
@@ -173,16 +181,22 @@ TENANT_ONLY_CODES: frozenset[str] = frozenset(
         "button:employment:create",
         "button:employment:update",
         "button:employment:delete",
+        "button:mgmt-unit:create",
+        "button:mgmt-unit:update",
+        "button:mgmt-unit:delete",
+        "button:mgmt-unit:grant",
     }
 )
 
-# 组织架构：只读菜单/页面 与 部门/任职写操作按钮
+# 组织与管理单元：只读菜单/页面 与 部门/任职/管理单元/数据范围写操作按钮
 _ORG_READ_CODES = frozenset(
     {
         "menu:departments",
         "menu:employments",
+        "menu:mgmt-units",
         "page:departments",
         "page:employments",
+        "page:mgmt-units",
     }
 )
 _ORG_WRITE_CODES = frozenset(
@@ -193,6 +207,10 @@ _ORG_WRITE_CODES = frozenset(
         "button:employment:create",
         "button:employment:update",
         "button:employment:delete",
+        "button:mgmt-unit:create",
+        "button:mgmt-unit:update",
+        "button:mgmt-unit:delete",
+        "button:mgmt-unit:grant",
     }
 )
 TENANT_SCOPED_CODES: frozenset[str] = frozenset(PERMISSION_CODES) - PLATFORM_ONLY_CODES

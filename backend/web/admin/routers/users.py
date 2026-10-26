@@ -9,6 +9,7 @@ from internal.domain.entity.common import Page
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.user import (
     UserCreateRequest,
+    UserOptionOut,
     UserOut,
     UserResetPasswordRequest,
     UserUpdateRequest,
@@ -34,6 +35,19 @@ def list_users(
 ) -> PageOut[UserOut]:
     """分页查询本租户最终用户，department_id 非空时按部门（含下级）筛选。"""
     return _to_page_out(service.list(page, page_size, keyword, department_id))
+
+
+@router.get(
+    "/options",
+    response_model=list[UserOptionOut],
+    dependencies=[Depends(require_permission("page:users"))],
+)
+def list_user_options(
+    service: UserAdminServiceDep,
+    keyword: str | None = Query(None, max_length=100),
+) -> list[UserOptionOut]:
+    """下拉选项用：返回本租户启用用户的精简列表。"""
+    return [UserOptionOut.model_validate(item) for item in service.list_options(keyword)]
 
 
 @router.post(
