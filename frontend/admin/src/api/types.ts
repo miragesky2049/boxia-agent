@@ -207,9 +207,76 @@ export interface User {
   is_active: boolean
   role_id: string
   role_ids: string[]
+  current_department_id: string | null
+  current_department_name: string | null
   last_login_at: string | null
   created_at: string
   updated_at: string
+}
+
+export interface Department {
+  id: string
+  tenant_id: string
+  parent_id: string | null
+  name: string
+  code: string | null
+  path: string
+  level: number
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  children?: Department[]
+}
+
+export interface DepartmentCreatePayload {
+  parent_id?: string | null
+  name: string
+  code?: string | null
+  sort_order: number
+  is_active?: boolean
+}
+
+export interface DepartmentUpdatePayload {
+  parent_id?: string | null
+  name: string
+  code?: string | null
+  sort_order: number
+}
+
+export interface Employment {
+  id: string
+  tenant_id: string
+  user_id: string
+  department_id: string
+  position: string
+  is_current: boolean
+  started_at: string
+  ended_at: string | null
+  user_name: string | null
+  user_display_name: string | null
+  department_name: string | null
+  department_path: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface EmploymentCreatePayload {
+  user_id: string
+  department_id: string
+  position?: string
+  started_at?: string
+}
+
+export interface EmploymentUpdatePayload {
+  position?: string
+  started_at?: string
+}
+
+export interface EmploymentTransferPayload {
+  department_id: string
+  position?: string
+  started_at?: string
 }
 
 export interface UserCreatePayload {
@@ -415,6 +482,7 @@ export interface AgentConfig {
 
 export interface AgentSummary extends ResourceBase {
   avatar_url: string
+  department_id?: string | null
 }
 
 export interface Agent extends AgentSummary {
@@ -431,6 +499,7 @@ export interface AgentPayload {
   config: AgentConfig
   tool_ids: string[]
   skill_ids: string[]
+  department_id?: string | null
 }
 
 export interface ListParams {

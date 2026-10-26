@@ -121,6 +121,7 @@ class Agent:
     tool_ids: list[UUID] = field(default_factory=list)
     skill_ids: list[UUID] = field(default_factory=list)
     tenant_id: UUID | None = None
+    department_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:

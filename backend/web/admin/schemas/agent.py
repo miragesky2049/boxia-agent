@@ -121,6 +121,7 @@ class AgentPayload(BaseModel):
     config: AgentConfig = Field(default_factory=AgentConfig)
     tool_ids: list[UUID] = Field(default_factory=list)
     skill_ids: list[UUID] = Field(default_factory=list)
+    department_id: UUID | None = None
 
 
 class AgentSummaryOut(BaseModel):
@@ -135,6 +136,7 @@ class AgentSummaryOut(BaseModel):
     is_enabled: bool
     tenant_id: UUID | None = None
     is_platform: bool = False
+    department_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 

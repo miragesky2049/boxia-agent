@@ -10,6 +10,8 @@ from internal.domain.repository.protocols import (
     AgentRepository,
     AgentTenantOpeningRepository,
     AuditLogRepository,
+    DepartmentRepository,
+    EmploymentRepository,
     PermissionResourceRepository,
     RefreshTokenRepository,
     ResourceGrantRepository,
@@ -31,6 +33,12 @@ from internal.infrastructure.repository.postgres_agent_tenant_opening_repository
 )
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
+)
+from internal.infrastructure.repository.postgres_department_repository import (
+    PostgresDepartmentRepository,
+)
+from internal.infrastructure.repository.postgres_employment_repository import (
+    PostgresEmploymentRepository,
 )
 from internal.infrastructure.repository.postgres_permission_resource_repository import (
     PostgresPermissionResourceRepository,
@@ -87,6 +95,8 @@ class SqlAlchemyUnitOfWork:
         self.user_refresh_tokens: UserRefreshTokenRepository = PostgresUserRefreshTokenRepository(
             self.session
         )
+        self.departments: DepartmentRepository = PostgresDepartmentRepository(self.session)
+        self.employments: EmploymentRepository = PostgresEmploymentRepository(self.session)
         self.resource_grants: ResourceGrantRepository = PostgresResourceGrantRepository(
             self.session
         )

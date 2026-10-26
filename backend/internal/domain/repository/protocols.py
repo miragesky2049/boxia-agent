@@ -14,6 +14,8 @@ from internal.domain.entity.access import (
 )
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
+from internal.domain.entity.department import Department
+from internal.domain.entity.employment import Employment
 from internal.domain.entity.permission import PermissionResource
 from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
@@ -370,9 +372,14 @@ class UserRepository(Protocol):
         """按主键查询。"""
 
     def list_page(
-        self, page: int, page_size: int, keyword: str | None, tenant_id: UUID
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        tenant_id: UUID,
+        user_ids: list[UUID] | None = None,
     ) -> tuple[list[User], int]:
-        """分页查询租户最终用户。"""
+        """分页查询租户最终用户；user_ids 非空时仅返回其中用户（部门子树筛选用）。"""
 
     def create(self, values: dict[str, Any]) -> User:
         """创建最终用户。"""
@@ -640,6 +647,113 @@ class AgentTenantOpeningRepository(Protocol):
         """查询平台级智能体，忽略平台角色的数据授权过滤。"""
 
 
+class DepartmentRepository(Protocol):
+    """部门仓储：物化路径树，所有调用均在单一租户作用域内。"""
+
+    def get(self, department_id: UUID) -> Department | None:
+        """按主键查询部门。"""
+
+    def get_for_update(
+        self, department_id: UUID, tenant_id: UUID | None = None
+    ) -> Department | None:
+        """按主键加行锁查询部门；传入租户时同时限定租户。"""
+
+    def list_all(self, tenant_id: UUID) -> list[Department]:
+        """按 path 排序返回租户全部部门，由应用层在内存组装树。"""
+
+    def create(self, values: dict[str, Any]) -> Department:
+        """创建部门。"""
+
+    def update(self, department_id: UUID, values: dict[str, Any]) -> Department | None:
+        """更新部门基础字段。"""
+
+    def delete(self, department_id: UUID) -> bool:
+        """物理删除部门。"""
+
+    def code_exists(
+        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
+    ) -> bool:
+        """租户内部门编码是否已存在（忽略大小写）。"""
+
+    def name_exists_under_parent(
+        self,
+        tenant_id: UUID,
+        parent_id: UUID | None,
+        name: str,
+        exclude_id: UUID | None = None,
+    ) -> bool:
+        """同一父部门下名称是否已存在（忽略大小写，根部门父 id 为空）。"""
+
+    def exists_child(self, tenant_id: UUID, department_id: UUID) -> bool:
+        """是否存在直接子部门。"""
+
+    def count_employments(self, tenant_id: UUID, department_id: UUID) -> int:
+        """统计部门下全部任职记录数（含历史）。"""
+
+    def count_agents(self, tenant_id: UUID, department_id: UUID) -> int:
+        """统计归属该部门的智能体数。"""
+
+    def lock_subtree_and_parent(
+        self,
+        tenant_id: UUID,
+        subtree_prefix: str,
+        new_parent_id: UUID | None,
+    ) -> list[Department]:
+        """按 path 顺序锁定待移动子树与目标父行并返回；跨租户父行不在结果中。"""
+
+    def reparent_subtree(
+        self,
+        tenant_id: UUID,
+        moved_id: UUID,
+        old_prefix: str,
+        new_prefix: str,
+        new_parent_id: UUID | None,
+        level_delta: int,
+    ) -> None:
+        """在已加锁前提下整体平移子树 path/level，并更新移动节点的 parent_id。"""
+
+
+class EmploymentRepository(Protocol):
+    """用户任职记录仓储。"""
+
+    def get(self, employment_id: UUID) -> Employment | None:
+        """按主键查询任职（含用户与部门展示字段）。"""
+
+    def list_page(
+        self,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        department_path_prefix: str | None,
+        user_id: UUID | None,
+        is_current: bool | None,
+    ) -> tuple[list[Employment], int]:
+        """分页查询任职；部门前缀命中本部门及下级，关键字匹配用户名/昵称/岗位。"""
+
+    def create(self, values: dict[str, Any]) -> Employment:
+        """创建任职记录。"""
+
+    def update(self, employment_id: UUID, values: dict[str, Any]) -> Employment | None:
+        """更新任职记录字段。"""
+
+    def delete(self, employment_id: UUID) -> bool:
+        """物理删除任职记录。"""
+
+    def get_current_for_update(self, tenant_id: UUID, user_id: UUID) -> Employment | None:
+        """加行锁查询用户当前主任职。"""
+
+    def map_current_for_users(
+        self, tenant_id: UUID, user_ids: list[UUID]
+    ) -> dict[UUID, tuple[UUID, str]]:
+        """批量返回用户当前任职的 (部门id, 部门名)，避免用户列表 N+1。"""
+
+    def list_current_user_ids_in_subtree(
+        self, tenant_id: UUID, department_path_prefix: str
+    ) -> set[UUID]:
+        """返回当前任职部门落在给定部门前缀（本部门及下级）内的用户 ID。"""
+
+
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -655,6 +769,8 @@ class UnitOfWork(Protocol):
     user_refresh_tokens: UserRefreshTokenRepository
     resource_grants: ResourceGrantRepository
     agent_openings: AgentTenantOpeningRepository
+    departments: DepartmentRepository
+    employments: EmploymentRepository
     agents: AgentRepository
     skills: ResourceRepository[Skill]
     skill_files: SkillFileRepository

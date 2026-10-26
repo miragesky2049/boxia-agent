@@ -121,4 +121,23 @@ class AgentService:
 
         payload["tool_ids"] = tool_ids
         payload["skill_ids"] = skill_ids
+        payload["department_id"] = self._validated_department(
+            payload.get("department_id")
+        )
         return payload
+
+    def _validated_department(self, value: object) -> UUID | None:
+        """平台智能体强制无部门；租户智能体非空时校验部门同租户且启用。"""
+        department_id = UUID(str(value)) if value else None
+        if self._context.is_platform:
+            if department_id is not None:
+                raise ValidationError("产品级智能体不能归属部门")
+            return None
+        if department_id is None:
+            return None
+        department = self._uow.departments.get(department_id)
+        if department is None or department.tenant_id != self._context.tenant_id:
+            raise ValidationError("所属部门不存在或不属于当前租户")
+        if not department.is_active:
+            raise ValidationError("所属部门已停用，不能挂接智能体")
+        return department_id

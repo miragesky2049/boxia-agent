@@ -30,9 +30,10 @@ def list_users(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
+    department_id: UUID | None = Query(None),
 ) -> PageOut[UserOut]:
-    """分页查询本租户最终用户。"""
-    return _to_page_out(service.list(page, page_size, keyword))
+    """分页查询本租户最终用户，department_id 非空时按部门（含下级）筛选。"""
+    return _to_page_out(service.list(page, page_size, keyword, department_id))
 
 
 @router.post(

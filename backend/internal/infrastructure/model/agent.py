@@ -6,9 +6,11 @@ from uuid import UUID
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     DateTime,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
     String,
     Table,
@@ -58,6 +60,19 @@ class AgentModel(Base):
     """agents 表。"""
 
     __tablename__ = "agents"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["tenant_id", "department_id"],
+            ["departments.tenant_id", "departments.id"],
+            name="fk_agents_department",
+            ondelete="RESTRICT",
+        ),
+        CheckConstraint(
+            "tenant_id IS NOT NULL OR department_id IS NULL",
+            name="ck_agents_platform_no_dept",
+        ),
+        Index("ix_agents_tenant_department", "tenant_id", "department_id"),
+    )
 
     id: Mapped[UuidPrimaryKey]
     # NULL 表示产品级智能体，所有租户可见；非空表示租户私有智能体。
@@ -69,6 +84,8 @@ class AgentModel(Base):
     description: Mapped[str] = mapped_column(Text, nullable=False, default="")
     config: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    # 归属部门仅租户智能体可填，平台智能体必须为空。
+    department_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Sequence
 from datetime import UTC, datetime
@@ -24,6 +25,7 @@ from internal.infrastructure.security.password import hash_password, validate_pa
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
 # 模块级别名：避免类内 list 方法遮蔽内置类型
 RoleIdList = list[UUID]
+UserList = list[User]
 
 
 class UserAdminService:
@@ -33,12 +35,35 @@ class UserAdminService:
         self._uow = uow
         self._context = context
 
-    def list(self, page: int, page_size: int, keyword: str | None) -> Page[User]:
-        """分页查询本租户最终用户。"""
+    def list(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        department_id: UUID | None = None,
+    ) -> Page[User]:
+        """分页查询本租户最终用户；department_id 非空时按部门（含下级）筛选。"""
         tenant_id = self._require_tenant()
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        items, total = self._uow.users.list_page(page, page_size, keyword, tenant_id)
+
+        filter_user_ids: list[UUID] | None = None
+        if department_id is not None:
+            filter_department = self._uow.departments.get(department_id)
+            if filter_department is None or filter_department.tenant_id != tenant_id:
+                raise NotFoundError("筛选部门不存在")
+            filter_user_ids = list(
+                self._uow.employments.list_current_user_ids_in_subtree(
+                    tenant_id, filter_department.path
+                )
+            )
+            if not filter_user_ids:
+                return Page(items=[], total=0, page=page, page_size=page_size)
+
+        items, total = self._uow.users.list_page(
+            page, page_size, keyword, tenant_id, filter_user_ids
+        )
+        items = self._attach_departments(tenant_id, items)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     def create(
@@ -227,3 +252,26 @@ class UserAdminService:
         if target is None or target.tenant_id != tenant_id:
             raise NotFoundError("最终用户不存在")
         return target
+
+    def _attach_departments(self, tenant_id: UUID, items: UserList) -> UserList:
+        """批量回填用户当前任职部门，避免列表 N+1。"""
+        if not items:
+            return items
+        current_map = self._uow.employments.map_current_for_users(
+            tenant_id, [user.id for user in items]
+        )
+        result: UserList = []
+        for user in items:
+            current = current_map.get(user.id)
+            if current is None:
+                result.append(user)
+                continue
+            department_id, department_name = current
+            result.append(
+                dataclasses.replace(
+                    user,
+                    current_department_id=department_id,
+                    current_department_name=department_name,
+                )
+            )
+        return result

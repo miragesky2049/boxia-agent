@@ -69,6 +69,8 @@ class UserModel(Base):
     __tablename__ = "users"
     __table_args__ = (
         UniqueConstraint("tenant_id", "username", name="ux_users_tenant_username"),
+        # 复合外键锚点：任职表以 (tenant_id, user_id) 引用本表
+        UniqueConstraint("tenant_id", "id", name="uq_users_tenant_id"),
         ForeignKeyConstraint(
             ["role_id", "tenant_id"],
             ["roles.id", "roles.tenant_id"],

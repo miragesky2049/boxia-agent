@@ -7,6 +7,8 @@ from fastapi import Depends
 from internal.application.admin_user_service import AdminUserService, AuditService
 from internal.application.agent_service import AgentService
 from internal.application.auth_service import AuthService
+from internal.application.department_service import DepartmentService
+from internal.application.employment_service import EmploymentService
 from internal.application.grant_service import GrantService
 from internal.application.resource_service import ResourceService
 from internal.application.role_grant_service import RoleGrantService
@@ -106,6 +108,16 @@ def get_user_service(uow: UowDep, context: RequestContextDep) -> UserAdminServic
     return UserAdminService(uow, context)
 
 
+def get_department_service(uow: UowDep, context: RequestContextDep) -> DepartmentService:
+    """部门管理用例。"""
+    return DepartmentService(uow, context)
+
+
+def get_employment_service(uow: UowDep, context: RequestContextDep) -> EmploymentService:
+    """任职记录用例。"""
+    return EmploymentService(uow, context)
+
+
 def get_grant_service(uow: AdminScopedUowDep, context: RequestContextDep) -> GrantService:
     """资源授权用例。"""
     return GrantService(uow, context)
@@ -131,6 +143,8 @@ RoleServiceDep = Annotated[RoleService, Depends(get_role_service)]
 RoleGrantServiceDep = Annotated[RoleGrantService, Depends(get_role_grant_service)]
 RolePermissionServiceDep = Annotated[RolePermissionService, Depends(get_role_permission_service)]
 UserAdminServiceDep = Annotated[UserAdminService, Depends(get_user_service)]
+DepartmentServiceDep = Annotated[DepartmentService, Depends(get_department_service)]
+EmploymentServiceDep = Annotated[EmploymentService, Depends(get_employment_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
 UserPortalServiceDep = Annotated[UserPortalService, Depends(get_user_portal_service)]
 
@@ -142,6 +156,8 @@ __all__ = [
     "AuthServiceDep",
     "ComponentServiceDep",
     "UserAdminServiceDep",
+    "DepartmentServiceDep",
+    "EmploymentServiceDep",
     "GrantServiceDep",
     "PromptServiceDep",
     "RoleGrantServiceDep",

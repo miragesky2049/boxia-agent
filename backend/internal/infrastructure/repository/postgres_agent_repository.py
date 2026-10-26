@@ -26,11 +26,15 @@ class PostgresAgentRepository:
         tenant_id: UUID | None = None,
         role_ids: tuple[UUID, ...] = (),
         apply_role_filter: bool = True,
+        department_scope: frozenset[UUID] | None = None,
     ):
         self._session = session
         self._tenant_id = tenant_id
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
+        # 部门数据范围预留接入点：非 None 时仅该集合内部门的租户智能体可见，
+        # 未分配部门的租户智能体 fail-closed；本期不接线（apply_scope 不传），行为不变。
+        self._department_scope = department_scope
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
@@ -41,7 +45,7 @@ class PostgresAgentRepository:
                     platform_role_grant_exists("agent", AgentModel.id, self._role_ids)
                 )
             return stmt
-        return stmt.where(
+        stmt = stmt.where(
             agent_visible(
                 AgentModel.id,
                 self._tenant_id,
@@ -49,6 +53,17 @@ class PostgresAgentRepository:
                 self._apply_role_filter,
             )
         )
+        if self._department_scope is not None:
+            stmt = stmt.where(
+                or_(
+                    AgentModel.tenant_id.is_(None),
+                    and_(
+                        AgentModel.tenant_id == self._tenant_id,
+                        AgentModel.department_id.in_(self._department_scope),
+                    ),
+                )
+            )
+        return stmt
 
     def _owned(self, stmt):
         """写归属范围。"""
@@ -274,6 +289,7 @@ class PostgresAgentRepository:
             tool_ids=tool_ids or [],
             skill_ids=skill_ids or [],
             tenant_id=row.tenant_id,
+            department_id=row.department_id,
         )
 
 
