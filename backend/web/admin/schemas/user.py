@@ -18,6 +18,8 @@ class UserOut(BaseModel):
     is_active: bool
     role_id: UUID
     role_ids: list[UUID] = []
+    current_department_id: UUID | None = None
+    current_department_name: str | None = None
     last_login_at: datetime | None = None
     created_at: datetime
     updated_at: datetime

@@ -11,6 +11,8 @@ const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
 const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
 const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
+const DepartmentsPage = lazy(() => import('./pages/departments/DepartmentsPage'))
+const EmploymentsPage = lazy(() => import('./pages/employments/EmploymentsPage'))
 const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const UserGrantsPage = lazy(() => import('./pages/grants/UserGrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
@@ -93,6 +95,22 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:users">
                   <UsersPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/departments"
+              element={
+                <RequirePermission permission="page:departments" tenantOnly>
+                  <DepartmentsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/employments"
+              element={
+                <RequirePermission permission="page:employments" tenantOnly>
+                  <EmploymentsPage />
                 </RequirePermission>
               }
             />

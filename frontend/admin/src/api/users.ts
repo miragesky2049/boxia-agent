@@ -13,6 +13,7 @@ export interface UserListParams {
   page?: number
   page_size?: number
   keyword?: string
+  department_id?: string
 }
 
 function buildQuery(params: UserListParams): string {
@@ -20,6 +21,7 @@ function buildQuery(params: UserListParams): string {
   query.set('page', String(params.page ?? 1))
   query.set('page_size', String(params.page_size ?? 20))
   if (params.keyword) query.set('keyword', params.keyword)
+  if (params.department_id) query.set('department_id', params.department_id)
   return query.toString()
 }
 

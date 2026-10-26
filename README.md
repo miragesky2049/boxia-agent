@@ -82,6 +82,7 @@
 | 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
 | 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
 | 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的智能体 |
+| 组织架构     | 部门树（物化路径、最多 10 级）、用户任职记录（单一主任职 + 调岗归档 + 历史可查）、智能体归属部门；为后续部门数据权限预留接入点 |
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
 | 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
 | 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
@@ -104,6 +105,8 @@
 | RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
 | 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权 |
 | 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
+| 部门（Department）| 租户内的组织单元，支持树形层级（最多 10 级），用物化路径 `path=/<root>/.../<self>/` 存储以高效查询子树 |
+| 任职（Employment）| 用户在某个部门的任职记录；同一用户同一时刻仅一条 `is_current=TRUE`（部分唯一索引约束），调岗自动归档旧记录并写入新记录，保留完整历史 |
 
 ### 1.5 角色与权限
 
@@ -965,7 +968,7 @@ boxia-agent/
 - 每次请求都以数据库中的实时角色、权限与账号状态为准（`AdminPrincipal.permissions` 每次重建），不信任令牌里的旧角色信息。
 - `system:console:access` 控制管理端登录；`system:data:all` 跳过数据授权过滤，但仍受租户隔离约束。
 - 超级管理员角色拥有所属作用域全部权限，功能权限与数据授权均不可单独调整。
-- 平台角色不能授予租户专属菜单与按钮（`menu:grants`、`menu:users`、`page:users`、`button:user:*`）；租户角色不能授予平台级租户管理权限（`menu:tenants` 等）。
+- 平台角色不能授予租户专属菜单与按钮（`menu:grants`、`menu:users`、`menu:departments`、`menu:employments`、`page:users`、`page:departments`、`page:employments`、`button:user:*`、`button:department:*`、`button:employment:*`）；租户角色不能授予平台级租户管理权限（`menu:tenants` 等）。
 - 授权只允许授予调用者已拥有的权限，复制角色同样校验；写入时对角色行加锁，避免并发授权互相覆盖。
 - 前端隐藏菜单和按钮只是体验优化，所有接口都以服务端权限校验为准，不满足返回 403。
 
@@ -1328,12 +1331,14 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `roles`                                       | 平台或租户角色：`tenant_id`（`NULL` 为平台角色）、`code`、`name`、`description`、`is_system`（系统角色不可删/不可停用）、启用状态 |
 | `permission_resources`                        | 全局功能权限目录（只读）：`code` 唯一、`category`、`action`、`sort_order`、启用状态         |
 | `role_permissions`                            | 角色与权限资源的多对多关系；`(role_id, permission_id)` 唯一，记录授予人                        |
-| `users`                                       | 租户管理员与普通用户统一账号、密码哈希、主角色 `role_id`、锁定状态、`token_version`；`(tenant_id, username)` 唯一 |
+| `users`                                       | 租户管理员与普通用户统一账号、密码哈希、主角色 `role_id`、锁定状态、`token_version`；`(tenant_id, username)` 唯一；带 `UNIQUE(tenant_id,id)` 供复合外键引用 |
+| `departments`                                 | 租户部门树：`parent_id` 自引用（根为 NULL）、物化路径 `path=/<root>/.../<self>/`、`level`（1..10）、`code`（租户内唯一）、`sort_order`、`is_active`；`UNIQUE(tenant_id,id)`、`UNIQUE(tenant_id,path)`，子树查询用 `text_pattern_ops` 索引 |
+| `user_employments`                            | 用户任职记录：`user_id` 复合 FK `(tenant_id,user_id)`、`department_id` 复合 FK `(tenant_id,department_id)`、`position`、`is_current`、`started_at`、`ended_at`（历史必填）；部分唯一索引 `(tenant_id,user_id) WHERE is_current` 保证单一主任职 |
 | `user_roles`                                  | 用户与租户角色的多对多关系；租户管理员通过角色的 `system:console:access` 获得管理端权限     |
 | `user_refresh_tokens`                         | 租户用户 Refresh Token 哈希、会话族、轮换/撤销状态、IP/UA                                |
 | `resource_grants`                             | 多态授权：`resource_type`（agent/skill/tool/component/prompt）+ `resource_id` + 可空 `tenant_id` + 可空 `role_id`；`tenant_id` 非空且 `role_id=NULL` 表示整个租户，`tenant_id=NULL` 表示平台角色授权 |
 | `audit_logs`                                  | 审计日志（操作者、动作、资源、`request_id`、详情 JSONB）；`tenant_id` 决定哪些作用域可见 |
-| `agents`                                      | 智能体，`config` 为 JSONB 完整配置                                                       |
+| `agents`                                      | 智能体，`config` 为 JSONB 完整配置；`department_id` 可空（租户智能体挂接部门，复合 FK `(tenant_id,department_id)`，平台智能体必须为 NULL） |
 | `skills` / `tools` / `components` / `prompts` | 四类资源表；`agent_id` 为数据归属的智能体（可空，历史数据通过迁移回填）                   |
 | `skill_files`                                 | 技能包内文本文件；`(skill_id, path)` 唯一，随技能级联删除，归属由所属技能决定              |
 | `agent_tools` / `agent_skills`                | 旧版智能体关联表，仅兼容保留（deprecated）；新代码以资源 `agent_id` 为准                   |
@@ -1349,6 +1354,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 - 迁移 `0006_roles_and_resource_access` 新增角色、最终用户、授权表与资源 `agent_id`，并为存量数据回填系统角色、归属与租户授权；DDL 支持 downgrade，但数据回填不可逆，升级前必须备份并在预发库演练。
 - 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
 - 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
+- 迁移 `0015_organization` 新增 `departments` / `user_employments` 表、给 `users` 加 `UNIQUE(tenant_id,id)`、给 `agents` 加 `department_id` 列与复合外键，并回填租户侧系统角色的组织架构权限（`menu:departments`、`menu:employments`、`page:departments`、`page:employments`、`button:department:*`、`button:employment:*`）。DDL 支持 downgrade。
 
 ### 9.2 迁移命令
 
@@ -1403,7 +1409,10 @@ uv run python -m scripts.skill_package list --id 3
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 授权管理                    | 独立菜单按资源类型集中授权；资源列表与详情页不再提供授权入口；支持授权状态筛选、多选批量追加/覆盖/移除；平台视角按租户逐个配置，租户视角仅本租户角色               |
 | 角色管理                    | 平台/租户各自维护角色增删改与复制；详情页按权限目录维护功能权限；系统角色不可删除、不可停用；平台角色可授权平台级资源（`button:role:*`）                       |
-| 用户管理                    | 租户管理员与普通用户统一账号：增删改、多角色绑定、重置密码、启停（`button:user:*`）                                                                             |
+| 用户管理                    | 租户管理员与普通用户统一账号：增删改、多角色绑定、重置密码、启停（`button:user:*`）；列表展示「当前部门」（来自当前任职），支持按部门（含下级）筛选  |
+| 部门管理                    | 租户内部门树增删改查、层级（最多 10 级）、编码、排序、启停切换；删除时若存在子部门/任职记录/归属智能体则禁止（409 引导停用）；停用部门不可再挂接任职或智能体 |
+| 任职管理                    | 用户任职记录增删改查、按用户/部门/状态筛选；同一用户同时仅一条当前任职；调岗自动归档旧记录并写入新记录；支持结束任职、查看完整历史                            |
+| 智能体配置-基础信息         | 租户智能体可选「所属部门」（TreeSelect），平台智能体该字段隐藏且强制为 NULL；同租户与启用校验                                                                    |
 | 管理员账号                  | 平台维护产品级账号，租户维护拥有管理角色的用户；列表、创建、角色/状态调整、重置密码、删除（`button:admin-user:*`）                                               |
 | 租户管理                    | 租户列表、新建、编辑名称与启用状态（`button:tenant:*`，仅产品级平台角色可授予）                                                                                  |
 | 菜单与路由                  | 菜单由 `/admin/context` 的 `menus`（`menu:*`）驱动，路由由 `page:*` 权限守卫；无权限路由返回 404                                                                |
@@ -1421,12 +1430,14 @@ uv run python -m scripts.skill_package list --id 3
 /grants                  授权管理（menu:grants）
 /roles                   角色管理（menu:roles；平台显示平台角色，租户显示本租户角色）
 /users                   用户管理（menu:users，租户）
+/departments             部门管理（menu:departments，租户；组织架构分组）
+/employments             任职管理（menu:employments，租户；组织架构分组）
 /admin-users             管理员账号（menu:admin-users）
 /tenants                 租户管理（menu:tenants，产品级）
 *                        404
 ```
 
-菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, admin-users, audit`。自定义角色按实际授权显示，前端只负责图标与文案映射，无权限路由返回 404。
+菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, departments, employments, admin-users, audit`。`departments` 与 `employments` 在前端合并为「组织架构」SubMenu，自定义角色按实际授权显示，无权限路由返回 404。
 
 授权管理页同样按视角收敛：平台只列平台级资源，租户只列本租户自有资源；列表展示授权汇总与授权状态，翻页保留勾选（单次最多 100 个），可批量追加/覆盖/移除。行内「配置授权」抽屉按租户配置访问范围（平台为「该租户不可见 / 整个租户 / 指定角色」，租户为「全部角色可见（默认）/ 指定角色」），保存只写入当前租户并刷新汇总。
 

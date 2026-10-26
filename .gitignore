@@ -237,3 +237,5 @@ ops/backups/
 frontend/admin/coverage/
 frontend/admin/playwright-report/
 frontend/admin/test-results/
+
+.playwright-mcp/

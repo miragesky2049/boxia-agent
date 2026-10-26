@@ -53,10 +53,19 @@ class PostgresUserRepository:
         return self._load_one(row)
 
     def list_page(
-        self, page: int, page_size: int, keyword: str | None, tenant_id: UUID
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        tenant_id: UUID,
+        user_ids: list[UUID] | None = None,
     ) -> tuple[list[User], int]:
-        """分页查询租户最终用户。"""
+        """分页查询租户最终用户；user_ids 非空时仅返回其中用户（部门子树筛选）。"""
         stmt = select(UserModel).where(UserModel.tenant_id == tenant_id)
+        if user_ids is not None:
+            if not user_ids:
+                return [], 0
+            stmt = stmt.where(UserModel.id.in_(user_ids))
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(

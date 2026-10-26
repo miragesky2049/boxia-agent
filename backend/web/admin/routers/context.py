@@ -21,6 +21,8 @@ def _menus(principal: AdminPrincipal) -> list[str]:
         "grants",
         "roles",
         "users",
+        "departments",
+        "employments",
         "admin-users",
         "tenants",
         "audit",

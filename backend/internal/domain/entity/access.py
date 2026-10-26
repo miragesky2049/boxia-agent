@@ -49,6 +49,9 @@ class User:
     must_change_password: bool = False
     password_changed_at: datetime | None = None
     role_ids: tuple[UUID, ...] = ()
+    # 当前任职部门展示字段，由用户列表仓储按当前任职批量回填
+    current_department_id: UUID | None = None
+    current_department_name: str | None = None
 
     def effective_role_ids(self) -> tuple[UUID, ...]:
         """返回完整角色集合；旧数据未写入关联表时退回主角色。"""
