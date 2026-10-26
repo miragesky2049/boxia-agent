@@ -449,7 +449,7 @@ export default function MgmtUnitDetailPage() {
         onOk={() => void saveDeptModal()}
         confirmLoading={deptModalSaving}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Select
           mode="multiple"
@@ -502,7 +502,7 @@ export default function MgmtUnitDetailPage() {
         onOk={() => void saveUserModal()}
         confirmLoading={userModalSaving}
         width={640}
-        destroyOnClose
+        destroyOnHidden
       >
         <Select
           mode="multiple"

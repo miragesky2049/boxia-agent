@@ -229,7 +229,7 @@ export default function MgmtUnitsPage() {
         onCancel={() => setModalOpen(false)}
         onOk={() => void handleSubmit()}
         confirmLoading={saving}
-        destroyOnClose
+        destroyOnHidden
       >
         <Form form={form} layout="vertical">
           <Form.Item label="上级单元" name="parent_id">
