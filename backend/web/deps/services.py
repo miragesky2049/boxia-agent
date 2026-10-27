@@ -5,14 +5,19 @@ from typing import Annotated
 from fastapi import Depends
 
 from internal.application.admin_user_service import AdminUserService, AuditService
+from internal.application.agent_run_service import AgentRunService
 from internal.application.agent_service import AgentService
 from internal.application.auth_service import AuthService
 from internal.application.department_service import DepartmentService
+from internal.application.document_service import DocumentService
 from internal.application.employment_service import EmploymentService
 from internal.application.grant_service import GrantService
 from internal.application.hr_dictionary_service import HrDictionaryService
+from internal.application.ingestion_service import IngestionService
+from internal.application.mcp_sync_service import McpSyncService
 from internal.application.mgmt_unit_service import MgmtUnitService
 from internal.application.resource_service import ResourceService
+from internal.application.retrieval_service import RetrievalService
 from internal.application.role_grant_service import RoleGrantService
 from internal.application.role_permission_service import RolePermissionService
 from internal.application.role_service import RoleService
@@ -23,6 +28,10 @@ from internal.application.user_admin_service import UserAdminService
 from internal.application.user_auth_service import UserAuthService
 from internal.application.user_portal_service import UserPortalService
 from internal.domain.entity.resource import Component, Prompt, Tool
+from internal.engine.llm import OpenAICompatLLMClient
+from internal.engine.query_rewrite import LLMQueryRewriter, QueryRewriter
+from internal.engine.rerank import RerankClient, SiliconFlowRerankClient
+from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from web.deps.db import UowDep
 from web.deps.scoped import AdminScopedUowDep, UserScopedUowDep
@@ -140,6 +149,67 @@ def get_user_portal_service(uow: UserScopedUowDep, context: RequestContextDep) -
     return UserPortalService(uow, context)
 
 
+def get_rerank_client() -> RerankClient:
+    """Rerank 客户端：SiliconFlow /v1/rerank，复用 embedding 网关凭据。"""
+    settings = get_settings()
+    return SiliconFlowRerankClient(
+        api_key=settings.embedding_api_key.get_secret_value(),
+        model=settings.rag_rerank_model,
+        base_url=settings.embedding_base_url,
+        timeout_seconds=settings.embedding_timeout_seconds,
+    )
+
+
+def get_query_rewriter() -> QueryRewriter:
+    """Query 改写器：复用 LLM 网关（DeepSeek）做指代消解与同义扩展。"""
+    settings = get_settings()
+    llm = OpenAICompatLLMClient(
+        api_key=settings.llm_api_key.get_secret_value(),
+        model=settings.llm_model_id,
+        base_url=settings.llm_base_url,
+        timeout_seconds=settings.llm_timeout_seconds,
+    )
+    return LLMQueryRewriter(llm)
+
+
+def get_agent_run_service(uow: UserScopedUowDep, context: RequestContextDep) -> AgentRunService:
+    """用户端 agent 运行用例：注入 retrieval service（含 rerank + query rewriter）。"""
+    settings = get_settings()
+    retrieval = RetrievalService(
+        uow,
+        context,
+        rerank_client=get_rerank_client() if settings.rag_rerank_enabled else None,
+        query_rewriter=get_query_rewriter() if settings.rag_query_rewrite_enabled else None,
+    )
+    return AgentRunService(uow, context, retrieval_service=retrieval)
+
+
+def get_mcp_sync_service(uow: AdminScopedUowDep, context: RequestContextDep) -> McpSyncService:
+    """MCP 工具同步用例。"""
+    return McpSyncService(uow, context)
+
+
+def get_document_service(uow: AdminScopedUowDep, context: RequestContextDep) -> DocumentService:
+    """知识库文档 CRUD 用例。"""
+    return DocumentService(uow, context)
+
+
+def get_ingestion_service(uow: AdminScopedUowDep, context: RequestContextDep) -> IngestionService:
+    """文档 ingest 用例：切分 + embedding + 写 chunks。"""
+    return IngestionService(uow, context)
+
+
+def get_retrieval_service(uow: UserScopedUowDep, context: RequestContextDep) -> RetrievalService:
+    """RAG 检索用例：query 改写 → 多 query 召回 → rerank 精排。"""
+    settings = get_settings()
+    return RetrievalService(
+        uow,
+        context,
+        rerank_client=get_rerank_client() if settings.rag_rerank_enabled else None,
+        query_rewriter=get_query_rewriter() if settings.rag_query_rewrite_enabled else None,
+    )
+
+
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserAuthServiceDep = Annotated[UserAuthService, Depends(get_user_auth_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
@@ -161,6 +231,11 @@ HrDictionaryServiceDep = Annotated[HrDictionaryService, Depends(get_hr_dictionar
 MgmtUnitServiceDep = Annotated[MgmtUnitService, Depends(get_mgmt_unit_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
 UserPortalServiceDep = Annotated[UserPortalService, Depends(get_user_portal_service)]
+AgentRunServiceDep = Annotated[AgentRunService, Depends(get_agent_run_service)]
+McpSyncServiceDep = Annotated[McpSyncService, Depends(get_mcp_sync_service)]
+DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
+IngestionServiceDep = Annotated[IngestionService, Depends(get_ingestion_service)]
+RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
 
 # 类型导出：路由中用于显式标注依赖返回值
 __all__ = [
@@ -183,5 +258,10 @@ __all__ = [
     "ToolServiceDep",
     "UserAuthServiceDep",
     "UserPortalServiceDep",
+    "AgentRunServiceDep",
+    "McpSyncServiceDep",
+    "DocumentServiceDep",
+    "IngestionServiceDep",
+    "RetrievalServiceDep",
     "SqlAlchemyUnitOfWork",
 ]

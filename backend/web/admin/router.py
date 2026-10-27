@@ -8,9 +8,11 @@ from web.admin.routers.audit_logs import router as audit_logs_router
 from web.admin.routers.components import router as components_router
 from web.admin.routers.context import router as context_router
 from web.admin.routers.departments import router as departments_router
+from web.admin.routers.documents import router as documents_router
 from web.admin.routers.employments import router as employments_router
 from web.admin.routers.grants import router as grants_router
 from web.admin.routers.hr_dictionaries import router as hr_dictionaries_router
+from web.admin.routers.mcp_tools import router as mcp_tools_router
 from web.admin.routers.mgmt_units import router as mgmt_units_router
 from web.admin.routers.permissions import router as permissions_router
 from web.admin.routers.prompts import router as prompts_router
@@ -27,10 +29,12 @@ router.include_router(tenants_router)
 router.include_router(agents_router)
 router.include_router(skills_router)
 router.include_router(tools_router)
+router.include_router(mcp_tools_router)
 router.include_router(components_router)
 router.include_router(prompts_router)
 router.include_router(users_router)
 router.include_router(departments_router)
+router.include_router(documents_router)
 router.include_router(employments_router)
 router.include_router(hr_dictionaries_router)
 router.include_router(mgmt_units_router)
