@@ -2,7 +2,8 @@ name: postgresql # Compose 项目名（stack 名），不加时默认取本文�
 
 services:
   postgres:
-    image: postgres:17-alpine
+    # 使用 pgvector 官方镜像，预置 vector 扩展；RAG 向量检索依赖
+    image: pgvector/pgvector:pg17
     container_name: postgres
     restart: unless-stopped
     environment:

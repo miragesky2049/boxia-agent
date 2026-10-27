@@ -102,6 +102,58 @@ class Settings(BaseSettings):
     docs_enabled: bool | None = None
     legacy_api_enabled: bool = True
 
+    # ============================================================
+    # LLM 运行时配置（当前为开发调试直连 OpenAI 兼容网关，
+    # 生产环境应切换到内部 LLM 代理或按租户下发凭据）
+    # ============================================================
+    llm_api_key: SecretStr = SecretStr("")
+    llm_model_id: str = "deepseek-chat"
+    llm_base_url: str = "https://api.deepseek.com"
+    llm_temperature: float = Field(default=0.7, ge=0.0, le=2.0)
+    llm_max_tokens: int = Field(default=1024, ge=1, le=32768)
+    llm_max_iterations: int = Field(default=6, ge=1, le=20)
+    llm_timeout_seconds: float = Field(default=60.0, ge=1.0, le=300.0)
+
+    # 短期记忆：Redis 存储会话内的多轮消息，按 conversation_id 隔离，默认 30 分钟过期
+    redis_url: str = "redis://127.0.0.1:6379/0"
+    # 单条会话最多保留多少轮（user+assistant 对），超出后从头部裁剪
+    memory_max_turns: int = Field(default=20, ge=1, le=100)
+    memory_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
+
+    # ============================================================
+    # RAG：Embedding 模型与向量检索配置
+    # embedding 走 OpenAI 兼容协议（/v1/embeddings），
+    # 可接 SiliconFlow / DashScope / 智谱 / 自建 vLLM 等网关
+    # ============================================================
+    embedding_api_key: SecretStr = SecretStr("")
+    embedding_base_url: str = "https://api.siliconflow.cn/v1"
+    embedding_model: str = "BAAI/bge-large-zh-v1.5"
+    # 向量维度必须与所选 embedding 模型对齐；pgvector 表结构按此维度建索引
+    embedding_dimensions: int = Field(default=1024, ge=64, le=4096)
+    embedding_timeout_seconds: float = Field(default=30.0, ge=1.0, le=120.0)
+    # 文档切分：按字符数滑窗，overlap 用于跨段保留上下文
+    rag_chunk_size: int = Field(default=500, ge=100, le=4000)
+    rag_chunk_overlap: int = Field(default=80, ge=0, le=1000)
+    # 检索：每次 query 召回 top_k 个 chunk 注入 prompt
+    rag_top_k: int = Field(default=5, ge=1, le=20)
+    # 余弦相似度阈值，低于该值的 chunk 不注入（避免召回噪声）
+    rag_similarity_threshold: float = Field(default=0.55, ge=0.0, le=1.0)
+
+    # Rerank：Cross-Encoder 精排（SiliconFlow /v1/rerank），独立开关
+    rag_rerank_enabled: bool = True
+    rag_rerank_model: str = "BAAI/bge-reranker-v2-m3"
+    rag_rerank_top_n: int = Field(default=5, ge=1, le=20)
+    # 向量召回倍数：粗排召回 top_k * recall_multiplier 个候选，再交给 rerank 精排
+    rag_recall_multiplier: int = Field(default=10, ge=2, le=30)
+
+    # Query 改写：LLM 生成独立 query + N 个同义变体，多 query 并行召回
+    rag_query_rewrite_enabled: bool = True
+    rag_query_rewrite_variants: int = Field(default=3, ge=1, le=5)
+
+    # Celery 异步 ingest：broker / backend 独立 Redis DB，避免与短期记忆混用
+    celery_broker_url: str = "redis://127.0.0.1:6379/1"
+    celery_result_backend: str = "redis://127.0.0.1:6379/2"
+
     @property
     def is_prod(self) -> bool:
         """是否生产环境。"""
