@@ -50,7 +50,7 @@ class Settings(BaseSettings):
     app_env: Literal["local", "dev", "test", "prod"] = "local"
     app_name: str = "boxia-agent"
     app_version: str = "1.0.0"
-    platform_name: str = "Agent运营管理平台"
+    platform_name: str = "AI智能体运营管理平台"
 
     database_url: str
     database_pool_size: int = Field(default=10, ge=1, le=100)

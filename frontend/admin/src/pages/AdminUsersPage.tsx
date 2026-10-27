@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
+import { App, Button, Divider, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
@@ -333,6 +333,9 @@ export default function AdminUsersPage() {
         forceRender
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            账号信息
+          </Divider>
           <Form.Item
             name="username"
             label="账号"
@@ -361,6 +364,10 @@ export default function AdminUsersPage() {
           >
             <Input.Password autoComplete="new-password" />
           </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            角色配置
+          </Divider>
           <Form.Item
             name="role_id"
             label={isPlatform ? '平台角色' : '租户角色'}

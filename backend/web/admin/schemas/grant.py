@@ -67,8 +67,14 @@ class GrantBatchOut(BaseModel):
 
 
 class UserRoleGrantRequest(BaseModel):
-    """批量给用户授予角色请求。"""
+    """批量给用户授予角色 + 管理单元请求。
+
+    - mode=append（默认）：追加所选角色与管理单元，已存在的关联保持不变；角色和管理单元都必填。
+    - mode=replace：整体覆盖每个目标用户的角色与管理单元；role_ids 至少一个，mgmt_unit_ids 为空数组表示清空。
+    """
 
     user_ids: list[UUID] = Field(min_length=1, max_length=200)
-    role_ids: list[UUID] = Field(min_length=1, max_length=50)
+    role_ids: list[UUID] = Field(default_factory=list, max_length=50)
+    mgmt_unit_ids: list[UUID] = Field(default_factory=list, max_length=50)
     tenant_id: UUID | None = Field(default=None)
+    mode: Literal["append", "replace"] = Field(default="append")

@@ -1,7 +1,7 @@
 """租户角色、最终用户与资源授权领域实体。"""
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 # 租户初始化时自动生成的系统角色：(code, name, description)
@@ -52,6 +52,17 @@ class User:
     # 当前任职部门展示字段，由用户列表仓储按当前任职批量回填
     current_department_id: UUID | None = None
     current_department_name: str | None = None
+    # HR 基础字段
+    employee_no: str | None = None
+    phone: str | None = None
+    email: str | None = None
+    gender: str | None = None
+    birth_date: date | None = None
+    avatar_url: str = ""
+    remark: str = ""
+    # 用户被授权的管理单元（授权管理页面展示用）
+    mgmt_unit_ids: tuple[UUID, ...] = ()
+    mgmt_unit_names: tuple[str, ...] = ()
 
     def effective_role_ids(self) -> tuple[UUID, ...]:
         """返回完整角色集合；旧数据未写入关联表时退回主角色。"""

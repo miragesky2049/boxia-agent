@@ -202,3 +202,44 @@ def test_password_reset_invalidates_session(
 
     assert _login_user(user_tenant_client, "alice", "New-password-123").status_code == 200
     assert _login_user(user_tenant_client, "alice").status_code == 401
+
+
+def test_user_options_returns_active_users(
+    client: TestClient, auth_headers, tenant_client
+) -> None:
+    """下拉选项接口：只返回启用用户，字段精简，且不放宽分页上限。"""
+    create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    roles = list_roles(site, headers)
+    create_user(site, headers, username="alice", role_id=roles["viewer"]["id"], display_name="Alice")
+    create_user(
+        site,
+        headers,
+        username="bob",
+        role_id=roles["viewer"]["id"],
+        display_name="Bob",
+        is_active=False,
+    )
+
+    # 分页接口仍然拒绝超过 100 的 page_size
+    bad_page = site.get("/api/v1/admin/users", params={"page": 1, "page_size": 500}, headers=headers)
+    assert bad_page.status_code == 422
+
+    options = site.get("/api/v1/admin/users/options", headers=headers)
+    assert options.status_code == 200, options.text
+    body = options.json()
+    usernames = {item["username"] for item in body}
+    # 超管 acme-admin 启用、alice 启用；bob 已禁用不出现
+    assert "alice" in usernames
+    assert "bob" not in usernames
+    assert "acme-admin" in usernames
+    # 字段精简：不应返回 tenant_id / role_id / created_at 等
+    assert body, "至少应返回超管账号"
+    sample = body[0]
+    assert set(sample.keys()) == {"id", "username", "display_name", "is_active"}
+
+    # 关键字过滤
+    filtered = site.get("/api/v1/admin/users/options", params={"keyword": "alice"}, headers=headers)
+    assert filtered.status_code == 200
+    filtered_usernames = {item["username"] for item in filtered.json()}
+    assert filtered_usernames == {"alice"}
