@@ -16,13 +16,15 @@ router = APIRouter(prefix="/context", tags=["admin-context"])
 def _menus(principal: AdminPrincipal) -> list[str]:
     """按 menu:* 权限返回可见菜单 key，前端仅用于渲染。"""
     menus = [code.split(":", 1)[1] for code in principal.permissions if code.startswith("menu:")]
+    # 按行业通用使用频次排序：核心业务 > 日常运营 > 组织建模 > 系统级
     order = [
         "agents",
         "grants",
-        "roles",
         "users",
+        "roles",
         "departments",
         "employments",
+        "mgmt-units",
         "admin-users",
         "tenants",
         "audit",
