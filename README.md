@@ -67,7 +67,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 浏览器打开 <http://localhost:5173>，用 `admin` + 第 4 步设置的密码登录，**首次登录强制改密**。
 
-> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步（但仍需先创建管理员）。
+> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery RAG worker，以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
 
 ### 端口速查
 
@@ -574,13 +574,19 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 它会：
 
-1. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
-2. 执行 `uv sync` 和数据库迁移
-3. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`
-4. 按参数启动对应 Vite：管理端 `localhost:5173`、用户端 `localhost:5174`
-5. `Ctrl + C` 时一并停止本次启动的后端进程
+1. 通过 docker compose 拉起 PostgreSQL（`backend/docker/postgresql/`）和 Redis（`backend/docker/redis/`），已在运行则跳过
+2. 清理上次残留的 Vite（5173/5174）和 Uvicorn（8000/8001）端口占用，避免 "Port already in use"
+3. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
+4. 执行 `uv sync` 和 `alembic upgrade head`
+5. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`
+6. 后台启动 Celery RAG worker（队列 `rag`），供文档异步 ingest 与向量写入
+7. 按参数前台启动对应 Vite：管理端 `localhost:5173`、用户端 `localhost:5174`
+8. `Ctrl + C` 时一并停止本次启动的后端、Celery worker 与 Vite
 
-注意：它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
+注意：
+
+- 它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
+- RAG / Agent 运行依赖 `LLM_API_KEY`、`EMBEDDING_API_KEY`，首次启动前请在 `backend/.env` 中填入；缺失时对话与知识库接口会报错，但不影响登录与基础管理。
 
 ### 3.7 如何停止服务
 

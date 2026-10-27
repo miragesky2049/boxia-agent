@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
-# 本地开发：按站点启动后端（热重载）+ Vite 开发服务器。
+# 本地开发一键启动：
+#   - 自动拉起 PostgreSQL / Redis（docker compose）
+#   - 清理上次残留的 Vite / Uvicorn 端口占用
+#   - uv sync + alembic 迁移
+#   - 后台启动后端（热重载）+ Celery RAG worker
+#   - 前台启动 Vite 开发服务器
 # 用法：./ops/dev.sh [admin|user|all]，缺省为 all。
-# 前置：PostgreSQL 已运行，backend/.env 已配置 DATABASE_URL。
+# 注意：仍需先执行一次 `uv run python -m scripts.create_admin` 创建管理员。
 set -euo pipefail
 
 SITE="${1:-all}"
@@ -15,27 +20,61 @@ case "$SITE" in
 esac
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+BACKEND_PIDS=()
+CELERY_PID=""
 
+cleanup() {
+  echo
+  echo "正在停止本次启动的进程..."
+  [ -n "$CELERY_PID" ] && kill "$CELERY_PID" 2>/dev/null || true
+  for pid in "${BACKEND_PIDS[@]:-}"; do
+    [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
+  done
+  # 顺手清理 Vite（dev-all.mjs 已在 SIGINT 时处理，这里兜底）
+  (cd "$ROOT/frontend" && node scripts/stop-all.mjs "${SITES[@]}" >/dev/null 2>&1 || true)
+}
+trap cleanup EXIT INT TERM
+
+# ---------- 1. 拉起基础设施（PostgreSQL + Redis） ----------
+echo "==> 启动 PostgreSQL / Redis（docker compose）"
+docker compose -f "$ROOT/backend/docker/postgresql/docker-compose.yml" up -d
+docker compose -f "$ROOT/backend/docker/redis/docker-compose.yml" up -d
+
+# ---------- 2. 清理残留端口占用 ----------
+echo "==> 清理残留 Vite 端口（5173 / 5174）"
+(cd "$ROOT/frontend" && node scripts/stop-all.mjs "${SITES[@]}" >/dev/null 2>&1 || true)
+
+echo "==> 清理残留后端端口（8000 / 8001）"
+"$ROOT/ops/kill-port.sh" 8000
+"$ROOT/ops/kill-port.sh" 8001
+
+# ---------- 3. 后端依赖 + 迁移 ----------
 cd "$ROOT/backend"
 if [ ! -f .env ]; then
   cp .env.example .env
-  echo "已生成 backend/.env，请确认 DATABASE_URL 与 JWT_SECRET"
+  echo "已生成 backend/.env，请确认 DATABASE_URL / JWT_SECRET / LLM_API_KEY / EMBEDDING_API_KEY"
 fi
 uv sync
 uv run alembic upgrade head
 
-PIDS=()
+# ---------- 4. 后台启动后端 ----------
 for site in "${SITES[@]}"; do
   case "$site" in
     admin) module=web.app_admin:app; port=8000 ;;
-    user) module=web.app_user:app; port=8001 ;;
+    user)  module=web.app_user:app;  port=8001 ;;
   esac
   uv run uvicorn "$module" --reload --host 127.0.0.1 --port "$port" &
-  PIDS+=("$!")
+  BACKEND_PIDS+=("$!")
   echo "已启动 ${site} 后端 http://127.0.0.1:${port}"
 done
-trap 'kill "${PIDS[@]}" 2>/dev/null || true' EXIT
 
+# ---------- 5. 后台启动 Celery RAG worker ----------
+echo "==> 启动 Celery RAG worker（队列 rag）"
+uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag &
+CELERY_PID=$!
+echo "已启动 Celery worker PID=${CELERY_PID}"
+
+# ---------- 6. 前台启动 Vite ----------
 cd "$ROOT/frontend"
 for site in "${SITES[@]}"; do
   [ -d "$site/node_modules" ] || (cd "$site" && pnpm install --frozen-lockfile)
