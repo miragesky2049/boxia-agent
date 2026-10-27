@@ -12,6 +12,7 @@ import type { DepartmentTreeNode } from '../../utils/departmentTree'
 import { buildDepartmentTreeData } from '../../utils/departmentTree'
 import AgentResourcesTab from './AgentResourcesTab'
 import AgentTenantsTab from './AgentTenantsTab'
+import AgentVisibilityTab from './AgentVisibilityTab'
 import BasicSection from './sections/BasicSection'
 import ChannelSection from './sections/ChannelSection'
 import ConversationSection from './sections/ConversationSection'
@@ -127,9 +128,7 @@ export default function AgentEditPage() {
           toolsApi.list({ page: 1, page_size: 100 }),
           skillsApi.list({ page: 1, page_size: 100 }),
           componentsApi.list({ page: 1, page_size: 100 }),
-          isPlatform
-            ? Promise.resolve([])
-            : departmentsApi.tree().catch(() => []),
+          isPlatform ? Promise.resolve([]) : departmentsApi.tree().catch(() => []),
         ])
         if (!active) return
         setTools(toolResult.items)
@@ -254,10 +253,7 @@ export default function AgentEditPage() {
                 <Spin spinning={loading}>
                   <div className="agent-edit__body">
                     <div className="agent-edit__main">
-                      <BasicSection
-                        deptTreeData={deptTreeData}
-                        showDepartment={!isPlatform}
-                      />
+                      <BasicSection deptTreeData={deptTreeData} showDepartment={!isPlatform} />
                       <ModelSection />
                       <PromptSection />
                       <MemorySection />
@@ -291,6 +287,19 @@ export default function AgentEditPage() {
               </Spin>
             ),
           },
+          ...(isEdit && !platformResource
+            ? [
+                {
+                  key: 'visibility',
+                  label: '可见范围',
+                  children: (
+                    <Spin spinning={loading}>
+                      <AgentVisibilityTab agentId={agentId as string} />
+                    </Spin>
+                  ),
+                },
+              ]
+            : []),
           ...(isEdit && isPlatform && platformResource
             ? [
                 {

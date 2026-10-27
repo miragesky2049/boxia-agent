@@ -339,4 +339,11 @@ class PostgresUserRepository:
             must_change_password=row.must_change_password,
             password_changed_at=row.password_changed_at,
             role_ids=role_ids,
+            employee_no=row.employee_no,
+            phone=row.phone,
+            email=row.email,
+            gender=row.gender,
+            birth_date=row.birth_date,
+            avatar_url=row.avatar_url,
+            remark=row.remark,
         )

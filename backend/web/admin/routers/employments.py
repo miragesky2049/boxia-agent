@@ -21,6 +21,12 @@ from web.deps.services import EmploymentServiceDep
 router = APIRouter(prefix="/employments", tags=["admin-employments"])
 
 
+def _hr_fields(payload) -> dict:
+    """从请求模型中提取 HR 字段；仅保留前端显式设置的字段，避免误清空。"""
+    exclude = {"user_id", "department_id", "position", "started_at", "change_type"}
+    return payload.model_dump(exclude=exclude, exclude_unset=True)
+
+
 @router.get(
     "",
     response_model=PageOut[EmploymentOut],
@@ -63,6 +69,7 @@ def create_employment(
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
+        hr_fields=_hr_fields(payload),
     )
     return EmploymentOut.model_validate(employment)
 
@@ -79,7 +86,7 @@ def update_employment(
     request: Request,
     service: EmploymentServiceDep,
 ) -> EmploymentOut:
-    """更新任职岗位或生效日期。"""
+    """更新任职岗位、生效日期与 HR 字段。"""
     ip, user_agent = client_meta(request)
     employment = service.update(
         employment_id,
@@ -89,6 +96,7 @@ def update_employment(
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
+        hr_fields=_hr_fields(payload),
     )
     return EmploymentOut.model_validate(employment)
 
@@ -116,6 +124,8 @@ def transfer_employment(
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
+        hr_fields=_hr_fields(payload),
+        change_type=payload.change_type,
     )
     return EmploymentOut.model_validate(employment)
 
@@ -137,6 +147,8 @@ def archive_employment(
     employment = service.archive(
         employment_id,
         ended_at=payload.ended_at,
+        termination_type=payload.termination_type,
+        change_reason=payload.change_reason,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,

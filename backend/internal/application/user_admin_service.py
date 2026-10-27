@@ -23,6 +23,8 @@ from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
 _USERNAME_PATTERN = re.compile(r"^[A-Za-z0-9_.-]{3,64}$")
+# 下拉选项最多返回的用户数，避免一次性拉全量拖慢弹窗
+OPTIONS_LIMIT = 500
 # 模块级别名：避免类内 list 方法遮蔽内置类型
 RoleIdList = list[UUID]
 UserList = list[User]
@@ -64,7 +66,16 @@ class UserAdminService:
             page, page_size, keyword, tenant_id, filter_user_ids
         )
         items = self._attach_departments(tenant_id, items)
+        items = self._attach_mgmt_units(tenant_id, items)
         return Page(items=items, total=total, page=page, page_size=page_size)
+
+    def list_options(self, keyword: str | None = None) -> UserList:
+        """下拉选项用：返回本租户启用用户的精简列表，不回填部门信息。"""
+        tenant_id = self._require_tenant()
+        items, _ = self._uow.users.list_page(
+            1, OPTIONS_LIMIT, keyword, tenant_id
+        )
+        return [item for item in items if item.is_active]
 
     def create(
         self,
@@ -76,6 +87,13 @@ class UserAdminService:
         is_active: bool,
         actor_id: UUID,
         actor_username: str,
+        employee_no: str | None = None,
+        phone: str | None = None,
+        email: str | None = None,
+        gender: str | None = None,
+        birth_date: object | None = None,
+        avatar_url: str = "",
+        remark: str = "",
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> User:
@@ -97,6 +115,13 @@ class UserAdminService:
                 "display_name": display_name.strip() or normalized,
                 "is_active": is_active,
                 "role_id": resolved_role_ids[0],
+                "employee_no": employee_no.strip() if employee_no else None,
+                "phone": phone.strip() if phone else None,
+                "email": email.strip() if email else None,
+                "gender": gender,
+                "birth_date": birth_date,
+                "avatar_url": avatar_url,
+                "remark": remark,
             }
         )
         self._uow.users.replace_roles(user.id, tenant_id, resolved_role_ids)
@@ -125,6 +150,13 @@ class UserAdminService:
         is_active: bool | None,
         actor_id: UUID,
         actor_username: str,
+        employee_no: str | None = None,
+        phone: str | None = None,
+        email: str | None = None,
+        gender: str | None = None,
+        birth_date: object | None = None,
+        avatar_url: str | None = None,
+        remark: str | None = None,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> User:
@@ -141,6 +173,20 @@ class UserAdminService:
             values["role_id"] = resolved_role_ids[0]
         if is_active is not None:
             values["is_active"] = is_active
+        if employee_no is not None:
+            values["employee_no"] = employee_no.strip() if employee_no else None
+        if phone is not None:
+            values["phone"] = phone.strip() if phone else None
+        if email is not None:
+            values["email"] = email.strip() if email else None
+        if gender is not None:
+            values["gender"] = gender
+        if birth_date is not None:
+            values["birth_date"] = birth_date
+        if avatar_url is not None:
+            values["avatar_url"] = avatar_url
+        if remark is not None:
+            values["remark"] = remark
 
         updated = self._uow.users.update(user_id, values)
         if updated is None:
@@ -272,6 +318,33 @@ class UserAdminService:
                     user,
                     current_department_id=department_id,
                     current_department_name=department_name,
+                )
+            )
+        return result
+
+    def _attach_mgmt_units(self, tenant_id: UUID, items: UserList) -> UserList:
+        """批量回填用户被授权的管理单元，避免列表 N+1。"""
+        if not items:
+            return items
+        grant_map = self._uow.user_mgmt_unit_grants.list_for_users(
+            tenant_id, [user.id for user in items]
+        )
+        all_unit_ids = list(
+            {grant.unit_id for grants in grant_map.values() for grant in grants}
+        )
+        unit_name_map = self._uow.user_mgmt_unit_grants.list_unit_names(
+            tenant_id, all_unit_ids
+        )
+        result: UserList = []
+        for user in items:
+            grants = grant_map.get(user.id, [])
+            unit_ids = tuple(grant.unit_id for grant in grants)
+            unit_names = tuple(unit_name_map.get(unit_id, "") for unit_id in unit_ids)
+            result.append(
+                dataclasses.replace(
+                    user,
+                    mgmt_unit_ids=unit_ids,
+                    mgmt_unit_names=unit_names,
                 )
             )
         return result

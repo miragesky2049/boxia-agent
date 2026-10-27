@@ -1,5 +1,6 @@
 import {
   ApartmentOutlined,
+  BankOutlined,
   ClusterOutlined,
   IdcardOutlined,
   KeyOutlined,
@@ -25,10 +26,11 @@ const { Header, Sider, Content } = Layout
 const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   agents: { icon: <RobotOutlined />, label: '智能体管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
-  roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
   users: { icon: <TeamOutlined />, label: '用户管理' },
+  roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
   departments: { icon: <ClusterOutlined />, label: '部门管理' },
   employments: { icon: <IdcardOutlined />, label: '任职管理' },
+  'mgmt-units': { icon: <BankOutlined />, label: '管理单元' },
   'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
 }
@@ -43,7 +45,7 @@ const MENU_GROUPS: Record<string, MenuGroup> = {
   organization: {
     icon: <ClusterOutlined />,
     label: '组织架构',
-    children: ['departments', 'employments'],
+    children: ['departments', 'employments', 'mgmt-units'],
   },
 }
 

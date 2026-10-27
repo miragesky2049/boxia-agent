@@ -9,6 +9,7 @@ from internal.domain.entity.common import Page
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.user import (
     UserCreateRequest,
+    UserOptionOut,
     UserOut,
     UserResetPasswordRequest,
     UserUpdateRequest,
@@ -36,6 +37,19 @@ def list_users(
     return _to_page_out(service.list(page, page_size, keyword, department_id))
 
 
+@router.get(
+    "/options",
+    response_model=list[UserOptionOut],
+    dependencies=[Depends(require_permission("page:users"))],
+)
+def list_user_options(
+    service: UserAdminServiceDep,
+    keyword: str | None = Query(None, max_length=100),
+) -> list[UserOptionOut]:
+    """下拉选项用：返回本租户启用用户的精简列表。"""
+    return [UserOptionOut.model_validate(item) for item in service.list_options(keyword)]
+
+
 @router.post(
     "",
     response_model=UserOut,
@@ -58,6 +72,13 @@ def create_user(
         is_active=payload.is_active,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        employee_no=payload.employee_no,
+        phone=payload.phone,
+        email=payload.email,
+        gender=payload.gender,
+        birth_date=payload.birth_date,
+        avatar_url=payload.avatar_url,
+        remark=payload.remark,
         ip=ip,
         user_agent=user_agent,
     )
@@ -85,6 +106,13 @@ def update_user(
         is_active=payload.is_active,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        employee_no=payload.employee_no,
+        phone=payload.phone,
+        email=payload.email,
+        gender=payload.gender,
+        birth_date=payload.birth_date,
+        avatar_url=payload.avatar_url,
+        remark=payload.remark,
         ip=ip,
         user_agent=user_agent,
     )
