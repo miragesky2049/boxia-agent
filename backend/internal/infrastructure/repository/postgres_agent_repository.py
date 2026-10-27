@@ -26,6 +26,7 @@ from internal.infrastructure.repository.agent_user_visibility_filter import (
 )
 from internal.infrastructure.repository.data_scope_filters import agent_row_filter
 from internal.infrastructure.repository.grant_filters import (
+    agent_opening_exists,
     agent_visible,
     has_any_grant,
     platform_role_grant_exists,
@@ -44,6 +45,7 @@ class PostgresAgentRepository:
         apply_role_filter: bool = True,
         data_scope: UserDataScope | None = None,
         user_visibility: UserAgentVisibilityContext | None = None,
+        user_portal: bool = False,
     ):
         self._session = session
         self._tenant_id = tenant_id
@@ -53,6 +55,9 @@ class PostgresAgentRepository:
         self._data_scope = data_scope
         # user 端实例级可见范围：仅 user 端注入；管理端保持 None
         self._user_visibility = user_visibility
+        # user 端门户模式：跳过角色授权收敛，只保留租户归属/开通粗粒度判断，
+        # 细粒度完全交给 user_visibility（部门/人员实例级 ACL）。
+        self._user_portal = user_portal
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
@@ -63,14 +68,24 @@ class PostgresAgentRepository:
                     platform_role_grant_exists("agent", AgentModel.id, self._role_ids)
                 )
             return stmt
-        stmt = stmt.where(
-            agent_visible(
-                AgentModel.id,
-                self._tenant_id,
-                self._role_ids,
-                self._apply_role_filter,
+        if self._user_portal:
+            # 用户端：租户自有智能体直接放行；平台智能体必须已对本租户开通。
+            # 不再按当前用户的角色做授权收敛，后续由 user_visibility 实例级 ACL 决定。
+            tenant_owned = AgentModel.tenant_id == self._tenant_id
+            platform_opened = and_(
+                AgentModel.tenant_id.is_(None),
+                agent_opening_exists(AgentModel.id, self._tenant_id),
             )
-        )
+            stmt = stmt.where(or_(tenant_owned, platform_opened))
+        else:
+            stmt = stmt.where(
+                agent_visible(
+                    AgentModel.id,
+                    self._tenant_id,
+                    self._role_ids,
+                    self._apply_role_filter,
+                )
+            )
         if self._data_scope is not None:
             # 行级数据权限：先按资源实例授权收敛，再按管理单元展开后的部门/人员集合收敛
             stmt = stmt.where(agent_row_filter(self._data_scope))

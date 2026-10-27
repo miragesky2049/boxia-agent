@@ -1,5 +1,5 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
+import { App, Button, DatePicker, Divider, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -429,6 +429,9 @@ export default function UsersPage() {
         forceRender
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            账号信息
+          </Divider>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
             <Form.Item
               name="username"
@@ -453,14 +456,17 @@ export default function UsersPage() {
             >
               <Input.Password autoComplete="new-password" />
             </Form.Item>
+            <Form.Item name="is_active" label="启用" valuePropName="checked">
+              <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            个人资料
+          </Divider>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
             <Form.Item name="employee_no" label="工号">
               <Input maxLength={64} />
-            </Form.Item>
-            <Form.Item name="phone" label="手机号">
-              <Input maxLength={32} />
-            </Form.Item>
-            <Form.Item name="email" label="邮箱">
-              <Input maxLength={128} />
             </Form.Item>
             <Form.Item name="gender" label="性别">
               <Select options={genderOptions} allowClear />
@@ -468,7 +474,26 @@ export default function UsersPage() {
             <Form.Item name="birth_date" label="出生日期">
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item name="avatar_url" label="头像 URL">
+              <Input maxLength={500} />
+            </Form.Item>
           </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            联系方式
+          </Divider>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="phone" label="手机号">
+              <Input maxLength={32} />
+            </Form.Item>
+            <Form.Item name="email" label="邮箱">
+              <Input maxLength={128} />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            权限配置
+          </Divider>
           <Form.Item
             name="role_ids"
             label="角色"
@@ -477,14 +502,12 @@ export default function UsersPage() {
           >
             <Select mode="multiple" options={roleOptions} />
           </Form.Item>
-          <Form.Item name="avatar_url" label="头像 URL">
-            <Input maxLength={500} />
-          </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            其他
+          </Divider>
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={3} maxLength={1000} />
-          </Form.Item>
-          <Form.Item name="is_active" label="启用" valuePropName="checked">
-            <Switch />
           </Form.Item>
         </Form>
       </Modal>
@@ -501,6 +524,9 @@ export default function UsersPage() {
         forceRender
       >
         <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            账号信息
+          </Divider>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
             <Form.Item
               name="display_name"
@@ -509,14 +535,17 @@ export default function UsersPage() {
             >
               <Input maxLength={64} />
             </Form.Item>
+            <Form.Item name="is_active" label="启用" valuePropName="checked">
+              <Switch checkedChildren="启用" unCheckedChildren="禁用" />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            个人资料
+          </Divider>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
             <Form.Item name="employee_no" label="工号">
               <Input maxLength={64} />
-            </Form.Item>
-            <Form.Item name="phone" label="手机号">
-              <Input maxLength={32} />
-            </Form.Item>
-            <Form.Item name="email" label="邮箱">
-              <Input maxLength={128} />
             </Form.Item>
             <Form.Item name="gender" label="性别">
               <Select options={genderOptions} allowClear />
@@ -524,7 +553,26 @@ export default function UsersPage() {
             <Form.Item name="birth_date" label="出生日期">
               <DatePicker style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item name="avatar_url" label="头像 URL">
+              <Input maxLength={500} />
+            </Form.Item>
           </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            联系方式
+          </Divider>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item name="phone" label="手机号">
+              <Input maxLength={32} />
+            </Form.Item>
+            <Form.Item name="email" label="邮箱">
+              <Input maxLength={128} />
+            </Form.Item>
+          </div>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            权限配置
+          </Divider>
           <Form.Item
             name="role_ids"
             label="角色"
@@ -533,14 +581,12 @@ export default function UsersPage() {
           >
             <Select mode="multiple" options={roleOptions} />
           </Form.Item>
-          <Form.Item name="avatar_url" label="头像 URL">
-            <Input maxLength={500} />
-          </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            其他
+          </Divider>
           <Form.Item name="remark" label="备注">
             <Input.TextArea rows={3} maxLength={1000} />
-          </Form.Item>
-          <Form.Item name="is_active" label="启用" valuePropName="checked">
-            <Switch />
           </Form.Item>
         </Form>
       </Modal>

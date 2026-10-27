@@ -314,3 +314,79 @@ def test_admin_list_not_affected_by_user_visibility(
     listed = site.get(AGENTS_URL, headers=headers).json()
     ids = {item["id"] for item in listed["items"]}
     assert agent["id"] in ids
+
+
+def test_user_portal_ignores_role_grant_and_follows_department_acl(
+    client: TestClient, auth_headers, tenant_client, user_tenant_client
+) -> None:
+    """用户端仅按部门/人员实例级 ACL 判断：智能体未授权给当前用户角色也能看到。
+
+    复刻"安安科技智能体只授权给 superadmin，viewer 用户靠部门匹配可见"的场景。
+    """
+    tenant = create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    roles = list_roles(site, headers)
+
+    # 根部门（模拟"集团公司"）
+    root = _create_dept(site, headers, "集团公司")
+    # viewer 用户任职在根部门，不做额外授权
+    alice = create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
+    _assign_employment(site, headers, alice["id"], root["id"])
+
+    agent = _create_agent(site, headers, "集团公司助手", root["id"])
+    # 仅授权给 superadmin，viewer 角色没有授权记录
+    site.put(
+        "/api/v1/admin/grants",
+        params={"resource_type": "agent", "resource_id": agent["id"]},
+        json={"grants": [{"tenant_id": tenant["id"], "role_id": roles["superadmin"]["id"]}]},
+        headers=headers,
+    )
+    # 配置可见范围为集团公司含子树
+    site.put(
+        f"{AGENTS_URL}/{agent['id']}/visibility",
+        json={
+            "mode": "custom",
+            "departments": [{"department_id": root["id"], "include_subtree": True}],
+            "user_ids": [],
+        },
+        headers=headers,
+    )
+
+    alice_site, alice_headers = _user_headers(user_tenant_client, "alice")
+    # alice 是 viewer，虽未被角色授权，但部门命中，用户端应可见
+    assert agent["id"] in _visible_user_ids(alice_site, alice_headers)
+
+
+def test_user_portal_hides_agent_outside_department_acl_regardless_of_role_grant(
+    client: TestClient, auth_headers, tenant_client, user_tenant_client
+) -> None:
+    """用户端细粒度收敛仍生效：viewer 用户部门不在可见范围时，即使智能体授权给 viewer 也不可见。"""
+    tenant = create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    roles = list_roles(site, headers)
+
+    target = _create_dept(site, headers, "目标部门")
+    other = _create_dept(site, headers, "其他部门")
+    alice = create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
+    _assign_employment(site, headers, alice["id"], other["id"])
+
+    agent = _create_agent(site, headers, "目标部门助手", target["id"])
+    # 授权给 viewer 角色，但部门不匹配
+    site.put(
+        "/api/v1/admin/grants",
+        params={"resource_type": "agent", "resource_id": agent["id"]},
+        json={"grants": [{"tenant_id": tenant["id"], "role_id": roles["viewer"]["id"]}]},
+        headers=headers,
+    )
+    site.put(
+        f"{AGENTS_URL}/{agent['id']}/visibility",
+        json={
+            "mode": "custom",
+            "departments": [{"department_id": target["id"], "include_subtree": False}],
+            "user_ids": [],
+        },
+        headers=headers,
+    )
+
+    alice_site, alice_headers = _user_headers(user_tenant_client, "alice")
+    assert agent["id"] not in _visible_user_ids(alice_site, alice_headers)

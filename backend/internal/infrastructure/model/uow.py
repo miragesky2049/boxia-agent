@@ -128,6 +128,8 @@ class SqlAlchemyUnitOfWork:
         self._scope_apply_role_filter: bool = True
         self._data_scope_snapshot: UserDataScope | None = None
         self._user_visibility: UserAgentVisibilityContext | None = None
+        # user 端门户模式：注入实例级可见范围时同步打开，用于跳过角色授权收敛
+        self._user_portal: bool = False
         self.agents: AgentRepository = PostgresAgentRepository(self.session, tenant_id)
         # 开通关系不参与角色收敛，租户侧查询由应用层按需过滤。
         self.agent_openings: AgentTenantOpeningRepository = PostgresAgentTenantOpeningRepository(
@@ -165,8 +167,13 @@ class SqlAlchemyUnitOfWork:
         self._rebuild_agent_repo()
 
     def apply_user_visibility(self, context: UserAgentVisibilityContext | None = None) -> None:
-        """按 user 端实例级可见范围重建智能体仓储；None 表示清除叠加。"""
+        """按 user 端实例级可见范围重建智能体仓储；None 表示清除叠加。
+
+        注入 user_visibility 时自动开启 user 端门户模式：跳过角色授权收敛，
+        由部门/人员实例级 ACL 作为唯一细粒度判断；context=None 时一并关闭。
+        """
         self._user_visibility = context
+        self._user_portal = context is not None
         self._rebuild_agent_repo()
 
     def _rebuild_agent_repo(self) -> None:
@@ -178,6 +185,7 @@ class SqlAlchemyUnitOfWork:
             self._scope_apply_role_filter,
             self._data_scope_snapshot,
             self._user_visibility,
+            self._user_portal,
         )
 
     def commit(self) -> None:

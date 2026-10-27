@@ -1,5 +1,5 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
+import { Alert, App, Button, Divider, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -380,6 +380,9 @@ export default function UserGrantsPage() {
           message="保存后将整体覆盖每个目标用户的角色与管理单元；角色变更会立即撤销其全部会话。"
         />
         <Form<BatchFormValues> form={batchForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            目标用户
+          </Divider>
           <Form.Item
             name="user_ids"
             label={`目标用户（最多 ${MAX_BATCH_USERS} 个）`}
@@ -398,6 +401,10 @@ export default function UserGrantsPage() {
               }))}
             />
           </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            授权配置
+          </Divider>
           <Form.Item
             name="role_ids"
             label="角色（功能权限）"

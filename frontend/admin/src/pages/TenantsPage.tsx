@@ -1,5 +1,5 @@
 import { PlusOutlined, RobotOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd'
+import { App, Button, Divider, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
@@ -262,6 +262,9 @@ export default function TenantsPage() {
         width={560}
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            租户信息
+          </Divider>
           <Form.Item
             name="code"
             label="租户编码"
@@ -283,6 +286,10 @@ export default function TenantsPage() {
           >
             <Input placeholder="例如：Acme 公司" />
           </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            管理员账号
+          </Divider>
           <Form.Item
             name="admin_username"
             label="租户管理员账号"

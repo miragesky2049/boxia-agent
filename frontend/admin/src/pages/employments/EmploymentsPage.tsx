@@ -4,6 +4,7 @@ import {
   Button,
   Col,
   DatePicker,
+  Divider,
   Form,
   Input,
   InputNumber,
@@ -133,6 +134,9 @@ function HrFieldsGroup({
     list.map((item) => ({ label: item.name, value: item.id }))
   return (
     <>
+      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+        岗位信息
+      </Divider>
       <Row gutter={12}>
         <Col span={12}>
           <Form.Item name="employment_type_id" label="雇佣类型">
@@ -181,6 +185,10 @@ function HrFieldsGroup({
           </Form.Item>
         </Col>
       </Row>
+
+      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+        工作信息
+      </Divider>
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item name="work_location" label="工作地点">
@@ -210,6 +218,10 @@ function HrFieldsGroup({
           </Form.Item>
         </Col>
       </Row>
+
+      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+        试用期
+      </Divider>
       <Row gutter={12}>
         <Col span={8}>
           <Form.Item name="probation_started_at" label="试用期开始">
@@ -227,6 +239,10 @@ function HrFieldsGroup({
           </Form.Item>
         </Col>
       </Row>
+
+      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+        其他
+      </Divider>
       <Form.Item name="change_reason" label="变动原因">
         <Input maxLength={255} />
       </Form.Item>
@@ -700,6 +716,9 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            任职基本信息
+          </Divider>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item
@@ -758,6 +777,9 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            任职基本信息
+          </Divider>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item name="position" label="岗位">
@@ -791,6 +813,9 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<TransferFormValues> form={transferForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            调岗信息
+          </Divider>
           <Row gutter={12}>
             <Col span={12}>
               <Form.Item
@@ -845,6 +870,9 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<ArchiveFormValues> form={archiveForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            结束信息
+          </Divider>
           <Form.Item name="ended_at" label="结束日期">
             <DatePicker style={{ width: '100%' }} />
           </Form.Item>
