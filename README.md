@@ -164,6 +164,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
 | 智能体管理   | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
+| RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入 pgvector；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed` |
 | 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本 |
 | 租户授权     | 产品级智能体必须显式授权给租户后才可见；通过独立「授权管理」菜单按租户/角色集中配置                 |
 | 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
@@ -222,7 +223,9 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 | 部分     | 主要技术                                                                     |
 |----------|------------------------------------------------------------------------------|
-| 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17、Alembic、PyJWT + bcrypt |
+| 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17（pgvector HNSW）、Alembic、PyJWT + bcrypt |
+| 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2），用于文档 ingest      |
+| RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写） |
 | 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5                                 |
 | 用户端   | React 19、TypeScript、Vite                                                   |
 | 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标                       |
@@ -339,6 +342,14 @@ docker inspect postgres --format '{{range .Mounts}}{{.Type}}  {{.Source}}  ->  {
 
 > 切换挂载方式**不会迁移已有数据**，直接切换会得到一个空库。已有数据时先 `docker compose -f backend/docker/docker-compose.yml down`，把旧数据 `pg_dump` 出来，用新目录启动后再恢复。
 
+**另起一个终端启动 Redis**（短期记忆 + Celery broker/result 依赖）：
+
+```bash
+docker compose -f backend/docker/redis/docker-compose.yml up -d
+```
+
+Redis 默认绑 `127.0.0.1:6379`，开 AOF + 256mb `allkeys-lru`；DB 0 短期记忆、DB 1 Celery broker、DB 2 Celery result 三个逻辑库共用同一实例。
+
 ### 3.2 第二步：初始化并启动后端
 
 **1）进入后端目录，准备配置文件**
@@ -438,9 +449,12 @@ uv run uvicorn web.app_admin:app --reload
 
 # 用户端后端（端口 8001，另开一个终端执行）
 uv run uvicorn web.app_user:app --reload --port 8001
+
+# RAG 文档 ingest 异步 worker（另开终端，仅使用知识库时需要）
+uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag
 ```
 
-终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。
+终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。Celery worker 依赖 Redis（默认 `redis://127.0.0.1:6379/1`），未启动 worker 时文档 ingest 会一直停在 `queued` 状态。
 
 **6）验证后端**
 
@@ -581,6 +595,7 @@ docker compose -f backend/docker/docker-compose.yml up -d
 # 启动后端（控制台 1）
 cd backend && uv run uvicorn web.app_admin:app --reload                # 管理端 8000
 cd backend && uv run uvicorn web.app_user:app --reload --port 8001     # 用户端 8001
+cd backend && uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # RAG ingest worker
 
 # 启动前端（控制台 2）
 cd frontend && pnpm run dev admin   # 只启动管理端 5173
@@ -729,7 +744,7 @@ docker ps --filter "publish=5432"
 ```
 
 - 如果是别的容器，先停止它。
-- 如果本机安装了 PostgreSQL 服务，可以停止该服务（Windows 在“服务”中停止 `postgresql-x64-*`），或者修改 `backend/docker/docker-compose.yml` 的端口映射，同时修改 `backend/.env` 里的 `DATABASE_URL` 端口。
+- 如果本机安装了 PostgreSQL 服务，可以停止该服务（Windows 在“服务”中停止 `postgresql-x64-*`），或者修改 `backend/docker/postgresql/docker-compose.yml` 的端口映射，同时修改 `backend/.env` 里的 `DATABASE_URL` 端口。
 
 ---
 
@@ -921,6 +936,26 @@ boxia-agent/
 | `OTEL_SERVICE_NAME`           | `boxia-agent`       | 否       | 链路服务名                                                                                                                                            |
 | `OTEL_TRACES_SAMPLER_RATIO`   | `1.0`               | 否       | 链路采样率                                                                                                                                            |
 | `WEB_CONCURRENCY`             | `2`（镜像）         | 否       | 后端 worker 数                                                                                                                                        |
+| `EMBEDDING_API_KEY`           | 无                  | RAG 必填 | Embedding / Rerank 服务 API Key（SiliconFlow 等 OpenAI 兼容服务）                                                                                     |
+| `EMBEDDING_BASE_URL`          | `https://api.siliconflow.cn/v1` | 否 | Embedding / Rerank 服务端点                                                                                                                           |
+| `EMBEDDING_MODEL`            | `BAAI/bge-large-zh-v1.5` | 否   | 向量模型（1024 维，最大输入 512 tokens）                                                                                                              |
+| `EMBEDDING_TIMEOUT_SECONDS`   | `30`                | 否       | Embedding / Rerank HTTP 超时                                                                                                                          |
+| `LLM_API_KEY`                 | 无                  | RAG 必填 | LLM 服务 API Key（用于 query 改写）                                                                                                                   |
+| `LLM_BASE_URL`                | `https://api.siliconflow.cn/v1` | 否 | LLM 端点                                                                                                                                              |
+| `LLM_MODEL_ID`                | 无                  | RAG 必填 | LLM 模型 ID                                                                                                                                           |
+| `LLM_TIMEOUT_SECONDS`         | `60`                | 否       | LLM HTTP 超时                                                                                                                                         |
+| `RAG_CHUNK_SIZE`              | `500`               | 否       | 文档分块字符数（受 bge 512 tokens 输入限制，勿超 600）                                                                                                  |
+| `RAG_CHUNK_OVERLAP`           | `80`                | 否       | 分块重叠字符数                                                                                                                                        |
+| `RAG_TOP_K`                    | `5`                 | 否       | 最终返回给 prompt 的 chunk 数                                                                                                                         |
+| `RAG_SIMILARITY_THRESHOLD`    | `0.55`              | 否       | 向量余弦阈值（rerank 关闭时使用）                                                                                                                      |
+| `RAG_RERANK_ENABLED`           | `true`              | 否       | 是否启用 Cross-Encoder 精排；关闭时退化为向量余弦过滤                                                                                                  |
+| `RAG_RERANK_MODEL`            | `BAAI/bge-reranker-v2-m3` | 否 | Rerank 模型                                                                                                                                           |
+| `RAG_RERANK_TOP_N`            | `5`                 | 否       | Rerank 返回的候选数                                                                                                                                    |
+| `RAG_RECALL_MULTIPLIER`       | `10`                | 否       | 向量召回倍数（粗排候选 = top_k × multiplier）                                                                                                         |
+| `RAG_QUERY_REWRITE_ENABLED`   | `true`              | 否       | 是否启用 LLM query 改写（指代消解 + 多 query 变体）                                                                                                  |
+| `RAG_QUERY_REWRITE_VARIANTS`  | `3`                 | 否       | 每次改写生成的同义变体数（1-5）                                                                                                                       |
+| `CELERY_BROKER_URL`           | `redis://127.0.0.1:6379/1` | 否   | Celery broker（Redis DB 1，与短期记忆 DB 0 隔离）                                                                                                     |
+| `CELERY_RESULT_BACKEND`       | `redis://127.0.0.1:6379/2` | 否   | Celery 结果后端（Redis DB 2）                                                                                                                         |
 
 > 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
 
@@ -1246,6 +1281,35 @@ Authorization: Bearer <access_token>
 - 全量替换（导入/目录导入）在单个事务内完成，失败不会留下半包数据。
 - 删除技能时 `skill_files` 随外键级联删除。
 
+### 8.3.2 RAG 知识库文档接口
+
+管理端入口：**智能体详情 → 配置 → 知识库**。文档原文内联传入，ingest 由 Celery worker 异步执行。
+
+| 方法   | 路径                          | 说明                                                                                                  |
+|--------|-------------------------------|-------------------------------------------------------------------------------------------------------|
+| GET    | `/admin/documents`            | 分页列表，参数 `keyword`、`agent_id`、`ingest_status`（`document:read`）                              |
+| POST   | `/admin/documents`            | 创建文档元数据，状态置为 `pending`（`document:create`）                                               |
+| GET    | `/admin/documents/{id}`        | 文档详情（含 `ingest_status` / `chunk_count` / `ingest_error`）                                       |
+| DELETE | `/admin/documents/{id}`       | 删除文档及其全部分块（`document:delete`）                                                              |
+| POST   | `/admin/documents/{id}/ingest`| 触发异步 ingest：状态置为 `queued`，投递到 Celery 队列 `rag`，立即返回（`document:update`）；`queued/processing` 中重复触发返回 409 |
+| GET    | `/admin/documents/{id}/ingest` | 查询 ingest 状态（前端轮询用）                                                                         |
+
+ingest 状态机：`pending → queued → processing → ready`（成功）或 `failed`（错误，`ingest_error` 字段记录原因，可重新触发）。
+
+检索链路（在用户端对话时由 `AgentRunService` 自动调用，无需前端单独发起）：
+
+```
+用户 query + 最近历史
+  → LLM query 改写（standalone 指代消解 + N 个同义变体）
+  → 对每个变体并行 embedding → pgvector cosine 召回 top_k × recall_multiplier
+  → 按 (document_id, chunk_index) 去重合并
+  → Cross-Encoder rerank 精排（bge-reranker-v2-m3）
+  → 按 rerank 阈值 0.1 过滤 → 取 top_k
+  → 拼装 "[资料 N | 章节路径]\n{chunk 内容}" 注入 system_prompt
+```
+
+降级策略：rerank 失败自动退化为向量余弦过滤；query 改写失败退化为原始 query；embedding 临时故障由 Celery retry 兜底。
+
 ### 8.4 管理员、用户与审计
 
 管理员账号接口（平台作用域操作 `admin_users`，租户作用域操作拥有管理端入口权限的 `users`；需 `page:admin-users` 及对应按钮权限）：
@@ -1441,6 +1505,8 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `agent_tools` / `agent_skills`                | 旧版智能体关联表，仅兼容保留（deprecated）；新代码以资源 `agent_id` 为准                   |
 | `agent_visibility_departments`                | 智能体可见部门关联：`(agent_id, department_id)` 复合主键，`include_subtree` 表示是否按部门物化路径前缀命中子树 |
 | `agent_visibility_users`                      | 智能体可见人员关联：`(agent_id, user_id)` 复合主键；被指定用户即使无当前任职也直接命中     |
+| `documents`                                    | RAG 知识库文档：`title`、`source_type`（markdown/text/pdf...）、`raw_content`（原文）、`agent_id`（绑定智能体，可空）、`ingest_status`（`pending/queued/processing/ready/failed`）、`ingest_error`、`chunk_count` |
+| `document_chunks`                             | 文档分块：`document_id` FK、`chunk_index`、`content`、`embedding`（pgvector 1024 维）、`metadata` JSONB（含 `heading_path` 标题路径）；向量列建 HNSW cosine 索引 |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
 约定：
@@ -1450,6 +1516,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 - 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
 - 列表默认按 `updated_at DESC, id DESC` 排序。
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
+- RAG 向量列依赖 `pgvector` 扩展：迁移 `0022_rag_documents` 会自动 `CREATE EXTENSION IF NOT EXISTS vector`，但 PostgreSQL 镜像必须预装该扩展（推荐 `pgvector/pgvector:pg17`）；自建外部库时需 DBA 先装好 `vector` 包。
 - 迁移 `0006_roles_and_resource_access` 新增角色、最终用户、授权表与资源 `agent_id`，并为存量数据回填系统角色、归属与租户授权；DDL 支持 downgrade，但数据回填不可逆，升级前必须备份并在预发库演练。
 - 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
 - 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
@@ -1984,13 +2051,20 @@ TLS 终止层（云负载均衡 / 宿主机 Nginx / Caddy）
 frontend-admin / frontend-user 容器（Nginx，静态文件 + /api 反代）
    │ 内部网络
    ▼
-backend-admin / backend-user 容器（FastAPI）───► db 容器（PostgreSQL，不对外）
+backend-admin / backend-user 容器（FastAPI）
+   │              │
+   │              ├──► db 容器（PostgreSQL 17 + pgvector，不对外）
+   │              │
+   │              └──► Redis（DB 0 短期记忆 / DB 1 Celery broker / DB 2 Celery result）
+   ▲                          ▲
+   └──────── celery-worker 容器（消费 RAG ingest 队列，独立进程）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
 - 入口使用泛域名 `*.example.com`：`adminsystem.example.com` 为产品级平台，其余子域为租户。
-- `backend-admin`、`backend-user`、`db` 不发布端口，只走 Compose 内部网络。
+- `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker` 不发布端口，只走 Compose 内部网络。
 - 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
+- `celery-worker` 与 backend 镜像同包，仅启动命令不同；不使用知识库时可以不启动。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
 ### 14.2 服务器准备
@@ -2041,6 +2115,31 @@ CORS_ORIGINS=
 HTTP_PORT=80
 USER_HTTP_PORT=8081
 WEB_CONCURRENCY=2
+
+# ===== Redis（短期记忆 + Celery broker/result）=====
+# 三个 DB 互相隔离：DB 0 短期记忆、DB 1 Celery broker、DB 2 Celery result
+# 生产建议用独立 Redis 实例或云托管 Redis，不要与 db 容器同机
+REDIS_URL=redis://redis:6379/0
+CELERY_BROKER_URL=redis://redis:6379/1
+CELERY_RESULT_BACKEND=redis://redis:6379/2
+MEMORY_MAX_TURNS=20
+MEMORY_TTL_SECONDS=1800
+
+# ===== LLM / Embedding（RAG 知识库使用，不使用知识库可留空）=====
+# LLM：用于对话生成 + query 改写（OpenAI 兼容协议）
+LLM_API_KEY=CHANGE_ME_LLM_API_KEY
+LLM_BASE_URL=https://api.deepseek.com
+LLM_MODEL_ID=deepseek-v4-flash
+LLM_TIMEOUT_SECONDS=60
+# Embedding / Rerank：SiliconFlow 托管 bge 模型（OpenAI 兼容 /v1/embeddings 与 /v1/rerank）
+EMBEDDING_API_KEY=CHANGE_ME_SILICONFLOW_API_KEY
+EMBEDDING_BASE_URL=https://api.siliconflow.cn/v1
+EMBEDDING_MODEL=BAAI/bge-large-zh-v1.5
+EMBEDDING_DIMENSIONS=1024
+EMBEDDING_TIMEOUT_SECONDS=30
+# RAG 行为开关（一般保持默认；无 rerank 客户端时自动降级为向量余弦过滤）
+RAG_RERANK_ENABLED=true
+RAG_QUERY_REWRITE_ENABLED=true
 
 # ===== 可选 =====
 LOG_LEVEL=INFO
@@ -2110,16 +2209,38 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 
 | 服务            | 作用                                          | 对外                            |
 |-----------------|-----------------------------------------------|---------------------------------|
-| `db`            | PostgreSQL 17，数据存 volume                  | 否                              |
+| `db`            | PostgreSQL 17（含 pgvector HNSW 索引），数据存 volume | 否                              |
 | `migrate`       | 一次性执行 `alembic upgrade head`，成功后退出 | 否                              |
+| `redis`         | Redis 7，DB 0 短期记忆 / DB 1 Celery broker / DB 2 Celery result | 否                              |
 | `backend-admin` | 管理端 FastAPI，仅 admin 路由                 | 否                              |
 | `backend-user`  | 用户端 FastAPI，仅 user 路由                  | 否                              |
+| `celery-worker` | RAG ingest 异步 worker，消费队列 `rag`（与 backend 同镜像，仅启动命令不同） | 否                              |
 | `frontend-admin` | 管理端 Nginx 静态站点 + `/api` 反代           | 是（`HTTP_PORT:8080`）          |
 | `frontend-user` | 用户端 Nginx 静态站点 + `/api` 反代           | 是（`USER_HTTP_PORT:8080`）     |
 
 除一次性执行的 `migrate` 外，其他服务都配置了健康检查；所有服务都有日志轮转和内存上限。
 
+> **不使用知识库时**：可以不启动 `celery-worker`，并把 `RAG_RERANK_ENABLED` / `RAG_QUERY_REWRITE_ENABLED` 置为 `false`。`redis` 服务仍需保留（短期记忆依赖它）。
+> **celery-worker 启动命令**：与 backend 同镜像，启动命令为 `celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag`；如需在 compose 外单独跑，宿主机先 `pip install celery[redis]` 后用同一份 `.env.prod` 启动即可。
+
 > CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend-admin`、`-backend-user`、`-frontend-admin`、`-frontend-user`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
+
+### 14.4.1 RAG 部署依赖
+
+知识库功能依赖三类外部资源，按启用情况准备：
+
+| 依赖 | 用途 | 不启用时 |
+|------|------|----------|
+| **PostgreSQL pgvector 扩展** | `document_chunks.embedding` 1024 维向量列 + HNSW cosine 索引 | 不装扩展则迁移 `0022_rag_documents` 失败；自建库时先 `CREATE EXTENSION IF NOT EXISTS vector;` |
+| **Redis** | 短期记忆（DB 0）+ Celery broker（DB 1）+ result backend（DB 2） | 短期记忆不可用；celery-worker 起不来则 ingest 任务堆积在 `queued` |
+| **OpenAI 兼容 LLM / Embedding / Rerank API** | 对话生成、query 改写、bge embedding、bge-reranker 精排 | 任一字段留空时对应功能自动降级；三个都没配则 RAG 不可用 |
+
+生产建议：
+
+- PostgreSQL 用 `pgvector/pgvector:pg17` 镜像（已内置扩展）；自建外部库时 DBA 需预装 `vector` 扩展。
+- Redis 用 `redis:7-alpine`，3 个 DB 通过逻辑隔离即可，无需起 3 个实例；AOF 开启，maxmemory 设 256mb + `allkeys-lru`。
+- LLM / Embedding / Rerank 推荐走云托管（SiliconFlow / DeepSeek / 内部 LLM 代理）；API Key 写入 `ops/.env.prod`，权限 600，不进 Git。
+- Celery worker 内存上限建议 512m（embedding 单次批处理 ≤ 20 条时够用）；如批量文档 ingest 频繁，可单独 scale 多个 worker。
 
 ### 14.5 创建首个管理员
 
