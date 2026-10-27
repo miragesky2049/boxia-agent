@@ -422,6 +422,30 @@ uv run alembic current
 
 **4）创建第一个管理员**
 
+有两种方式，任选其一：
+
+**方式 A：启动时自动初始化（推荐用于部署环境）**
+
+在 `ops/.env.*` 或 `backend/.env` 中开启：
+
+```bash
+ADMIN_AUTO_INIT=true
+ADMIN_INITIAL_PASSWORD='Boxia-2026-Root!'
+ADMIN_INITIAL_USERNAME=admin
+ADMIN_INITIAL_DISPLAY_NAME=系统管理员
+ADMIN_INITIAL_ROLE=superadmin
+ADMIN_INITIAL_MUST_CHANGE_PASSWORD=true
+```
+
+启动 admin 站点时，**同时满足以下两个条件**才会执行自动初始化：
+
+1. `ADMIN_AUTO_INIT=true`
+2. `ADMIN_INITIAL_PASSWORD` 非空
+
+执行时若 `admin_users` 表为空（首次部署），会自动创建首个平台管理员账号；表中已有账号则跳过。密码不符合策略、角色不存在时跳过并输出告警日志。
+
+**方式 B：手动脚本（适合本地调试或自动化流水线）**
+
 ```bash
 uv run python -m scripts.create_admin
 ```
@@ -827,6 +851,24 @@ WSL (109097 - Relay) ERROR: CreateProcessCommon:818: execvpe(/bin/bash) failed: 
    ```
    但 `ops/dev.sh` 只调用 Windows 侧的 `uv` / `pnpm`，用 Git Bash 更直接。
 
+### 4.14 Windows 下 Celery worker 报 `PermissionError(13, '拒绝访问。')`
+
+完整报错类似：
+
+```text
+[ERROR/SpawnPoolWorker-1] Pool process ... error: PermissionError(13, '拒绝访问。', None, 5, None)
+...
+PermissionError: [WinError 5] 拒绝访问。
+```
+
+原因：Celery 默认的 prefork 池依赖 Unix fork 语义，在 Windows 上 billiard 子进程在获取信号量时会被系统拒绝。这是 Windows 平台的已知限制，不是代码问题。
+
+解决办法：使用 `--pool=solo`（单进程，调试友好）或 `--pool=threads`。`ops/dev.sh` 已经自动检测 Git Bash / MSYS 环境并切到 `--pool=solo`，无需手动处理。如果单独启动 worker，请加参数：
+
+```bash
+uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag --pool=solo
+```
+
 ---
 
 ## 5. 目录结构与代码分层
@@ -985,6 +1027,12 @@ boxia-agent/
 | `RAG_QUERY_REWRITE_VARIANTS`  | `3`                 | 否       | 每次改写生成的同义变体数（1-5）                                                                                                                       |
 | `CELERY_BROKER_URL`           | `redis://127.0.0.1:6379/1` | 否   | Celery broker（Redis DB 1，与短期记忆 DB 0 隔离）                                                                                                     |
 | `CELERY_RESULT_BACKEND`       | `redis://127.0.0.1:6379/2` | 否   | Celery 结果后端（Redis DB 2）                                                                                                                         |
+| `ADMIN_AUTO_INIT`             | `false`            | 否       | 部署时是否自动初始化首个平台管理员账号（仅 admin 站点启动时生效）；需与 `ADMIN_INITIAL_PASSWORD` 同时配置才会执行                                          |
+| `ADMIN_INITIAL_USERNAME`     | `admin`            | 否       | 自动初始化的平台管理员用户名                                                                                                                          |
+| `ADMIN_INITIAL_DISPLAY_NAME`  | `系统管理员`        | 否       | 自动初始化的平台管理员显示名                                                                                                                          |
+| `ADMIN_INITIAL_PASSWORD`      | 空                | 否       | 自动初始化的平台管理员密码；为空时跳过初始化；需符合密码策略                                                                                              |
+| `ADMIN_INITIAL_ROLE`          | `superadmin`       | 否       | 自动初始化的平台角色编码（必须是已存在的平台角色）                                                                                                      |
+| `ADMIN_INITIAL_MUST_CHANGE_PASSWORD` | `true`      | 否       | 首次登录是否强制改密（自动化环境可设为 `false`）                                                                                                       |
 
 > 本地开发直接使用 `.env.example` 即可；`JWT_SECRET` 此时只是开发占位值，**生产必须换成随机值**。
 
@@ -2282,6 +2330,23 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 
 ### 14.5 创建首个管理员
 
+**方式 A：随容器启动自动初始化（推荐生产使用）**
+
+在 `ops/.env.prod` 中追加以下配置，`backend-admin` 容器启动时若 `admin_users` 表为空会自动创建首个平台账号：
+
+```bash
+ADMIN_AUTO_INIT=true
+ADMIN_INITIAL_PASSWORD='<符合密码策略的强密码>'
+ADMIN_INITIAL_USERNAME=admin
+ADMIN_INITIAL_DISPLAY_NAME=系统管理员
+ADMIN_INITIAL_ROLE=superadmin
+ADMIN_INITIAL_MUST_CHANGE_PASSWORD=true
+```
+
+**必须同时配置 `ADMIN_AUTO_INIT=true` 和 `ADMIN_INITIAL_PASSWORD` 才会执行**；只开开关不配密码会被跳过并输出日志。首次登录会强制改密。表中已有账号时自动跳过，不影响存量账号；密码不符合策略或角色不存在时跳过并输出告警日志。
+
+**方式 B：手动脚本**
+
 交互方式（推荐）：
 
 ```bash
@@ -2300,7 +2365,7 @@ docker compose -f ops/docker-compose.yml run --rm \
   backend-admin python -m scripts.create_admin
 ```
 
-首次登录会强制改密。默认创建的是产品级平台账号，租户管理员请登录平台后在「租户管理」中创建。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
+默认创建的是产品级平台账号，租户管理员请登录平台后在「租户管理」中创建。自动化/演示环境可额外传 `-e ADMIN_MUST_CHANGE_PASSWORD=false`。
 
 > 非交互方式会把密码留在 shell 历史和进程列表中，生产环境优先用交互方式；如果必须非交互，执行后清理历史记录。
 

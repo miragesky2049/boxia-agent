@@ -154,6 +154,18 @@ class Settings(BaseSettings):
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
 
+    # ============================================================
+    # 产品级平台管理员自动初始化（部署产品级运营平台时开启）
+    # 仅 admin 站点启动时生效：若 admin_users 表为空，自动创建首个平台账号
+    # 与 backend/.env.example「四.1」节保持一一对应，修改字段时同步更新
+    # ============================================================
+    admin_auto_init: bool = False
+    admin_initial_username: str = "admin"
+    admin_initial_display_name: str = "系统管理员"
+    admin_initial_password: SecretStr = SecretStr("")
+    admin_initial_role: str = "superadmin"
+    admin_initial_must_change_password: bool = True
+
     @property
     def is_prod(self) -> bool:
         """是否生产环境。"""
@@ -193,6 +205,11 @@ class Settings(BaseSettings):
         subdomain = self.platform_admin_subdomain.strip().lower()
         root = self.normalized_root_domain
         return f"{subdomain}.{root}" if root else subdomain
+
+    @property
+    def admin_auto_init_enabled(self) -> bool:
+        """是否真正执行自动初始化：开关开启且配置了初始密码才生效。"""
+        return self.admin_auto_init and bool(self.admin_initial_password.get_secret_value())
 
     @model_validator(mode="after")
     def _validate_environment(self) -> "Settings":

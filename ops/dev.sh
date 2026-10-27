@@ -69,8 +69,19 @@ for site in "${SITES[@]}"; do
 done
 
 # ---------- 5. 后台启动 Celery RAG worker ----------
-echo "==> 启动 Celery RAG worker（队列 rag）"
-uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag &
+# Windows（Git Bash / MSYS）下 prefork 池会因 billiard 子进程权限/信号问题崩溃，
+# 改用 solo 池（单进程，调试友好）；*nix 仍用默认 prefork。
+case "$(uname -s)" in
+  MINGW*|MSYS*|CYGWIN*)
+    CELERY_POOL="--pool=solo"
+    ;;
+  *)
+    CELERY_POOL=""
+    ;;
+esac
+echo "==> 启动 Celery RAG worker（队列 rag，pool=${CELERY_POOL:-prefork}）"
+# shellcheck disable=SC2086
+uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag $CELERY_POOL &
 CELERY_PID=$!
 echo "已启动 Celery worker PID=${CELERY_PID}"
 
