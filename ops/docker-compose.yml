@@ -17,6 +17,8 @@ x-backend-runtime: &backend-runtime
   depends_on:
     db:
       condition: service_healthy
+    redis:
+      condition: service_healthy
     migrate:
       condition: service_completed_successfully
   networks:
@@ -67,7 +69,8 @@ x-frontend-runtime: &frontend-runtime
 
 services:
   db:
-    image: postgres:17-alpine
+    # 使用 pgvector 官方镜像，预置 vector 扩展；RAG 向量检索依赖
+    image: pgvector/pgvector:pg17
     env_file:
       - ${ENV_FILE:-.env.prod}
     volumes:
@@ -81,6 +84,31 @@ services:
       retries: 10
     restart: unless-stopped
     mem_limit: 512m
+    logging: *default-logging
+
+  redis:
+    # 短期记忆（DB 0）+ Celery broker（DB 1）+ result backend（DB 2）
+    # 生产如需复用已有 Redis：注释掉本服务，并把 REDIS_URL / CELERY_* 指向外部地址
+    image: redis:7-alpine
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+    volumes:
+      - redisdata:/data
+    networks:
+      - internal
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+    mem_limit: 256m
     logging: *default-logging
 
   migrate:
@@ -120,6 +148,34 @@ services:
     environment:
       WEB_CONCURRENCY: ${WEB_CONCURRENCY:-2}
 
+  celery-worker:
+    # RAG ingest 异步 worker，与 backend 同镜像，仅启动命令不同
+    # 不使用知识库时可注释掉本服务，任务会停留在 queued
+    build: *backend-build
+    image: boxia-agent-backend:local
+    command:
+      - celery
+      - -A
+      - internal.infrastructure.celery_app
+      - worker
+      - --loglevel=info
+      - -Q
+      - rag
+    env_file:
+      - ${ENV_FILE:-.env.prod}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    restart: unless-stopped
+    mem_limit: 512m
+    logging: *default-logging
+
   frontend-admin:
     <<: *frontend-runtime
     build:
@@ -149,6 +205,7 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
 
 networks:
   edge:

@@ -44,7 +44,7 @@ git clone https://github.com/miragesky2049/boxia-agent.git
 cd boxia-agent
 
 # 2. 启动数据库（Docker 一键起 PostgreSQL）
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 
 # 3. 初始化后端配置 + 依赖 + 数据库表
 cd backend
@@ -299,7 +299,7 @@ cd boxia-agent
 在仓库根目录执行：
 
 ```bash
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 ```
 
 这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。编排文件把 Compose 项目名固定为 `postgresql`，因此 `docker compose ls` 中显示的名称不受执行目录影响。
@@ -321,16 +321,16 @@ docker ps
 ```powershell
 # Windows PowerShell（当前会话有效）
 $env:PG_DATA_DIR = "D:/Docker/postgresql"
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 ```
 
 ```bash
 # Linux / macOS
 export PG_DATA_DIR=$PWD/.pgdata
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 ```
 
-也可以把 `PG_DATA_DIR=...` 写进 `backend/docker/.env`，之后每次 `docker compose -f backend/docker/docker-compose.yml` 都会自动读取，不用重复设置。
+也可以把 `PG_DATA_DIR=...` 写进 `backend/docker/.env`，之后每次 `docker compose -f backend/docker/postgresql/docker-compose.yml` 都会自动读取，不用重复设置。
 
 确认实际挂载位置：
 
@@ -340,7 +340,7 @@ docker inspect postgres --format '{{range .Mounts}}{{.Type}}  {{.Source}}  ->  {
 
 `Type` 为 `volume` 表示用的是命名卷，为 `bind` 表示已经指向宿主机目录。
 
-> 切换挂载方式**不会迁移已有数据**，直接切换会得到一个空库。已有数据时先 `docker compose -f backend/docker/docker-compose.yml down`，把旧数据 `pg_dump` 出来，用新目录启动后再恢复。
+> 切换挂载方式**不会迁移已有数据**，直接切换会得到一个空库。已有数据时先 `docker compose -f backend/docker/postgresql/docker-compose.yml down`，把旧数据 `pg_dump` 出来，用新目录启动后再恢复。
 
 **另起一个终端启动 Redis**（短期记忆 + Celery broker/result 依赖）：
 
@@ -349,6 +349,29 @@ docker compose -f backend/docker/redis/docker-compose.yml up -d
 ```
 
 Redis 默认绑 `127.0.0.1:6379`，开 AOF + 256mb `allkeys-lru`；DB 0 短期记忆、DB 1 Celery broker、DB 2 Celery result 三个逻辑库共用同一实例。
+
+**已有 PostgreSQL / Redis 时，跳过上面的 `docker compose up`**
+
+如果你本地或公司内网已经有 PostgreSQL、Redis（比如直装的 PG、公司云托管 Redis、其他项目共用的实例），不需要再起一套 Docker 容器，只要改 `backend/.env` 里的四个连接串即可：
+
+| 场景 | 改哪个变量 |
+|------|------------|
+| 已有 PostgreSQL | `DATABASE_URL=postgresql+psycopg://<user>:<password>@<host>:<port>/<db>` |
+| 已有 Redis（短期记忆） | `REDIS_URL=redis://:<password>@<host>:<port>/0` |
+| 已有 Redis（Celery broker） | `CELERY_BROKER_URL=redis://:<password>@<host>:<port>/1` |
+| 已有 Redis（Celery result） | `CELERY_RESULT_BACKEND=redis://:<password>@<host>:<port>/2` |
+
+前置条件：
+
+- **自建 PostgreSQL 必须预装 pgvector 扩展**。RAG 知识库的 `document_chunks.embedding` 向量列依赖它，迁移 `0022_rag_documents` 时会自动 `CREATE EXTENSION`，但如果数据库账号没有建扩展权限会失败。用管理员账号先在目标库执行一次：
+  ```sql
+  CREATE EXTENSION IF NOT EXISTS vector;
+  ```
+  本地直装 PG / 公司内网 PG / 云托管 PG（如阿里云 RDS、AWS RDS）都需要这一步；只有仓库自带的 `pgvector/pgvector:pg17` 镜像已内置扩展。
+- **三个 Redis 逻辑库必须互相隔离**：短期记忆用 DB 0、Celery broker 用 DB 1、Celery result 用 DB 2。如果外部 Redis 是云托管的只有单 DB，需要找运维开多个 DB 或换实例。
+- **后端代码零改动**：连接串全部走 `backend/internal/infrastructure/config/settings.py` 的 pydantic-settings，没有任何硬编码主机名。
+
+跳过 Docker 启动后，直接进 3.2 节初始化后端即可。
 
 ### 3.2 第二步：初始化并启动后端
 
@@ -565,7 +588,7 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 |-----------------|-------------------------------------------------------------------------------------------------------|
 | 后端            | 在启动它的终端按 `Ctrl + C`；用 `ops/dev.sh` 启动时按一次会同时停止对应的所有后端                     |
 | 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或执行 `cd frontend && pnpm run stop`（两个前端）/ `pnpm run stop admin`（单个） |
-| 数据库          | 执行 `docker compose -f backend/docker/docker-compose.yml down`              |
+| 数据库          | 执行 `docker compose -f backend/docker/postgresql/docker-compose.yml down`              |
 
 > `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
 
@@ -590,7 +613,7 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 # 以下命令都在仓库根目录执行
 
 # 启动数据库
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 
 # 启动后端（控制台 1）
 cd backend && uv run uvicorn web.app_admin:app --reload                # 管理端 8000
@@ -717,8 +740,8 @@ uv run python -m scripts.create_admin
 
 ```bash
 # 回到仓库根目录
-docker compose -f backend/docker/docker-compose.yml down -v
-docker compose -f backend/docker/docker-compose.yml up -d
+docker compose -f backend/docker/postgresql/docker-compose.yml down -v
+docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 
 cd backend
 uv run alembic upgrade head
@@ -2241,6 +2264,15 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 - Redis 用 `redis:7-alpine`，3 个 DB 通过逻辑隔离即可，无需起 3 个实例；AOF 开启，maxmemory 设 256mb + `allkeys-lru`。
 - LLM / Embedding / Rerank 推荐走云托管（SiliconFlow / DeepSeek / 内部 LLM 代理）；API Key 写入 `ops/.env.prod`，权限 600，不进 Git。
 - Celery worker 内存上限建议 512m（embedding 单次批处理 ≤ 20 条时够用）；如批量文档 ingest 频繁，可单独 scale 多个 worker。
+
+**复用已有 PostgreSQL / Redis**
+
+如果生产环境已经有现成的 PostgreSQL（含 pgvector）或 Redis（如云托管 RDS / ElastiCache / 公司内部实例），不需要起 compose 自带的 `db` / `redis` 容器：
+
+1. 在 `ops/.env.prod` 中把 `DATABASE_URL` / `REDIS_URL` / `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` 指向外部地址（参考本地开发 3.1 节的连接串写法）。
+2. 在 `ops/docker-compose.yml` 中**注释掉 `db` 和 `redis` 两个服务**，并把 `backend-admin` / `backend-user` / `migrate` / `celery-worker` 的 `depends_on` 中对应行删掉（否则 compose 会等一个不会启动的容器健康）。
+3. 外部 PostgreSQL 必须先 `CREATE EXTENSION IF NOT EXISTS vector;`；外部 Redis 需要开放 DB 0/1/2 三个逻辑库（或找运维开多 DB）。
+4. `migrate` 一次性任务仍由 compose 触发，它会直接连外部库执行 Alembic 升级，不需要改代码。
 
 ### 14.5 创建首个管理员
 
