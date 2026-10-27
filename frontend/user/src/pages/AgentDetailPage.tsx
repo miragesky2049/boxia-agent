@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, MessageOutlined } from '@ant-design/icons'
 import { Alert, Button, Card, Col, Empty, Row, Skeleton, Tabs, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
@@ -223,6 +223,11 @@ export default function AgentDetailPage() {
                   {resourceTotal > 0 ? `${resourceTotal} 项可用资源` : '暂未配置资源'}
                 </Tag>
               </div>
+              <Link to={`/agents/${agent.id}/chat`}>
+                <Button type="primary" size="large" icon={<MessageOutlined />}>
+                  发起对话
+                </Button>
+              </Link>
             </section>
 
             {resourceTotal === 0 ? (

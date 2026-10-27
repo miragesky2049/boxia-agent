@@ -3,6 +3,7 @@ import { AuthProvider } from './auth/AuthContext'
 import RequireAuth from './auth/RequireAuth'
 import AgentDetailPage from './pages/AgentDetailPage'
 import AgentListPage from './pages/AgentListPage'
+import ChatPage from './pages/ChatPage'
 import LoginPage from './pages/LoginPage'
 
 export default function App() {
@@ -24,6 +25,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <AgentDetailPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/agents/:agentId/chat"
+            element={
+              <RequireAuth>
+                <ChatPage />
               </RequireAuth>
             }
           />
