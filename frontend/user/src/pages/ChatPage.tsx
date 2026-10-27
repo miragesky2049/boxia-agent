@@ -6,7 +6,7 @@ import {
   SendOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
-import { Alert, Button, Collapse, message, Spin, Tag, Tooltip } from 'antd'
+import { Alert, App as AntdApp, Button, Collapse, Spin, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
@@ -80,23 +80,33 @@ function isComponentBlockPayload(data: unknown): data is ComponentBlockPayload {
 }
 
 function SenclawComponentBlock({ json }: { json: string }) {
-  let data: unknown
-  try {
-    data = JSON.parse(json)
-  } catch (err) {
+  const { message } = AntdApp.useApp()
+
+  const parsed = useMemo(() => {
+    try {
+      return { ok: true, data: JSON.parse(json) as unknown }
+    } catch (err) {
+      return {
+        ok: false as const,
+        error: err instanceof Error ? err.message : 'JSON 解析失败',
+      }
+    }
+  }, [json])
+
+  if (!parsed.ok) {
     return (
       <Alert
         type="error"
         showIcon
         message="组件声明解析失败"
-        description={err instanceof Error ? err.message : undefined}
+        description={parsed.error}
       />
     )
   }
+
+  const data = parsed.data
   if (!isComponentBlockPayload(data)) {
-    return (
-      <Alert type="warning" showIcon message="组件声明格式不正确" description={json} />
-    )
+    return <Alert type="warning" showIcon message="组件声明格式不正确" description={json} />
   }
 
   if (data.name === '@senclaw-elearning-cmp/upload-material') {
@@ -116,9 +126,10 @@ function SenclawComponentBlock({ json }: { json: string }) {
   }
 
   if (data.name === '@senclaw-elearning-cmp/action-bar') {
-    const placement = data.props?.placement === 'right' || data.props?.placement === 'center'
-      ? data.props.placement
-      : 'left'
+    const placement =
+      data.props?.placement === 'right' || data.props?.placement === 'center'
+        ? data.props.placement
+        : 'left'
     const rawActions = Array.isArray(data.props?.actions) ? data.props.actions : []
     const actions: ActionBarAction[] = rawActions.map((a) => {
       const item = (a ?? {}) as Record<string, unknown>

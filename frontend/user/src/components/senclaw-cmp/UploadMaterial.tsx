@@ -5,7 +5,7 @@ import {
   InboxOutlined,
   LoadingOutlined,
 } from '@ant-design/icons'
-import { Button, Progress, Tag, message } from 'antd'
+import { App, Button, Progress, Tag } from 'antd'
 import { useCallback, useRef, useState } from 'react'
 import type { ChangeEvent, DragEvent } from 'react'
 import type {
@@ -28,10 +28,10 @@ function formatSize(bytes: number): string {
 }
 
 /**
- * 内置模拟上传：后端 GetSceneRobotDataMdContext 链路未就绪前用于前端联调。
- * 真实环境由调用方通过 uploadRequest 注入。
+ * 开发环境模拟上传：仅当调用方未注入 uploadRequest 且当前为 dev 时启用，
+ * 避免生产环境伪装上传成功。
  */
-const simulateUpload: UploadMaterialRequest = (file) => {
+const devSimulateUpload: UploadMaterialRequest = (file) => {
   const duration = 900 + Math.random() * 900
   return new Promise((resolve, reject) => {
     window.setTimeout(() => {
@@ -57,21 +57,28 @@ export default function UploadMaterial(props: UploadMaterialProps) {
     className,
   } = props
 
+  const { message } = App.useApp()
+
   const [files, setFiles] = useState<UploadedMaterialFile[]>([])
   const [dragActive, setDragActive] = useState(false)
   const inputRef = useRef<HTMLInputElement | null>(null)
   const notifiedRef = useRef(false)
 
   const patchFile = useCallback((id: string, patch: Partial<UploadedMaterialFile>) => {
-    setFiles((prev) =>
-      prev.map((f) => (f.id === id ? { ...f, ...patch } : f)),
-    )
+    setFiles((prev) => prev.map((f) => (f.id === id ? { ...f, ...patch } : f)))
   }, [])
 
   const removeFile = useCallback(
     (id: string) => {
       if (disabled) return
-      setFiles((prev) => prev.filter((f) => f.id !== id))
+      setFiles((prev) => {
+        const next = prev.filter((f) => f.id !== id)
+        // 删除后列表为空时复位已通知标记，允许下次重新触发 onUploaded
+        if (next.length === 0) {
+          notifiedRef.current = false
+        }
+        return next
+      })
     },
     [disabled],
   )
@@ -104,11 +111,17 @@ export default function UploadMaterial(props: UploadMaterialProps) {
         return next
       })
 
-      const requester = uploadRequest ?? simulateUpload
+      const requester =
+        uploadRequest ??
+        (import.meta.env.DEV
+          ? devSimulateUpload
+          : (() => {
+              throw new Error('上传服务未配置，请联系管理员注入 uploadRequest')
+            }) as UploadMaterialRequest)
+
       try {
         const { materialId } = await requester(file, sceneRobotId)
         patchFile(id, { status: 'parsing' })
-        // 后端解析延迟模拟：真实链路中 requester 返回后即代表解析完成
         await new Promise((r) => window.setTimeout(r, 600 + Math.random() * 600))
         patchFile(id, { status: 'done', materialId })
         setFiles((prev) => {
@@ -144,7 +157,6 @@ export default function UploadMaterial(props: UploadMaterialProps) {
     if (e.target.files && e.target.files.length > 0) {
       acceptFiles(e.target.files)
     }
-    // 重置 input，允许重复选择同一文件
     e.target.value = ''
   }
 
