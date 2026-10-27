@@ -44,6 +44,10 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 from internal.infrastructure.repository.postgres_department_repository import (
     PostgresDepartmentRepository,
 )
+from internal.infrastructure.repository.postgres_document_repository import (
+    PostgresDocumentChunkRepository,
+    PostgresDocumentRepository,
+)
 from internal.infrastructure.repository.postgres_employment_repository import (
     PostgresEmploymentRepository,
 )
@@ -142,6 +146,9 @@ class SqlAlchemyUnitOfWork:
             self.session, tenant_id
         )
         self.prompts: ResourceRepository[Prompt] = PostgresPromptRepository(self.session, tenant_id)
+        # RAG 知识库：文档元数据 + 分块向量仓储
+        self.documents = PostgresDocumentRepository(self.session, tenant_id)
+        self.document_chunks = PostgresDocumentChunkRepository(self.session, tenant_id)
 
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源与智能体仓储，其余仓储复用同一会话。"""
