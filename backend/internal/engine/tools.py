@@ -1,0 +1,185 @@
+"""工具适配层：把数据库里的 Tool 实体统一封装为可被 agent runner 调用的形态。"""
+
+from __future__ import annotations
+
+import json
+import logging
+from abc import ABC, abstractmethod
+from typing import Any
+
+import httpx
+
+from internal.domain.entity.resource import Tool as ToolEntity
+from internal.engine.context import AgentRunContext
+from internal.engine.llm import LLMToolSpec
+
+logger = logging.getLogger(__name__)
+
+
+class ToolExecutionError(Exception):
+    """工具执行失败：runner 捕获后作为 tool 结果回灌给 LLM，不中断主循环。"""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message)
+        self.message = message
+
+
+class Tool(ABC):
+    """运行期工具抽象。"""
+
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        """工具名：必须与 LLM function 调用的 name 一致。"""
+
+    @abstractmethod
+    def spec(self) -> LLMToolSpec:
+        """向 LLM 暴露的 JSON Schema。"""
+
+    @abstractmethod
+    async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
+        """执行工具并返回文本结果；失败抛 ToolExecutionError。"""
+
+
+class EchoTool(Tool):
+    """内置 echo 工具：原样回显参数，便于联调与冒烟测试。"""
+
+    def __init__(self, name: str = "echo", description: str = "原样回显输入文本，用于调试") -> None:
+        self._name = name
+        self._description = description
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    def spec(self) -> LLMToolSpec:
+        return LLMToolSpec(
+            name=self._name,
+            description=self._description,
+            parameters={
+                "type": "object",
+                "properties": {
+                    "text": {"type": "string", "description": "要回显的文本"},
+                },
+                "required": ["text"],
+            },
+        )
+
+    async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
+        text = str(arguments.get("text") or "")
+        return f"echo: {text}"
+
+
+class HttpTool(Tool):
+    """HTTP 工具：按 ToolEntity.config 中声明的 url/method/headers 调用外部接口。"""
+
+    def __init__(self, entity: ToolEntity) -> None:
+        self._entity = entity
+        config = entity.config or {}
+        self._url_template: str = config.get("url") or ""
+        self._method: str = (config.get("method") or "GET").upper()
+        self._headers: dict[str, str] = config.get("headers") or {}
+        self._parameters: dict[str, Any] = config.get("parameters") or {
+            "type": "object",
+            "properties": {},
+        }
+        self._timeout: float = float(config.get("timeout_seconds") or 30.0)
+
+    @property
+    def name(self) -> str:
+        return self._entity.name
+
+    def spec(self) -> LLMToolSpec:
+        return LLMToolSpec(
+            name=self._entity.name,
+            description=self._entity.description or self._entity.name,
+            parameters=self._parameters,
+        )
+
+    async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
+        if not self._url_template:
+            raise ToolExecutionError(f"工具 {self._entity.name} 未配置 url")
+        from internal.engine.prompt import render_template
+
+        url = render_template(self._url_template, {**arguments, "tenant_id": str(context.tenant_id or "")})
+        method = self._method
+        request_headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            **{k: str(v) for k, v in self._headers.items()},
+        }
+        request_headers.update(context.llm_headers())
+
+        try:
+            async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as client:
+                if method == "GET":
+                    response = await client.get(url, params=arguments, headers=request_headers)
+                else:
+                    response = await client.request(method, url, json=arguments, headers=request_headers)
+        except httpx.HTTPError as exc:
+            logger.warning("tool http error tool=%s url=%s err=%s", self._entity.name, url, exc)
+            raise ToolExecutionError(f"HTTP 调用失败: {exc}") from exc
+
+        if response.status_code >= 400:
+            raise ToolExecutionError(
+                f"HTTP {response.status_code}: {response.text[:500]}"
+            )
+
+        text = response.text
+        try:
+            # 尝试美化 JSON，便于 LLM 阅读
+            parsed = response.json()
+            text = json.dumps(parsed, ensure_ascii=False)
+        except ValueError:
+            pass
+        return text[:8000]
+
+
+class McpTool(Tool):
+    """MCP 工具：通过 MCP 协议调用外部 boxia-mcp-server。"""
+
+    def __init__(self, entity: ToolEntity) -> None:
+        self._entity = entity
+        config = entity.config or {}
+        self._server_url: str = config.get("server_url") or ""
+        self._tool_name: str = config.get("tool_name") or entity.name
+        self._parameters: dict[str, Any] = config.get("input_schema") or {
+            "type": "object",
+            "properties": {},
+        }
+
+    @property
+    def name(self) -> str:
+        return self._entity.name
+
+    def spec(self) -> LLMToolSpec:
+        return LLMToolSpec(
+            name=self._entity.name,
+            description=self._entity.description or self._entity.name,
+            parameters=self._parameters,
+        )
+
+    async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
+        if not self._server_url:
+            raise ToolExecutionError(f"工具 {self._entity.name} 未配置 server_url")
+        from internal.engine.mcp_client import call_tool
+
+        try:
+            return await call_tool(self._server_url, self._tool_name, arguments)
+        except Exception as exc:  # noqa: BLE001 - McpClientError 已包装
+            raise ToolExecutionError(str(exc)) from exc
+
+
+def build_tools(entities: list[ToolEntity]) -> list[Tool]:
+    """根据 Tool 实体列表构造运行期工具集合；未知类型回退为 HTTP 工具。"""
+    tools: list[Tool] = []
+    for entity in entities:
+        if not entity.is_enabled:
+            continue
+        tool_type = (entity.type or "http").lower()
+        if tool_type == "echo":
+            tools.append(EchoTool(name=entity.name, description=entity.description))
+        elif tool_type == "mcp":
+            tools.append(McpTool(entity))
+        else:
+            tools.append(HttpTool(entity))
+    return tools
