@@ -15,7 +15,7 @@ from internal.engine.llm import LLMClient, OpenAICompatLLMClient
 from internal.engine.memory import ConversationMemory, MemoryKey, build_conversation_memory
 from internal.engine.prompt import render_template
 from internal.engine.runner import AgentRunResult, FunctionCallAgentRunner, RunnerOptions
-from internal.engine.tools import build_tools
+from internal.engine.tools import SkillManifest, LoadSkillTool, build_tools
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +64,23 @@ class AgentRunService:
 
         tools = self._uow.tools.list_for_agent(agent_id, True)
         prompts = self._uow.prompts.list_for_agent(agent_id, True)
+        skills = self._uow.skills.list_for_agent(agent_id, True)
 
-        system_prompt = self._build_system_prompt(agent.config, prompts)
+        system_prompt = self._build_system_prompt(agent.config, prompts, skills)
         runtime_tools = build_tools(list(tools))
+
+        # 渐进式披露：把 LoadSkillTool 注入工具列表，让 LLM 按需加载 skill 完整规则
+        skill_manifests = [
+            SkillManifest(
+                name=s.name,
+                description=s.description or "",
+                content=s.content or "",
+            )
+            for s in skills
+            if s.is_enabled and (s.name or "").strip()
+        ]
+        if skill_manifests:
+            runtime_tools.append(LoadSkillTool(skill_manifests))
         llm_client = self._build_llm_client(agent.config)
         options = self._build_options(agent.config)
         memory = self._resolve_memory()
@@ -141,8 +155,17 @@ class AgentRunService:
         self,
         agent_config: dict[str, Any],
         prompts: list[Any],
+        skills: list[Any] | None = None,
     ) -> str:
-        """拼装系统提示词：优先 agent.config.system_prompt，否则取 prompts 表中 category=system 的首个启用项。"""
+        """拼装系统提示词：主提示词 + 预加载启用 skills 完整规则。
+
+        优先级：
+        1. agent.config.system_prompt 显式覆盖
+        2. prompts 表中 category=system 的首个启用项
+        3. 兜底：智能体描述
+        末尾追加启用 skills 的完整执行规则，让 LLM 直接按 skill 规则执行，
+        无需 XML 标签路由。
+        """
         base = str(agent_config.get("system_prompt") or "").strip()
         if not base:
             for prompt in prompts:
@@ -150,8 +173,8 @@ class AgentRunService:
                     base = prompt.content or ""
                     break
         if not base:
-            # 兜底：使用智能体描述，保证 LLM 至少有角色信息
             base = "你是一个乐于助人的智能助手。"
+
         variables: dict[str, Any] = {
             "tenant_id": str(self._context.tenant_id or ""),
             "tenant_code": self._context.tenant.code if self._context.tenant else "",
@@ -159,7 +182,37 @@ class AgentRunService:
         extra = agent_config.get("prompt_variables") or {}
         if isinstance(extra, dict):
             variables.update({str(k): v for k, v in extra.items()})
-        return render_template(base, variables)
+        system_prompt = render_template(base, variables)
+
+        skills_section = self._build_skills_section(skills or [])
+        if skills_section:
+            system_prompt = f"{system_prompt}\n\n{skills_section}"
+
+        return system_prompt
+
+    @staticmethod
+    def _build_skills_section(skills: list[Any]) -> str:
+        """渐进式披露：只输出技能清单（name + description），不输出完整规则。
+
+        完整规则由 LoadSkillTool 按需加载，避免 system prompt 被全量 skill 撑爆。
+        """
+        if not skills:
+            return ""
+        blocks: list[str] = [
+            "# 可用技能库",
+            "本智能体装配了以下技能。当需要使用某个技能时，"
+            "必须先调用 `load_skill` 工具加载该技能的完整执行规则，再按规则执行任务。",
+            "",
+            "| 技能名 | 简介 |",
+            "|---|---|",
+        ]
+        for skill in skills:
+            name = (skill.name or "").strip()
+            if not name:
+                continue
+            description = (skill.description or "").strip() or "（无简介）"
+            blocks.append(f"| `{name}` | {description} |")
+        return "\n".join(blocks)
 
     async def _augment_with_rag(
         self,

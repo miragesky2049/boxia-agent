@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import logging
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from typing import Any
 
 import httpx
@@ -183,3 +184,64 @@ def build_tools(entities: list[ToolEntity]) -> list[Tool]:
         else:
             tools.append(HttpTool(entity))
     return tools
+
+
+@dataclass(frozen=True)
+class SkillManifest:
+    """运行期技能清单：用于渐进式披露。"""
+
+    name: str
+    description: str
+    content: str
+
+
+class LoadSkillTool(Tool):
+    """内置工具：按需加载某个 skill 的完整执行规则。
+
+    渐进式披露（Progressive Disclosure）：
+      - system prompt 里只暴露 skill 清单（name + description）
+      - LLM 判断该用哪个 skill 后，通过本工具拿到完整规则
+      - 避免把所有 skill 全量塞进 system prompt 导致 token 膨胀
+    """
+
+    def __init__(self, skills: list[SkillManifest]) -> None:
+        self._skills = {s.name: s for s in skills}
+
+    @property
+    def name(self) -> str:
+        return "load_skill"
+
+    def spec(self) -> LLMToolSpec:
+        return LLMToolSpec(
+            name=self.name,
+            description=(
+                "按名称加载某个已安装技能的完整执行规则。"
+                "当你决定使用某个技能时，必须先调用本工具拿到完整规则，"
+                "再按规则执行任务。"
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "skill_name": {
+                        "type": "string",
+                        "description": "要加载的技能名称（来自 system prompt 的技能清单）",
+                        "enum": list(self._skills.keys()),
+                    }
+                },
+                "required": ["skill_name"],
+            },
+        )
+
+    async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
+        skill_name = str(arguments.get("skill_name") or "").strip()
+        skill = self._skills.get(skill_name)
+        if skill is None:
+            available = "、".join(self._skills.keys()) or "（无可用技能）"
+            raise ToolExecutionError(
+                f"未找到技能 `{skill_name}`。可用技能：{available}"
+            )
+        return (
+            f"# 技能：{skill.name}\n"
+            f"## 简介\n{skill.description}\n\n"
+            f"## 完整执行规则\n{skill.content}"
+        )

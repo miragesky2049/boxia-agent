@@ -170,6 +170,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
 | 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
 | 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的智能体 |
+| 用户端会话   | 登录后浏览智能体列表 → 查看详情（技能/工具/组件/提示词 Tabs）→ 进入聊天；多轮对话携带 `conversation_id`，回复内联展示工具调用轨迹（工具名、入参、返回、是否出错）并支持折叠，Markdown + GFM 渲染，内置建议提示词与清空会话 |
 | 组织架构     | 部门树（物化路径、最多 10 级）、用户任职记录（单一主任职 + 调岗归档 + 历史可查）、智能体归属部门；为后续部门数据权限预留接入点 |
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
 | 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
@@ -553,10 +554,17 @@ pnpm run stop          # 停止两个前端
 - [ ] `http://127.0.0.1:8000/health/ready` 返回 `ok`
 - [ ] `http://127.0.0.1:8000/docs` 能打开
 - [ ] `http://localhost:5173` 能用 `admin` 登录
-- [ ] 登录后能看到“智能体列表”页面
-- [ ] 能进入任一资源页面（如“技能”），成功新建一条记录
+- [ ] 登录后能看到”智能体列表”页面
+- [ ] 能进入任一资源页面（如”技能”），成功新建一条记录
 - [ ] `http://adminsystem.localhost:5173` 能打开产品级登录页
 - [ ] 创建租户后，`http://<租户编码>.localhost:5173` 能打开对应租户的登录页
+
+启动用户端后再补打勾：
+
+- [ ] `http://127.0.0.1:8001/health/live` 能返回
+- [ ] `http://<租户编码>.localhost:5174`（或 `http://localhost:5174?tenant=<租户编码>`）能用普通用户账号登录
+- [ ] 登录后看到智能体卡片列表，进入详情 Tabs 能看到技能/工具/组件/提示词
+- [ ] 进入聊天页能发送一条消息并收到回复；若智能体挂了工具，回复下方能看到可折叠的工具调用轨迹
 
 全部通过，说明本地环境已经可用。
 
@@ -572,11 +580,24 @@ pnpm run dev     # http://localhost:5174
 
 也可以从 `frontend/` 根目录执行 `pnpm run dev user`（或 `pnpm run dev` 同时启动两端）。
 
-用户端接口走独立后端 `127.0.0.1:8001`，使用最终用户账号密码登录。账号需由租户管理员在管理端“用户管理”中创建并绑定角色。用户端必须通过租户子域名访问（如 `http://<租户编码>.localhost:5174`），根域名 `localhost:5174` 会被拒绝；本地回环主机调试时可在登录页填写租户编码或使用 `?tenant=<租户编码>`。
+用户端接口走独立后端 `127.0.0.1:8001`，使用最终用户账号密码登录。账号需由租户管理员在管理端"用户管理"中创建并绑定角色。用户端必须通过租户子域名访问（如 `http://<租户编码>.localhost:5174`），根域名 `localhost:5174` 会被拒绝；本地回环主机调试时可在登录页填写租户编码或使用 `?tenant=<租户编码>`，登录页会自动把租户编码写入 `localStorage`（键 `boxia.user-tenant-code`）并作为 `X-Tenant-Code` 请求头透传。
+
+登录后路由与页面能力：
+
+| 路径                          | 页面           | 能力                                                                                                          |
+|-------------------------------|----------------|---------------------------------------------------------------------------------------------------------------|
+| `/login`                      | 登录页         | 用户名/密码 + 租户编码（仅本地回环展示）；`next` 参数仅限站内相对路径，防开放重定向                             |
+| `/`                           | 智能体列表     | 卡片展示当前租户下被授权且已启用的智能体（头像、名称、简介、入口按钮）                                          |
+| `/agents/:agentId`           | 智能体详情     | Tabs 查看技能 / 工具 / 组件 / 提示词（按资源数量自动隐藏空 Tab），可直接进入聊天                                |
+| `/agents/:agentId/chat`      | 聊天页         | 多轮对话（携带 `conversation_id`）、建议提示词、Markdown + GFM 渲染、清空会话、工具调用轨迹折叠（名称/入参/返回/是否出错） |
+
+聊天接口为 `POST /user/agents/:agentId/run`（同步返回），响应体包含 `content`、`tool_traces[]`、`iterations`、`usage`、`finish_reason`。
+
+> 设计稿参考：仓库根目录的 `chat-progressive-disclosure.png`，聊天页按"渐进式披露"原则默认折叠工具调用细节，只在用户主动展开时展示入参与返回。
 
 ### 3.6 懒人版一键启动
 
-先回到仓库根目录。如果数据库已经在运行，并且能使用 Git Bash，可以用一条命令启动指定站点（含对应后端与自动迁移），不带参数时启动两个站点：
+先回到仓库根目录。如果能使用 Git Bash，一条命令就能拉起全部服务（含数据库、后端、Celery、前端），不带参数时启动两个站点：
 
 ```bash
 ./ops/dev.sh          # 统一启动：管理端 + 用户端
@@ -596,14 +617,14 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 >
 > 仓库根目录的 `.gitattributes` 已声明 `*.sh text eol=lf`，正常情况下脚本不会被 checkout 成 CRLF；若从旧版本更新后仍报 `$'\r': command not found`，执行 `sed -i 's/\r$//' ops/*.sh` 转换一次即可。
 
-它会：
+它会按顺序执行：
 
 1. 通过 docker compose 拉起 PostgreSQL（`backend/docker/postgresql/`）和 Redis（`backend/docker/redis/`），已在运行则跳过
 2. 清理上次残留的 Vite（5173/5174）和 Uvicorn（8000/8001）端口占用，避免 "Port already in use"
 3. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
 4. 执行 `uv sync` 和 `alembic upgrade head`
-5. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`
-6. 后台启动 Celery RAG worker（队列 `rag`），供文档异步 ingest 与向量写入
+5. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`（热重载模式）
+6. 后台启动 Celery RAG worker（队列 `rag`），Windows 下自动切 `--pool=solo`，详见 [4.14](#414-windows-下-celery-worker-报-permissionerror13-拒绝访问)
 7. 按参数前台启动对应 Vite：管理端 `localhost:5173`、用户端 `localhost:5174`
 8. `Ctrl + C` 时一并停止本次启动的后端、Celery worker 与 Vite
 
@@ -611,6 +632,7 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 - 它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
 - RAG / Agent 运行依赖 `LLM_API_KEY`、`EMBEDDING_API_KEY`，首次启动前请在 `backend/.env` 中填入；缺失时对话与知识库接口会报错，但不影响登录与基础管理。
+- 如果 Vite 控制台报 `ECONNREFUSED 127.0.0.1:8001`，说明对应用户端后端没起，见 [4.15](#415-vite-控制台报-http-proxy-error-api-econnrefused-1270018001)。
 
 ### 3.7 如何停止服务
 
@@ -868,6 +890,64 @@ PermissionError: [WinError 5] 拒绝访问。
 ```bash
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag --pool=solo
 ```
+
+### 4.15 Vite 控制台报 `http proxy error: /api/... ECONNREFUSED 127.0.0.1:8001`
+
+完整报错类似：
+
+```text
+23:06:36 [vite] http proxy error: /api/v1/user/auth/login
+Error: connect ECONNREFUSED 127.0.0.1:8001
+    at TCPConnectWrap.afterConnect [as oncomplete] (node:net:1705:16)
+```
+
+原因：**user 端 FastAPI 后端没有启动**，不是 `vite.config.ts` 配置问题。
+
+前端代理规则（`frontend/user/vite.config.ts`）：
+
+```ts
+proxy: {
+  '/api': {
+    target: env.VITE_PROXY_TARGET || 'http://127.0.0.1:8001',
+    changeOrigin: false,
+  },
+}
+```
+
+- `frontend/user` 下所有 `/api/*` 请求都会被转发到 `127.0.0.1:8001`（user 端后端）。
+- `frontend/admin` 下的 `/api/*` 转发到 `127.0.0.1:8000`（admin 端后端）。
+- 若报错是 `8000 ECONNREFUSED`，对应就是 admin 端后端没起，排查思路一致。
+
+先确认端口是否真的在监听：
+
+```bash
+# Windows (Git Bash / PowerShell)
+netstat -ano | findstr :8001
+
+# macOS / Linux
+lsof -i :8001
+```
+
+没有输出即说明后端进程没在跑。解决方法任选其一：
+
+1. **推荐：一键脚本拉起全部服务**（数据库 + 双后端 + Celery + Vite）：
+   ```bash
+   ./ops/dev.sh all
+   ```
+2. **单独启动 user 端后端**（另开一个终端，保持运行）：
+   ```bash
+   cd backend
+   uv run uvicorn web.app_user:app --reload --host 127.0.0.1 --port 8001
+   ```
+3. **单独启动 admin 端后端**（如果报错的是 8000）：
+   ```bash
+   cd backend
+   uv run uvicorn web.app_admin:app --reload --host 127.0.0.1 --port 8000
+   ```
+
+启动后看到 `Application startup complete.` 即可回到前端页面重试登录，Vite 控制台不再报 ECONNREFUSED。
+
+> 想让前端代理指向其它后端地址（如远程联调环境），可在 `frontend/user/.env.local` 中设置 `VITE_PROXY_TARGET=http://<host>:<port>`，无需改 `vite.config.ts`。
 
 ---
 
