@@ -46,6 +46,7 @@ function defaultDataFor(type: WorkflowNodeType): Record<string, unknown> {
         system_prompt_tpl: '',
         user_prompt_tpl: '{{query}}',
         temperature: 0.7,
+        retrieval: { enabled: false, document_ids: [] as string[] },
       }
     case 'tool':
       return { tool_id: '', arguments_tpl: {} }

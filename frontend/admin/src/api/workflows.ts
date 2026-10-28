@@ -1,4 +1,6 @@
 import { request } from './client'
+import { getAccessToken } from '../auth/tokenStore'
+import { getTenantCode } from '../tenant/scope'
 import type { PageResult } from './types'
 
 export type WorkflowGraphNodeType = 'start' | 'llm' | 'tool' | 'end'
@@ -70,6 +72,28 @@ export interface GraphValidateResult {
   node_count: number
   edge_count: number
   node_types: string[]
+}
+
+export interface WorkflowDebugNodeState {
+  node_id: string
+  type: string
+  status: 'pending' | 'running' | 'success' | 'error'
+  duration_ms: number
+  output: Record<string, unknown>
+  error: string
+}
+
+export interface WorkflowDebugResult {
+  run_id: string
+  outputs: Record<string, unknown>
+  node_states: WorkflowDebugNodeState[]
+  usage: { prompt_tokens: number; completion_tokens: number; total_tokens: number }
+  finish_reason: 'success' | 'error'
+}
+
+export interface WorkflowDebugStreamEvent {
+  event: 'node_start' | 'node_end' | 'result' | 'error'
+  data: Record<string, unknown>
 }
 
 const PLATFORM_TENANT_ID = '00000000-0000-0000-0000-000000000000'
@@ -175,4 +199,60 @@ export async function cloneWorkflowFromTemplate(
     method: 'POST',
     body: JSON.stringify(payload),
   })
+}
+
+export async function debugRunWorkflow(payload: {
+  graph: WorkflowGraph
+  inputs: Record<string, unknown>
+}): Promise<WorkflowDebugResult> {
+  return request<WorkflowDebugResult>('/admin/workflows/debug/run', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+/**
+ * SSE 流式试运行：逐节点推送 node_start / node_end / result / error 事件。
+ * 通过 fetch + ReadableStream 手写 SSE 解析，避免 EventSource 不支持 POST 的问题。
+ */
+export async function debugRunWorkflowStream(
+  payload: { graph: WorkflowGraph; inputs: Record<string, unknown> },
+  onEvent: (event: WorkflowDebugStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch('/api/v1/admin/workflows/debug/run/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getAccessToken() ?? ''}`,
+      ...(getTenantCode() ? { 'X-Tenant-Code': getTenantCode() } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`试运行启动失败：${response.status}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const eventLine = frame.split('\n').find((line) => line.startsWith('event:'))
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data:'))
+      if (!eventLine || !dataLine) continue
+      const event = eventLine.slice('event:'.length).trim()
+      const dataRaw = dataLine.slice('data:'.length).trim()
+      try {
+        onEvent({ event: event as WorkflowDebugStreamEvent['event'], data: JSON.parse(dataRaw) })
+      } catch {
+        // 忽略无法解析的帧
+      }
+    }
+  }
 }

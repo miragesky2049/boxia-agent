@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, PlayCircleOutlined, SaveOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { App, Button, Input, Space, Spin, Switch, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -15,13 +15,14 @@ import {
 import '@xyflow/react/dist/style.css'
 
 import { getWorkflow, updateWorkflow, validateGraph } from '../../api/workflows'
-import { toolsApi } from '../../api/resources'
+import { listDocumentsForRetrieval, toolsApi } from '../../api/resources'
 import { useTenant } from '../../tenant/TenantContext'
-import { isPlatformTenant } from '../../api/workflows'
+import { isPlatformTenant, type WorkflowDebugNodeState } from '../../api/workflows'
 import { useWorkflowStore, type WorkflowNodeData, type WorkflowNodeType } from './store/workflowStore'
 import { NodePalette } from './components/NodePalette'
 import { NodeConfigDrawer } from './components/NodeConfigDrawer'
 import { WorkflowCanvasNode } from './components/nodes/WorkflowCanvasNode'
+import { RunDebugModal } from './components/RunDebugModal'
 
 const nodeTypes = {
   workflowNode: WorkflowCanvasNode,
@@ -43,7 +44,12 @@ export default function WorkflowEditPage() {
   const [description, setDescription] = useState('')
   const [isEnabled, setIsEnabled] = useState(true)
   const [drawerOpen, setDrawerOpen] = useState(false)
+  const [debugOpen, setDebugOpen] = useState(false)
   const [toolOptions, setToolOptions] = useState<Array<{ value: string; label: string }>>([])
+  const [documentOptions, setDocumentOptions] = useState<
+    Array<{ value: string; label: string; disabled?: boolean }>
+  >([])
+  const [debugStates, setDebugStates] = useState<Record<string, WorkflowDebugNodeState>>({})
 
   const nodes = useWorkflowStore((s) => s.nodes)
   const edges = useWorkflowStore((s) => s.edges)
@@ -94,6 +100,22 @@ export default function WorkflowEditPage() {
       })
   }, [])
 
+  useEffect(() => {
+    listDocumentsForRetrieval()
+      .then((docs) => {
+        setDocumentOptions(
+          docs.map((d) => ({
+            value: d.id,
+            label: d.ingest_status === 'ready' ? d.title : `${d.title}（ingest=${d.ingest_status}）`,
+            disabled: d.ingest_status !== 'ready',
+          })),
+        )
+      })
+      .catch(() => {
+        // 文档列表加载失败不阻塞画布
+      })
+  }, [])
+
   const readOnly = !isPlatform && tenantId !== null && isPlatformTenant(tenantId)
 
   const handleNodeClick = useCallback(
@@ -108,6 +130,26 @@ export default function WorkflowEditPage() {
     selectNode(null)
     setDrawerOpen(false)
   }, [selectNode])
+
+  // 把 debug 状态映射到画布节点的 data.debugStatus，供 WorkflowCanvasNode 高亮
+  const nodesWithDebug = useMemo<Array<Node<WorkflowNodeData>>>(() => {
+    if (Object.keys(debugStates).length === 0) return nodes
+    return nodes.map((node) => {
+      const state = debugStates[node.id]
+      if (!state) return node
+      return {
+        ...node,
+        data: { ...node.data, debugStatus: state.status },
+      }
+    })
+  }, [nodes, debugStates])
+
+  const handleDebugStatesChange = useCallback(
+    (states: Record<string, WorkflowDebugNodeState>) => {
+      setDebugStates(states)
+    },
+    [],
+  )
 
   const handleAddNode = useCallback(
     (type: WorkflowNodeType) => {
@@ -203,6 +245,13 @@ export default function WorkflowEditPage() {
               校验图
             </Button>
             <Button
+              icon={<PlayCircleOutlined />}
+              onClick={() => setDebugOpen(true)}
+              disabled={readOnly}
+            >
+              试运行
+            </Button>
+            <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
@@ -219,7 +268,7 @@ export default function WorkflowEditPage() {
         <NodePalette onAdd={handleAddNode} />
         <div style={{ flex: 1, background: '#f5f7fa' }}>
           <ReactFlow
-            nodes={nodes}
+            nodes={nodesWithDebug}
             edges={edges}
             nodeTypes={nodeTypes}
             onNodesChange={onNodesChange as OnNodesChange}
@@ -241,6 +290,14 @@ export default function WorkflowEditPage() {
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         toolOptions={toolOptions}
+        documentOptions={documentOptions}
+      />
+
+      <RunDebugModal
+        open={debugOpen}
+        graph={graphPayload.graph}
+        onClose={() => setDebugOpen(false)}
+        onNodeStateChange={handleDebugStatesChange}
       />
     </div>
   )

@@ -13,11 +13,21 @@ const TYPE_META: Record<
   end: { color: '#722ed1', icon: <StopOutlined />, label: 'End' },
 }
 
+const DEBUG_BORDER: Record<string, string> = {
+  running: '#faad14',
+  success: '#52c41a',
+  error: '#ff4d4f',
+}
+
 export function WorkflowCanvasNode({ data, selected }: NodeProps) {
   const nodeData = data as WorkflowNodeData
   const meta = TYPE_META[nodeData.nodeType]
   const hasInput = nodeData.nodeType !== 'start'
   const hasOutput = nodeData.nodeType !== 'end'
+  const debugStatus = (nodeData as WorkflowNodeData & { debugStatus?: string }).debugStatus
+  const borderColor = debugStatus ? DEBUG_BORDER[debugStatus] ?? undefined : undefined
+  const border = borderColor ?? (selected ? meta.color : '#d9d9d9')
+  const isRunning = debugStatus === 'running'
 
   return (
     <div
@@ -27,8 +37,13 @@ export function WorkflowCanvasNode({ data, selected }: NodeProps) {
         padding: '10px 14px',
         borderRadius: 8,
         background: '#fff',
-        border: `2px solid ${selected ? meta.color : '#d9d9d9'}`,
-        boxShadow: selected ? `0 0 0 3px ${meta.color}33` : '0 1px 4px rgba(0,0,0,0.08)',
+        border: `2px solid ${border}`,
+        boxShadow: isRunning
+          ? '0 0 0 4px rgba(250, 173, 20, 0.25)'
+          : selected
+            ? `0 0 0 3px ${meta.color}33`
+            : '0 1px 4px rgba(0,0,0,0.08)',
+        opacity: debugStatus === 'pending' ? 0.6 : 1,
       }}
     >
       {hasInput && <Handle type="target" position={Position.Left} />}
@@ -40,6 +55,9 @@ export function WorkflowCanvasNode({ data, selected }: NodeProps) {
             {nodeData.label}
           </div>
         </div>
+        {isRunning && (
+          <span style={{ fontSize: 11, color: '#faad14' }}>运行中</span>
+        )}
       </div>
       {hasOutput && <Handle type="source" position={Position.Right} />}
     </div>

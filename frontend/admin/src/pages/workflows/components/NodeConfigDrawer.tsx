@@ -1,4 +1,4 @@
-import { Drawer, Form, Input, InputNumber, Select, Space, Tag } from 'antd'
+import { Drawer, Form, Input, InputNumber, Select, Space, Switch, Tag } from 'antd'
 import { useEffect } from 'react'
 import { useWorkflowStore, type WorkflowNodeType } from '../store/workflowStore'
 
@@ -6,6 +6,7 @@ interface Props {
   open: boolean
   onClose: () => void
   toolOptions?: Array<{ value: string; label: string }>
+  documentOptions?: Array<{ value: string; label: string; disabled?: boolean }>
 }
 
 const TYPE_TITLE: Record<WorkflowNodeType, string> = {
@@ -15,7 +16,12 @@ const TYPE_TITLE: Record<WorkflowNodeType, string> = {
   end: 'End 节点',
 }
 
-export function NodeConfigDrawer({ open, onClose, toolOptions = [] }: Props) {
+export function NodeConfigDrawer({
+  open,
+  onClose,
+  toolOptions = [],
+  documentOptions = [],
+}: Props) {
   const selectedNodeId = useWorkflowStore((s) => s.selectedNodeId)
   const node = useWorkflowStore((s) => s.nodes.find((n) => n.id === selectedNodeId) ?? null)
   const updateNodeConfig = useWorkflowStore((s) => s.updateNodeConfig)
@@ -36,6 +42,9 @@ export function NodeConfigDrawer({ open, onClose, toolOptions = [] }: Props) {
   }
 
   const nodeType: WorkflowNodeType | null = node?.data.nodeType ?? null
+
+  const retrievalEnabled: boolean =
+    (node?.data.config?.retrieval as { enabled?: boolean } | undefined)?.enabled === true
 
   return (
     <Drawer
@@ -88,6 +97,31 @@ export function NodeConfigDrawer({ open, onClose, toolOptions = [] }: Props) {
               <Form.Item label="Max Tokens" name="max_tokens">
                 <InputNumber min={0} style={{ width: '100%' }} />
               </Form.Item>
+
+              <Form.Item
+                label="启用知识库检索（RAG）"
+                name={['retrieval', 'enabled']}
+                valuePropName="checked"
+                extra="开启后，User Prompt 会作为 query 检索所选文档并拼接到 System Prompt"
+              >
+                <Switch />
+              </Form.Item>
+              {retrievalEnabled && (
+                <Form.Item
+                  label="选择文档"
+                  name={['retrieval', 'document_ids']}
+                  extra="仅展示本租户已启用且 ingest 完成的文档"
+                >
+                  <Select
+                    mode="multiple"
+                    options={documentOptions}
+                    placeholder="选择知识库文档"
+                    allowClear
+                    showSearch
+                    optionFilterProp="label"
+                  />
+                </Form.Item>
+              )}
             </>
           )}
 
