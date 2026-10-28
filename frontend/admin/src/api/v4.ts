@@ -157,14 +157,83 @@ export async function getAppGraph(applicationId: string): Promise<{
 export async function saveAppGraph(
   applicationId: string,
   graph: V4Graph,
-): Promise<{ runtime_mode: 'dag' | 'agent_loop' }> {
-  return request<{ runtime_mode: 'dag' | 'agent_loop' }>(
-    `/admin/v4/apps/${applicationId}/graph`,
-    {
-      method: 'PUT',
-      body: JSON.stringify({ graph }),
-    },
+): Promise<{
+  runtime_mode: 'dag' | 'agent_loop'
+  versioned_fields: Array<{
+    path: string
+    old: unknown
+    new: unknown
+    version: number
+  }>
+}> {
+  return request<{
+    runtime_mode: 'dag' | 'agent_loop'
+    versioned_fields: Array<{ path: string; old: unknown; new: unknown; version: number }>
+  }>(`/admin/v4/apps/${applicationId}/graph`, {
+    method: 'PUT',
+    body: JSON.stringify({ graph }),
+  })
+}
+
+// ========== 字段级版本 ==========
+export interface V4FieldVersion {
+  field_path: string
+  version: number
+  value: unknown
+  changelog: string
+  published_at: string | null
+  created_at: string
+}
+
+export interface V4EffectiveField {
+  version: number
+  value: unknown
+  pinned: boolean
+}
+
+export interface V4FieldPin {
+  field_path: string
+  pinned_version: number
+  created_at: string
+}
+
+export async function listFieldVersions(
+  applicationId: string,
+  fieldPath?: string,
+): Promise<V4FieldVersion[]> {
+  const qs = fieldPath ? `?field_path=${encodeURIComponent(fieldPath)}` : ''
+  return request<V4FieldVersion[]>(`/admin/v4/apps/${applicationId}/field-versions${qs}`)
+}
+
+export async function getEffectiveConfig(
+  applicationId: string,
+  tenantId?: string,
+): Promise<Record<string, V4EffectiveField>> {
+  const qs = tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''
+  return request<Record<string, V4EffectiveField>>(
+    `/admin/v4/apps/${applicationId}/effective-config${qs}`,
   )
+}
+
+export async function pinField(
+  applicationId: string,
+  payload: { tenant_id: string; field_path: string; version: number },
+): Promise<void> {
+  await request<void>(`/admin/v4/apps/${applicationId}/field-pin`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function unpinField(
+  applicationId: string,
+  tenantId: string,
+  fieldPath: string,
+): Promise<void> {
+  const qs = `?tenant_id=${encodeURIComponent(tenantId)}&field_path=${encodeURIComponent(fieldPath)}`
+  await request<void>(`/admin/v4/apps/${applicationId}/field-pin${qs}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function setAppListing(applicationId: string, listed: boolean): Promise<void> {

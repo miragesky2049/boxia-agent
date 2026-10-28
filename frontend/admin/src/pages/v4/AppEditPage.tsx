@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, HistoryOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
 import { App, Button, Input, Space, Spin, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -22,6 +22,7 @@ import { NodePalette, V4_NODE_DND_MIME } from './components/NodePalette'
 import { RunDebugModal } from './components/RunDebugModal'
 import { RunLogPanel } from './components/RunLogPanel'
 import { V4CanvasNode } from './components/V4CanvasNode'
+import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
 import { useV4AppStore, type V4NodeData, type V4NodeType } from './store/appStore'
 
 const nodeTypes = { v4Node: V4CanvasNode }
@@ -46,6 +47,7 @@ function V4AppEditCanvas() {
   const [debugRunning, setDebugRunning] = useState(false)
   const [finalResult, setFinalResult] = useState<Record<string, unknown> | null>(null)
   const [logPanelOpen, setLogPanelOpen] = useState(false)
+  const [versionDrawerOpen, setVersionDrawerOpen] = useState(false)
 
   const nodes = useV4AppStore((s) => s.nodes)
   const edges = useV4AppStore((s) => s.edges)
@@ -202,7 +204,10 @@ function V4AppEditCanvas() {
       const graph = serializeToGraph()
       const result = await saveAppGraph(appId, graph)
       setRuntimeMode(result.runtime_mode)
-      message.success('已保存')
+      const changed = result.versioned_fields?.length ?? 0
+      message.success(
+        changed > 0 ? `已保存，${changed} 个字段已生成新版本` : '已保存',
+      )
     } catch (error) {
       message.error(error instanceof Error ? error.message : '保存失败')
     } finally {
@@ -242,6 +247,13 @@ function V4AppEditCanvas() {
           {runtimeMode && <Tag color={runtimeMode === 'agent_loop' ? 'purple' : 'blue'}>{runtimeMode}</Tag>}
           {debugRunning && <Tag color="orange">试运行中（画布只读）</Tag>}
           <Space style={{ marginLeft: 'auto' }}>
+            <Button
+              icon={<HistoryOutlined />}
+              onClick={() => setVersionDrawerOpen(true)}
+              disabled={debugRunning}
+            >
+              版本
+            </Button>
             <Button
               icon={<PlayCircleOutlined />}
               onClick={() => setDebugOpen(true)}
@@ -288,6 +300,12 @@ function V4AppEditCanvas() {
       </div>
 
       <NodeConfigDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
+
+      <VersionHistoryDrawer
+        open={versionDrawerOpen}
+        applicationId={appId}
+        onClose={() => setVersionDrawerOpen(false)}
+      />
 
       <RunDebugModal
         open={debugOpen}
