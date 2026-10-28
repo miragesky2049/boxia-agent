@@ -210,3 +210,134 @@ class V4ApplicationRepository:
             {"tid": tenant_id},
         ).all()
         return [dict(r._mapping) for r in rows]
+
+    # ========== field version ==========
+    def get_latest_field_versions(self, application_id: UUID) -> dict[str, dict]:
+        """返回 {field_path: {version, value, changelog, created_at}}，每字段取最新版本。"""
+        rows = self._session.execute(
+            text(
+                "SELECT DISTINCT ON (field_path) field_path, version, value, changelog, created_at "
+                "FROM application_field_version "
+                "WHERE application_id = :aid "
+                "ORDER BY field_path, version DESC"
+            ),
+            {"aid": application_id},
+        ).all()
+        return {
+            r._mapping["field_path"]: {
+                "version": r._mapping["version"],
+                "value": r._mapping["value"],
+                "changelog": r._mapping["changelog"],
+                "created_at": r._mapping["created_at"],
+            }
+            for r in rows
+        }
+
+    def insert_field_version(
+        self,
+        application_id: UUID,
+        field_path: str,
+        version: int,
+        value: Any,
+        changelog: str = "",
+    ) -> UUID:
+        vid = new_uuid()
+        self._session.execute(
+            text(
+                "INSERT INTO application_field_version "
+                "(id, application_id, field_path, version, value, changelog, published_at) "
+                "VALUES (:id, :aid, :path, :ver, CAST(:val AS JSONB), :log, NOW())"
+            ),
+            {
+                "id": vid,
+                "aid": application_id,
+                "path": field_path,
+                "ver": version,
+                "val": json.dumps(value),
+                "log": changelog,
+            },
+        )
+        return vid
+
+    def list_field_versions(
+        self,
+        application_id: UUID,
+        field_path: str | None = None,
+    ) -> list[dict]:
+        sql = (
+            "SELECT field_path, version, value, changelog, published_at, created_at "
+            "FROM application_field_version WHERE application_id = :aid"
+        )
+        params: dict[str, Any] = {"aid": application_id}
+        if field_path:
+            sql += " AND field_path = :path"
+            params["path"] = field_path
+        sql += " ORDER BY field_path, version DESC"
+        rows = self._session.execute(text(sql), params).all()
+        return [dict(r._mapping) for r in rows]
+
+    def get_field_version(
+        self,
+        application_id: UUID,
+        field_path: str,
+        version: int,
+    ) -> dict | None:
+        row = self._session.execute(
+            text(
+                "SELECT field_path, version, value, changelog, published_at, created_at "
+                "FROM application_field_version "
+                "WHERE application_id = :aid AND field_path = :path AND version = :ver"
+            ),
+            {"aid": application_id, "path": field_path, "ver": version},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    # ========== tenant field pin ==========
+    def list_pins(self, tenant_id: UUID, application_id: UUID) -> list[dict]:
+        rows = self._session.execute(
+            text(
+                "SELECT field_path, pinned_version, created_at "
+                "FROM tenant_field_pin "
+                "WHERE tenant_id = :tid AND application_id = :aid"
+            ),
+            {"tid": tenant_id, "aid": application_id},
+        ).all()
+        return [dict(r._mapping) for r in rows]
+
+    def upsert_pin(
+        self,
+        tenant_id: UUID,
+        application_id: UUID,
+        field_path: str,
+        version: int,
+    ) -> None:
+        self._session.execute(
+            text(
+                "INSERT INTO tenant_field_pin (id, tenant_id, application_id, field_path, pinned_version) "
+                "VALUES (:id, :tid, :aid, :path, :ver) "
+                "ON CONFLICT ON CONSTRAINT ux_field_pin_unique "
+                "DO UPDATE SET pinned_version = EXCLUDED.pinned_version, created_at = NOW()"
+            ),
+            {
+                "id": new_uuid(),
+                "tid": tenant_id,
+                "aid": application_id,
+                "path": field_path,
+                "ver": version,
+            },
+        )
+
+    def delete_pin(
+        self,
+        tenant_id: UUID,
+        application_id: UUID,
+        field_path: str,
+    ) -> bool:
+        deleted = self._session.execute(
+            text(
+                "DELETE FROM tenant_field_pin "
+                "WHERE tenant_id = :tid AND application_id = :aid AND field_path = :path"
+            ),
+            {"tid": tenant_id, "aid": application_id, "path": field_path},
+        )
+        return int(getattr(deleted, "rowcount", 0) or 0) > 0

@@ -12,6 +12,7 @@ from internal.application.errors import NotFoundError, ValidationError
 from internal.engine.llm import LLMClient, OpenAICompatLLMClient
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.repository.v4.model_repository import V4ModelRepository
+from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)
 
@@ -103,6 +104,7 @@ class V4ModelService:
         owner_type: str = "platform",
         owner_id: UUID | None = None,
     ) -> UUID:
+        validate_outbound_url(base_url)
         existing = self._repo.list_providers(owner_type)
         if any(p["name"] == name for p in existing):
             raise ValidationError(f"provider 已存在: {name}")
@@ -118,6 +120,8 @@ class V4ModelService:
     ) -> None:
         if self._repo.get_provider(provider_id) is None:
             raise NotFoundError("provider 不存在")
+        if base_url is not None:
+            validate_outbound_url(base_url)
         self._repo.update_provider(
             provider_id, base_url=base_url, api_key=api_key, is_enabled=is_enabled
         )
@@ -174,17 +178,36 @@ class V4ModelService:
 
     # ========== bootstrap ==========
     def seed_from_settings(self) -> None:
-        """开发环境：把 settings.llm_* 写入 model_provider + model_catalog。"""
+        """启动时把 settings.llm_* 写入 model_provider + model_catalog。
+
+        只在不存在时插入，永不覆盖已有凭证——管理员在 admin 端改的 key 不能被
+        每次启动或每次请求的 seed 动作回退。
+        """
         settings = get_settings()
         if not settings.llm_api_key.get_secret_value():
             logger.warning("LLM_API_KEY 未配置，跳过模型目录 seed")
             return
-        provider_id = self._repo.upsert_provider(
-            name="deepseek",
-            base_url=settings.llm_base_url,
-            api_key=settings.llm_api_key.get_secret_value(),
+
+        # provider：同名已存在则直接复用，不 UPDATE base_url / api_key
+        existing_providers = self._repo.list_providers(owner_type="platform")
+        provider_id: UUID | None = next(
+            (p["id"] for p in existing_providers if p["name"] == "deepseek"),
+            None,
         )
-        self._repo.upsert_catalog(
+        if provider_id is None:
+            provider_id = self._repo.create_provider(
+                name="deepseek",
+                base_url=settings.llm_base_url,
+                api_key=settings.llm_api_key.get_secret_value(),
+                owner_type="platform",
+                owner_id=None,
+            )
+
+        # catalog：model_id 已存在则跳过，不覆盖 display_name / capabilities
+        existing_catalog = self._repo.list_catalog_full()
+        if any(c["model_id"] == settings.llm_model_id for c in existing_catalog):
+            return
+        self._repo.create_catalog(
             provider_id=provider_id,
             model_id=settings.llm_model_id,
             display_name="DeepSeek Chat",

@@ -12,16 +12,22 @@ from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
-from internal.application.errors import AppError
+from internal.application.errors import AppError, ValidationError
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
 from internal.engine.v4.runner import GraphRunner
+from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.sse import SSE_HEADERS, sse_event
 
 logger = logging.getLogger(__name__)
 
-router = APIRouter(prefix="/v4/apps", tags=["v4-app-admin"])
+# v4 应用管理是产品级平台运营能力：租户子域名管理员无权调用
+router = APIRouter(
+    prefix="/v4/apps",
+    tags=["v4-app-admin"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 def get_app_service(uow: UowDep) -> V4ApplicationService:
@@ -57,6 +63,12 @@ class EnabledPayload(BaseModel):
 class DebugRunPayload(BaseModel):
     graph: dict[str, Any]
     inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class PinFieldPayload(BaseModel):
+    tenant_id: UUID
+    field_path: str = Field(..., max_length=500)
+    version: int = Field(..., ge=1)
 
 
 @router.get("")
@@ -135,9 +147,56 @@ def save_app_graph(
     payload: GraphPayload,
     service: V4ApplicationService = AppServiceDep,
 ) -> dict:
-    """保存 graph 定义，返回推断的 runtime_mode。"""
-    runtime_mode = service.save_graph(application_id, payload.graph)
-    return {"runtime_mode": runtime_mode}
+    """保存 graph 定义，返回推断的 runtime_mode 与本次快照的字段版本列表。"""
+    return service.save_graph(application_id, payload.graph)
+
+
+@router.get("/{application_id}/field-versions")
+def list_field_versions(
+    application_id: UUID,
+    field_path: str | None = None,
+    service: V4ApplicationService = AppServiceDep,
+) -> list[dict]:
+    """列出某应用全部字段的版本历史；传 field_path 只看单字段。"""
+    return service.list_field_versions(application_id, field_path)
+
+
+@router.get("/{application_id}/effective-config")
+def get_effective_config(
+    application_id: UUID,
+    tenant_id: UUID | None = None,
+    service: V4ApplicationService = AppServiceDep,
+) -> dict:
+    """计算租户视角下的生效 config：pin 字段用 pinned 版本，其余用 latest。"""
+    return service.get_effective_config(application_id, tenant_id)
+
+
+@router.post("/{application_id}/field-pin", status_code=status.HTTP_201_CREATED)
+def pin_field(
+    application_id: UUID,
+    payload: PinFieldPayload,
+    service: V4ApplicationService = AppServiceDep,
+) -> dict:
+    """租户把某字段锁定在指定版本。"""
+    service.pin_field(
+        tenant_id=payload.tenant_id,
+        application_id=application_id,
+        field_path=payload.field_path,
+        version=payload.version,
+    )
+    return {"ok": True}
+
+
+@router.delete("/{application_id}/field-pin")
+def unpin_field(
+    application_id: UUID,
+    tenant_id: UUID,
+    field_path: str,
+    service: V4ApplicationService = AppServiceDep,
+) -> dict:
+    """租户取消某字段的 pin，回到 latest。"""
+    service.unpin_field(tenant_id, application_id, field_path)
+    return {"ok": True}
 
 
 @router.post("/{application_id}/listing")
@@ -166,15 +225,20 @@ def set_enabled(
 async def debug_run_stream(
     payload: DebugRunPayload,
     uow: UowDep,
+    _principal: PlatformAdminDep,
 ) -> StreamingResponse:
     """画布 SSE 流式试运行：逐节点外抛 node_start / node_end，最后发 result。
 
     不依赖已保存的应用，直接用画布 graph 跑（前端编辑中实时试运行）。
+    仅平台管理员可用；节点数上限保护试运行不被滥用。
     """
+    nodes = payload.graph.get("nodes") or []
+    if not isinstance(nodes, list) or len(nodes) > 50:
+        raise ValidationError("graph 节点数必须在 1-50 之间")
+
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     model_service = V4ModelService(uow.session)
-    model_service.seed_from_settings()
 
     async def node_callback(event_type: str, data: dict[str, Any]) -> None:
         await queue.put(sse_event(event_type, data))

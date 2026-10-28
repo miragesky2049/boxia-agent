@@ -9,9 +9,15 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from internal.application.v4.model_service import V4ModelService
+from web.deps.auth import require_platform_admin
 from web.deps.db import UowDep
 
-router = APIRouter(prefix="/v4/models", tags=["v4-models"])
+# 模型目录是平台级配置（provider / api_key / base_url），仅平台管理员可读写
+router = APIRouter(
+    prefix="/v4/models",
+    tags=["v4-models"],
+    dependencies=[Depends(require_platform_admin)],
+)
 
 
 def get_model_service(uow: UowDep) -> V4ModelService:
