@@ -12,8 +12,8 @@ import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getAgent } from '../api/agents'
-import { runAgent } from '../api/agentRun'
-import type { ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
+import { runAgentStream } from '../api/agentRun'
+import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
 import type { UserAgentDetail } from '../api/types'
 import { ActionBar, UploadMaterial } from '../components/senclaw-cmp'
 import type { ActionBarAction, UploadedMaterialFile } from '../components/senclaw-cmp'
@@ -268,32 +268,84 @@ export default function ChatPage() {
     setInput('')
     setSending(true)
 
-    try {
-      const result = await runAgent(agentId, {
-        query: text,
-        conversation_id: conversationId || undefined,
-        history: historyForRequest,
-      })
-      if (!conversationId) setConversationId(result.conversation_id)
+    // 本地累积的工具轨迹：SSE 多次 tool_end 时合并
+    const toolTraces: ToolCallTrace[] = []
+
+    const patchAssistant = (patch: Partial<Message>) => {
       setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsg.id
-            ? {
-                ...m,
-                content: result.content,
-                toolTraces: result.tool_traces,
-                loading: false,
+        prev.map((m) => (m.id === assistantMsg.id ? { ...m, ...patch } : m)),
+      )
+    }
+
+    try {
+      await runAgentStream(
+        agentId,
+        {
+          query: text,
+          conversation_id: conversationId || undefined,
+          history: historyForRequest,
+        },
+        (evt: AgentStreamEvent) => {
+          switch (evt.event) {
+            case 'llm_end':
+              // 每轮 LLM 返回的 content 是该轮完整输出；多轮时以最后一轮为准
+              if (evt.data.content) {
+                patchAssistant({ loading: false, content: evt.data.content })
               }
-            : m,
-        ),
+              break
+            case 'tool_start':
+              // 工具开始执行：临时占位，等 tool_end 填充
+              toolTraces.push({
+                tool_call_id: evt.data.tool_call_id,
+                tool_name: evt.data.name,
+                arguments: evt.data.arguments,
+                observation: '',
+                is_error: false,
+              })
+              patchAssistant({ toolTraces: [...toolTraces] })
+              break
+            case 'tool_end': {
+              const idx = toolTraces.findIndex(
+                (t) => t.tool_call_id === evt.data.tool_call_id,
+              )
+              if (idx >= 0) {
+                toolTraces[idx] = {
+                  ...toolTraces[idx],
+                  observation: evt.data.observation,
+                  is_error: evt.data.is_error,
+                }
+              } else {
+                toolTraces.push({
+                  tool_call_id: evt.data.tool_call_id,
+                  tool_name: evt.data.name,
+                  arguments: {},
+                  observation: evt.data.observation,
+                  is_error: evt.data.is_error,
+                })
+              }
+              patchAssistant({ toolTraces: [...toolTraces] })
+              break
+            }
+            case 'result':
+              if (!conversationId) setConversationId(evt.data.conversation_id)
+              patchAssistant({
+                loading: false,
+                content: evt.data.content,
+                toolTraces: evt.data.tool_traces,
+              })
+              break
+            case 'error':
+              patchAssistant({ loading: false, error: evt.data.message })
+              break
+            default:
+              // run_start / llm_start / final 不影响 UI
+              break
+          }
+        },
       )
     } catch (err) {
       const msg = err instanceof Error ? err.message : '调用智能体失败'
-      setMessages((prev) =>
-        prev.map((m) =>
-          m.id === assistantMsg.id ? { ...m, loading: false, error: msg } : m,
-        ),
-      )
+      patchAssistant({ loading: false, error: msg })
     } finally {
       setSending(false)
       requestAnimationFrame(() => textareaRef.current?.focus())
