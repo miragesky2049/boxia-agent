@@ -24,11 +24,11 @@ def infer_runtime_mode(graph: dict[str, Any]) -> str:
     return "agent_loop" if (has_loop_edge or has_agent_node) else "dag"
 
 
-def compile_graph(graph: dict[str, Any]):
+def compile_graph(graph: dict[str, Any], checkpointer: Any = None):
     """把画布 JSON 编译成可执行的 LangGraph graph。
 
     不做翻译，画布直接产出 LangGraph 兼容定义。
-    返回 sg.compile() 后的可执行对象。
+    如果传了 checkpointer，编译时挂上，支持 interrupt / resume（人审节点）。
     """
     state_schema = _build_state_schema(graph)
     sg = StateGraph(state_schema)
@@ -69,7 +69,7 @@ def compile_graph(graph: dict[str, Any]):
         raise ValueError("graph 缺少 start 节点")
     sg.set_entry_point(start_nodes[0]["id"])
 
-    return sg.compile()
+    return sg.compile(checkpointer=checkpointer)
 
 
 def _build_state_schema(graph: dict[str, Any]) -> type:

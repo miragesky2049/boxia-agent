@@ -1,4 +1,4 @@
-"""v4 运行时：编译并执行 graph，记录运行实例。"""
+"""v4 运行时：编译并执行 graph，记录运行实例，支持人审 interrupt / resume。"""
 
 from __future__ import annotations
 
@@ -7,6 +7,9 @@ import time
 import uuid
 from typing import Any, Callable
 from uuid import UUID
+
+from langgraph.checkpoint.memory import MemorySaver
+from langgraph.types import Command
 
 from internal.engine.v4.compiler import compile_graph, infer_runtime_mode
 from internal.engine.v4.events import NodeExecutionEvent, publish
@@ -17,9 +20,20 @@ logger = logging.getLogger(__name__)
 # 模型解析器签名：(model_id: str) -> LLMClient
 ModelResolver = Callable[[str], Any]
 
+# 进程内 checkpointer：按 thread_id 保存图状态，支持 interrupt / resume
+# 首期用 MemorySaver（进程内），后续可换 PostgresSaver 持久化
+_CHECKPOINTER = MemorySaver()
+
+
+class GraphInterrupted(Exception):
+    """图执行被人审 interrupt 暂停。"""
+    def __init__(self, interrupt_payload: dict[str, Any]):
+        self.interrupt_payload = interrupt_payload
+        super().__init__("图执行被人审节点暂停")
+
 
 class GraphRunner:
-    """编译并执行 graph，返回最终输出，记录运行实例。"""
+    """编译并执行 graph，返回最终输出，支持人审暂停恢复。"""
 
     def __init__(
         self,
@@ -27,21 +41,36 @@ class GraphRunner:
         tenant_id: UUID | None = None,
         application_id: UUID | None = None,
         model_resolver: ModelResolver | None = None,
+        thread_id: str | None = None,
     ):
         self.graph = graph
         self.tenant_id = tenant_id or uuid.UUID("00000000-0000-0000-0000-000000000000")
         self.application_id = application_id or uuid.uuid4()
         self.runtime_mode = infer_runtime_mode(graph)
-        self.compiled = compile_graph(graph)
+        self.thread_id = thread_id or str(uuid.uuid4())
         self.run_id = uuid.uuid4()
-        self.langgraph_thread_id = str(uuid.uuid4())
         self._model_resolver = model_resolver
+        # 编译时挂 checkpointer，支持 interrupt 暂停
+        self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
+
+    def _config(self) -> dict[str, Any]:
+        return {"configurable": {"thread_id": self.thread_id}}
+
+    def _extract_interrupt(self) -> dict[str, Any] | None:
+        """从 checkpointer 中取出当前等待的人审 interrupt payload。"""
+        state = self.compiled.get_state(self._config())
+        if not state.next:
+            return None
+        for task in state.tasks:
+            if hasattr(task, "interrupts") and task.interrupts:
+                return task.interrupts[0].value
+        return None
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
-        """执行 graph，返回 end 节点的输出。"""
+        """执行 graph。如果遇到人审 interrupt，抛 GraphInterrupted。"""
         started_at = time.time()
         logger.info(
-            f"开始运行: run={self.run_id} mode={self.runtime_mode} "
+            f"开始运行: run={self.run_id} thread={self.thread_id} mode={self.runtime_mode} "
             f"nodes={len(self.graph.get('nodes', []))}"
         )
 
@@ -55,15 +84,21 @@ class GraphRunner:
             input=input_data,
         ))
 
-        # 通过 contextvar 注入模型解析器，节点在同一 asyncio 上下文内可见
         token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
 
         try:
-            result = await self.compiled.ainvoke(
+            await self.compiled.ainvoke(
                 {"input": input_data},
-                config={"configurable": {"thread_id": self.langgraph_thread_id}},
+                config=self._config(),
             )
-            output = result.get("output", {})
+            # 检查是否被 interrupt 暂停
+            interrupt_payload = self._extract_interrupt()
+            if interrupt_payload is not None:
+                logger.info(f"运行被人审暂停: thread={self.thread_id}")
+                raise GraphInterrupted(interrupt_payload)
+
+            result = await self.compiled.aget_state(self._config())
+            output = result.values.get("output", {}) if result.values else {}
             duration_ms = int((time.time() - started_at) * 1000)
 
             publish(NodeExecutionEvent(
@@ -76,10 +111,11 @@ class GraphRunner:
                 output=output,
                 duration_ms=duration_ms,
             ))
-
             logger.info(f"运行完成: run={self.run_id} duration={duration_ms}ms")
             return output
 
+        except GraphInterrupted:
+            raise
         except Exception as e:
             duration_ms = int((time.time() - started_at) * 1000)
             publish(NodeExecutionEvent(
@@ -97,3 +133,31 @@ class GraphRunner:
         finally:
             if token is not None:
                 ModelResolverCtx.reset(token)
+
+    async def resume(self, approval: dict[str, Any]) -> dict[str, Any]:
+        """人审通过后恢复执行。approval 形如 {"approved": true, "comment": "..."}。"""
+        started_at = time.time()
+        token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+
+        try:
+            await self.compiled.ainvoke(
+                Command(resume=approval),
+                config=self._config(),
+            )
+            # 检查是否还有下一个 interrupt
+            interrupt_payload = self._extract_interrupt()
+            if interrupt_payload is not None:
+                raise GraphInterrupted(interrupt_payload)
+
+            result = await self.compiled.aget_state(self._config())
+            output = result.values.get("output", {}) if result.values else {}
+            duration_ms = int((time.time() - started_at) * 1000)
+            logger.info(f"恢复运行完成: thread={self.thread_id} duration={duration_ms}ms")
+            return output
+        finally:
+            if token is not None:
+                ModelResolverCtx.reset(token)
+
+    def get_interrupt_state(self) -> dict[str, Any] | None:
+        """查询当前 thread 是否在等人审。"""
+        return self._extract_interrupt()

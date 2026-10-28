@@ -228,21 +228,35 @@ def _retrieval_node_build(config: dict[str, Any]):
 def _human_task_node_build(config: dict[str, Any]):
     """human_task 节点：暂停图执行，等待人工审批。
 
+    使用 LangGraph interrupt 暂停图执行。interrupt 抛出后，图状态被 checkpointer 保存，
+    外部通过 Command(resume=...) 传入审批结果恢复执行。
+
     config.assignee_role: 指派角色（如 reviewer / approver）
     config.instructions: 审批说明
     """
+    from langgraph.types import interrupt
+
     assignee_role = config.get("assignee_role", "reviewer")
     instructions = config.get("instructions", "")
 
     async def human_task_fn(state: dict) -> dict:
-        # TODO: 接人审工单系统 + interrupt（LangGraph interrupt API）
-        # 首期直接通过，返回 pending 状态供前端展示
+        snapshot = state.get("input", {})
+        # interrupt 会暂停图执行，下次 resume 时返回值就是传入的 resume 参数
+        decision = interrupt({
+            "type": "human_approval",
+            "assignee_role": assignee_role,
+            "instructions": instructions,
+            "snapshot": snapshot,
+        })
+        # decision 形如 {"approved": bool, "comment": str}
+        approved = bool(decision.get("approved", False)) if isinstance(decision, dict) else False
+        comment = decision.get("comment", "") if isinstance(decision, dict) else ""
         return {
             "output": {
-                "status": "pending",
+                "status": "approved" if approved else "rejected",
                 "assignee_role": assignee_role,
-                "instructions": instructions,
-                "snapshot": state.get("input", {}),
+                "comment": comment,
+                "snapshot": snapshot,
             }
         }
 

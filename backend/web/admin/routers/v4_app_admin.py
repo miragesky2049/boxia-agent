@@ -258,7 +258,7 @@ async def debug_run_stream(
         try:
             async for event in runner.compiled.astream_events(
                 {"input": payload.inputs},
-                config={"configurable": {"thread_id": runner.langgraph_thread_id}},
+                config={"configurable": {"thread_id": runner.thread_id}},
                 version="v2",
             ):
                 kind = event["event"]

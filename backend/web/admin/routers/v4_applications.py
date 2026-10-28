@@ -1,4 +1,4 @@
-"""v4 应用市场接口：浏览产品级应用、自助开通、我的应用列表、租户运行。"""
+"""v4 应用市场接口：浏览产品级应用、自助开通、我的应用列表、租户运行（含人审 interrupt/resume）。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 from internal.application.errors import NotFoundError, ValidationError
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
-from internal.engine.v4.runner import GraphRunner
+from internal.engine.v4.runner import GraphInterrupted, GraphRunner
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
 
@@ -27,6 +27,11 @@ class SubscribePayload(BaseModel):
 
 class RunPayload(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+class ResumePayload(BaseModel):
+    approved: bool
+    comment: str = ""
 
 
 def get_v4_service(uow: UowDep) -> V4ApplicationService:
@@ -65,6 +70,25 @@ def list_my_apps(
     return service.list_my_apps(context.tenant_id)
 
 
+def _build_runner(
+    service: V4ApplicationService,
+    uow: UowDep,
+    tenant_id: UUID,
+    application_id: UUID,
+    thread_id: str | None = None,
+) -> GraphRunner:
+    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器。"""
+    graph = service.build_effective_graph(application_id, tenant_id)
+    model_service = V4ModelService(uow.session)
+    return GraphRunner(
+        graph=graph,
+        tenant_id=tenant_id,
+        application_id=application_id,
+        model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
+        thread_id=thread_id,
+    )
+
+
 @router.post("/applications/{application_id}/run")
 async def run_application(
     application_id: UUID,
@@ -73,7 +97,11 @@ async def run_application(
     uow: UowDep,
     context: RequestContextDep,
 ) -> dict:
-    """租户运行已开通的应用：按 tenant_id 加载 effective_config（含 pin 字段）。"""
+    """租户运行已开通的应用。
+
+    - 正常完成：{"status": "success", "output": ...}
+    - 遇到人审节点：{"status": "waiting_approval", "thread_id": "...", "approval": {...}}
+    """
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
@@ -82,14 +110,43 @@ async def run_application(
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    graph = service.build_effective_graph(application_id, tenant_id)
+    runner = _build_runner(service, uow, tenant_id, application_id)
+    try:
+        output = await runner.invoke(payload.inputs)
+        return {"status": "success", "output": output, "thread_id": runner.thread_id}
+    except GraphInterrupted as exc:
+        return {
+            "status": "waiting_approval",
+            "thread_id": runner.thread_id,
+            "approval": exc.interrupt_payload,
+        }
 
-    model_service = V4ModelService(uow.session)
-    runner = GraphRunner(
-        graph=graph,
-        tenant_id=tenant_id,
-        application_id=application_id,
-        model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
-    )
-    output = await runner.invoke(payload.inputs)
-    return {"output": output, "run_id": str(runner.run_id)}
+
+@router.post("/applications/{application_id}/runs/{thread_id}/resume")
+async def resume_application(
+    application_id: UUID,
+    thread_id: str,
+    payload: ResumePayload,
+    service: V4ServiceDep,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """人审节点恢复执行：提交审批结果后继续跑图。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+
+    instance = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+    if instance is None:
+        raise NotFoundError("该应用未开通或不存在")
+
+    runner = _build_runner(service, uow, tenant_id, application_id, thread_id=thread_id)
+    try:
+        output = await runner.resume({"approved": payload.approved, "comment": payload.comment})
+        return {"status": "success", "output": output, "thread_id": thread_id}
+    except GraphInterrupted as exc:
+        return {
+            "status": "waiting_approval",
+            "thread_id": thread_id,
+            "approval": exc.interrupt_payload,
+        }
