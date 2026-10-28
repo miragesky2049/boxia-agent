@@ -92,6 +92,10 @@ from internal.infrastructure.repository.postgres_user_refresh_token_repository i
 from internal.infrastructure.repository.postgres_user_repository import (
     PostgresUserRepository,
 )
+from internal.infrastructure.repository.postgres_workflow_repository import (
+    PostgresWorkflowRepository,
+    PostgresWorkflowTemplateRepository,
+)
 
 
 class SqlAlchemyUnitOfWork:
@@ -151,6 +155,9 @@ class SqlAlchemyUnitOfWork:
         # RAG 知识库：文档元数据 + 分块向量仓储
         self.documents = PostgresDocumentRepository(self.session, tenant_id)
         self.document_chunks = PostgresDocumentChunkRepository(self.session, tenant_id)
+        # 工作流与模板：MVP 不接入 resource_grants 角色授权，按租户自有 + 平台可见简化过滤
+        self.workflows = PostgresWorkflowRepository(self.session, tenant_id)
+        self.workflow_templates = PostgresWorkflowTemplateRepository(self.session, tenant_id)
 
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源与智能体仓储，其余仓储复用同一会话。"""

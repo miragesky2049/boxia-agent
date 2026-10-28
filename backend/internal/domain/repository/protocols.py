@@ -29,6 +29,7 @@ from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
 from internal.domain.entity.tenant import Tenant
 from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
+from internal.domain.entity.workflow import Workflow, WorkflowTemplate
 
 TResource = TypeVar("TResource")
 
@@ -950,6 +951,63 @@ class UserMgmtUnitGrantRepository(Protocol):
         """批量读取单元 id -> 名称映射（前端展示用）。"""
 
 
+class WorkflowRepository(Protocol):
+    """工作流仓储。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        is_enabled: bool | None,
+    ) -> tuple[list[Workflow], int]:
+        """分页查询可见工作流。"""
+
+    def get(self, workflow_id: UUID) -> Workflow | None:
+        """按主键查询；不可见返回 None。"""
+
+    def create(self, values: dict) -> Workflow:
+        """创建工作流。"""
+
+    def update(self, workflow_id: UUID, values: dict) -> Workflow | None:
+        """全量更新仅本租户自有工作流；平台工作流对租户不可写。"""
+
+    def delete(self, workflow_id: UUID) -> bool:
+        """删除仅本租户自有工作流。"""
+
+    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
+        """本租户作用域内名称是否已存在（忽略大小写）。"""
+
+
+class WorkflowTemplateRepository(Protocol):
+    """工作流模板仓储：仅产品级可写，租户只读启用模板。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        category: str | None,
+        include_disabled: bool = False,
+    ) -> tuple[list[WorkflowTemplate], int]:
+        """分页查询模板；租户视角仅返回启用中的。"""
+
+    def get(self, template_id: UUID) -> WorkflowTemplate | None:
+        """按主键查询模板。"""
+
+    def create(self, values: dict) -> WorkflowTemplate:
+        """创建模板；强制 tenant_id = PLATFORM_TENANT_ID。"""
+
+    def update(self, template_id: UUID, values: dict) -> WorkflowTemplate | None:
+        """全量更新模板（仅平台视角）。"""
+
+    def delete(self, template_id: UUID) -> bool:
+        """删除模板（仅平台视角）。"""
+
+    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
+        """模板名称是否已存在（忽略大小写，全表唯一）。"""
+
+
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -976,6 +1034,8 @@ class UnitOfWork(Protocol):
     tools: ResourceRepository[Tool]
     components: ResourceRepository[Component]
     prompts: ResourceRepository[Prompt]
+    workflows: WorkflowRepository
+    workflow_templates: WorkflowTemplateRepository
 
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源与智能体仓储。"""

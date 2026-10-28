@@ -21,6 +21,7 @@ from web.admin.routers.skills import router as skills_router
 from web.admin.routers.tenants import router as tenants_router
 from web.admin.routers.tools import router as tools_router
 from web.admin.routers.users import router as users_router
+from web.admin.routers.workflows import router as workflows_router
 from web.deps.auth import require_admin
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
@@ -43,3 +44,4 @@ router.include_router(roles_router)
 router.include_router(permissions_router)
 router.include_router(grants_router)
 router.include_router(audit_logs_router)
+router.include_router(workflows_router)

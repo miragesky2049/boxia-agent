@@ -19,6 +19,7 @@ def _menus(principal: AdminPrincipal) -> list[str]:
     # 按行业通用使用频次排序：核心业务 > 日常运营 > 组织建模 > 系统级
     order = [
         "agents",
+        "workflows",
         "grants",
         "users",
         "roles",

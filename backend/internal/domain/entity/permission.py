@@ -65,6 +65,7 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm(CONSOLE_ACCESS, "管理端访问", "system", "access", 5, "登录管理后台的入口权限"),
     _perm(DATA_ALL, "全量数据权限", "system", "manage", 6, "跳过数据权限过滤，可访问全部资源"),
     _perm("menu:agents", "智能体管理", "menu", "view", 10),
+    _perm("menu:workflows", "工作流", "menu", "view", 15),
     _perm("menu:grants", "用户授权", "menu", "view", 20),
     _perm("menu:roles", "角色管理", "menu", "view", 30),
     _perm("menu:users", "用户管理", "menu", "view", 40),
@@ -75,6 +76,7 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("menu:tenants", "租户管理", "menu", "view", 60),
     _perm("menu:audit", "审计日志", "menu", "view", 70),
     _perm("page:agents", "智能体管理页面", "page", "view", 110),
+    _perm("page:workflows", "工作流页面", "page", "view", 115),
     _perm("page:grants", "用户授权页面", "page", "view", 120),
     _perm("page:roles", "角色管理页面", "page", "view", 130),
     _perm("page:users", "用户管理页面", "page", "view", 140),
@@ -244,6 +246,8 @@ _CONSOLE_CODES = frozenset(
         CONSOLE_ACCESS,
         "menu:agents",
         "page:agents",
+        "menu:workflows",
+        "page:workflows",
     }
 )
 

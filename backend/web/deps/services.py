@@ -27,6 +27,8 @@ from internal.application.tenant_service import TenantService
 from internal.application.user_admin_service import UserAdminService
 from internal.application.user_auth_service import UserAuthService
 from internal.application.user_portal_service import UserPortalService
+from internal.application.workflow_run_service import WorkflowRunService
+from internal.application.workflow_service import WorkflowService
 from internal.domain.entity.resource import Component, Prompt, Tool
 from internal.engine.llm import OpenAICompatLLMClient
 from internal.engine.query_rewrite import LLMQueryRewriter, QueryRewriter
@@ -210,6 +212,20 @@ def get_retrieval_service(uow: UserScopedUowDep, context: RequestContextDep) -> 
     )
 
 
+def get_workflow_service(
+    uow: AdminScopedUowDep, context: RequestContextDep
+) -> WorkflowService:
+    """工作流与模板用例。"""
+    return WorkflowService(uow, context)
+
+
+def get_workflow_run_service(
+    uow: UserScopedUowDep, context: RequestContextDep
+) -> WorkflowRunService:
+    """用户端工作流运行用例：UoW 已叠加用户可见范围。"""
+    return WorkflowRunService(uow, context)
+
+
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserAuthServiceDep = Annotated[UserAuthService, Depends(get_user_auth_service)]
 AgentServiceDep = Annotated[AgentService, Depends(get_agent_service)]
@@ -236,6 +252,8 @@ McpSyncServiceDep = Annotated[McpSyncService, Depends(get_mcp_sync_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 IngestionServiceDep = Annotated[IngestionService, Depends(get_ingestion_service)]
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
+WorkflowServiceDep = Annotated[WorkflowService, Depends(get_workflow_service)]
+WorkflowRunServiceDep = Annotated[WorkflowRunService, Depends(get_workflow_run_service)]
 
 # 类型导出：路由中用于显式标注依赖返回值
 __all__ = [
@@ -263,5 +281,7 @@ __all__ = [
     "DocumentServiceDep",
     "IngestionServiceDep",
     "RetrievalServiceDep",
+    "WorkflowServiceDep",
+    "WorkflowRunServiceDep",
     "SqlAlchemyUnitOfWork",
 ]
