@@ -158,6 +158,97 @@ export async function getRunDetail(runId: string): Promise<V4RunDetail> {
   return request<V4RunDetail>(`/admin/v4/marketplace/runs/${runId}`)
 }
 
+// ========== 统一资源（tool / prompt / skill / knowledge） ==========
+export type V4ResourceType = 'tool' | 'prompt' | 'skill' | 'knowledge'
+
+export interface V4Resource {
+  id: string
+  type: V4ResourceType
+  owner_type: 'platform' | 'tenant'
+  owner_id: string | null
+  name: string
+  config: Record<string, unknown>
+  version: number
+  is_enabled: boolean
+  is_deprecated: boolean
+  created_at: string
+}
+
+export interface V4ResourceGrant {
+  id: string
+  resource_id: string
+  tenant_id: string
+  granted_at: string
+}
+
+export async function listResources(params: {
+  type?: V4ResourceType
+  owner_type?: 'platform' | 'tenant'
+} = {}): Promise<V4Resource[]> {
+  const query = new URLSearchParams()
+  if (params.type) query.set('type', params.type)
+  if (params.owner_type) query.set('owner_type', params.owner_type)
+  const qs = query.toString()
+  return request<V4Resource[]>(`/admin/v4/resources${qs ? `?${qs}` : ''}`)
+}
+
+export async function getResource(resourceId: string): Promise<V4Resource> {
+  return request<V4Resource>(`/admin/v4/resources/${resourceId}`)
+}
+
+export async function createResource(payload: {
+  type: V4ResourceType
+  name: string
+  config: Record<string, unknown>
+}): Promise<{ resource_id: string }> {
+  return request<{ resource_id: string }>('/admin/v4/resources', {
+    method: 'POST',
+    body: JSON.stringify({ ...payload, owner_type: 'platform' }),
+  })
+}
+
+export async function updateResource(
+  resourceId: string,
+  payload: {
+    name?: string
+    config?: Record<string, unknown>
+    is_enabled?: boolean
+    is_deprecated?: boolean
+  },
+): Promise<void> {
+  await request<void>(`/admin/v4/resources/${resourceId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteResource(resourceId: string): Promise<void> {
+  await request<void>(`/admin/v4/resources/${resourceId}`, { method: 'DELETE' })
+}
+
+export async function listResourceGrants(resourceId: string): Promise<V4ResourceGrant[]> {
+  return request<V4ResourceGrant[]>(`/admin/v4/resources/${resourceId}/grants`)
+}
+
+export async function grantResource(
+  resourceId: string,
+  tenantId: string,
+): Promise<void> {
+  await request<void>(`/admin/v4/resources/${resourceId}/grants`, {
+    method: 'POST',
+    body: JSON.stringify({ tenant_id: tenantId }),
+  })
+}
+
+export async function revokeResourceGrant(
+  resourceId: string,
+  tenantId: string,
+): Promise<void> {
+  await request<void>(`/admin/v4/resources/${resourceId}/grants/${tenantId}`, {
+    method: 'DELETE',
+  })
+}
+
 // ========== 平台应用管理 ==========
 export async function listApps(params: {
   owner_type?: string

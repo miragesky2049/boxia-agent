@@ -65,6 +65,7 @@ def list_resources(
 @admin_router.post("", status_code=status.HTTP_201_CREATED)
 def create_resource(
     payload: ResourceCreatePayload,
+    uow: UowDep,
     service: V4ResourceService = ResourceServiceDep,
 ) -> dict:
     """创建资源。"""
@@ -75,6 +76,7 @@ def create_resource(
         owner_type=payload.owner_type,
         owner_id=payload.owner_id,
     )
+    uow.commit()
     return {"resource_id": resource_id}
 
 
@@ -90,6 +92,7 @@ def get_resource(
 def update_resource(
     resource_id: UUID,
     payload: ResourceUpdatePayload,
+    uow: UowDep,
     service: V4ResourceService = ResourceServiceDep,
 ) -> dict:
     service.update_resource(
@@ -99,15 +102,18 @@ def update_resource(
         is_enabled=payload.is_enabled,
         is_deprecated=payload.is_deprecated,
     )
+    uow.commit()
     return {"ok": True}
 
 
 @admin_router.delete("/{resource_id}")
 def delete_resource(
     resource_id: UUID,
+    uow: UowDep,
     service: V4ResourceService = ResourceServiceDep,
 ) -> dict:
     service.delete_resource(resource_id)
+    uow.commit()
     return {"ok": True}
 
 
@@ -116,10 +122,12 @@ def delete_resource(
 def grant_resource(
     resource_id: UUID,
     payload: GrantPayload,
+    uow: UowDep,
     service: V4ResourceService = ResourceServiceDep,
 ) -> dict:
     """把平台资源开放给指定租户。"""
     service.grant_resource(resource_id, payload.tenant_id)
+    uow.commit()
     return {"ok": True}
 
 
@@ -135,9 +143,11 @@ def list_grants(
 def revoke_grant(
     resource_id: UUID,
     tenant_id: UUID,
+    uow: UowDep,
     service: V4ResourceService = ResourceServiceDep,
 ) -> dict:
     service.revoke_resource(resource_id, tenant_id)
+    uow.commit()
     return {"ok": True}
 
 
