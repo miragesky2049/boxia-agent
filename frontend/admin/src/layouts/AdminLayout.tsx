@@ -10,6 +10,7 @@ import {
   SafetyCertificateOutlined,
   SafetyOutlined,
   TeamOutlined,
+  ToolOutlined,
   UserOutlined,
   UserSwitchOutlined,
 } from '@ant-design/icons'
@@ -27,6 +28,7 @@ const { Header, Sider, Content } = Layout
 const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   agents: { icon: <RobotOutlined />, label: '智能体管理' },
   workflows: { icon: <DeploymentUnitOutlined />, label: '工作流' },
+  tools: { icon: <ToolOutlined />, label: '工具管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
   users: { icon: <TeamOutlined />, label: '用户管理' },
   roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },

@@ -17,6 +17,13 @@ export interface ClonePayload {
   name?: string | null
 }
 
+export interface ToolTestInvokeResult {
+  success: boolean
+  duration_ms: number
+  output: string
+  error: string
+}
+
 export interface ResourceApi<TOut, TPayload> {
   list: (params: ListParams) => Promise<PageResult<TOut>>
   create: (payload: TPayload) => Promise<TOut>
@@ -63,3 +70,87 @@ export const componentsApi = createResourceApi<ComponentResource, ComponentPaylo
   '/admin/components',
 )
 export const promptsApi = createResourceApi<PromptResource, PromptPayload>('/admin/prompts')
+
+export async function testInvokeTool(
+  id: string,
+  args: Record<string, unknown>,
+): Promise<ToolTestInvokeResult> {
+  return request<ToolTestInvokeResult>(`/admin/tools/${id}/test-invoke`, {
+    method: 'POST',
+    body: JSON.stringify({ arguments: args }),
+  })
+}
+
+// ---------- MCP 自动同步 ----------
+
+export interface McpPulledTool {
+  name: string
+  description: string
+  input_schema: Record<string, unknown>
+}
+
+export interface McpPullResult {
+  server_url: string
+  tools: McpPulledTool[]
+}
+
+export async function pullMcpTools(serverUrl: string): Promise<McpPullResult> {
+  return request<McpPullResult>('/admin/tools/pull-mcp-tools', {
+    method: 'POST',
+    body: JSON.stringify({ server_url: serverUrl }),
+  })
+}
+
+export interface McpImportItem {
+  name: string
+  description: string
+  tool_name_remote: string
+  input_schema: Record<string, unknown>
+}
+
+export async function importMcpTools(
+  serverUrl: string,
+  items: McpImportItem[],
+): Promise<{ created: Tool[] }> {
+  return request<{ created: Tool[] }>('/admin/tools/import-mcp-tools', {
+    method: 'POST',
+    body: JSON.stringify({ server_url: serverUrl, tools: items }),
+  })
+}
+
+// ---------- curl 解析 ----------
+
+export interface ParseCurlResult {
+  method: string
+  url: string
+  headers: Record<string, string>
+  body: Record<string, unknown> | null
+  notes: string[]
+}
+
+export async function parseCurl(curlCommand: string): Promise<ParseCurlResult> {
+  return request<ParseCurlResult>('/admin/tools/parse-curl', {
+    method: 'POST',
+    body: JSON.stringify({ curl_command: curlCommand }),
+  })
+}
+
+// ---------- 知识库文档（用于 LLM 节点 RAG 配置） ----------
+
+export interface DocumentOption {
+  id: string
+  title: string
+  ingest_status: string
+  is_enabled: boolean
+}
+
+export async function listDocumentsForRetrieval(
+  pageSize = 200,
+): Promise<DocumentOption[]> {
+  const query = new URLSearchParams()
+  query.set('page', '1')
+  query.set('page_size', String(pageSize))
+  query.set('is_enabled', 'true')
+  const result = await request<PageResult<DocumentOption>>(`/admin/documents?${query.toString()}`)
+  return result.items
+}

@@ -12,6 +12,7 @@ const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
 const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
 const WorkflowListPage = lazy(() => import('./pages/workflows/WorkflowListPage'))
 const WorkflowEditPage = lazy(() => import('./pages/workflows/WorkflowEditPage'))
+const ToolListPage = lazy(() => import('./pages/tools/ToolListPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const DepartmentsPage = lazy(() => import('./pages/departments/DepartmentsPage'))
 const EmploymentsPage = lazy(() => import('./pages/employments/EmploymentsPage'))
@@ -83,6 +84,14 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:workflows">
                   <WorkflowEditPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/tools"
+              element={
+                <RequirePermission permission="page:tools">
+                  <ToolListPage />
                 </RequirePermission>
               }
             />
