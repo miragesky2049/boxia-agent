@@ -22,6 +22,9 @@ const TYPE_LABEL: Record<V4NodeType, string> = {
   tool: '工具节点',
   template: '模板节点',
   http: 'HTTP 节点',
+  retrieval: '检索节点',
+  human_task: '人审节点',
+  subgraph: '子图节点',
 }
 
 interface ModelOption {
@@ -439,6 +442,46 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             </Form.Item>
             <Form.Item label="请求体" name="body">
               <Input.TextArea rows={4} />
+            </Form.Item>
+          </>
+        )
+      case 'retrieval':
+        return (
+          <>
+            <Form.Item label="知识库 ID" name="knowledge_base_id">
+              <Input placeholder="知识库 UUID" />
+            </Form.Item>
+            <Form.Item label="查询字段" name="query_field">
+              <Input placeholder="从 input 取哪个字段作为 query（默认 query）" />
+            </Form.Item>
+            <Form.Item label="Top K" name="top_k">
+              <InputNumber min={1} max={50} style={{ width: '100%' }} />
+            </Form.Item>
+          </>
+        )
+      case 'human_task':
+        return (
+          <>
+            <Form.Item label="指派角色" name="assignee_role">
+              <Input placeholder="如 reviewer / approver" />
+            </Form.Item>
+            <Form.Item label="审批说明" name="instructions">
+              <Input.TextArea rows={4} placeholder="告诉审批人需要做什么" />
+            </Form.Item>
+          </>
+        )
+      case 'subgraph':
+        return (
+          <>
+            <Form.Item label="子图应用 ID" name="application_id" rules={[{ required: true }]}>
+              <Input placeholder="要嵌套调用的应用 UUID" />
+            </Form.Item>
+            <Form.Item
+              label="入参映射（JSON）"
+              name="input_mapping"
+              tooltip={'父 state 字段 -> 子图 input 字段，如 {"query": "query"}'}
+            >
+              <Input.TextArea rows={3} placeholder='{"query": "query"}' />
             </Form.Item>
           </>
         )

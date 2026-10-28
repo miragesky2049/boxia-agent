@@ -2,11 +2,14 @@ import {
   ApartmentOutlined,
   ApiOutlined,
   BranchesOutlined,
+  ClusterOutlined,
   CodeOutlined,
+  FileSearchOutlined,
   PlayCircleOutlined,
   PlusOutlined,
   StopOutlined,
   ToolOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import type { ReactElement } from 'react'
 import type { V4NodeType } from '../store/appStore'
@@ -22,10 +25,13 @@ const ITEMS: Array<{
 }> = [
   { type: 'start', label: '开始', desc: '工作流入口', color: '#52c41a', icon: <PlayCircleOutlined /> },
   { type: 'llm', label: 'LLM', desc: '调用大模型', color: '#1677ff', icon: <ApartmentOutlined /> },
+  { type: 'retrieval', label: '检索', desc: 'RAG 知识库检索', color: '#2f54eb', icon: <FileSearchOutlined /> },
   { type: 'branch', label: '条件分支', desc: '按条件路由', color: '#faad14', icon: <BranchesOutlined /> },
   { type: 'tool', label: '工具', desc: '调用已注册工具', color: '#fa8c16', icon: <ToolOutlined /> },
   { type: 'template', label: '模板', desc: '文本渲染', color: '#13c2c2', icon: <CodeOutlined /> },
   { type: 'http', label: 'HTTP', desc: '发 HTTP 请求', color: '#eb2f96', icon: <ApiOutlined /> },
+  { type: 'human_task', label: '人审', desc: '暂停等待人工审批', color: '#fa541c', icon: <UserOutlined /> },
+  { type: 'subgraph', label: '子图', desc: '嵌套调用另一个应用', color: '#08979c', icon: <ClusterOutlined /> },
   { type: 'end', label: '结束', desc: '工作流出口', color: '#722ed1', icon: <StopOutlined /> },
 ]
 

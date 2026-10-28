@@ -3,10 +3,13 @@ import {
   ApartmentOutlined,
   ApiOutlined,
   BranchesOutlined,
+  ClusterOutlined,
   CodeOutlined,
+  FileSearchOutlined,
   PlayCircleOutlined,
   StopOutlined,
   ToolOutlined,
+  UserOutlined,
 } from '@ant-design/icons'
 import type { ReactElement } from 'react'
 import type { V4NodeData, V4NodeType } from '../store/appStore'
@@ -19,6 +22,9 @@ const TYPE_META: Record<V4NodeType, { color: string; icon: ReactElement; label: 
   tool: { color: '#fa8c16', icon: <ToolOutlined />, label: '工具' },
   template: { color: '#13c2c2', icon: <CodeOutlined />, label: '模板' },
   http: { color: '#eb2f96', icon: <ApiOutlined />, label: 'HTTP' },
+  retrieval: { color: '#2f54eb', icon: <FileSearchOutlined />, label: '检索' },
+  human_task: { color: '#fa541c', icon: <UserOutlined />, label: '人审' },
+  subgraph: { color: '#08979c', icon: <ClusterOutlined />, label: '子图' },
 }
 
 const DEBUG_BORDER: Record<string, string> = {
@@ -67,6 +73,19 @@ function configSummary(nodeData: V4NodeDataWithDebug): string {
       const method = (cfg.method as string) || 'GET'
       const url = (cfg.url as string) || ''
       return url ? truncate(`${method} ${url}`, 28) : '未配置 URL'
+    }
+    case 'retrieval': {
+      const kb = (cfg.knowledge_base_id as string) || ''
+      const topK = Number(cfg.top_k ?? 5)
+      return kb ? `kb=${truncate(kb, 20)} top=${topK}` : `未绑定知识库 top=${topK}`
+    }
+    case 'human_task': {
+      const role = (cfg.assignee_role as string) || 'reviewer'
+      return `审批：${role}`
+    }
+    case 'subgraph': {
+      const appId = (cfg.application_id as string) || ''
+      return appId ? `→ ${truncate(appId, 24)}` : '未选择子图应用'
     }
   }
 }

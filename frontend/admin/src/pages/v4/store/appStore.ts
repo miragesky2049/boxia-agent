@@ -10,8 +10,18 @@ import {
 import { create } from 'zustand'
 import type { V4Graph, V4GraphEdge, V4GraphNode } from '../../../api/v4'
 
-// v4 支持的 7 种内置节点（后续扩展 retrieval / human_task / subgraph）
-export type V4NodeType = 'start' | 'llm' | 'end' | 'branch' | 'tool' | 'template' | 'http'
+// v4 支持的 10 种内置节点
+export type V4NodeType =
+  | 'start'
+  | 'llm'
+  | 'end'
+  | 'branch'
+  | 'tool'
+  | 'template'
+  | 'http'
+  | 'retrieval'
+  | 'human_task'
+  | 'subgraph'
 
 export interface V4InputVariable {
   name: string
@@ -50,7 +60,18 @@ export interface V4AppState {
   reset: () => void
 }
 
-const NODE_TYPES: V4NodeType[] = ['start', 'llm', 'end', 'branch', 'tool', 'template', 'http']
+const NODE_TYPES: V4NodeType[] = [
+  'start',
+  'llm',
+  'end',
+  'branch',
+  'tool',
+  'template',
+  'http',
+  'retrieval',
+  'human_task',
+  'subgraph',
+]
 
 function defaultConfigFor(type: V4NodeType): Record<string, unknown> {
   switch (type) {
@@ -68,6 +89,12 @@ function defaultConfigFor(type: V4NodeType): Record<string, unknown> {
       return { template: '' }
     case 'http':
       return { url: '', method: 'GET', headers: {}, body: '' }
+    case 'retrieval':
+      return { knowledge_base_id: '', query_field: 'query', top_k: 5 }
+    case 'human_task':
+      return { assignee_role: 'reviewer', instructions: '' }
+    case 'subgraph':
+      return { application_id: '', input_mapping: {} }
   }
 }
 
@@ -93,6 +120,12 @@ export function listOutputFields(nodeType: V4NodeType): string[] {
       return ['status', 'body', 'headers']
     case 'branch':
       return ['true', 'false']
+    case 'retrieval':
+      return ['results', 'count']
+    case 'human_task':
+      return ['output']
+    case 'subgraph':
+      return ['output']
   }
 }
 
@@ -112,6 +145,12 @@ function labelFor(type: V4NodeType): string {
       return '模板'
     case 'http':
       return 'HTTP'
+    case 'retrieval':
+      return '检索'
+    case 'human_task':
+      return '人审'
+    case 'subgraph':
+      return '子图'
   }
 }
 
@@ -143,7 +182,18 @@ function toBackendNode(node: Node<V4NodeData>): V4GraphNode {
 }
 
 function initialCounter(): Record<V4NodeType, number> {
-  return { start: 1, llm: 1, end: 1, branch: 1, tool: 1, template: 1, http: 1 }
+  return {
+    start: 1,
+    llm: 1,
+    end: 1,
+    branch: 1,
+    tool: 1,
+    template: 1,
+    http: 1,
+    retrieval: 1,
+    human_task: 1,
+    subgraph: 1,
+  }
 }
 
 function bumpCounter(

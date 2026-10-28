@@ -190,6 +190,94 @@ def _http_node_build(config: dict[str, Any]):
     return http_fn
 
 
+# ========== retrieval（RAG 检索） ==========
+def _retrieval_node_build(config: dict[str, Any]):
+    """retrieval 节点：从知识库检索相关文档。
+
+    config.knowledge_base_id: 知识库 ID
+    config.query_field: 从 input 取哪个字段作为检索 query（默认 query）
+    config.top_k: 返回前 K 条（默认 5）
+    """
+    kb_id = config.get("knowledge_base_id", "")
+    query_field = config.get("query_field", "query")
+    top_k = int(config.get("top_k", 5))
+
+    async def retrieval_fn(state: dict) -> dict:
+        input_data = state.get("input", {})
+        query = input_data.get(query_field, "")
+        # TODO: 接向量检索引擎，首期返回 stub
+        stub_results = [
+            {
+                "doc_id": f"doc_{i}",
+                "score": 1.0 - i * 0.1,
+                "content": f"[RAG stub] kb={kb_id or 'unset'} query={query} top_k={top_k} doc_{i}",
+            }
+            for i in range(top_k)
+        ]
+        return {
+            "output": {
+                "results": stub_results,
+                "count": len(stub_results),
+            }
+        }
+
+    return retrieval_fn
+
+
+# ========== human_task（人审节点） ==========
+def _human_task_node_build(config: dict[str, Any]):
+    """human_task 节点：暂停图执行，等待人工审批。
+
+    config.assignee_role: 指派角色（如 reviewer / approver）
+    config.instructions: 审批说明
+    """
+    assignee_role = config.get("assignee_role", "reviewer")
+    instructions = config.get("instructions", "")
+
+    async def human_task_fn(state: dict) -> dict:
+        # TODO: 接人审工单系统 + interrupt（LangGraph interrupt API）
+        # 首期直接通过，返回 pending 状态供前端展示
+        return {
+            "output": {
+                "status": "pending",
+                "assignee_role": assignee_role,
+                "instructions": instructions,
+                "snapshot": state.get("input", {}),
+            }
+        }
+
+    return human_task_fn
+
+
+# ========== subgraph（子图） ==========
+def _subgraph_node_build(config: dict[str, Any]):
+    """subgraph 节点：嵌套调用另一个 application 的 graph。
+
+    config.application_id: 要嵌套调用的应用 ID
+    config.input_mapping: 父 state 字段到子图 input 的映射
+    """
+    application_id = config.get("application_id", "")
+    input_mapping = config.get("input_mapping", {})
+
+    async def subgraph_fn(state: dict) -> dict:
+        # TODO: 从 repository 加载目标 application 的 graph，递归编译并执行
+        # 首期 stub 返回空输出
+        input_data = state.get("input", {})
+        mapped_input = {
+            child_key: input_data.get(parent_key)
+            for parent_key, child_key in input_mapping.items()
+        }
+        return {
+            "output": {
+                "application_id": application_id,
+                "input": mapped_input,
+                "result": "[SUBGRAPH stub] 子图嵌套调用待接入",
+            }
+        }
+
+    return subgraph_fn
+
+
 def _resolve_params(params: dict, state: dict) -> dict:
     """把 {{#node.output#}} 占位符替换为实际值。"""
     result = {}
@@ -301,5 +389,51 @@ register_node(
             PortSpec(name="status", type="number"),
             PortSpec(name="body", type="object"),
         ],
+    )
+)
+
+register_node(
+    NodePlugin(
+        type="retrieval",
+        version="1.0",
+        config_schema={
+            "knowledge_base_id": {"type": "string"},
+            "query_field": {"type": "string", "default": "query"},
+            "top_k": {"type": "number", "default": 5},
+        },
+        build=_retrieval_node_build,
+        input_ports=[PortSpec(name="input", type="object")],
+        output_ports=[
+            PortSpec(name="results", type="array"),
+            PortSpec(name="count", type="number"),
+        ],
+    )
+)
+
+register_node(
+    NodePlugin(
+        type="human_task",
+        version="1.0",
+        config_schema={
+            "assignee_role": {"type": "string", "default": "reviewer"},
+            "instructions": {"type": "string"},
+        },
+        build=_human_task_node_build,
+        input_ports=[PortSpec(name="input", type="object")],
+        output_ports=[PortSpec(name="output", type="object")],
+    )
+)
+
+register_node(
+    NodePlugin(
+        type="subgraph",
+        version="1.0",
+        config_schema={
+            "application_id": {"type": "string"},
+            "input_mapping": {"type": "object"},
+        },
+        build=_subgraph_node_build,
+        input_ports=[PortSpec(name="input", type="object")],
+        output_ports=[PortSpec(name="output", type="object")],
     )
 )
