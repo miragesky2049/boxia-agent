@@ -1,9 +1,11 @@
 import { App, Avatar, Button, Card, Empty, List, Spin, Tag, Typography } from 'antd'
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { listMarketplace, listMyApps, subscribeApplication } from '../../api/v4'
 
 export default function V4MarketplacePage() {
   const { message } = App.useApp()
+  const navigate = useNavigate()
   const [loading, setLoading] = useState(true)
   const [marketplace, setMarketplace] = useState<
     Array<{ id: string; name: string; avatar_url: string | null; description: string }>
@@ -71,9 +73,13 @@ export default function V4MarketplacePage() {
                 <Card
                   actions={[
                     subscribed ? (
-                      <Tag color="green" key="subscribed" style={{ margin: 0 }}>
-                        已开通
-                      </Tag>
+                      <Button
+                        key="runs"
+                        type="link"
+                        onClick={() => navigate(`/v4/marketplace/apps/${item.id}/runs`)}
+                      >
+                        运行历史
+                      </Button>
                     ) : (
                       <Button
                         key="subscribe"
@@ -84,7 +90,12 @@ export default function V4MarketplacePage() {
                         立即开通
                       </Button>
                     ),
-                  ]}
+                    subscribed ? (
+                      <Tag color="green" key="subscribed" style={{ margin: 0 }}>
+                        已开通
+                      </Tag>
+                    ) : null,
+                  ].filter(Boolean)}
                 >
                   <Card.Meta
                     avatar={<Avatar src={item.avatar_url}>{item.name.slice(0, 1)}</Avatar>}

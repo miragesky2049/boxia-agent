@@ -108,6 +108,56 @@ export async function listMyApps(): Promise<V4MyApp[]> {
   return request<V4MyApp[]>('/admin/v4/marketplace/my-apps')
 }
 
+// ========== 运行历史 ==========
+export interface V4RunItem {
+  id: string
+  application_id: string
+  status: 'running' | 'success' | 'error' | 'interrupted'
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+}
+
+export interface V4NodeExecution {
+  id: string
+  node_id: string
+  node_type: string
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  error: string | null
+  started_at: string
+  finished_at: string | null
+  duration_ms: number | null
+  token_usage: {
+    prompt_tokens?: number
+    completion_tokens?: number
+    total_tokens?: number
+  } | null
+}
+
+export interface V4RunDetail {
+  run: V4RunItem & {
+    tenant_id: string
+    langgraph_thread_id: string
+  }
+  node_executions: V4NodeExecution[]
+}
+
+export async function listApplicationRuns(
+  applicationId: string,
+  limit = 50,
+): Promise<V4RunItem[]> {
+  return request<V4RunItem[]>(
+    `/admin/v4/marketplace/applications/${applicationId}/runs?limit=${limit}`,
+  )
+}
+
+export async function getRunDetail(runId: string): Promise<V4RunDetail> {
+  return request<V4RunDetail>(`/admin/v4/marketplace/runs/${runId}`)
+}
+
 // ========== 平台应用管理 ==========
 export async function listApps(params: {
   owner_type?: string
