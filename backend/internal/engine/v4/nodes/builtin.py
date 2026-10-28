@@ -16,6 +16,10 @@ logger = logging.getLogger(__name__)
 # 节点无需感知会话，只通过此上下文拿到 LLMClient
 ModelResolverCtx: ContextVar[Any] = ContextVar("v4_model_resolver", default=None)
 
+# 运行时子图加载器：由 GraphRunner 注入，签名 (application_id: str) -> dict（返回 graph JSON）
+# 节点通过此上下文递归加载并执行目标 application 的 graph
+SubgraphLoaderCtx: ContextVar[Any] = ContextVar("v4_subgraph_loader", default=None)
+
 
 # ========== start ==========
 def _start_node_build(config: dict[str, Any]):
@@ -268,28 +272,62 @@ def _subgraph_node_build(config: dict[str, Any]):
     """subgraph 节点：嵌套调用另一个 application 的 graph。
 
     config.application_id: 要嵌套调用的应用 ID
-    config.input_mapping: 父 state 字段到子图 input 的映射
+    config.input_mapping: {parent_field: child_field}，把父 state.input 映射为子图 input
     """
     application_id = config.get("application_id", "")
-    input_mapping = config.get("input_mapping", {})
+    input_mapping = config.get("input_mapping", {}) or {}
 
     async def subgraph_fn(state: dict) -> dict:
-        # TODO: 从 repository 加载目标 application 的 graph，递归编译并执行
-        # 首期 stub 返回空输出
+        loader = SubgraphLoaderCtx.get()
         input_data = state.get("input", {})
-        mapped_input = {
-            child_key: input_data.get(parent_key)
-            for parent_key, child_key in input_mapping.items()
-        }
+
+        if loader is None or not application_id:
+            mapped_input = _map_input(input_data, input_mapping)
+            return {
+                "output": {
+                    "application_id": application_id,
+                    "input": mapped_input,
+                    "result": "[SUBGRAPH stub] 未注入 subgraph loader",
+                }
+            }
+
+        graph_json = loader(application_id)
+        if not graph_json:
+            return {
+                "output": {
+                    "application_id": application_id,
+                    "error": "子图不存在或未发布",
+                }
+            }
+
+        from internal.engine.v4.compiler import compile_graph
+
+        compiled = compile_graph(graph_json)
+        mapped_input = _map_input(input_data, input_mapping)
+        child_state = await compiled.ainvoke({"input": mapped_input})
+        child_output = child_state.get("output", {}) if isinstance(child_state, dict) else {}
+
         return {
             "output": {
                 "application_id": application_id,
-                "input": mapped_input,
-                "result": "[SUBGRAPH stub] 子图嵌套调用待接入",
+                "result": child_output,
             }
         }
 
     return subgraph_fn
+
+
+def _map_input(parent_input: dict, mapping: dict) -> dict:
+    """父 input 字段按 mapping 重命名为子图 input 字段。
+
+    mapping 为空时整体透传。
+    """
+    if not mapping:
+        return dict(parent_input)
+    return {
+        child_key: parent_input.get(parent_key)
+        for parent_key, child_key in mapping.items()
+    }
 
 
 def _resolve_params(params: dict, state: dict) -> dict:

@@ -13,12 +13,15 @@ from langgraph.types import Command
 
 from internal.engine.v4.compiler import compile_graph, infer_runtime_mode
 from internal.engine.v4.events import NodeExecutionEvent, publish
-from internal.engine.v4.nodes.builtin import ModelResolverCtx
+from internal.engine.v4.nodes.builtin import ModelResolverCtx, SubgraphLoaderCtx
 
 logger = logging.getLogger(__name__)
 
 # 模型解析器签名：(model_id: str) -> LLMClient
 ModelResolver = Callable[[str], Any]
+
+# 子图加载器签名：(application_id: str) -> dict（返回 graph JSON，已按 tenant 应用 effective config）
+SubgraphLoader = Callable[[str], dict]
 
 # 进程内 checkpointer：按 thread_id 保存图状态，支持 interrupt / resume
 # 首期用 MemorySaver（进程内），后续可换 PostgresSaver 持久化
@@ -41,6 +44,7 @@ class GraphRunner:
         tenant_id: UUID | None = None,
         application_id: UUID | None = None,
         model_resolver: ModelResolver | None = None,
+        subgraph_loader: SubgraphLoader | None = None,
         thread_id: str | None = None,
     ):
         self.graph = graph
@@ -50,11 +54,13 @@ class GraphRunner:
         self.thread_id = thread_id or str(uuid.uuid4())
         self.run_id = uuid.uuid4()
         self._model_resolver = model_resolver
+        self._subgraph_loader = subgraph_loader
         # 编译时挂 checkpointer，支持 interrupt 暂停
         self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
 
     def _config(self) -> dict[str, Any]:
-        return {"configurable": {"thread_id": self.thread_id}}
+        # 按 tenant_id 命名空间隔离 thread_id，防止跨租户通过伪造 thread_id 访问他人 checkpoint
+        return {"configurable": {"thread_id": f"{self.tenant_id}:{self.thread_id}"}}
 
     def _extract_interrupt(self) -> dict[str, Any] | None:
         """从 checkpointer 中取出当前等待的人审 interrupt payload。"""
@@ -84,7 +90,10 @@ class GraphRunner:
             input=input_data,
         ))
 
-        token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+        model_token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+        subgraph_token = (
+            SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
+        )
 
         try:
             await self.compiled.ainvoke(
@@ -131,13 +140,18 @@ class GraphRunner:
             logger.error(f"运行失败: run={self.run_id} error={e}")
             raise
         finally:
-            if token is not None:
-                ModelResolverCtx.reset(token)
+            if model_token is not None:
+                ModelResolverCtx.reset(model_token)
+            if subgraph_token is not None:
+                SubgraphLoaderCtx.reset(subgraph_token)
 
     async def resume(self, approval: dict[str, Any]) -> dict[str, Any]:
         """人审通过后恢复执行。approval 形如 {"approved": true, "comment": "..."}。"""
         started_at = time.time()
-        token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+        model_token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+        subgraph_token = (
+            SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
+        )
 
         try:
             await self.compiled.ainvoke(
@@ -155,8 +169,10 @@ class GraphRunner:
             logger.info(f"恢复运行完成: thread={self.thread_id} duration={duration_ms}ms")
             return output
         finally:
-            if token is not None:
-                ModelResolverCtx.reset(token)
+            if model_token is not None:
+                ModelResolverCtx.reset(model_token)
+            if subgraph_token is not None:
+                SubgraphLoaderCtx.reset(subgraph_token)
 
     def get_interrupt_state(self) -> dict[str, Any] | None:
         """查询当前 thread 是否在等人审。"""

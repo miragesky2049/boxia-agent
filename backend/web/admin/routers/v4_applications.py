@@ -77,14 +77,28 @@ def _build_runner(
     application_id: UUID,
     thread_id: str | None = None,
 ) -> GraphRunner:
-    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器。"""
+    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器。"""
     graph = service.build_effective_graph(application_id, tenant_id)
     model_service = V4ModelService(uow.session)
+
+    def subgraph_loader(child_app_id: str) -> dict:
+        """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
+        try:
+            child_uuid = UUID(child_app_id)
+        except ValueError:
+            return {}
+        try:
+            return service.build_effective_graph(child_uuid, tenant_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("加载子图失败: child_app_id=%s", child_app_id)
+            return {}
+
     return GraphRunner(
         graph=graph,
         tenant_id=tenant_id,
         application_id=application_id,
         model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
+        subgraph_loader=subgraph_loader,
         thread_id=thread_id,
     )
 
