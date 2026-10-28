@@ -300,6 +300,47 @@ class V4ApplicationService:
                 }
         return effective
 
+    def build_effective_graph(
+        self,
+        application_id: UUID,
+        tenant_id: UUID | None = None,
+    ) -> dict[str, Any]:
+        """加载 graph 并按 tenant 的 pin 字段覆盖 config，返回可直接编译的 graph。
+
+        不 mutate 原 graph；只对 pin 字段（pinned=True 且 version != latest）做覆盖。
+        """
+        record = self._repo.get_graph(application_id)
+        if record is None:
+            raise NotFoundError("graph 不存在")
+        raw = record["graph"]
+        graph: dict[str, Any] = json.loads(raw) if isinstance(raw, str) else raw
+
+        effective = self.get_effective_config(application_id, tenant_id)
+        if not effective:
+            return graph
+
+        # 深拷贝 nodes，只覆盖被 pin 的字段
+        nodes_copy: list[dict[str, Any]] = []
+        for node in graph.get("nodes", []):
+            node_copy = {**node, "config": {**(node.get("config") or {})}}
+            nodes_copy.append(node_copy)
+
+        for path, info in effective.items():
+            if not info.get("pinned"):
+                continue
+            # field_path 形如 graph.nodes.{node_id}.config.{field}
+            parts = path.split(".")
+            if len(parts) < 5 or parts[0] != "graph" or parts[1] != "nodes" or parts[3] != "config":
+                continue
+            node_id = parts[2]
+            field = ".".join(parts[4:])
+            for node in nodes_copy:
+                if node.get("id") == node_id:
+                    node["config"][field] = info["value"]
+                    break
+
+        return {**graph, "nodes": nodes_copy}
+
     def list_applications(
         self,
         owner_type: str | None = None,
