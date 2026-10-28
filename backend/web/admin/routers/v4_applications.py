@@ -13,6 +13,7 @@ from internal.application.errors import NotFoundError, ValidationError
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
 from internal.engine.v4.runner import GraphInterrupted, GraphRunner
+from internal.infrastructure.repository.v4.run_repository import V4RunRepository
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
 
@@ -76,6 +77,7 @@ def _build_runner(
     tenant_id: UUID,
     application_id: UUID,
     thread_id: str | None = None,
+    run_id: UUID | None = None,
 ) -> GraphRunner:
     """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器。"""
     graph = service.build_effective_graph(application_id, tenant_id)
@@ -83,6 +85,7 @@ def _build_runner(
     from internal.application.v4.resource_service import V4ResourceService
 
     resource_service = V4ResourceService(uow.session)
+    run_repo = V4RunRepository(uow.session)
 
     def subgraph_loader(child_app_id: str) -> dict:
         """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
@@ -112,6 +115,8 @@ def _build_runner(
         subgraph_loader=subgraph_loader,
         tool_resolver=tool_resolver,
         thread_id=thread_id,
+        run_id=run_id,
+        run_repo=run_repo,
     )
 
 
@@ -139,13 +144,19 @@ async def run_application(
     runner = _build_runner(service, uow, tenant_id, application_id)
     try:
         output = await runner.invoke(payload.inputs)
-        return {"status": "success", "output": output, "thread_id": runner.thread_id}
+        uow.commit()
+        return {"status": "success", "output": output, "thread_id": runner.thread_id, "run_id": runner.run_id}
     except GraphInterrupted as exc:
+        uow.commit()
         return {
             "status": "waiting_approval",
             "thread_id": runner.thread_id,
+            "run_id": runner.run_id,
             "approval": exc.interrupt_payload,
         }
+    except Exception:
+        uow.commit()
+        raise
 
 
 @router.post("/applications/{application_id}/runs/{thread_id}/resume")
@@ -157,7 +168,11 @@ async def resume_application(
     uow: UowDep,
     context: RequestContextDep,
 ) -> dict:
-    """人审节点恢复执行：提交审批结果后继续跑图。"""
+    """人审节点恢复执行：提交审批结果后继续跑图。
+
+    resume 前先查 run 表校验 ownership：thread_id 必须属于 (tenant_id, application_id)
+    且状态为 interrupted，否则 404。防止跨租户通过伪造 thread_id 接管他人运行。
+    """
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
@@ -166,13 +181,65 @@ async def resume_application(
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    runner = _build_runner(service, uow, tenant_id, application_id, thread_id=thread_id)
+    run_repo = V4RunRepository(uow.session)
+    pending = run_repo.get_running_by_thread(tenant_id, application_id, thread_id)
+    if pending is None:
+        raise NotFoundError("没有等待审批的运行记录")
+
+    runner = _build_runner(
+        service, uow, tenant_id, application_id,
+        thread_id=thread_id, run_id=pending["id"],
+    )
     try:
         output = await runner.resume({"approved": payload.approved, "comment": payload.comment})
-        return {"status": "success", "output": output, "thread_id": thread_id}
+        uow.commit()
+        return {"status": "success", "output": output, "thread_id": thread_id, "run_id": pending["id"]}
     except GraphInterrupted as exc:
+        uow.commit()
         return {
             "status": "waiting_approval",
             "thread_id": thread_id,
+            "run_id": pending["id"],
             "approval": exc.interrupt_payload,
         }
+    except Exception:
+        uow.commit()
+        raise
+
+
+@router.get("/applications/{application_id}/runs")
+def list_runs(
+    application_id: UUID,
+    service: V4ServiceDep,
+    uow: UowDep,
+    context: RequestContextDep,
+    limit: int = 50,
+) -> list[dict]:
+    """租户查看某应用的运行历史。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+    return V4RunRepository(uow.session).list_runs(
+        tenant_id, application_id=application_id, limit=limit
+    )
+
+
+@router.get("/runs/{run_id}")
+def get_run_detail(
+    run_id: UUID,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """查看运行详情：run 元信息 + 节点执行列表。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+
+    run_repo = V4RunRepository(uow.session)
+    run = run_repo.get_run(run_id)
+    if run is None or run["tenant_id"] != tenant_id:
+        raise NotFoundError("运行记录不存在")
+    return {
+        "run": run,
+        "node_executions": run_repo.list_node_executions(run_id),
+    }

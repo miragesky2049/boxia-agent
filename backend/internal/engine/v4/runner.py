@@ -54,16 +54,19 @@ class GraphRunner:
         subgraph_loader: SubgraphLoader | None = None,
         tool_resolver: ToolResolver | None = None,
         thread_id: str | None = None,
+        run_id: UUID | None = None,
+        run_repo: Any | None = None,
     ):
         self.graph = graph
         self.tenant_id = tenant_id or uuid.UUID("00000000-0000-0000-0000-000000000000")
         self.application_id = application_id or uuid.uuid4()
         self.runtime_mode = infer_runtime_mode(graph)
         self.thread_id = thread_id or str(uuid.uuid4())
-        self.run_id = uuid.uuid4()
+        self.run_id = run_id or uuid.uuid4()
         self._model_resolver = model_resolver
         self._subgraph_loader = subgraph_loader
         self._tool_resolver = tool_resolver
+        self._run_repo = run_repo
         # 编译时挂 checkpointer，支持 interrupt 暂停
         self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
 
@@ -88,6 +91,16 @@ class GraphRunner:
             f"开始运行: run={self.run_id} thread={self.thread_id} mode={self.runtime_mode} "
             f"nodes={len(self.graph.get('nodes', []))}"
         )
+
+        if self._run_repo is not None:
+            self._run_repo.insert_run(
+                run_id=self.run_id,
+                tenant_id=self.tenant_id,
+                application_id=self.application_id,
+                graph_snapshot=self.graph,
+                input_data=input_data,
+                langgraph_thread_id=self.thread_id,
+            )
 
         publish(NodeExecutionEvent(
             run_id=self.run_id,
@@ -114,11 +127,16 @@ class GraphRunner:
             interrupt_payload = self._extract_interrupt()
             if interrupt_payload is not None:
                 logger.info(f"运行被人审暂停: thread={self.thread_id}")
+                if self._run_repo is not None:
+                    self._run_repo.update_run_status(self.run_id, status="interrupted")
                 raise GraphInterrupted(interrupt_payload)
 
             result = await self.compiled.aget_state(self._config())
             output = result.values.get("output", {}) if result.values else {}
             duration_ms = int((time.time() - started_at) * 1000)
+
+            if self._run_repo is not None:
+                self._run_repo.update_run_status(self.run_id, status="success", output=output)
 
             publish(NodeExecutionEvent(
                 run_id=self.run_id,
@@ -137,6 +155,10 @@ class GraphRunner:
             raise
         except Exception as e:
             duration_ms = int((time.time() - started_at) * 1000)
+            if self._run_repo is not None:
+                self._run_repo.update_run_status(
+                    self.run_id, status="error", error=str(e)
+                )
             publish(NodeExecutionEvent(
                 run_id=self.run_id,
                 tenant_id=self.tenant_id,
@@ -174,11 +196,15 @@ class GraphRunner:
             # 检查是否还有下一个 interrupt
             interrupt_payload = self._extract_interrupt()
             if interrupt_payload is not None:
+                if self._run_repo is not None:
+                    self._run_repo.update_run_status(self.run_id, status="interrupted")
                 raise GraphInterrupted(interrupt_payload)
 
             result = await self.compiled.aget_state(self._config())
             output = result.values.get("output", {}) if result.values else {}
             duration_ms = int((time.time() - started_at) * 1000)
+            if self._run_repo is not None:
+                self._run_repo.update_run_status(self.run_id, status="success", output=output)
             logger.info(f"恢复运行完成: thread={self.thread_id} duration={duration_ms}ms")
             return output
         finally:
