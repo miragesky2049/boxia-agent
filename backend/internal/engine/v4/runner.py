@@ -56,6 +56,8 @@ class GraphRunner:
         thread_id: str | None = None,
         run_id: UUID | None = None,
         run_repo: Any | None = None,
+        usage_repo: Any | None = None,
+        audit_repo: Any | None = None,
     ):
         self.graph = graph
         self.tenant_id = tenant_id or uuid.UUID("00000000-0000-0000-0000-000000000000")
@@ -67,6 +69,8 @@ class GraphRunner:
         self._subgraph_loader = subgraph_loader
         self._tool_resolver = tool_resolver
         self._run_repo = run_repo
+        self._usage_repo = usage_repo
+        self._audit_repo = audit_repo
         # 编译时挂 checkpointer，支持 interrupt 暂停
         self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
 
@@ -133,10 +137,23 @@ class GraphRunner:
 
             result = await self.compiled.aget_state(self._config())
             output = result.values.get("output", {}) if result.values else {}
+            usage = result.values.get("usage") if result.values else None
             duration_ms = int((time.time() - started_at) * 1000)
 
             if self._run_repo is not None:
                 self._run_repo.update_run_status(self.run_id, status="success", output=output)
+
+            if self._usage_repo is not None and usage:
+                self._usage_repo.record_usage(
+                    tenant_id=self.tenant_id,
+                    application_id=self.application_id,
+                    run_id=self.run_id,
+                    node_id="llm",
+                    model_id=output.get("model", "unknown"),
+                    prompt_tokens=usage.get("prompt_tokens", 0),
+                    completion_tokens=usage.get("completion_tokens", 0),
+                    total_tokens=usage.get("total_tokens", 0),
+                )
 
             publish(NodeExecutionEvent(
                 run_id=self.run_id,
@@ -159,6 +176,22 @@ class GraphRunner:
                 self._run_repo.update_run_status(
                     self.run_id, status="error", error=str(e)
                 )
+            if self._audit_repo is not None:
+                try:
+                    self._audit_repo.record({
+                        "action": "run_error",
+                        "resource_type": "run",
+                        "resource_id": str(self.run_id),
+                        "tenant_id": self.tenant_id,
+                        "detail": {
+                            "application_id": str(self.application_id),
+                            "thread_id": self.thread_id,
+                            "error": str(e),
+                            "duration_ms": duration_ms,
+                        },
+                    })
+                except Exception:  # noqa: BLE001
+                    logger.exception("写 audit_logs 失败")
             publish(NodeExecutionEvent(
                 run_id=self.run_id,
                 tenant_id=self.tenant_id,

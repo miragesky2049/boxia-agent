@@ -13,7 +13,11 @@ from internal.application.errors import NotFoundError, ValidationError
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
 from internal.engine.v4.runner import GraphInterrupted, GraphRunner
+from internal.infrastructure.repository.postgres_audit_log_repository import (
+    PostgresAuditLogRepository,
+)
 from internal.infrastructure.repository.v4.run_repository import V4RunRepository
+from internal.infrastructure.repository.v4.usage_repository import V4UsageRepository
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
 
@@ -86,6 +90,8 @@ def _build_runner(
 
     resource_service = V4ResourceService(uow.session)
     run_repo = V4RunRepository(uow.session)
+    usage_repo = V4UsageRepository(uow.session)
+    audit_repo = PostgresAuditLogRepository(uow.session)
 
     def subgraph_loader(child_app_id: str) -> dict:
         """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
@@ -117,6 +123,8 @@ def _build_runner(
         thread_id=thread_id,
         run_id=run_id,
         run_repo=run_repo,
+        usage_repo=usage_repo,
+        audit_repo=audit_repo,
     )
 
 
