@@ -13,20 +13,44 @@
 ### 一张图看懂架构
 
 ```text
-你的浏览器
-   │
-   ├── 管理端 (运营/管理员)  http://localhost:5173
-   └── 用户端 (普通员工)    http://localhost:5174
-            │
-            │  /api/v1/admin/**  、 /api/v1/user/**
-            ▼
-   ┌──────────────────────────────┐
-   │ 后端 FastAPI (Python 3.12)  │
-   │  - 管理端后端 :8000         │
-   │  - 用户端后端 :8001         │
-   └──────────────┬───────────────┘
-                  ▼
-          PostgreSQL 17 (:5432)
+                        ┌─────────────────────┐
+   你的浏览器 ──────────►│  Nginx (生产反代)   │
+                        └────┬───────┬───────┘
+                             │       │
+              ┌──────────────┘       └──────────────┐
+              ▼                                     ▼
+   ┌─────────────────────┐              ┌─────────────────────┐
+   │ 管理端  React 5173   │              │ 用户端  React 5174   │
+   │ (运营/管理员)         │              │ (普通员工)           │
+   └──────────┬──────────┘              └──────────┬──────────┘
+              │ /api/v1/admin/**                     │ /api/v1/user/**
+              ▼                                      ▼
+   ┌──────────────────────────────────────────────────────────────┐
+   │              FastAPI (Python 3.12, Uvicorn)                   │
+   │  ┌────────────────┐                              ┌───────────┐ │
+   │  │ admin 站点 8000 │                              │ user 8001 │ │
+   │  └──────┬─────────┘                              └─────┬─────┘ │
+   │         │                                                 │     │
+   │         └──────────────┬──────────────────────────────────┘     │
+   │                        ▼                                        │
+   │  ┌────────────────────────────────────────────────────────┐    │
+   │  │ 引擎层：FunctionCallAgentRunner / WorkflowExecutor     │    │
+   │  │        ToolGateway (熔断/限流/重试/连接池)             │    │
+   │  │        RetrievalService (RAG)                         │    │
+   │  └──┬──────────────┬──────────────┬───────────────┬────────┘    │
+   └─────┼──────────────┼──────────────┼───────────────┼─────────────┘
+         ▼              ▼              ▼               ▼
+   ┌──────────┐  ┌──────────┐  ┌──────────┐    ┌──────────────┐
+   │ Postgres │  │  Redis   │  │  Celery  │    │  大模型网关   │
+   │  17+pgv  │  │  (broker)│  │ (RAG切分)│    │ OpenAI兼容    │
+   │  :5432   │  │  :6379   │  │          │    │              │
+   └──────────┘  └──────────┘  └──────────┘    └──────────────┘
+                         │
+                         ▼
+                  ┌──────────────┐
+                  │ 外部租户工具  │  ◄── SSRF 防护 + 治理网关
+                  │ HTTP / MCP   │
+                  └──────────────┘
 ```
 
 - **后端**：Python + FastAPI，两个独立站点（admin / user）
@@ -82,6 +106,8 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 ### 接下来去哪？
 
+- 跑起来想搭第一个 AI 助手 → [10.1 工作流 5 分钟上手](#101-工作流-5-分钟上手小白实战)
+- 想给智能体接外部接口（HTTP/MCP）→ [10.2 工具接入 5 分钟上手](#102-工具接入-5-分钟上手小白实战)
 - 卡住了 → [第 4 章 新手常见问题](#4-新手常见问题)
 - 想改代码 → [第 5 章 目录结构与代码分层](#5-目录结构与代码分层)
 - 想部署上线 → [第 14 章 生产环境落地部署](#14-生产环境落地部署)
@@ -164,8 +190,12 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
 | 智能体管理   | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
-| RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入 pgvector；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed` |
-| 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本 |
+| RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入 pgvector；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed`；智能体与 Workflow LLM 节点共用同一份 `apply_rag_to_prompt()` 增强逻辑 |
+| 工作流编排   | 可视化画布（ReactFlow）拖拽编排 Start→LLM→Tool→End 四节点 DAG；节点配置抽屉、模板市场一键复制、试运行节点实时高亮（黄/绿/红）、图拓扑校验（环检测/多 start/模板语法）；LLM 节点支持开关 RAG 并多选知识库文档 |
+| 工具治理网关 | 所有跨网 HTTP 工具调用统一经过 `tool_gateway`：超时三档（连接 5s/读 30s/整体 45s）、可重试错误指数退避（0.5s→1s）、按 (租户, 工具) 熔断（连续 5 次失败打开 30s）、按租户每秒 20 次限流、按 base_url 共享 httpx 连接池（HTTP/2 + keep-alive）、响应超 8KB 自动裁剪；熔断/限流/连接失败时返回中文降级文本回灌 LLM，不中断主循环 |
+| 工具接入向导 | admin 工具页 4 Tab（基础信息/服务连接/高级治理/试运行）；粘贴 curl 自动解析 method/url/headers/body；输入 MCP server URL 自动 `list_tools` 拉取工具列表勾选批量入库；高级配置滑块调超时/重试/熔断/限流 |
+| SSRF 防护    | 所有出站 URL 强制校验：拒绝 loopback（127.0.0.0/8）、链路本地（169.254.0.0/16，含云元数据 169.254.169.254）、组播、保留、未指定地址；允许 RFC1918 私网（10.x / 172.16-31.x / 192.168.x）——租户内网 MCP 是合法部署形态 |
+| 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本；工具已独立成菜单，支持 HTTP / MCP 两种类型 |
 | 租户授权     | 产品级智能体必须显式授权给租户后才可见；通过独立「授权管理」菜单按租户/角色集中配置                 |
 | 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
 | 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
@@ -185,14 +215,21 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 名词              | 用大白话解释                                                                         |
 |-------------------|--------------------------------------------------------------------------------------|
 | 智能体（Agent）   | 一个配置好的 AI 助手。比如“陪练剧本生成助手”，它有自己的人设、模型、欢迎语和可用能力 |
-| 技能（Skill）     | 智能体会的一项本领，比如“根据业务信息生成剧本”                                       |
-| 工具（Tool）      | 智能体可以调用的外部接口，比如“查询天气”“创建工单”                                   |
+| 工作流（Workflow） | 一条预先编排好的多步骤业务流水线。比如"Start 收 query → LLM 改写 → Tool 查数据库 → End 返回答案"，在画布上拖拽节点连线即可生成 |
+| 节点（Node）       | 工作流里的一个步骤。MVP 只支持 4 种：Start（开始）、LLM（调大模型）、Tool（调外部接口）、End（结束） |
+| 技能（Skill）     | 智能体会的一项本领，比如"根据业务信息生成剧本"                                       |
+| 工具（Tool）      | 智能体可以调用的外部接口，比如"查询天气""创建工单"。支持 HTTP 直连和 MCP 协议两种 |
+| MCP               | Model Context Protocol，一种标准的工具协议。租户跑一个 MCP Server，平台连上去自动发现它提供哪些工具，不用手写 JSON Schema |
 | 组件（Component） | 对话页面上的展示模块，比如欢迎语卡片、常见问题列表                                   |
-| 提示词（Prompt）  | 写给 AI 模型的指令模板，决定它怎么理解和回答                                         |
+| 提示词（Prompt）  | 写给 AI 模型的指令模板，决定它怎么理解和回答；支持 `{{变量}}` / `{{节点名.字段}}` 模板插值 |
+| 熔断（Circuit Breaker） | 保险丝。某个工具连续失败 5 次，自动"跳闸"30 秒不调它，直接返回"稍后重试"，避免压垮对方 |
+| 限流（Rate Limit） | 每个租户每秒最多调 20 次工具，超出直接返回"请稍后再试"，防止一个租户刷爆平台 |
+| SSRF              | 服务端请求伪造。防止 AI 被 prompt 注入后让平台去访问云元数据（169.254.169.254）、本机（127.0.0.1）等危险地址 |
+| 模板市场          | 产品管理员做好的工作流样板，租户一键复制到自己名下再改，不用从空白画布开始 |
 | 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步                             |
-| Token             | 登录成功后服务器发的“通行证”。之后每次请求都带上它，服务器才知道你是谁               |
+| Token             | 登录成功后服务器发的"通行证"。之后每次请求都带上它，服务器才知道你是谁               |
 | RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
-| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权 |
+| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权；产品级资源统一用全零 UUID（`00000000-0000-0000-0000-000000000000`）标识 |
 | 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
 | 部门（Department）| 租户内的组织单元，支持树形层级（最多 10 级），用物化路径 `path=/<root>/.../<self>/` 存储以高效查询子树 |
 | 任职（Employment）| 用户在某个部门的任职记录；同一用户同一时刻仅一条 `is_current=TRUE`（部分唯一索引约束），调岗自动归档旧记录并写入新记录，保留完整历史 |
@@ -227,8 +264,10 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17（pgvector HNSW）、Alembic、PyJWT + bcrypt |
 | 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2），用于文档 ingest      |
 | RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写） |
-| 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5                                 |
+| 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5、@xyflow/react（画布）、zustand（画布状态） |
 | 用户端   | React 19、TypeScript、Vite                                                   |
+| 工作流引擎 | 自研 DAG 拓扑分层调度（asyncio.gather 同层并行）、节点状态机（pending/running/success/error） |
+| 工具协议 | MCP（Model Context Protocol）Streamable HTTP/SSE；HTTP 工具走统一治理网关 |
 | 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标                       |
 | 测试     | pytest + httpx、Vitest + Testing Library、Playwright                         |
 | 代码质量 | ruff、mypy、oxlint、Prettier、pre-commit                                     |
@@ -1453,19 +1492,100 @@ Authorization: Bearer <access_token>
 
 ingest 状态机：`pending → queued → processing → ready`（成功）或 `failed`（错误，`ingest_error` 字段记录原因，可重新触发）。
 
-检索链路（在用户端对话时由 `AgentRunService` 自动调用，无需前端单独发起）：
+检索链路（在用户端对话时由 `AgentRunService` 自动调用，无需前端单独发起；Workflow LLM 节点开启 `retrieval.enabled` 时走同一份 `apply_rag_to_prompt()`）：
 
-```
-用户 query + 最近历史
-  → LLM query 改写（standalone 指代消解 + N 个同义变体）
-  → 对每个变体并行 embedding → pgvector cosine 召回 top_k × recall_multiplier
-  → 按 (document_id, chunk_index) 去重合并
-  → Cross-Encoder rerank 精排（bge-reranker-v2-m3）
-  → 按 rerank 阈值 0.1 过滤 → 取 top_k
-  → 拼装 "[资料 N | 章节路径]\n{chunk 内容}" 注入 system_prompt
+```text
+   用户 query + 最近历史
+            │
+            ▼
+   ┌────────────────────────┐
+   │ ① LLM query 改写        │
+   │   - standalone 指代消解 │
+   │   - 生成 N 个同义变体   │
+   └────────────┬───────────┘
+                ▼ 多个 query 变体并行
+   ┌────────────────────────┐
+   │ ② Embedding (bge-large-zh) │
+   │   每个变体向量化          │
+   └────────────┬───────────┘
+                ▼
+   ┌────────────────────────┐
+   │ ③ pgvector 余弦召回     │
+   │   top_k × recall_mult   │
+   └────────────┬───────────┘
+                ▼
+   ┌────────────────────────┐
+   │ ④ 按 (doc_id, chunk_idx) │
+   │   去重合并               │
+   └────────────┬───────────┘
+                ▼
+   ┌────────────────────────┐
+   │ ⑤ Cross-Encoder 精排    │
+   │   bge-reranker-v2-m3    │
+   └────────────┬───────────┘
+                ▼
+   ┌────────────────────────┐
+   │ ⑥ rerank 阈值 0.1 过滤  │
+   │   取 top_k             │
+   └────────────┬───────────┘
+                ▼
+   ┌────────────────────────┐
+   │ ⑦ 拼装注入 system_prompt │
+   │   "[资料 N | 章节路径]\n│
+   │    {chunk 内容}]"         │
+   └────────────────────────┘
 ```
 
 降级策略：rerank 失败自动退化为向量余弦过滤；query 改写失败退化为原始 query；embedding 临时故障由 Celery retry 兜底。
+
+### 8.3.3 工作流与工具治理接口
+
+**工作流 CRUD**（admin 端，权限 `workflow:read/create/update/delete`）：
+
+| 方法   | 路径                                  | 说明                                                                 |
+|--------|---------------------------------------|----------------------------------------------------------------------|
+| GET    | `/admin/workflows`                    | 分页列表，参数 `keyword`、`is_enabled`                                |
+| POST   | `/admin/workflows`                    | 创建，body 为 `{name, description, graph, is_enabled}`；graph 是 JSONB 整图 |
+| GET    | `/admin/workflows/{id}`               | 详情（含完整 graph）                                                  |
+| PUT    | `/admin/workflows/{id}`               | 更新（整图覆盖）                                                      |
+| DELETE | `/admin/workflows/{id}`               | 删除                                                                 |
+| POST   | `/admin/workflows/{id}/validate`      | 拓扑校验：环检测、start/end 唯一性、模板语法；不落库                   |
+| POST   | `/admin/workflows/{id}/clone-from-template/{template_id}` | 从模板市场一键复制为新工作流 |
+
+graph 结构示例：
+
+```jsonc
+{
+  "variables": [{"key": "query", "type": "string", "required": true}],
+  "nodes": [
+    {"id": "start_1", "type": "start",  "position": {"x":0,"y":0},
+     "data": {"output_schema": {"query": "string"}}},
+    {"id": "llm_1",    "type": "llm",    "position": {"x":300,"y":0},
+     "data": {"model_id": "default",
+              "system_prompt_tpl": "你是助手",
+              "user_prompt_tpl": "{{query}}",
+              "temperature": 0.7,
+              "retrieval": {"enabled": true, "document_ids": ["<uuid>"]}}},
+    {"id": "end_1",    "type": "end",    "position": {"x":600,"y":0},
+     "data": {"output_tpl": {"answer": "{{llm_1.output}}"}}}
+  ],
+  "edges": [
+    {"source": "start_1", "target": "llm_1"},
+    {"source": "llm_1",  "target": "end_1"}
+  ]
+}
+```
+
+**工具治理辅助接口**（admin 端，权限 `tool:read` / `tool:create`）：
+
+| 方法   | 路径                            | 说明                                                                 |
+|--------|---------------------------------|----------------------------------------------------------------------|
+| POST   | `/admin/tools/pull-mcp-tools`    | 输入 `{server_url}`，SSRF 校验后调 MCP `list_tools`，返回工具候选列表（不落库） |
+| POST   | `/admin/tools/import-mcp-tools`  | 批量入库：body 为 `{server_url, tools:[{name, description, tool_name_remote, input_schema}]}`，每个工具创建一条 `type=mcp` 的 Tool 实体 |
+| POST   | `/admin/tools/parse-curl`        | 输入 `{curl_command}`，用 shlex 解析为 `{method, url, headers, body, notes}`，前端回填 HTTP 工具表单 |
+| POST   | `/admin/tools/{id}/test-invoke`  | 在 admin 端试调工具，返回 `{success, duration_ms, output, error}`；不落库 |
+
+所有出站 URL 强制经过 `ssrf_guard.validate_outbound_url()`：拒绝 loopback / 云元数据（169.254.169.254）/ 链路本地 / 组播 / 保留地址；允许 RFC1918 私网（租户内网 MCP 合法）。
 
 ### 8.4 管理员、用户与审计
 
@@ -1568,24 +1688,67 @@ ingest 状态机：`pending → queued → processing → ready`（成功）或 
 | GET  | `/health/ready` | 数据库连通且迁移版本与代码一致；失败返回 503 |
 | GET  | `/metrics`      | Prometheus 指标；生产由 Nginx 拒绝外部访问   |
 
+业务指标清单（带 `tenant` / `tool` / `model` 标签，`tenant` 用短码 `platform` 或前 8 位 UUID，避免标签爆炸）：
+
+| 指标名 | 类型 | 说明 |
+|--------|------|------|
+| `boxia_http_request_duration_seconds` | Histogram | 每个 HTTP 接口耗时 |
+| `boxia_llm_request_duration_seconds` | Histogram | LLM `/chat/completions` 耗时（按 model / status 分桶） |
+| `boxia_llm_tokens_total` | Counter | LLM token 用量（prompt / completion 分类） |
+| `boxia_tool_invoke_duration_seconds` | Histogram | 工具调用耗时（按 tenant / tool / status 分桶） |
+| `boxia_tool_invoke_total` | Counter | 工具调用次数（含 success / error / circuit_open / rate_limited） |
+| `boxia_agent_run_iterations` | Histogram | 单次 agent 运行的 function calling 迭代数 |
+
 ### 8.6 用户端接口
 
 用户端站点（`web.app_user:app`）只有 `/api/v1/user/**`，与管理端完全隔离。最终用户由租户管理员在管理端“用户管理”中创建并绑定角色：
 
-| 方法 | 路径                   | 说明                                                                 |
-|------|------------------------|----------------------------------------------------------------------|
-| POST | `/user/auth/login`     | 账号密码登录，返回 access/refresh、有效期与用户角色信息              |
-| POST | `/user/auth/refresh`   | 轮换刷新令牌；检测到重放会撤销整个会话族                             |
-| POST | `/user/auth/logout`    | 撤销当前会话族，返回 204                                             |
-| GET  | `/user/me`             | 当前用户、所属租户、角色与功能权限编码                               |
-| GET  | `/user/agents`         | 分页查询当前角色可见且已启用的智能体，支持 `keyword`                 |
-| GET  | `/user/agents/{id}`    | 智能体详情及已过滤的技能/工具/组件/提示词；不可见统一返回 404        |
+| 方法 | 路径                            | 说明                                                                 |
+|------|---------------------------------|----------------------------------------------------------------------|
+| POST | `/user/auth/login`              | 账号密码登录，返回 access/refresh、有效期与用户角色信息              |
+| POST | `/user/auth/refresh`            | 轮换刷新令牌；检测到重放会撤销整个会话族                             |
+| POST | `/user/auth/logout`             | 撤销当前会话族，返回 204                                             |
+| GET  | `/user/me`                      | 当前用户、所属租户、角色与功能权限编码                               |
+| GET  | `/user/agents`                   | 分页查询当前角色可见且已启用的智能体，支持 `keyword`                 |
+| GET  | `/user/agents/{id}`              | 智能体详情及已过滤的技能/工具/组件/提示词；不可见统一返回 404        |
+| POST | `/user/agents/{id}/run`          | 同步运行智能体，返回完整 final 文本 + 工具调用轨迹 + usage            |
+| POST | `/user/agents/{id}/run/stream`   | SSE 流式运行：边跑边推 `run_start / llm_start / llm_delta / tool_start / tool_end / final` 事件，前端 ChatPage 逐字渲染 |
+| GET  | `/user/workflows`                | 分页查询当前角色可见且已启用的工作流（我的 + 平台模板）              |
+| POST | `/user/workflows/{id}/run`        | 同步运行一次工作流，body 为 `{"inputs":{"query":"..."},"conversation_id":"..."}`；返回 `outputs`、每节点状态/耗时/错误、usage、finish_reason |
+| POST | `/user/workflows/{id}/run/stream` | SSE 流式运行工作流：边跑边推 `node_start / node_end / result` 事件，画布可实时高亮节点状态 |
 
 - 鉴权：Access Token + Refresh Token，与管理员令牌使用不同 `aud`（`USER_JWT_AUDIENCE`），两端令牌不能互相冒用。
 - 租户作用域：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404/403。登录与刷新令牌都校验租户一致性。
 - 可见性：在租户规则上追加 `is_enabled=true`，角色集合仅本人 `role_id`；未显式授权的智能体不可见。
 - 实例级可见范围：管理端可为租户智能体配置 `visibility_mode=custom` 与可见部门（含子树）/指定人员列表；user 端查询在租户授权之上叠加该过滤，未命中返回 404。无当前任职的用户仅命中 `all` 模式与直接指定的 `user_id` 规则。
 - 用户端站点不挂载 `/admin/**` 与 `/public/**`；用户登录、刷新重放与登出写入审计日志。
+
+**SSE 事件帧格式**（`/run/stream` 接口）：
+
+```text
+event: run_start
+data: {"run_id":"...","agent_id":"..."}
+
+event: llm_start
+data: {"model":"deepseek-chat"}
+
+event: llm_delta
+data: {"text":"你"}
+
+event: llm_delta
+data: {"text":"好"}
+
+event: tool_start
+data: {"tool_name":"query_erp","arguments":{"q":"北京天气"}}
+
+event: tool_end
+data: {"tool_name":"query_erp","output":"晴天 25℃","duration_ms":234}
+
+event: final
+data: {"content":"今天北京晴天 25℃","usage":{"prompt_tokens":123,"completion_tokens":45}}
+```
+
+工作流流式接口用相同的帧格式，但事件名为 `node_start` / `node_end`（携带 `node_id` / `node_type` / `status`），最终事件为 `result`（携带完整 outputs）。响应头带 `Cache-Control: no-cache`、`Connection: keep-alive`、`X-Accel-Buffering: no`（Nginx 不缓冲）。
 
 ### 8.7 调用示例（Git Bash）
 
@@ -1664,17 +1827,20 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `agent_visibility_users`                      | 智能体可见人员关联：`(agent_id, user_id)` 复合主键；被指定用户即使无当前任职也直接命中     |
 | `documents`                                    | RAG 知识库文档：`title`、`source_type`（markdown/text/pdf...）、`raw_content`（原文）、`agent_id`（绑定智能体，可空）、`ingest_status`（`pending/queued/processing/ready/failed`）、`ingest_error`、`chunk_count` |
 | `document_chunks`                             | 文档分块：`document_id` FK、`chunk_index`、`content`、`embedding`（pgvector 1024 维）、`metadata` JSONB（含 `heading_path` 标题路径）；向量列建 HNSW cosine 索引 |
+| `workflows`                                    | 工作流：`name`、`description`、`graph` JSONB（`{variables, nodes, edges}` 整图）、`is_enabled`、`visibility_mode`、`created_by`；`tenant_id` NOT NULL，产品级为全零 UUID |
+| `workflow_templates`                          | 工作流模板市场：产品管理员发布的样板工作流，结构同 `workflows`；租户通过 `clone-from-template` 一键复制为自己的工作流 |
 | `alembic_version`                             | 当前迁移版本                                                                             |
 
 约定：
 
-- 资源与审计记录都带 `tenant_id`：`NULL` 表示产品级，非空表示租户私有；平台账号表 `admin_users` 不保存租户维度，通过 `role_id` 绑定平台角色。
-- 资源名称与用户名按作用域唯一：唯一索引为 `(COALESCE(tenant_id, 0), lower(name))` 与 `(COALESCE(tenant_id, 0), username)`，不同租户可以同名；应用层额外禁止租户与产品级资源重名。
+- 资源与审计记录都带 `tenant_id`：**迁移 `0024_platform_tenant_migration` 后所有表该字段一律 NOT NULL**；产品级资源统一使用全零 UUID `00000000-0000-0000-0000-000000000000`（常量 `PLATFORM_TENANT_ID`），不再使用 `NULL` 表示产品级。UoW 过滤统一为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。平台账号表 `admin_users` 不保存租户维度，通过 `role_id` 绑定平台角色。
+- 资源名称与用户名按作用域唯一：唯一索引为 `(COALESCE(tenant_id, '00000000-0000-0000-0000-000000000000'), lower(name))` 与 `(COALESCE(tenant_id, ...), username)`，不同租户可以同名；应用层额外禁止租户与产品级资源重名。
 - 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
 - 列表默认按 `updated_at DESC, id DESC` 排序。
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
 - RAG 向量列依赖 `pgvector` 扩展：迁移 `0022_rag_documents` 会自动 `CREATE EXTENSION IF NOT EXISTS vector`，但 PostgreSQL 镜像必须预装该扩展（推荐 `pgvector/pgvector:pg17`）；自建外部库时需 DBA 先装好 `vector` 包。
 - 迁移 `0006_roles_and_resource_access` 新增角色、最终用户、授权表与资源 `agent_id`，并为存量数据回填系统角色、归属与租户授权；DDL 支持 downgrade，但数据回填不可逆，升级前必须备份并在预发库演练。
+- 迁移 `0025_workflows` 建 `workflows` / `workflow_templates` 两表（直接 NOT NULL）；`0026_workflow_permissions` 预置 `workflow:read/create/update/delete` 权限并回填内置角色；`0027_tool_menu_permissions` 预置 `menu:tools` / `page:tools` 菜单权限。
 - 迁移 `0010_platform_roles` 引入平台角色与平台角色授权：`roles.tenant_id`、`resource_grants.tenant_id` 允许为空，回填 `admin_users.role_id`，并把存量平台资源授权给平台 `admin` / `viewer` 角色（`superadmin` 默认全量可见）。降级会丢失平台角色绑定与授权，需先备份。
 - 迁移 `0011_rbac_permission_resources` 新增 `permission_resources` 与 `role_permissions`，移除 `roles.system_role` 与 `admin_users.role`，并按原 `system_role` 回填内置角色的功能权限（空角色平台账号回退到平台只读角色）。降级会重建 `roles.system_role` 与 `admin_users.role` 字段，但角色功能权限关系不可恢复，回滚前必须备份 `role_permissions`。
 - 迁移 `0015_organization` 新增 `departments` / `user_employments` 表、给 `users` 加 `UNIQUE(tenant_id,id)`、给 `agents` 加 `department_id` 列与复合外键，并回填租户侧系统角色的组织架构权限（`menu:departments`、`menu:employments`、`page:departments`、`page:employments`、`button:department:*`、`button:employment:*`）。DDL 支持 downgrade。
@@ -1730,6 +1896,8 @@ uv run python -m scripts.skill_package list --id 3
 | 智能体管理                  | 搜索、状态筛选（平台视角含“仅已授权”）、分页、新建、配置、启用/停用、删除                                                                                        |
 | 智能体配置                  | Tabs：配置（基础信息、模型、角色与提示词、记忆、对话体验、发布渠道、知识库等）、技能与资源、可见范围（仅租户智能体；全员可见 / 自定义部门含子树 + 指定人员）           |
 | 技能与资源                  | 在智能体详情内管理所属技能/工具/组件/提示词；增删改查、搜索、分页、克隆到其他智能体；按 `button:{resource}:*` 权限控制操作入口                                  |
+| 工具管理（独立菜单）        | 列表页按类型/启用状态筛选；编辑抽屉 4 Tab：基础信息 / 服务连接 / 高级治理（滑块）/ 试运行；HTTP 工具支持"粘贴 curl 自动解析"回填 method/url/headers/body；MCP 工具输入 server_url 自动 list_tools 拉取工具卡片勾选批量入库；高级治理滑块：超时 5-120s、重试 0-5、熔断阈值 2-20、熔断打开 10-300s、限流 QPS 1-100 |
+| 工作流编排（独立菜单）      | 列表页双 Tab：我的工作流 / 模板市场；新建时弹模板选择（客服问答/数据查询/文档总结/空白画布）；画布三栏布局：左侧节点库（拖拽）、中间 ReactFlow 画布（连线/缩放/小地图）、右侧节点配置抽屉；预置 Start→LLM→End 骨架；试运行按钮弹出 Modal 输入 query，画布节点实时高亮（黄=运行中/绿=成功/红=失败），右侧抽屉展开输入输出耗时 |
 | 技能包                      | 抽屉内管理多文件：查看/编辑、新建、删除、zip 导入导出；平台级技能可克隆到本租户                                                                                 |
 | 授权管理                    | 独立菜单按资源类型集中授权；资源列表与详情页不再提供授权入口；支持授权状态筛选、多选批量追加/覆盖/移除；平台视角按租户逐个配置，租户视角仅本租户角色               |
 | 角色管理                    | 平台/租户各自维护角色增删改与复制；详情页按权限目录维护功能权限；系统角色不可删除、不可停用；平台角色可授权平台级资源（`button:role:*`）                       |
@@ -1751,6 +1919,10 @@ uv run python -m scripts.skill_package list --id 3
 /agents                  智能体列表
 /agents/new              新建智能体
 /agents/:id/edit         智能体配置 + 技能与资源
+/workflows               工作流列表（我的工作流 / 模板市场）
+/workflows/new           新建工作流（先弹模板选择）
+/workflows/:id/edit      画布编排页（三栏：节点库 / 画布 / 配置抽屉）
+/tools                   工具管理列表（menu:tools）
 /grants                  授权管理（menu:grants）
 /roles                   角色管理（menu:roles；平台显示平台角色，租户显示本租户角色）
 /users                   用户管理（menu:users，租户）
@@ -1761,9 +1933,237 @@ uv run python -m scripts.skill_package list --id 3
 *                        404
 ```
 
-菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, grants, roles, users, departments, employments, admin-users, audit`。`departments` 与 `employments` 在前端合并为「组织架构」SubMenu，自定义角色按实际授权显示，无权限路由返回 404。
+菜单由 `/admin/context` 返回的 `menus` 驱动，来源是角色拥有的 `menu:*` 权限：平台 superadmin 为 `agents, workflows, tools, grants, roles, admin-users, tenants, audit`；租户 superadmin 为 `agents, workflows, tools, grants, roles, users, departments, employments, admin-users, audit`。`departments` 与 `employments` 在前端合并为「组织架构」SubMenu，自定义角色按实际授权显示，无权限路由返回 404。
 
 授权管理页同样按视角收敛：平台只列平台级资源，租户只列本租户自有资源；列表展示授权汇总与授权状态，翻页保留勾选（单次最多 100 个），可批量追加/覆盖/移除。行内「配置授权」抽屉按租户配置访问范围（平台为「该租户不可见 / 整个租户 / 指定角色」，租户为「全部角色可见（默认）/ 指定角色」），保存只写入当前租户并刷新汇总。
+
+### 10.1 工作流 5 分钟上手（小白实战）
+
+**工作流长什么样？** 它就是一张 DAG 图，由 4 种节点拼出来：
+
+```text
+   ┌─────────┐      ┌─────────┐      ┌─────────┐      ┌─────────┐
+   │ Start   │─────►│  LLM    │─────►│  Tool   │─────►│  End    │
+   │ 收 query│      │ 改写意图 │      │ 查外部API│      │ 组装答案 │
+   └─────────┘      └────┬────┘      └────┬────┘      └─────────┘
+        │               │  ▲              │
+        │               │  └── RAG 命中文档（可选开关）
+        │               ▼
+        │        ┌─────────────┐
+        └───────►│ pgvector 召回│
+                 └─────────────┘
+
+   节点状态机：pending ──► running ──► success
+                              │
+                              └────► error（整图 fail，画布染红）
+```
+
+**执行时序图（一次用户请求）：**
+
+```text
+ 用户端      FastAPI        Executor       LLMClient      ToolGateway     租户工具
+   │           │              │               │               │              │
+   │ POST /run │              │               │               │              │
+   │──────────►│              │               │               │              │
+   │           │ run()       │               │               │              │
+   │           │─────────────►│               │               │              │
+   │           │              │ Start 节点返回 inputs         │              │
+   │           │              │               │               │              │
+   │           │              │ LLM 节点：渲染 prompt        │              │
+   │           │              │──────────────►│               │              │
+   │           │              │               │ (RAG 开关开则先查 pgvector)   │
+   │           │              │◄──────────────│ output        │              │
+   │           │              │               │               │              │
+   │           │              │ Tool 节点：   │               │              │
+   │           │              │──────────────────────────────►│              │
+   │           │              │               │               │ ① SSRF 校验  │
+   │           │              │               │               │ ② 熔断检查   │
+   │           │              │               │               │ ③ 限流检查   │
+   │           │              │               │               │ ④ 重试循环   │
+   │           │              │               │               │─────────────►│
+   │           │              │               │               │◄─────────────│
+   │           │              │◄──────────────────────────────│ 8KB 裁剪     │
+   │           │              │               │               │              │
+   │           │              │ End 节点渲染 output_tpl     │              │
+   │           │◄─────────────│ outputs + 节点状态 + usage  │              │
+   │◄──────────│              │               │               │              │
+```
+
+不写一行代码，在画布上拖出一个"query → LLM 改写 → 查工具 → 返回答案"的流水线：
+
+1. 左侧菜单点「工作流」→ 右上角「新建」→ 弹窗选「空白画布」（或选一个模板直接用）。
+2. 画布自动生成一条竖向骨架：`Start → LLM → End`，三个节点已经排好位置。
+3. 点中间的 LLM 节点，右侧抽屉弹出配置：
+   - **模型 ID**：填你在 `.env` 里配的模型名（默认 `default`）。
+   - **System Prompt**：写人设，比如 `你是一个帮助客服总结问题的助手`。
+   - **User Prompt**：默认 `{{query}}`，意思是把 Start 节点收到的 query 原样传给 LLM。
+   - **Temperature**：0.7 就好。
+   - **启用知识库检索**：打开开关 → 下方出现「选择文档」多选框，勾选已经 ingest 完成的文档（状态为 ready 的）。
+4. 如果要加 Tool 节点：从左侧节点库拖一个「Tool」到 LLM 和 End 之间 → 点 LLM 节点的输出 port 拖线到 Tool 的输入 port，再从 Tool 拖线到 End。
+5. 点 Tool 节点：右侧抽屉选「选择工具」（下拉只列本租户已启用的工具），「参数模板」填 JSON，比如 `{"q":"{{llm_1.output}}"}`（意思是把上一个 LLM 节点的输出当参数）。
+6. 点 End 节点：「输出模板」填 `{"answer":"{{llm_1.output}}"}` 或 `{"answer":"{{tool_1.output}}"}`，决定最终返回给用户什么字段。
+7. 顶部点「校验图」→ 提示"校验通过：4 个节点，3 条边"。
+8. 顶部点「试运行」→ 弹窗输入 query（比如 `查询北京天气`）→ 画布上节点逐个点亮：
+   - 🟡 黄色脉冲 = 运行中
+   - 🟢 绿色边框 = 成功（右侧抽屉可展开输入/输出/耗时）
+   - 🔴 红色边框 = 失败（右侧抽屉显示错误分类 + 修复建议）
+9. 满意后点顶部「保存」。
+
+> **模板变量怎么写？**
+> - `{{query}}` = Start 节点收到的全局入参
+> - `{{llm_1.output}}` = 节点 ID 为 `llm_1` 的 LLM 节点输出
+> - `{{tool_1.output}}` = 节点 ID 为 `tool_1` 的 Tool 节点输出
+> - 节点 ID 在抽屉顶部的「节点 ID：xxx」标签里可以看到。
+
+### 10.2 工具接入 5 分钟上手（小白实战）
+
+**所有 HTTP 工具调用都必须经过这道治理关卡：**
+
+```text
+                invoke_http(url, method, headers, body)
+                            │
+                            ▼
+              ┌─────────────────────────────┐
+              │ ① SSRF 校验                  │
+              │   ├─ scheme 必须 http/https  │
+              │   ├─ DNS 解析所有 IP          │
+              │   └─ 拒绝 loopback/云元数据/  │
+              │      组播/保留/未指定          │
+              └─────────────┬───────────────┘
+                            ▼ 安全
+              ┌─────────────────────────────┐
+              │ ② 熔断器（按 租户+工具 维度） │
+              │   closed ──失败×5──► open    │
+              │   open ──30s后─────► half_open│
+              │   half_open 放行一次探测      │
+              └─────────────┬───────────────┘
+                            ▼ 允许
+              ┌─────────────────────────────┐
+              │ ③ 限流器（按租户维度）        │
+              │   每秒 ≤ 20 次              │
+              └─────────────┬───────────────┘
+                            ▼ 未超
+              ┌─────────────────────────────┐
+              │ ④ 共享 httpx 连接池          │
+              │   按 base_url 分池            │
+              │   HTTP/2 + keep-alive 30s   │
+              └─────────────┬───────────────┘
+                            ▼
+              ┌─────────────────────────────┐
+              │ ⑤ 重试循环（最多2次）         │
+              │   可重试：超时/连接错/5xx/429  │
+              │   不重试：4xx/鉴权失败        │
+              │   退避：0.5s → 1s           │
+              └─────────────┬───────────────┘
+                            ▼
+              ┌─────────────────────────────┐
+              │ ⑥ 响应裁剪到 8KB             │
+              │   尝试美化 JSON              │
+              └─────────────────────────────┘
+```
+
+**熔断/限流失败时的降级路径（不抛异常给 LLM）：**
+
+```text
+   工具调用失败
+        │
+        ├── 熔断打开?     ──► 返回 "工具当前不可用（服务熔断），请告知用户稍后重试"
+        ├── 限流触发?      ──► 返回 "工具调用过于频繁，请稍后重试"
+        ├── 连接超时?     ──► 返回 "工具调用失败：超时。请告知用户稍后重试"
+        ├── 5xx / 429?   ──► 先重试2次，仍失败返回降级文本
+        ├── 4xx / 401?    ──► 抛 ToolExecutionError（不重试）
+        └── SSRF 拒绝?    ──► 返回 "工具地址不安全：xxx，请检查工具配置"
+                              │
+                              ▼
+                    LLM 收到 observation 文本，
+                    自己决定怎么回复用户（换话术/换工具/告知用户）
+```
+
+**SSRF 防护白名单/黑名单（DNS 解析后逐 IP 判断）：**
+
+```text
+   ┌─────────────────────────────┬──────────────────────────┐
+   │ 允许（白名单）             │ 拒绝（黑名单）            │
+   ├─────────────────────────────┼──────────────────────────┤
+   │ 公网 IP（任意）             │ 127.0.0.0/8   loopback   │
+   │ 10.0.0.0/8    租户内网     │ 169.254.0.0/16 链路本地   │
+   │ 172.16.0.0/12 租户内网     │   └─ 含 169.254.169.254  │
+   │ 192.168.0.0/16 租户内网    │      云元数据(拒绝)       │
+   │                            │ 224.0.0.0/4   组播        │
+   │                            │ 240.0.0.0/4   保留        │
+   │                            │ 0.0.0.0/8     未指定      │
+   │                            │ ::1 / ::      IPv6 同上   │
+   └─────────────────────────────┴──────────────────────────┘
+```
+
+平台支持两种工具类型，都不用手写 JSON Schema：
+
+#### 方式 A：HTTP 工具（粘贴 curl 最快）
+
+1. 左侧菜单点「工具管理」→ 右上角「新建」。
+2. 抽屉打开后切到「服务连接」Tab：
+   - **类型**选 `HTTP`。
+   - 找到「粘贴 curl」按钮 → 把你从浏览器/Postman 复制的 curl 命令粘进去 → 点「解析 curl」。
+   - 自动回填 Method（彩色标签）、URL、Headers（键值对表格）、Body（JSON）。
+3. 切到「基础信息」Tab 填名称和描述。
+4. （可选）切到「高级配置」Tab 拖滑块调超时/重试/熔断/限流，默认值对大多数场景够用。
+5. 切到「试运行」Tab：按 Schema 填几个参数 → 点「试调」→ 看右侧耗时瀑布图和响应。
+6. 保存。回工作流画布，Tool 节点的「选择工具」下拉里就能看到它了。
+
+#### 方式 B：MCP 工具（自动发现）
+
+MCP 自动发现的完整流程：
+
+```text
+  管理员                平台后端                   租户 MCP Server
+    │                      │                            │
+    │ 填 server_url         │                            │
+    │ 点「拉取工具」        │                            │
+    │─────────────────────►│                            │
+    │                      │ ① SSRF 校验 URL             │
+    │                      │ ② TCP 连接 + MCP 握手       │
+    │                      │───────────────────────────►│
+    │                      │◄───────────────────────────│
+    │                      │ ③ list_tools()              │
+    │                      │───────────────────────────►│
+    │                      │◄───────────────────────────│
+    │                      │   返回工具数组：             │
+    │                      │   [{name, description,     │
+    │                      │    input_schema}]            │
+    │                      │                            │
+    │◄──── 工具卡片列表 ────│                            │
+    │   (勾选要启用的)      │                            │
+    │                      │                            │
+    │ 点「批量导入」        │                            │
+    │─────────────────────►│                            │
+    │                      │ ④ 为每个工具创建 Tool 实体 │
+    │                      │   type=mcp                  │
+    │                      │   config.server_url=...     │
+    │                      │   config.tool_name=...      │
+    │◄──── 创建成功列表 ────│                            │
+```
+
+1. 新建工具时**类型**选 `MCP`。
+2. 在「服务连接」Tab 填你的 MCP Server URL（比如 `http://192.168.1.100:8000/mcp`）。
+   - 私网地址（10.x / 172.16-31.x / 192.168.x）是允许的，平台会自动连过去。
+   - 但 **127.0.0.1 / 169.254.169.254（云元数据）会被拒绝**（SSRF 防护）。
+3. 点「拉取工具」→ 平台连过去 `list_tools` → 返回工具卡片列表（名称/描述/参数数）。
+4. 勾选要启用的工具 → 点「批量导入」→ 平台自动为每个工具创建一条 Tool 实体，不用手录 JSON Schema。
+5. 回工作流画布即可选择。
+
+#### 工具治理默认值（一般不用改）
+
+| 配置项 | 默认值 | 大白话 |
+|--------|--------|--------|
+| 连接超时 | 5 秒 | TCP 建连最多等 5 秒 |
+| 读超时 | 30 秒 | 对方响应最多等 30 秒 |
+| 整体超时 | 45 秒 | 从发请求到收完最多 45 秒 |
+| 重试次数 | 2 次 | 超时/5xx/429 自动重试，退避 0.5s→1s |
+| 熔断阈值 | 5 次 | 连续失败 5 次就"跳闸"30 秒 |
+| 限流 | 20 QPS | 每租户每秒最多 20 次工具调用 |
+| 响应裁剪 | 8 KB | 返回文本超 8KB 自动截断，防 prompt 爆炸 |
+
+> **熔断/限流时会发生什么？** 平台**不会**把异常抛给 LLM 主循环，而是返回一句中文提示（比如"工具当前不可用（服务熔断），请告知用户稍后重试"），LLM 看到这句话后自己决定怎么回复用户——工作流不会整个崩掉。
 
 ---
 
