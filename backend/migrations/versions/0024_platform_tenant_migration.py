@@ -38,7 +38,7 @@ _NULLABLE_TABLES = (
 
 
 def upgrade() -> None:
-    """1) 先插入平台租户行；2) 回填 NULL；3) 改为 NOT NULL；4) 重建索引与约束。"""
+    """1) 先插入平台租户行；2) 先拆 agents 旧约束；3) 回填 NULL；4) 改为 NOT NULL；5) 重建索引与新约束。"""
     # 1. 先种入产品级平台租户，避免外键 tenants.id 约束失败。
     op.execute(
         f"""
@@ -48,19 +48,30 @@ def upgrade() -> None:
         """
     )
 
-    # 2. 把历史 NULL 行回填为 PLATFORM_TENANT_ID。
+    # 2. 先拆掉 agents 表基于 tenant_id IS NULL 语义的旧 check 约束。
+    #    旧约束 ck_agents_tenant_dept_required = (tenant_id IS NULL OR department_id IS NOT NULL)
+    #    会在把产品级行（tenant_id IS NULL AND department_id IS NULL）回填为
+    #    PLATFORM_TENANT_ID 时被拦截，必须先 DROP，回填完成后再 ADD 新语义约束。
+    op.execute(
+        "ALTER TABLE agents DROP CONSTRAINT IF EXISTS ck_agents_platform_no_dept"
+    )
+    op.execute(
+        "ALTER TABLE agents DROP CONSTRAINT IF EXISTS ck_agents_tenant_dept_required"
+    )
+
+    # 3. 把历史 NULL 行回填为 PLATFORM_TENANT_ID。
     for table in _NULLABLE_TABLES:
         op.execute(
             f"UPDATE {table} SET tenant_id = '{PLATFORM_TENANT_ID}' WHERE tenant_id IS NULL"
         )
 
-    # 3. 逐表断言无残留 NULL，再 SET NOT NULL。
+    # 4. 逐表断言无残留 NULL，再 SET NOT NULL。
     for table in _NULLABLE_TABLES:
         op.execute(
             f"ALTER TABLE {table} ALTER COLUMN tenant_id SET NOT NULL"
         )
 
-    # 4. 重建部分唯一索引：旧谓词是 tenant_id IS NULL，新谓词是 tenant_id = PLATFORM_TENANT_ID。
+    # 5. 重建部分唯一索引：旧谓词是 tenant_id IS NULL，新谓词是 tenant_id = PLATFORM_TENANT_ID。
     op.execute("DROP INDEX IF EXISTS ux_roles_platform_code")
     op.execute(
         f"""
@@ -86,20 +97,14 @@ def upgrade() -> None:
         """
     )
 
-    # 5. agents 表的两个 check 约束：旧谓词用 tenant_id IS NULL 表示平台，
-    #    现在统一为 tenant_id = PLATFORM_TENANT_ID 表示平台。
-    op.execute(
-        "ALTER TABLE agents DROP CONSTRAINT IF EXISTS ck_agents_platform_no_dept"
-    )
+    # 6. agents 表的两个新 check 约束：平台行（PLATFORM_TENANT_ID）允许 department_id 为空；
+    #    租户行（非 PLATFORM_TENANT_ID）department_id 必填。
     op.execute(
         f"""
         ALTER TABLE agents
             ADD CONSTRAINT ck_agents_platform_no_dept
             CHECK (tenant_id <> '{PLATFORM_TENANT_ID}' OR department_id IS NULL)
         """
-    )
-    op.execute(
-        "ALTER TABLE agents DROP CONSTRAINT IF EXISTS ck_agents_tenant_dept_required"
     )
     op.execute(
         f"""
