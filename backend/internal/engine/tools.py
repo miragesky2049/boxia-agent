@@ -2,27 +2,21 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-import httpx
-
 from internal.domain.entity.resource import Tool as ToolEntity
 from internal.engine.context import AgentRunContext
 from internal.engine.llm import LLMToolSpec
+from internal.engine.tool_gateway import (
+    GatewayConfig,
+    ToolExecutionError,
+    get_tool_gateway,
+)
 
 logger = logging.getLogger(__name__)
-
-
-class ToolExecutionError(Exception):
-    """工具执行失败：runner 捕获后作为 tool 结果回灌给 LLM，不中断主循环。"""
-
-    def __init__(self, message: str) -> None:
-        super().__init__(message)
-        self.message = message
 
 
 class Tool(ABC):
@@ -108,31 +102,20 @@ class HttpTool(Tool):
             "Content-Type": "application/json",
             **{k: str(v) for k, v in self._headers.items()},
         }
-        request_headers.update(context.llm_headers())
-
-        try:
-            async with httpx.AsyncClient(timeout=httpx.Timeout(self._timeout, connect=10.0)) as client:
-                if method == "GET":
-                    response = await client.get(url, params=arguments, headers=request_headers)
-                else:
-                    response = await client.request(method, url, json=arguments, headers=request_headers)
-        except httpx.HTTPError as exc:
-            logger.warning("tool http error tool=%s url=%s err=%s", self._entity.name, url, exc)
-            raise ToolExecutionError(f"HTTP 调用失败: {exc}") from exc
-
-        if response.status_code >= 400:
-            raise ToolExecutionError(
-                f"HTTP {response.status_code}: {response.text[:500]}"
-            )
-
-        text = response.text
-        try:
-            # 尝试美化 JSON，便于 LLM 阅读
-            parsed = response.json()
-            text = json.dumps(parsed, ensure_ascii=False)
-        except ValueError:
-            pass
-        return text[:8000]
+        gateway_cfg = GatewayConfig.from_config(
+            (self._entity.config or {}).get("gateway")
+        )
+        gateway = get_tool_gateway()
+        return await gateway.invoke_http(
+            method=method,
+            url=url,
+            headers=request_headers,
+            json_body=arguments if method != "GET" else None,
+            params=arguments if method == "GET" else None,
+            context=context,
+            tool_name=self._entity.name,
+            cfg=gateway_cfg,
+        )
 
 
 class McpTool(Tool):
