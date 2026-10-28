@@ -20,6 +20,10 @@ ModelResolverCtx: ContextVar[Any] = ContextVar("v4_model_resolver", default=None
 # 节点通过此上下文递归加载并执行目标 application 的 graph
 SubgraphLoaderCtx: ContextVar[Any] = ContextVar("v4_subgraph_loader", default=None)
 
+# 运行时 tool 资源解析器：由 GraphRunner 注入，签名 (resource_id: str) -> dict | None
+# 返回 tool 的 config（含 endpoint / method / params_schema），无权访问或不存在时返回 None
+ToolResolverCtx: ContextVar[Any] = ContextVar("v4_tool_resolver", default=None)
+
 
 # ========== start ==========
 def _start_node_build(config: dict[str, Any]):
@@ -143,18 +147,43 @@ def _compare(actual, operator: str, expected) -> bool:
 
 # ========== tool（调工具） ==========
 def _tool_node_build(config: dict[str, Any]):
-    """tool 节点：调用工具（走工具治理网关）。
+    """tool 节点：调用工具资源（走 resource 表解析 + 工具治理网关）。
 
-    config.tool_id: 资源 ID
-    config.params: {param_name: "{{#node.output#}}"}
+    config.resource_id: resource 表中 type=tool 的资源 ID
+    config.params: {param_name: 值或占位符}
     """
+    resource_id = config.get("resource_id", "")
+    params_config = config.get("params", {}) or {}
 
     async def tool_fn(state: dict) -> dict:
-        # TODO: 接工具治理网关
-        params = _resolve_params(config.get("params", {}), state)
+        resolver = ToolResolverCtx.get()
+        params = _resolve_params(params_config, state)
+
+        if resolver is None or not resource_id:
+            return {
+                "output": {
+                    "result": f"[TOOL stub] resource_id={resource_id} params={params}",
+                    "error": None,
+                }
+            }
+
+        tool_config = resolver(resource_id)
+        if tool_config is None:
+            return {
+                "output": {
+                    "result": None,
+                    "error": "工具资源不存在、已禁用或当前租户无权访问",
+                }
+            }
+
+        # TODO: 真正按 tool_config 的 endpoint / method 发请求（走 SSRF 防护）
         return {
             "output": {
-                "result": f"[TOOL] {config.get('tool_id', 'unknown')} params={params}",
+                "result": {
+                    "tool_name": tool_config.get("name"),
+                    "endpoint": tool_config.get("config", {}).get("endpoint"),
+                    "params": params,
+                },
                 "error": None,
             }
         }

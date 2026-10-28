@@ -77,9 +77,12 @@ def _build_runner(
     application_id: UUID,
     thread_id: str | None = None,
 ) -> GraphRunner:
-    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器。"""
+    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器。"""
     graph = service.build_effective_graph(application_id, tenant_id)
     model_service = V4ModelService(uow.session)
+    from internal.application.v4.resource_service import V4ResourceService
+
+    resource_service = V4ResourceService(uow.session)
 
     def subgraph_loader(child_app_id: str) -> dict:
         """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
@@ -93,12 +96,21 @@ def _build_runner(
             logger.exception("加载子图失败: child_app_id=%s", child_app_id)
             return {}
 
+    def tool_resolver(resource_id: str) -> dict | None:
+        """按租户解析 tool 资源：无权访问或不存在返回 None。"""
+        try:
+            rid = UUID(resource_id)
+        except ValueError:
+            return None
+        return resource_service.resolve_for_tenant(rid, tenant_id)
+
     return GraphRunner(
         graph=graph,
         tenant_id=tenant_id,
         application_id=application_id,
         model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
         subgraph_loader=subgraph_loader,
+        tool_resolver=tool_resolver,
         thread_id=thread_id,
     )
 

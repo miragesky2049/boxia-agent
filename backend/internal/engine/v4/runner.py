@@ -13,7 +13,11 @@ from langgraph.types import Command
 
 from internal.engine.v4.compiler import compile_graph, infer_runtime_mode
 from internal.engine.v4.events import NodeExecutionEvent, publish
-from internal.engine.v4.nodes.builtin import ModelResolverCtx, SubgraphLoaderCtx
+from internal.engine.v4.nodes.builtin import (
+    ModelResolverCtx,
+    SubgraphLoaderCtx,
+    ToolResolverCtx,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,9 @@ ModelResolver = Callable[[str], Any]
 
 # 子图加载器签名：(application_id: str) -> dict（返回 graph JSON，已按 tenant 应用 effective config）
 SubgraphLoader = Callable[[str], dict]
+
+# tool 资源解析器签名：(resource_id: str) -> dict | None
+ToolResolver = Callable[[str], Any]
 
 # 进程内 checkpointer：按 thread_id 保存图状态，支持 interrupt / resume
 # 首期用 MemorySaver（进程内），后续可换 PostgresSaver 持久化
@@ -45,6 +52,7 @@ class GraphRunner:
         application_id: UUID | None = None,
         model_resolver: ModelResolver | None = None,
         subgraph_loader: SubgraphLoader | None = None,
+        tool_resolver: ToolResolver | None = None,
         thread_id: str | None = None,
     ):
         self.graph = graph
@@ -55,6 +63,7 @@ class GraphRunner:
         self.run_id = uuid.uuid4()
         self._model_resolver = model_resolver
         self._subgraph_loader = subgraph_loader
+        self._tool_resolver = tool_resolver
         # 编译时挂 checkpointer，支持 interrupt 暂停
         self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
 
@@ -94,6 +103,7 @@ class GraphRunner:
         subgraph_token = (
             SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
         )
+        tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
 
         try:
             await self.compiled.ainvoke(
@@ -144,6 +154,8 @@ class GraphRunner:
                 ModelResolverCtx.reset(model_token)
             if subgraph_token is not None:
                 SubgraphLoaderCtx.reset(subgraph_token)
+            if tool_token is not None:
+                ToolResolverCtx.reset(tool_token)
 
     async def resume(self, approval: dict[str, Any]) -> dict[str, Any]:
         """人审通过后恢复执行。approval 形如 {"approved": true, "comment": "..."}。"""
@@ -152,6 +164,7 @@ class GraphRunner:
         subgraph_token = (
             SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
         )
+        tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
 
         try:
             await self.compiled.ainvoke(
@@ -173,6 +186,8 @@ class GraphRunner:
                 ModelResolverCtx.reset(model_token)
             if subgraph_token is not None:
                 SubgraphLoaderCtx.reset(subgraph_token)
+            if tool_token is not None:
+                ToolResolverCtx.reset(tool_token)
 
     def get_interrupt_state(self) -> dict[str, Any] | None:
         """查询当前 thread 是否在等人审。"""

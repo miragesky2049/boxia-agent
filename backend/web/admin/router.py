@@ -24,6 +24,8 @@ from web.admin.routers.users import router as users_router
 from web.admin.routers.v4_app_admin import router as v4_app_admin_router
 from web.admin.routers.v4_applications import router as v4_applications_router
 from web.admin.routers.v4_models import router as v4_models_router
+from web.admin.routers.v4_resources import admin_router as v4_resource_admin_router
+from web.admin.routers.v4_resources import tenant_router as v4_resource_tenant_router
 from web.admin.routers.workflows import router as workflows_router
 from web.deps.auth import require_admin
 
@@ -51,3 +53,5 @@ router.include_router(workflows_router)
 router.include_router(v4_applications_router)
 router.include_router(v4_app_admin_router)
 router.include_router(v4_models_router)
+router.include_router(v4_resource_admin_router)
+router.include_router(v4_resource_tenant_router)
