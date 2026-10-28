@@ -1,0 +1,256 @@
+import { request } from './client'
+import { getAccessToken } from '../auth/tokenStore'
+import { getTenantCode } from '../tenant/scope'
+
+// ========== 应用 graph ==========
+export interface V4GraphNode {
+  id: string
+  type: string
+  position?: { x: number; y: number }
+  config?: Record<string, unknown>
+}
+
+export interface V4GraphEdge {
+  from: string
+  to: string
+  type?: 'normal' | 'feedback'
+  when?: string
+}
+
+export interface V4Graph {
+  nodes: V4GraphNode[]
+  edges: V4GraphEdge[]
+}
+
+export interface V4Application {
+  id: string
+  owner_type: 'platform' | 'tenant'
+  owner_id: string | null
+  name: string
+  avatar_url: string | null
+  description: string
+  is_enabled: boolean
+  is_listed_in_market: boolean
+  visibility_mode: 'all' | 'custom'
+  created_by: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface V4ApplicationGraph extends V4Application {
+  graph: V4Graph
+  runtime_mode: 'dag' | 'agent_loop'
+}
+
+export interface V4MarketplaceItem {
+  id: string
+  name: string
+  avatar_url: string | null
+  description: string
+}
+
+export interface V4MyApp {
+  id: string
+  tenant_id: string
+  application_id: string
+  status: 'active' | 'suspended' | 'disabled' | 'revoked'
+  source: 'marketplace' | 'custom'
+  name: string
+  description: string
+  avatar_url: string | null
+  created_at: string
+}
+
+// ========== 模型目录 ==========
+export interface V4ModelItem {
+  model_id: string
+  display_name: string
+  capabilities: Record<string, unknown>
+  provider_name: string
+}
+
+export interface V4ModelCatalogItem extends V4ModelItem {
+  id: string
+  provider_id: string
+  is_enabled: boolean
+  base_url: string
+}
+
+export interface V4Provider {
+  id: string
+  name: string
+  base_url: string
+  owner_type: 'platform' | 'tenant'
+  owner_id: string | null
+  is_enabled: boolean
+  created_at: string
+}
+
+// ========== 市场接口（租户端） ==========
+export async function listMarketplace(): Promise<V4MarketplaceItem[]> {
+  return request<V4MarketplaceItem[]>('/admin/v4/marketplace/applications')
+}
+
+export async function subscribeApplication(applicationId: string): Promise<{
+  instance_id: string
+  application_id: string
+}> {
+  return request<{ instance_id: string; application_id: string }>(
+    '/admin/v4/marketplace/subscribe',
+    {
+      method: 'POST',
+      body: JSON.stringify({ application_id: applicationId }),
+    },
+  )
+}
+
+export async function listMyApps(): Promise<V4MyApp[]> {
+  return request<V4MyApp[]>('/admin/v4/marketplace/my-apps')
+}
+
+// ========== 平台应用管理 ==========
+export async function listApps(params: {
+  owner_type?: string
+  marketplace_only?: boolean
+} = {}): Promise<V4Application[]> {
+  const query = new URLSearchParams()
+  if (params.owner_type) query.set('owner_type', params.owner_type)
+  if (params.marketplace_only) query.set('marketplace_only', 'true')
+  const qs = query.toString()
+  return request<V4Application[]>(`/admin/v4/apps${qs ? `?${qs}` : ''}`)
+}
+
+export async function createApp(payload: {
+  name: string
+  description?: string
+}): Promise<{ application_id: string }> {
+  return request<{ application_id: string }>('/admin/v4/apps', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getApp(applicationId: string): Promise<V4Application> {
+  return request<V4Application>(`/admin/v4/apps/${applicationId}`)
+}
+
+export async function updateApp(
+  applicationId: string,
+  payload: { name?: string; description?: string; avatar_url?: string | null },
+): Promise<void> {
+  await request<void>(`/admin/v4/apps/${applicationId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function getAppGraph(applicationId: string): Promise<{
+  graph: V4Graph
+  runtime_mode: 'dag' | 'agent_loop'
+  graph_schema_version: number
+}> {
+  return request<{ graph: V4Graph; runtime_mode: 'dag' | 'agent_loop'; graph_schema_version: number }>(
+    `/admin/v4/apps/${applicationId}/graph`,
+  )
+}
+
+export async function saveAppGraph(
+  applicationId: string,
+  graph: V4Graph,
+): Promise<{ runtime_mode: 'dag' | 'agent_loop' }> {
+  return request<{ runtime_mode: 'dag' | 'agent_loop' }>(
+    `/admin/v4/apps/${applicationId}/graph`,
+    {
+      method: 'PUT',
+      body: JSON.stringify({ graph }),
+    },
+  )
+}
+
+export async function setAppListing(applicationId: string, listed: boolean): Promise<void> {
+  await request<void>(`/admin/v4/apps/${applicationId}/listing`, {
+    method: 'POST',
+    body: JSON.stringify({ listed }),
+  })
+}
+
+export async function setAppEnabled(applicationId: string, enabled: boolean): Promise<void> {
+  await request<void>(`/admin/v4/apps/${applicationId}/enabled`, {
+    method: 'POST',
+    body: JSON.stringify({ enabled }),
+  })
+}
+
+// ========== 模型目录 ==========
+export async function listAvailableModels(): Promise<V4ModelItem[]> {
+  return request<V4ModelItem[]>('/admin/v4/models/catalog/available')
+}
+
+export async function listModelCatalog(): Promise<V4ModelCatalogItem[]> {
+  return request<V4ModelCatalogItem[]>('/admin/v4/models/catalog')
+}
+
+export async function listProviders(): Promise<V4Provider[]> {
+  return request<V4Provider[]>('/admin/v4/models/providers')
+}
+
+// ========== 试运行 SSE ==========
+export interface V4DebugNodeState {
+  node_id: string
+  type: string
+  status: 'pending' | 'running' | 'success' | 'error'
+  duration_ms: number
+  output: Record<string, unknown>
+  error: string
+}
+
+export interface V4DebugStreamEvent {
+  event: 'node_start' | 'node_end' | 'result' | 'error'
+  data: Record<string, unknown>
+}
+
+/**
+ * v4 画布试运行：SSE 逐节点推送 node_start / node_end / result / error。
+ * 复用 workflows 的 fetch + ReadableStream 手写 SSE 解析。
+ */
+export async function debugRunAppStream(
+  payload: { graph: V4Graph; inputs: Record<string, unknown> },
+  onEvent: (event: V4DebugStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch('/api/v1/admin/v4/apps/debug/run/stream', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getAccessToken() ?? ''}`,
+      ...(getTenantCode() ? { 'X-Tenant-Code': getTenantCode() } : {}),
+    },
+    body: JSON.stringify(payload),
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`试运行启动失败：${response.status}`)
+  }
+
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const eventLine = frame.split('\n').find((line) => line.startsWith('event:'))
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data:'))
+      if (!eventLine || !dataLine) continue
+      const event = eventLine.slice('event:'.length).trim()
+      const dataRaw = dataLine.slice('data:'.length).trim()
+      try {
+        onEvent({ event: event as V4DebugStreamEvent['event'], data: JSON.parse(dataRaw) })
+      } catch {
+        // 忽略无法解析的帧
+      }
+    }
+  }
+}

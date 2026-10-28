@@ -52,15 +52,30 @@ def _get_shared_client(base_url: str, timeout: httpx.Timeout) -> httpx.AsyncClie
     """按 base_url 取共享 client；不存在则创建。
 
     不同 timeout 视为同一 client（timeout 在每次请求时可覆盖）。
+    http2 依赖 h2 包，未安装时自动降级为 http/1.1。
     """
     key = base_url
     client = _client_pool.get(key)
     if client is None or client.is_closed:
-        client = httpx.AsyncClient(timeout=timeout, http2=True, limits=httpx.Limits(
-            max_connections=100,
-            max_keepalive_connections=20,
-            keepalive_expiry=30.0,
-        ))
+        try:
+            client = httpx.AsyncClient(
+                timeout=timeout,
+                http2=True,
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=30.0,
+                ),
+            )
+        except ImportError:
+            client = httpx.AsyncClient(
+                timeout=timeout,
+                limits=httpx.Limits(
+                    max_connections=100,
+                    max_keepalive_connections=20,
+                    keepalive_expiry=30.0,
+                ),
+            )
         _client_pool[key] = client
     return client
 

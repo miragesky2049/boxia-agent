@@ -29,6 +29,7 @@ dependencies = [
     "uuid6>=2024.7.10",
     "uvicorn[standard]>=0.32.0",
     "celery[redis]>=5.4",
+    "langgraph>=1.2.18",
 ]
 
 [dependency-groups]
