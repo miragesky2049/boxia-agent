@@ -7,6 +7,7 @@ from typing import Any
 from uuid import UUID
 
 from internal.application.errors import ForbiddenError, NotFoundError
+from internal.application.rag_utils import apply_rag_to_prompt
 from internal.application.retrieval_service import RetrievalService
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
@@ -14,7 +15,12 @@ from internal.engine.context import AgentRunContext
 from internal.engine.llm import LLMClient, OpenAICompatLLMClient
 from internal.engine.memory import ConversationMemory, MemoryKey, build_conversation_memory
 from internal.engine.prompt import render_template
-from internal.engine.runner import AgentRunResult, FunctionCallAgentRunner, RunnerOptions
+from internal.engine.runner import (
+    AgentRunResult,
+    EventCallback,
+    FunctionCallAgentRunner,
+    RunnerOptions,
+)
 from internal.engine.tools import SkillManifest, LoadSkillTool, build_tools
 
 logger = logging.getLogger(__name__)
@@ -53,8 +59,9 @@ class AgentRunService:
         user_id: UUID,
         user_name: str = "",
         history: list[dict[str, Any]] | None = None,
+        event_callback: EventCallback | None = None,
     ) -> AgentRunResult:
-        """同步运行一次 agent 调用。"""
+        """同步运行一次 agent 调用；event_callback 非空时通过它外抛运行事件（SSE 用）。"""
         if self._context.is_platform:
             raise ForbiddenError("用户端仅支持通过租户子域名访问")
 
@@ -115,11 +122,20 @@ class AgentRunService:
             history=rag_history,
         )
 
+        # 运行期 UoW 拆分：DB 加载阶段结束后立即 commit，把连接归还连接池，
+        # 避免 LLM HTTP 循环（可能数十秒）期间一直占用 DB 连接。
+        # 后续 Tool 调用走 runtime_tools（已构建好的 Python 对象），不再碰 DB。
+        try:
+            self._uow.commit()
+        except Exception:  # noqa: BLE001 - commit 失败不阻断运行（读阶段无写）
+            logger.debug("uow commit after load failed", exc_info=True)
+
         runner = FunctionCallAgentRunner(
             llm=llm_client,
             tools=runtime_tools,
             system_prompt=system_prompt,
             default_max_iterations=options.max_iterations or 6,
+            event_callback=event_callback,
         )
 
         result = await runner.run(
@@ -223,52 +239,14 @@ class AgentRunService:
         history: list[dict[str, Any]] | None = None,
     ) -> str:
         """RAG 增强：启用时召回相关 chunks，拼到 system_prompt 后面。"""
-        retrieval_cfg = agent_config.get("retrieval") or {}
-        if not retrieval_cfg.get("enabled"):
-            return system_prompt
-
-        from internal.infrastructure.config.settings import get_settings
-
-        settings = get_settings()
-        document_ids_raw = retrieval_cfg.get("document_ids") or []
-        document_ids = [UUID(str(d)) for d in document_ids_raw]
-        top_k = int(retrieval_cfg.get("top_k") or settings.rag_top_k)
-        threshold = float(
-            retrieval_cfg.get("similarity_threshold") or settings.rag_similarity_threshold
-        )
-        rerank_enabled = bool(
-            retrieval_cfg.get("rerank_enabled", settings.rag_rerank_enabled)
-        )
-        query_rewrite_enabled = bool(
-            retrieval_cfg.get(
-                "query_rewrite_enabled", settings.rag_query_rewrite_enabled
-            )
-        )
-
-        service = self._retrieval_service or RetrievalService(self._uow, self._context)
-        try:
-            result = await service.search(
-                query=query,
-                history=history or [],
-                document_ids=document_ids,
-                top_k=top_k,
-                similarity_threshold=threshold,
-                enable_query_rewrite=query_rewrite_enabled,
-                enable_rerank=rerank_enabled,
-                variant_count=settings.rag_query_rewrite_variants,
-                recall_multiplier=settings.rag_recall_multiplier,
-            )
-        except Exception:  # noqa: BLE001 - RAG 失败不阻断主流程
-            logger.warning("rag retrieval failed query_len=%d", len(query), exc_info=True)
-            return system_prompt
-
-        if not result.context_text:
-            return system_prompt
-
-        return (
-            f"{system_prompt}\n\n"
-            f"以下是从知识库检索到的参考资料，请基于这些内容回答用户问题：\n\n"
-            f"{result.context_text}"
+        return await apply_rag_to_prompt(
+            system_prompt=system_prompt,
+            retrieval_cfg=agent_config.get("retrieval") or {},
+            query=query,
+            uow=self._uow,
+            context=self._context,
+            history=history,
+            retrieval_service=self._retrieval_service,
         )
 
     @staticmethod

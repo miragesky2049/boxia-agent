@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID, uuid4
 
+from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 from internal.engine.context import AgentRunContext
 
@@ -17,7 +18,8 @@ class WorkflowContext:
     - ``global_inputs``：用户传入的入参，与 graph.variables 对齐；start 节点直接返回。
     - ``node_outputs``：每个节点执行后写入 ``{node_id: {field: value}}``，供下游插值。
     - ``run_context``：复用 AgentRunContext 的租户 / 用户 / run_id 透传能力。
-    - ``uow``：ToolNode 用它从 tools 表加载工具实体；LLMNode 不用。
+    - ``uow``：ToolNode 用它从 tools 表加载工具实体；LLMNode RAG 也用它召回 chunks。
+    - ``request_context``：RAG 检索时的租户作用域，由 executor 透传。
     """
 
     workflow_id: UUID
@@ -26,6 +28,7 @@ class WorkflowContext:
     global_inputs: dict[str, Any]
     node_outputs: dict[str, dict[str, Any]] = field(default_factory=dict)
     uow: UnitOfWork | None = None
+    request_context: RequestContext | None = None
     run_id: str = field(default_factory=lambda: f"wf_{uuid4().hex[:24]}")
 
     def as_agent_context(self) -> AgentRunContext:

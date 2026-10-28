@@ -10,6 +10,7 @@ from typing import Any, Callable
 from uuid import UUID
 
 from internal.application.errors import ValidationError
+from internal.domain.entity.request_context import RequestContext
 from internal.engine.llm import LLMClient
 from internal.engine.workflow.context import WorkflowContext
 from internal.engine.workflow.registry import build_node
@@ -54,9 +55,11 @@ class WorkflowExecutor:
         self,
         llm_factory: Callable[[dict[str, Any]], LLMClient],
         node_timeout_seconds: float = DEFAULT_NODE_TIMEOUT_SECONDS,
+        event_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> None:
         self._llm_factory = llm_factory
         self._node_timeout = node_timeout_seconds
+        self._event_callback = event_callback
 
     async def run(
         self,
@@ -67,6 +70,7 @@ class WorkflowExecutor:
         graph: dict[str, Any],
         global_inputs: dict[str, Any],
         uow: Any = None,
+        request_context: RequestContext | None = None,
     ) -> WorkflowRunResult:
         """执行整图；任一节点失败则 finish_reason=error 并返回已完成节点状态。"""
         try:
@@ -83,6 +87,7 @@ class WorkflowExecutor:
             user_id=user_id,
             global_inputs=global_inputs,
             uow=uow,
+            request_context=request_context,
         )
 
         node_type_by_id: dict[str, str] = {
@@ -108,6 +113,14 @@ class WorkflowExecutor:
 
         try:
             for layer in layers:
+                for node_id in layer:
+                    await self._emit(
+                        "node_start",
+                        {
+                            "node_id": node_id,
+                            "type": node_type_by_id[node_id],
+                        },
+                    )
                 results = await asyncio.gather(
                     *(
                         self._run_one(node_id, node_type_by_id[node_id], data_by_id[node_id], ctx)
@@ -124,6 +137,15 @@ class WorkflowExecutor:
                             status="error",
                             error=str(result),
                         )
+                        await self._emit(
+                            "node_end",
+                            {
+                                "node_id": node_id,
+                                "type": node_type_by_id[node_id],
+                                "status": "error",
+                                "error": str(result),
+                            },
+                        )
                         raise result
                     output, duration_ms = result
                     states[node_id] = NodeState(
@@ -132,6 +154,16 @@ class WorkflowExecutor:
                         status="success",
                         duration_ms=duration_ms,
                         output=output,
+                    )
+                    await self._emit(
+                        "node_end",
+                        {
+                            "node_id": node_id,
+                            "type": node_type_by_id[node_id],
+                            "status": "success",
+                            "duration_ms": duration_ms,
+                            "output": output,
+                        },
                     )
                     if node_type_by_id[node_id] == "llm":
                         usage["prompt_tokens"] += int(output.get("prompt_tokens") or 0)
@@ -174,6 +206,17 @@ class WorkflowExecutor:
         duration_ms = int((time.perf_counter() - started) * 1000)
         ctx.record_output(node_id, output)
         return output, duration_ms
+
+    async def _emit(self, event: str, payload: dict[str, Any]) -> None:
+        """外抛运行事件；回调为 None 时静默跳过。"""
+        if self._event_callback is None:
+            return
+        try:
+            result = self._event_callback(event, payload)
+            if asyncio.iscoroutine(result):
+                await result
+        except Exception:  # noqa: BLE001 - 回调异常不能影响主流程
+            logger.warning("workflow event callback failed event=%s", event, exc_info=True)
 
     @staticmethod
     def _validate_inputs(

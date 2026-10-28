@@ -7,18 +7,28 @@
 from __future__ import annotations
 
 import logging
+import time
 from abc import ABC, abstractmethod
 from typing import Any, Callable
 from uuid import UUID
 
 from internal.application.errors import NotFoundError, ValidationError
+from internal.application.rag_utils import apply_rag_to_prompt
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.engine.context import AgentRunContext
 from internal.engine.llm import LLMClient
 from internal.engine.prompt import render_template
 from internal.engine.tools import Tool, ToolExecutionError, build_tools
 from internal.engine.workflow.context import WorkflowContext
+from internal.infrastructure.observability.metrics import TOOL_CALLS, TOOL_DURATION
 
 logger = logging.getLogger(__name__)
+
+
+def _tenant_label(tenant_id: UUID | None) -> str:
+    if tenant_id is None or tenant_id == PLATFORM_TENANT_ID:
+        return "platform"
+    return tenant_id.hex[:8]
 
 
 class WorkflowNode(ABC):
@@ -72,6 +82,16 @@ class LLMNode(WorkflowNode):
         if not user_prompt.strip():
             raise ValidationError(f"LLM 节点 {self.node_id} 的 user_prompt_tpl 为空")
 
+        retrieval_cfg = self.data.get("retrieval") or {}
+        if retrieval_cfg.get("enabled") and ctx.uow is not None and ctx.request_context is not None:
+            system_prompt = await apply_rag_to_prompt(
+                system_prompt=system_prompt,
+                retrieval_cfg=retrieval_cfg if isinstance(retrieval_cfg, dict) else {},
+                query=user_prompt,
+                uow=ctx.uow,
+                context=ctx.request_context,
+            )
+
         messages: list[dict[str, Any]] = []
         if system_prompt.strip():
             messages.append({"role": "system", "content": system_prompt})
@@ -112,6 +132,12 @@ class ToolNode(WorkflowNode):
         if entity is None or not entity.is_enabled:
             raise NotFoundError(f"工具 {tool_id} 不存在或已停用")
 
+        # 工具实体加载后立即 commit，释放 DB 连接；后续 tool.invoke 是 HTTP 调用
+        try:
+            ctx.uow.commit()
+        except Exception:  # noqa: BLE001 - 读阶段 commit 失败不影响后续
+            logger.debug("tool node uow commit failed", exc_info=True)
+
         runtime_tools = build_tools([entity])
         if not runtime_tools:
             raise NotFoundError(f"工具 {entity.name} 已停用")
@@ -130,10 +156,21 @@ class ToolNode(WorkflowNode):
             for key, value in arguments_tpl.items()
         }
 
+        started = time.perf_counter()
+        tenant = _tenant_label(ctx.tenant_id)
+        tool_status = "success"
         try:
             content = await tool.invoke(arguments, ctx.as_agent_context())
         except ToolExecutionError as exc:
+            tool_status = "tool_error"
             raise ValidationError(f"工具 {entity.name} 执行失败：{exc.message}") from exc
+        except Exception:
+            tool_status = "unexpected_error"
+            raise
+        finally:
+            duration = time.perf_counter() - started
+            TOOL_DURATION.labels(tenant=tenant, tool=entity.name, status=tool_status).observe(duration)
+            TOOL_CALLS.labels(tenant=tenant, tool=entity.name, status=tool_status).inc()
 
         return {"output": content}
 

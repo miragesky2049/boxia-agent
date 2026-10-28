@@ -34,8 +34,9 @@ class WorkflowRunService:
         workflow_id: UUID,
         inputs: dict[str, Any],
         user_id: UUID,
+        event_callback: Callable[[str, dict[str, Any]], Any] | None = None,
     ) -> WorkflowRunResult:
-        """同步执行一次工作流。"""
+        """同步执行一次工作流；event_callback 非空时通过它外抛节点事件（SSE 用）。"""
         if self._context.is_platform:
             raise ForbiddenError("用户端仅支持通过租户子域名访问")
 
@@ -43,7 +44,17 @@ class WorkflowRunService:
         if workflow is None or not workflow.is_enabled:
             raise NotFoundError("工作流不存在或未对当前用户开放")
 
-        executor = WorkflowExecutor(llm_factory=self._build_llm_factory())
+        # 加载完成后立即 commit，把连接归还连接池；
+        # 运行期 ToolNode 会 autobegin 新的短事务做工具查询，用完即释放。
+        try:
+            self._uow.commit()
+        except Exception:  # noqa: BLE001
+            logger.debug("uow commit after load failed", exc_info=True)
+
+        executor = WorkflowExecutor(
+            llm_factory=self._build_llm_factory(),
+            event_callback=event_callback,
+        )
         return await executor.run(
             workflow_id=workflow.id,
             tenant_id=self._context.tenant_id,
@@ -51,6 +62,7 @@ class WorkflowRunService:
             graph=dict(workflow.graph or {}),
             global_inputs=dict(inputs or {}),
             uow=self._uow,
+            request_context=self._context,
         )
 
     def _build_llm_factory(self) -> Callable[[dict[str, Any]], LLMClient]:
