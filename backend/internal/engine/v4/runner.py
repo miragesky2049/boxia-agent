@@ -1,10 +1,11 @@
-"""v4 运行时：编译并执行 graph，记录运行实例，支持人审 interrupt / resume。"""
+"""v4 运行时：编译并执行 graph，记录运行实例 + 节点执行，支持人审 interrupt / resume。"""
 
 from __future__ import annotations
 
 import logging
 import time
 import uuid
+from datetime import datetime
 from typing import Any, Callable
 from uuid import UUID
 
@@ -33,6 +34,9 @@ ToolResolver = Callable[[str], Any]
 # 进程内 checkpointer：按 thread_id 保存图状态，支持 interrupt / resume
 # 首期用 MemorySaver（进程内），后续可换 PostgresSaver 持久化
 _CHECKPOINTER = MemorySaver()
+
+# LangGraph 内部事件名过滤：这些不是用户节点，不写 run_node_execution
+_INTERNAL_NAMES = {"", "LangGraph", "Graph", "Channel"}
 
 
 class GraphInterrupted(Exception):
@@ -71,6 +75,10 @@ class GraphRunner:
         self._run_repo = run_repo
         self._usage_repo = usage_repo
         self._audit_repo = audit_repo
+        # 节点 id -> type 映射，用于节点执行记录
+        self._node_types: dict[str, str] = {
+            n.get("id"): n.get("type", "unknown") for n in graph.get("nodes", [])
+        }
         # 编译时挂 checkpointer，支持 interrupt 暂停
         self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
 
@@ -87,6 +95,116 @@ class GraphRunner:
             if hasattr(task, "interrupts") and task.interrupts:
                 return task.interrupts[0].value
         return None
+
+    def _is_user_node(self, name: str) -> bool:
+        """判断事件 name 是否对应用户节点（而非 LangGraph 内部链）。"""
+        if not name or name.startswith("LangGraph") or name in _INTERNAL_NAMES:
+            return False
+        return name in self._node_types
+
+    async def _stream_and_record(self, stream_input: dict | Command) -> None:
+        """跑 graph 并逐节点落 run_node_execution。"""
+        node_started_at: dict[str, float] = {}
+
+        async for event in self.compiled.astream_events(
+            stream_input,
+            config=self._config(),
+            version="v2",
+        ):
+            kind = event["event"]
+            name = event.get("name") or ""
+            if not self._is_user_node(name):
+                continue
+
+            if kind == "on_chain_start":
+                node_started_at[name] = time.perf_counter()
+            elif kind == "on_chain_end":
+                started = node_started_at.pop(name, time.perf_counter())
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                data = event.get("data") or {}
+                output = data.get("output")
+                input_data = data.get("input")
+                self._record_node_execution(
+                    node_id=name,
+                    input_data=input_data if isinstance(input_data, dict) else None,
+                    output=output if isinstance(output, dict) else {"value": output},
+                    duration_ms=duration_ms,
+                )
+            elif kind == "on_chain_error":
+                started = node_started_at.pop(name, time.perf_counter())
+                duration_ms = int((time.perf_counter() - started) * 1000)
+                err = (event.get("data") or {}).get("error")
+                self._record_node_execution(
+                    node_id=name,
+                    output=None,
+                    duration_ms=duration_ms,
+                    error=str(err),
+                )
+
+    def _record_node_execution(
+        self,
+        *,
+        node_id: str,
+        input_data: dict | None,
+        output: dict | None,
+        duration_ms: int,
+        error: str | None = None,
+    ) -> None:
+        """写 run_node_execution；LLM 节点含 usage 时同步写 tenant_usage_ledger。"""
+        if self._run_repo is None:
+            return
+        node_type = self._node_types.get(node_id, "unknown")
+
+        token_usage: dict[str, int] | None = None
+        if isinstance(output, dict):
+            usage = output.get("usage")
+            if isinstance(usage, dict):
+                token_usage = {
+                    "prompt_tokens": int(usage.get("prompt_tokens", 0) or 0),
+                    "completion_tokens": int(usage.get("completion_tokens", 0) or 0),
+                    "total_tokens": int(usage.get("total_tokens", 0) or 0),
+                }
+
+        try:
+            self._run_repo.insert_node_execution(
+                run_id=self.run_id,
+                node_id=node_id,
+                node_type=node_type,
+                input_data=input_data,
+                output=output,
+                error=error,
+                started_at=datetime.utcnow(),
+                finished_at=datetime.utcnow(),
+                duration_ms=duration_ms,
+                token_usage=token_usage,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("写 run_node_execution 失败: node=%s", node_id)
+
+        # LLM 节点成功且有 usage -> 落 usage ledger
+        if (
+            self._usage_repo is not None
+            and node_type == "llm"
+            and error is None
+            and token_usage
+            and token_usage.get("total_tokens")
+        ):
+            model_id = ""
+            if isinstance(output, dict):
+                model_id = output.get("model") or ""
+            try:
+                self._usage_repo.record_usage(
+                    tenant_id=self.tenant_id,
+                    application_id=self.application_id,
+                    run_id=self.run_id,
+                    node_id=node_id,
+                    model_id=model_id,
+                    prompt_tokens=token_usage["prompt_tokens"],
+                    completion_tokens=token_usage["completion_tokens"],
+                    total_tokens=token_usage["total_tokens"],
+                )
+            except Exception:  # noqa: BLE001
+                logger.exception("写 tenant_usage_ledger 失败: node=%s", node_id)
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行 graph。如果遇到人审 interrupt，抛 GraphInterrupted。"""
@@ -123,10 +241,7 @@ class GraphRunner:
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
 
         try:
-            await self.compiled.ainvoke(
-                {"input": input_data},
-                config=self._config(),
-            )
+            await self._stream_and_record({"input": input_data})
             # 检查是否被 interrupt 暂停
             interrupt_payload = self._extract_interrupt()
             if interrupt_payload is not None:
@@ -137,23 +252,10 @@ class GraphRunner:
 
             result = await self.compiled.aget_state(self._config())
             output = result.values.get("output", {}) if result.values else {}
-            usage = result.values.get("usage") if result.values else None
             duration_ms = int((time.time() - started_at) * 1000)
 
             if self._run_repo is not None:
                 self._run_repo.update_run_status(self.run_id, status="success", output=output)
-
-            if self._usage_repo is not None and usage:
-                self._usage_repo.record_usage(
-                    tenant_id=self.tenant_id,
-                    application_id=self.application_id,
-                    run_id=self.run_id,
-                    node_id="llm",
-                    model_id=output.get("model", "unknown"),
-                    prompt_tokens=usage.get("prompt_tokens", 0),
-                    completion_tokens=usage.get("completion_tokens", 0),
-                    total_tokens=usage.get("total_tokens", 0),
-                )
 
             publish(NodeExecutionEvent(
                 run_id=self.run_id,
@@ -222,10 +324,7 @@ class GraphRunner:
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
 
         try:
-            await self.compiled.ainvoke(
-                Command(resume=approval),
-                config=self._config(),
-            )
+            await self._stream_and_record(Command(resume=approval))
             # 检查是否还有下一个 interrupt
             interrupt_payload = self._extract_interrupt()
             if interrupt_payload is not None:
