@@ -7,6 +7,7 @@ from typing import Literal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from internal.engine.llm import shutdown_llm_clients
 from internal.infrastructure.bootstrap import ensure_platform_admin
 from internal.infrastructure.config.settings import Settings, get_settings
 from internal.infrastructure.middleware.access_log import AccessLogMiddleware
@@ -41,6 +42,7 @@ async def lifespan(application: FastAPI):
         except Exception:
             logger.exception("平台管理员自动初始化失败")
     yield
+    await shutdown_llm_clients()
     dispose_engine()
 
 

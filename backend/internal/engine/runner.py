@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.engine.context import AgentRunContext
 from internal.engine.llm import LLMClient, LLMResponse, LLMToolSpec
 from internal.engine.messages import (
@@ -20,8 +22,15 @@ from internal.engine.messages import (
     user,
 )
 from internal.engine.tools import Tool, ToolExecutionError
+from internal.infrastructure.observability.metrics import AGENT_ITERATIONS, TOOL_CALLS, TOOL_DURATION
 
 logger = logging.getLogger(__name__)
+
+
+def _tenant_label(context: AgentRunContext) -> str:
+    if context.tenant_id == PLATFORM_TENANT_ID:
+        return "platform"
+    return context.tenant_id.hex[:8]
 
 
 @dataclass(frozen=True)
@@ -183,6 +192,10 @@ class FunctionCallAgentRunner:
             },
         )
 
+        AGENT_ITERATIONS.labels(tenant=_tenant_label(context)).observe(
+            len(tool_traces) or 1
+        )
+
         return AgentRunResult(
             content=final_content,
             messages=messages,
@@ -206,24 +219,34 @@ class FunctionCallAgentRunner:
         )
 
         tool = self._tools.get(name)
+        tenant = _tenant_label(context)
         if tool is None:
             observation = f"错误：未注册的工具 `{name}`，可用工具列表：{list(self._tools.keys())}"
+            TOOL_CALLS.labels(tenant=tenant, tool=name, status="not_found").inc()
             await self._emit(
                 "tool_end",
                 {"tool_call_id": tool_call.id, "name": name, "observation": observation, "is_error": True},
             )
             return observation, True
 
+        started = time.perf_counter()
+        status = "success"
         try:
             observation = await tool.invoke(arguments, context)
             is_error = False
         except ToolExecutionError as exc:
             observation = f"工具执行失败：{exc.message}"
             is_error = True
+            status = "tool_error"
         except Exception as exc:  # noqa: BLE001 - 兜底：不让单工具异常拖垮主循环
             logger.exception("tool unexpected error tool=%s", name)
             observation = f"工具执行异常：{exc}"
             is_error = True
+            status = "unexpected_error"
+
+        duration = time.perf_counter() - started
+        TOOL_DURATION.labels(tenant=tenant, tool=name, status=status).observe(duration)
+        TOOL_CALLS.labels(tenant=tenant, tool=name, status=status).inc()
 
         await self._emit(
             "tool_end",
