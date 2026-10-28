@@ -1,10 +1,11 @@
-"""创建管理员账号（生产初始化使用，禁止提交密码）。
+"""创建产品级管理员账号（生产初始化使用，禁止提交密码）。
 
 用法：
     ADMIN_USERNAME=admin ADMIN_PASSWORD='...' python -m scripts.create_admin
 未提供 ADMIN_PASSWORD 时从标准输入读取（推荐）。
 ADMIN_MUST_CHANGE_PASSWORD=false 可关闭首登改密，仅用于自动化环境。
-TENANT_CODE=acme 时创建该租户下的账号，留空则创建产品级平台账号。
+
+租户管理员已并入 users，由租户创建流程或租户用户管理页维护，本脚本不再支持。
 """
 
 import getpass
@@ -13,6 +14,8 @@ import sys
 
 from sqlalchemy import text
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import dispose_engine, get_engine
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
@@ -27,7 +30,7 @@ def main() -> int:
     """创建或更新管理员账号，并默认强制首次登录改密。"""
     username = os.environ.get("ADMIN_USERNAME", "admin").strip()
     display_name = os.environ.get("ADMIN_DISPLAY_NAME", "系统管理员").strip()
-    role = os.environ.get("ADMIN_ROLE", "superadmin").strip()
+    role_code = os.environ.get("ADMIN_ROLE", "superadmin").strip()
     password = os.environ.get("ADMIN_PASSWORD") or getpass.getpass("管理员密码: ")
     if not password:
         print("密码不能为空", file=sys.stderr)
@@ -41,31 +44,28 @@ def main() -> int:
 
     password_hash = hash_password(password)
     must_change = _must_change_password()
-    tenant_code = os.environ.get("TENANT_CODE", "").strip().lower()
     engine = get_engine()
     try:
         with engine.begin() as conn:
-            tenant_id = None
-            if tenant_code:
-                row = conn.execute(
-                    text("SELECT id FROM tenants WHERE code = :code"), {"code": tenant_code}
-                ).first()
-                if row is None:
-                    print(f"租户 {tenant_code} 不存在", file=sys.stderr)
-                    return 2
-                tenant_id = row[0]
-            exists = conn.execute(
+            role_id = conn.execute(
                 text(
-                    "SELECT id FROM admin_users WHERE username = :username "
-                    "AND tenant_id IS NOT DISTINCT FROM :tenant_id"
+                    "SELECT id FROM roles WHERE tenant_id = :tid AND code = :code "
+                    "AND is_active = TRUE"
                 ),
-                {"username": username, "tenant_id": tenant_id},
+                {"code": role_code, "tid": str(PLATFORM_TENANT_ID)},
+            ).scalar()
+            if role_id is None:
+                print(f"平台角色 {role_code} 不存在或已停用", file=sys.stderr)
+                return 2
+            exists = conn.execute(
+                text("SELECT id FROM admin_users WHERE username = :username"),
+                {"username": username},
             ).first()
             if exists:
                 conn.execute(
                     text(
                         "UPDATE admin_users SET password_hash = :hash, display_name = :name, "
-                        "role = :role, is_active = TRUE, failed_login_count = 0, "
+                        "role_id = :role_id, is_active = TRUE, failed_login_count = 0, "
                         "locked_until = NULL, must_change_password = :must_change, "
                         "token_version = token_version + 1, password_changed_at = now() "
                         "WHERE id = :id"
@@ -73,7 +73,7 @@ def main() -> int:
                     {
                         "hash": password_hash,
                         "name": display_name,
-                        "role": role,
+                        "role_id": role_id,
                         "must_change": must_change,
                         "id": exists[0],
                     },
@@ -83,21 +83,20 @@ def main() -> int:
                 conn.execute(
                     text(
                         "INSERT INTO admin_users "
-                        "(tenant_id, username, password_hash, display_name, role, is_active, "
+                        "(id, username, password_hash, display_name, role_id, is_active, "
                         "must_change_password, password_changed_at) "
-                        "VALUES (:tenant_id, :username, :hash, :name, :role, TRUE, :must_change, now())"
+                        "VALUES (:id, :username, :hash, :name, :role_id, TRUE, :must_change, now())"
                     ),
                     {
-                        "tenant_id": tenant_id,
+                        "id": new_uuid(),
                         "username": username,
                         "hash": password_hash,
                         "name": display_name,
-                        "role": role,
+                        "role_id": role_id,
                         "must_change": must_change,
                     },
                 )
-                scope = f"租户 {tenant_code}" if tenant_code else "产品级平台"
-                print(f"管理员 {username} 创建成功（{scope}）")
+                print(f"管理员 {username} 创建成功（产品级平台）")
     finally:
         dispose_engine()
     return 0

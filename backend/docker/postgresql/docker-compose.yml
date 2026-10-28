@@ -1,0 +1,28 @@
+name: postgresql # Compose 项目名（stack 名），不加时默认取本文件所在目录名
+
+services:
+  postgres:
+    # 使用 pgvector 官方镜像，预置 vector 扩展；RAG 向量检索依赖
+    image: pgvector/pgvector:pg17
+    container_name: postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: boxia_agent
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      # 默认使用命名卷 pgdata；如需数据落到宿主机目录，启动前设置 PG_DATA_DIR，例如
+      # Windows: set PG_DATA_DIR=D:/Docker/postgresql
+      # Linux/macOS: export PG_DATA_DIR=$PWD/.pgdata
+      - ${PG_DATA_DIR:-pgdata}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d boxia_agent"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  pgdata:
+    name: pgdata

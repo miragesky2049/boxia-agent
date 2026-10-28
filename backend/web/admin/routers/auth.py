@@ -31,10 +31,12 @@ def login(
 ) -> LoginResponse:
     """管理员登录，仅校验当前子域名作用域内的账号。"""
     ip, user_agent = _client_meta(request)
+    # 平台账号：tenant_id 传 None 走 admin_users；租户账号：传真实租户 ID 走 users。
+    tenant_id = None if context.is_platform else context.tenant_id
     pair = service.login(
         payload.username,
         payload.password,
-        tenant_id=context.tenant_id,
+        tenant_id=tenant_id,
         ip=ip,
         user_agent=user_agent,
     )
@@ -56,9 +58,10 @@ def refresh(
 ) -> LoginResponse:
     """轮换刷新令牌，令牌归属作用域必须与当前子域名一致。"""
     ip, user_agent = _client_meta(request)
+    tenant_id = None if context.is_platform else context.tenant_id
     pair = service.refresh(
         payload.refresh_token,
-        tenant_id=context.tenant_id,
+        tenant_id=tenant_id,
         ip=ip,
         user_agent=user_agent,
     )
@@ -75,8 +78,15 @@ def refresh(
 def logout(principal: AdminAuthDep, request: Request, service: AuthServiceDep) -> None:
     """撤销当前会话族，使访问令牌立即失效。"""
     ip, user_agent = _client_meta(request)
-    user = service.get_profile(principal.user_id)
-    service.logout(user, principal.session_id, ip=ip, user_agent=user_agent)
+    tenant_id = None if principal.is_platform else principal.tenant_id
+    service.logout(
+        principal.user_id,
+        principal.username,
+        principal.session_id,
+        tenant_id=tenant_id,
+        ip=ip,
+        user_agent=user_agent,
+    )
 
 
 @login_router.post("/password", status_code=status.HTTP_204_NO_CONTENT)
@@ -88,10 +98,12 @@ def change_password(
 ) -> None:
     """修改当前账号密码并撤销全部会话。"""
     ip, user_agent = _client_meta(request)
+    tenant_id = None if principal.is_platform else principal.tenant_id
     service.change_password(
         principal.user_id,
         payload.current_password,
         payload.new_password,
+        tenant_id=tenant_id,
         ip=ip,
         user_agent=user_agent,
     )
@@ -100,4 +112,5 @@ def change_password(
 @login_router.get("/me", response_model=AdminUserOut)
 def get_current_admin(principal: AdminAuthDep, service: AuthServiceDep) -> AdminUserOut:
     """返回当前登录的管理员信息。"""
-    return AdminUserOut.model_validate(service.get_profile(principal.user_id))
+    tenant_id = None if principal.is_platform else principal.tenant_id
+    return AdminUserOut.model_validate(service.get_profile(principal.user_id, tenant_id))

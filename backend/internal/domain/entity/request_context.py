@@ -2,7 +2,9 @@
 
 from dataclasses import dataclass
 from typing import Literal
+from uuid import UUID
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.tenant import Tenant
 
 PLATFORM_SCOPE = "platform"
@@ -26,10 +28,10 @@ class RequestContext:
         return self.scope == PLATFORM_SCOPE
 
     @property
-    def tenant_id(self) -> int | None:
-        """当前租户 ID；产品级为 None。"""
-        return self.tenant.id if self.tenant else None
+    def tenant_id(self) -> UUID:
+        """当前租户 ID；产品级返回 PLATFORM_TENANT_ID（全零 UUID）。"""
+        return self.tenant.id if self.tenant else PLATFORM_TENANT_ID
 
-    def can_manage(self, resource_tenant_id: int | None) -> bool:
+    def can_manage(self, resource_tenant_id: UUID) -> bool:
         """当前作用域能否维护指定归属的资源。"""
         return resource_tenant_id == self.tenant_id

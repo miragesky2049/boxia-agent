@@ -1,6 +1,7 @@
 """多租户隔离测试：子域名识别、账号隔离与产品级资源只读复用。"""
 
 from datetime import datetime
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -65,7 +66,7 @@ def test_platform_context(client: TestClient) -> None:
     assert body["root_domain"] == "example.com"
     assert body["platform_admin_subdomain"] == "adminsystem"
     assert body["platform_admin_host"] == "adminsystem.example.com"
-    assert body["platform_name"] == "Agent运营管理平台"
+    assert body["platform_name"] == "AI智能体运营管理平台"
 
 
 def test_tenant_context_and_login(
@@ -87,6 +88,28 @@ def test_tenant_context_and_login(
     assert context.status_code == 200, context.text
     assert context.json()["scope"] == "tenant"
     assert context.json()["user"]["username"] == f"{TENANT_A}-admin"
+
+
+def test_tenant_admin_password_change_clears_force_flag(
+    client: TestClient, auth_headers: dict[str, str], tenant_client
+) -> None:
+    """租户管理员首登改密后，再次登录不应继续要求改密。"""
+    _create_tenant(client, auth_headers, TENANT_A, "Acme 公司")
+    acme = tenant_client(TENANT_A)
+    new_password = "New-tenant-pass-456"
+
+    tokens = _login(acme, f"{TENANT_A}-admin")
+    assert tokens["user"]["must_change_password"] is True
+
+    response = acme.post(
+        "/api/v1/admin/auth/password",
+        json={"current_password": TENANT_ADMIN_PASSWORD, "new_password": new_password},
+        headers=_bearer(tokens["access_token"]),
+    )
+    assert response.status_code == 204, response.text
+
+    relogin = _login(acme, f"{TENANT_A}-admin", new_password)
+    assert relogin["user"]["must_change_password"] is False
 
 
 def test_platform_account_cannot_login_on_tenant_domain(
@@ -139,7 +162,7 @@ def test_cross_scope_token_rejected(
 def test_platform_resource_visible_but_readonly_for_tenant(
     client: TestClient, auth_headers: dict[str, str], tenant_client
 ) -> None:
-    _create_tenant(client, auth_headers, TENANT_A, "Acme 公司")
+    tenant = _create_tenant(client, auth_headers, TENANT_A, "Acme 公司")
     acme = tenant_client(TENANT_A)
     tenant_headers = _bearer(_login(acme, f"{TENANT_A}-admin")["access_token"])
 
@@ -149,6 +172,18 @@ def test_platform_resource_visible_but_readonly_for_tenant(
     assert platform_skill.status_code == 201
     platform_id = platform_skill.json()["id"]
     assert platform_skill.json()["is_platform"] is True
+
+    hidden = acme.get("/api/v1/admin/skills?page_size=100", headers=tenant_headers)
+    assert hidden.status_code == 200
+    assert platform_id not in [item["id"] for item in hidden.json()["items"]]
+
+    granted = client.put(
+        "/api/v1/admin/grants",
+        params={"resource_type": "skill", "resource_id": platform_id},
+        json={"grants": [{"tenant_id": tenant["id"], "role_id": None}]},
+        headers=auth_headers,
+    )
+    assert granted.status_code == 200, granted.text
 
     listed = acme.get("/api/v1/admin/skills?page_size=100", headers=tenant_headers)
     assert listed.status_code == 200
@@ -242,13 +277,15 @@ def test_tenant_users_scoped(
     acme = tenant_client(TENANT_A)
     tenant_headers = _bearer(_login(acme, f"{TENANT_A}-admin")["access_token"])
 
+    roles = acme.get("/api/v1/admin/roles", headers=tenant_headers).json()
+    admin_role = next(item for item in roles if item["code"] == "admin")
     created = acme.post(
         "/api/v1/admin/users",
         json={
             "username": "operator",
             "password": "Strong-password-456",
             "display_name": "运营",
-            "role": "admin",
+            "role_ids": [admin_role["id"]],
         },
         headers=tenant_headers,
     )
@@ -260,32 +297,24 @@ def test_tenant_users_scoped(
         f"{TENANT_A}-admin",
         "operator",
     }
-    assert (
-        acme.get("/api/v1/admin/users?all_tenants=true", headers=tenant_headers).status_code == 403
-    )
-
-    all_users = client.get(
-        "/api/v1/admin/users?all_tenants=true&page_size=100", headers=auth_headers
-    )
-    assert all_users.status_code == 200
-    assert all_users.json()["total"] == 3
+    # 租户管理员统一在 users 中，平台管理员账号表看不到租户用户
+    assert client.get("/api/v1/admin/users", headers=auth_headers).status_code == 403
 
 
-def test_create_user_with_unknown_tenant_rejected(
+def test_platform_cannot_create_tenant_user(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     response = client.post(
         "/api/v1/admin/users",
         json={
-            "username": "ghost-admin",
+            "username": "ghost-user",
             "password": "Strong-password-456",
             "display_name": "幽灵账号",
-            "role": "admin",
-            "tenant_id": 999999,
+            "role_ids": [1],
         },
         headers=auth_headers,
     )
-    assert response.status_code == 404
+    assert response.status_code == 403
 
 
 def test_tenant_login_failure_audited_in_tenant_scope(
@@ -325,7 +354,7 @@ def _fake_tenant(code: str) -> Tenant:
     """构造租户实体，避免单元测试依赖数据库。"""
     now = datetime(2026, 1, 1)
     return Tenant(
-        id=1,
+        id=UUID("0190f5a0-0000-7000-8000-000000000000"),
         code=code,
         name=f"{code} 公司",
         is_active=True,

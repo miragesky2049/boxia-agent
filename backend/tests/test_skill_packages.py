@@ -2,6 +2,7 @@
 
 import io
 import zipfile
+from uuid import UUID
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,7 +31,7 @@ def _create_skill(
 def _write_file(
     client: TestClient,
     headers: dict[str, str],
-    skill_id: int,
+    skill_id: UUID,
     path: str,
     content: str,
     expected_hash: str | None = None,
@@ -42,7 +43,7 @@ def _write_file(
 
 
 def _list_files(
-    client: TestClient, headers: dict[str, str], skill_id: int, query: str = ""
+    client: TestClient, headers: dict[str, str], skill_id: UUID, query: str = ""
 ) -> dict:
     response = client.get(f"/api/v1/admin/skills/{skill_id}/files{query}", headers=headers)
     assert response.status_code == 200, response.text
@@ -63,6 +64,23 @@ def _create_tenant(client: TestClient, headers: dict[str, str]) -> dict:
     )
     assert response.status_code == 201, response.text
     return response.json()
+
+
+def _grant_to_tenant(
+    client: TestClient,
+    headers: dict[str, str],
+    tenant_id: UUID,
+    resource_type: str,
+    resource_id: UUID,
+) -> None:
+    """平台把资源授权给整租户，租户内全部角色可见。"""
+    response = client.put(
+        "/api/v1/admin/grants",
+        params={"resource_type": resource_type, "resource_id": resource_id},
+        json={"grants": [{"tenant_id": tenant_id, "role_id": None}]},
+        headers=headers,
+    )
+    assert response.status_code == 200, response.text
 
 
 def _tenant_client_with_headers(tenant_client) -> tuple[TestClient, dict[str, str]]:
@@ -313,7 +331,7 @@ def test_delete_skill_cascades_files(client: TestClient, auth_headers) -> None:
     with get_engine().connect() as conn:
         remaining = conn.execute(
             text("SELECT count(*) FROM skill_files WHERE skill_id = :skill_id"),
-            {"skill_id": skill["id"]},
+            {"skill_id": UUID(skill["id"])},
         ).scalar_one()
     assert remaining == 0
 
@@ -326,9 +344,20 @@ def test_tenant_reads_platform_skill_but_cannot_write_and_can_clone(
     platform = _create_skill(client, auth_headers, content="产品级入口")
     _write_file(client, auth_headers, platform["id"], "references/p.md", "产品级资料")
 
+    # 未授权前租户不可见
+    invisible = acme.get(
+        f"/api/v1/admin/skills/{platform['id']}", headers=tenant_headers
+    )
+    assert invisible.status_code == 404
+
+    _grant_to_tenant(client, auth_headers, created["id"], "skill", platform["id"])
+
     listed = acme.get(f"/api/v1/admin/skills/{platform['id']}/files", headers=tenant_headers)
     assert listed.status_code == 200
-    assert [item["path"] for item in listed.json()["items"]] == ["SKILL.md", "references/p.md"]
+    assert sorted(item["path"] for item in listed.json()["items"]) == [
+        "SKILL.md",
+        "references/p.md",
+    ]
 
     forbidden = _write_file(acme, tenant_headers, platform["id"], "SKILL.md", "篡改")
     assert forbidden.status_code == 403
@@ -351,7 +380,10 @@ def test_tenant_reads_platform_skill_but_cannot_write_and_can_clone(
     clone_id = cloned.json()["id"]
 
     clone_files = _list_files(acme, tenant_headers, clone_id)
-    assert [item["path"] for item in clone_files["items"]] == ["SKILL.md", "references/p.md"]
+    assert sorted(item["path"] for item in clone_files["items"]) == [
+        "SKILL.md",
+        "references/p.md",
+    ]
     content = acme.get(
         f"/api/v1/admin/skills/{clone_id}/files/content",
         params={"path": "references/p.md"},
@@ -384,10 +416,11 @@ def test_platform_cannot_clone(client: TestClient, auth_headers) -> None:
 
 
 def test_clone_duplicate_name_conflict(client: TestClient, auth_headers, tenant_client) -> None:
-    _create_tenant(client, auth_headers)
+    tenant = _create_tenant(client, auth_headers)
     acme, tenant_headers = _tenant_client_with_headers(tenant_client)
     platform = _create_skill(client, auth_headers, name="平台技能")
     _write_file(client, auth_headers, platform["id"], "notes.md", "x")
+    _grant_to_tenant(client, auth_headers, tenant["id"], "skill", platform["id"])
 
     first = acme.post(
         f"/api/v1/admin/skills/{platform['id']}/clone",

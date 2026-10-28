@@ -21,10 +21,10 @@ async function adminToken(request: APIRequestContext): Promise<string> {
   return ((await response.json()) as { access_token: string }).access_token
 }
 
-async function ensureTenant(request: APIRequestContext, token: string): Promise<number> {
+async function ensureTenant(request: APIRequestContext, token: string): Promise<string> {
   const auth = { Authorization: `Bearer ${token}` }
   const list = await request.get('/api/v1/admin/tenants?page_size=100', { headers: auth })
-  const body = (await list.json()) as { items: { id: number; code: string }[] }
+  const body = (await list.json()) as { items: { id: string; code: string }[] }
   const existing = body.items.find((item) => item.code === TENANT_CODE)
   if (existing) return existing.id
 
@@ -39,24 +39,29 @@ async function ensureTenant(request: APIRequestContext, token: string): Promise<
     },
   })
   expect(created.status()).toBe(201)
-  return ((await created.json()) as { id: number }).id
+  return ((await created.json()) as { id: string }).id
 }
 
-/** 每次测试前把租户管理员重置为已知初始密码，并保持首登改密标记。 */
-async function resetTenantAdminPassword(request: APIRequestContext, token: string) {
-  const auth = { Authorization: `Bearer ${token}` }
-  const list = await request.get(
-    `/api/v1/admin/users?all_tenants=true&page_size=100&keyword=${TENANT_ADMIN}`,
-    { headers: auth },
-  )
-  const body = (await list.json()) as { items: { id: number; username: string }[] }
-  const target = body.items.find((item) => item.username === TENANT_ADMIN)
-  expect(target).toBeTruthy()
-  const reset = await request.post(`/api/v1/admin/users/${target!.id}/password`, {
-    headers: auth,
-    data: { new_password: TENANT_PASSWORD },
-  })
-  expect(reset.status()).toBe(204)
+/** 每次测试前把租户管理员重置为已知初始密码。租户管理员已并入 users，平台无法直接重置。 */
+async function resetTenantAdminPassword(request: APIRequestContext) {
+  const tenantHeaders = { 'X-Tenant-Code': TENANT_CODE }
+  for (const password of [TENANT_PASSWORD, TENANT_NEW_PASSWORD]) {
+    const login = await request.post('/api/v1/admin/auth/login', {
+      headers: tenantHeaders,
+      data: { username: TENANT_ADMIN, password },
+    })
+    if (!login.ok()) continue
+    if (password === TENANT_PASSWORD) return
+
+    const token = ((await login.json()) as { access_token: string }).access_token
+    const changed = await request.post('/api/v1/admin/auth/password', {
+      headers: { ...tenantHeaders, Authorization: `Bearer ${token}` },
+      data: { current_password: password, new_password: TENANT_PASSWORD },
+    })
+    expect(changed.status()).toBe(204)
+    return
+  }
+  throw new Error('无法重置租户管理员密码：尝试的密码均不可用')
 }
 
 async function loginPlatform(page: Page) {
@@ -92,7 +97,7 @@ async function submitLogin(page: Page, password: string) {
 /** 切换到租户作用域并完成登录；首登会先完成强制改密。 */
 async function loginTenant(page: Page, request: APIRequestContext, token: string) {
   await ensureTenant(request, token)
-  await resetTenantAdminPassword(request, token)
+  await resetTenantAdminPassword(request)
 
   await page.goto('/login')
   await switchToTenant(page)
@@ -183,27 +188,76 @@ test.describe('多租户', () => {
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
   })
 
-  test('租户内产品级资源只读', async ({ page, request }) => {
+  test('平台智能体授权给租户后才可见', async ({ page, request }) => {
     const token = await adminToken(request)
-    await ensureTenant(request, token)
+    const tenantId = await ensureTenant(request, token)
+    const name = `平台授权智能体 ${Date.now()}`
 
-    const name = `平台共享技能 ${Date.now()}`
-    const created = await request.post('/api/v1/admin/skills', {
+    const created = await request.post('/api/v1/admin/agents', {
       headers: { Authorization: `Bearer ${token}` },
-      data: { name, description: '产品级维护', is_enabled: true, content: '', config: {} },
+      data: { name, description: '产品级维护', is_enabled: true, config: {} },
     })
     expect(created.status()).toBe(201)
+    const agentId = ((await created.json()) as { id: string }).id
 
+    try {
+      await loginTenant(page, request, token)
+      await page.goto('/agents')
+      const search = page.getByPlaceholder('搜索智能体名称或描述')
+      await search.fill(name)
+      await search.press('Enter')
+      await expect(page.getByRole('row', { name: new RegExp(name) })).toHaveCount(0)
+
+      const grant = await request.put(
+        `/api/v1/admin/grants?resource_type=agent&resource_id=${agentId}`,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+          data: { grants: [{ tenant_id: tenantId, role_id: null }] },
+        },
+      )
+      expect(grant.ok()).toBeTruthy()
+
+      await search.fill(name)
+      await search.press('Enter')
+      const row = page.getByRole('row', { name: new RegExp(name) })
+      await expect(row).toBeVisible()
+      await expect(row.getByText('平台级')).toBeVisible()
+      await expect(row.getByText('只读')).toBeVisible()
+      await expect(row.getByRole('button', { name: /删\s*除/ })).toHaveCount(0)
+    } finally {
+      await request.delete(`/api/v1/admin/agents/${agentId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    }
+  })
+
+  test('租户管理员可管理角色与最终用户', async ({ page, request }) => {
+    const token = await adminToken(request)
     await loginTenant(page, request, token)
 
-    await page.goto('/skills')
-    await page.getByPlaceholder('搜索名称或描述').fill(name)
-    await page.getByPlaceholder('搜索名称或描述').press('Enter')
+    const suffix = Date.now()
+    const roleName = `E2E 角色 ${suffix}`
+    await page.getByRole('menuitem', { name: '角色管理' }).click()
+    await expect(page.getByRole('heading', { name: '角色管理' })).toBeVisible()
 
-    const row = page.getByRole('row', { name: new RegExp(name) })
+    await page.getByRole('button', { name: '新建角色' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建角色' })
+    await dialog.getByLabel('角色编码').fill(`e2e-role-${suffix}`)
+    await dialog.getByLabel('角色名称').fill(roleName)
+    await dialog.getByRole('button', { name: '保存' }).click()
+    await expect(page.getByText('角色已创建')).toBeVisible()
+
+    const row = page.getByRole('row', { name: new RegExp(roleName) })
     await expect(row).toBeVisible()
-    await expect(row.getByText('平台级')).toBeVisible()
-    await expect(row.getByText('产品级资源只读')).toBeVisible()
-    await expect(row.getByRole('button', { name: /删\s*除/ })).toHaveCount(0)
+    await row.getByRole('button', { name: /删\s*除/ }).click()
+    await page
+      .locator('.ant-popconfirm')
+      .getByRole('button', { name: /删\s*除/ })
+      .click()
+    await expect(page.getByText('角色已删除')).toBeVisible()
+
+    await page.getByRole('menuitem', { name: '用户管理' }).click()
+    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+    await expect(page.getByRole('button', { name: '新建用户' })).toBeVisible()
   })
 })

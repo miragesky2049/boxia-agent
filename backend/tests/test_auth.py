@@ -8,7 +8,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
 from internal.infrastructure.security.password import hash_password
 
@@ -52,19 +54,23 @@ def _encode(claims: dict, secret: str | None = None) -> str:
     return jwt.encode(payload, secret or settings.jwt_secret.get_secret_value(), algorithm="HS256")
 
 
-def _insert_user(username: str, role: str) -> None:
+def _insert_user(username: str, role_code: str) -> None:
     with get_engine().begin() as conn:
         conn.execute(
             text(
                 "INSERT INTO admin_users "
-                "(username, password_hash, display_name, role, must_change_password) "
-                "VALUES (:username, :hash, :display_name, :role, FALSE)"
+                "(id, username, password_hash, display_name, role_id, must_change_password) "
+                "VALUES (:id, :username, :hash, :display_name, "
+                "        (SELECT id FROM roles WHERE tenant_id = :tid AND code = :role_code), "
+                "        FALSE)"
             ),
             {
+                "id": new_uuid(),
                 "username": username,
                 "hash": hash_password(ADMIN_PASSWORD),
                 "display_name": username,
-                "role": role,
+                "role_code": role_code,
+                "tid": str(PLATFORM_TENANT_ID),
             },
         )
 
@@ -77,7 +83,7 @@ def test_login_success(client: TestClient) -> None:
     assert body["refresh_token"].startswith("bxt_")
     assert body["refresh_expires_in"] > 0
     assert body["user"]["username"] == ADMIN_USERNAME
-    assert body["user"]["role"] == "superadmin"
+    assert body["user"]["role_code"] == "superadmin"
     assert body["user"]["must_change_password"] is False
 
 
@@ -135,7 +141,7 @@ def test_me_success(client: TestClient, auth_headers: dict[str, str]) -> None:
 
     assert response.status_code == 200
     assert response.json()["username"] == ADMIN_USERNAME
-    assert response.json()["role"] == "superadmin"
+    assert response.json()["role_code"] == "superadmin"
 
 
 @pytest.mark.parametrize(

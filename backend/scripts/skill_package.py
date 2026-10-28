@@ -15,6 +15,7 @@ import io
 import sys
 import zipfile
 from pathlib import Path
+from uuid import UUID
 
 from internal.application.skill_package_service import (
     SkillPackageService,
@@ -165,19 +166,19 @@ def main(argv: list[str] | None = None) -> int:
     import_parser.set_defaults(func=_import)
 
     export_parser = subparsers.add_parser("export", help="导出技能包到目录")
-    export_parser.add_argument("--id", type=int, required=True, help="技能 ID")
+    export_parser.add_argument("--id", type=UUID, required=True, help="技能 ID")
     export_parser.add_argument("--output", required=True, help="导出目录")
     export_parser.add_argument("--tenant", default="", help="以租户作用域读取")
     export_parser.set_defaults(func=_export)
 
     clone_parser = subparsers.add_parser("clone", help="克隆技能到租户")
-    clone_parser.add_argument("--id", type=int, required=True, help="源技能 ID")
+    clone_parser.add_argument("--id", type=UUID, required=True, help="源技能 ID")
     clone_parser.add_argument("--tenant", required=True, help="目标租户编码")
     clone_parser.add_argument("--name", default=None, help="副本名称")
     clone_parser.set_defaults(func=_clone)
 
     list_parser = subparsers.add_parser("list", help="列出技能包文件")
-    list_parser.add_argument("--id", type=int, required=True, help="技能 ID")
+    list_parser.add_argument("--id", type=UUID, required=True, help="技能 ID")
     list_parser.add_argument("--tenant", default="", help="以租户作用域读取")
     list_parser.set_defaults(func=_list)
 

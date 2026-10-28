@@ -1,0 +1,33 @@
+"""Celery 应用工厂：从 settings 读取 broker/backend，注册异步任务。"""
+
+from __future__ import annotations
+
+from celery import Celery
+
+from internal.infrastructure.config.settings import get_settings
+
+
+def make_celery() -> Celery:
+    """构造 Celery 实例；worker 进程通过 `celery -A internal.infrastructure.celery_app worker` 启动。"""
+    settings = get_settings()
+    app = Celery(
+        "boxia_agent",
+        broker=settings.celery_broker_url,
+        backend=settings.celery_result_backend,
+        include=["internal.infrastructure.tasks.ingest_tasks"],
+    )
+    app.conf.update(
+        task_default_queue="rag",
+        task_serializer="json",
+        result_serializer="json",
+        accept_content=["json"],
+        timezone="UTC",
+        enable_utc=True,
+        task_acks_late=True,
+        worker_prefetch_multiplier=1,
+        task_track_started=True,
+    )
+    return app
+
+
+celery_app = make_celery()

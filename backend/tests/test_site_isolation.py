@@ -4,7 +4,8 @@ from fastapi.testclient import TestClient
 
 TENANT_CODE = "acme"
 TENANT_ADMIN_PASSWORD = "Tenant-password-123"
-USER_API_TOKEN = "test-user-token-0123456789abcdef"
+USER_USERNAME = "acme-viewer"
+USER_PASSWORD = "User-password-123"
 
 
 def _create_tenant(client: TestClient, headers: dict[str, str]) -> None:
@@ -44,7 +45,54 @@ def test_user_site_excludes_admin_and_public_routes(
     assert acme.get("/api/v1/public/context").status_code == 404
 
 
+def _create_user(tenant_client) -> None:
+    """以租户超管身份创建只读最终用户。"""
+    acme = tenant_client(TENANT_CODE)
+    login = acme.post(
+        "/api/v1/admin/auth/login",
+        json={"username": "acme-admin", "password": TENANT_ADMIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    roles = acme.get("/api/v1/admin/roles", headers=headers)
+    assert roles.status_code == 200, roles.text
+    viewer = next(item for item in roles.json() if item["code"] == "viewer")
+
+    created = acme.post(
+        "/api/v1/admin/users",
+        json={
+            "username": USER_USERNAME,
+            "password": USER_PASSWORD,
+            "display_name": "只读用户",
+            "role_ids": [viewer["id"]],
+        },
+        headers=headers,
+    )
+    assert created.status_code == 201, created.text
+
+
 def test_user_site_serves_user_routes(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    tenant_client,
+    user_tenant_client,
+    user_login_headers,
+) -> None:
+    _create_tenant(client, auth_headers)
+    _create_user(tenant_client)
+    acme = user_tenant_client(TENANT_CODE)
+    headers = user_login_headers(TENANT_CODE, USER_USERNAME, USER_PASSWORD)
+
+    response = acme.get("/api/v1/user/me", headers=headers)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["username"] == USER_USERNAME
+    assert body["role_code"] == "viewer"
+
+
+def test_user_routes_require_login(
     client: TestClient,
     auth_headers: dict[str, str],
     user_tenant_client,
@@ -52,10 +100,8 @@ def test_user_site_serves_user_routes(
     _create_tenant(client, auth_headers)
     acme = user_tenant_client(TENANT_CODE)
 
-    response = acme.get("/api/v1/user/me", headers={"Authorization": f"Bearer {USER_API_TOKEN}"})
-
-    assert response.status_code == 200, response.text
-    assert response.json()["scope"] == "user"
+    assert acme.get("/api/v1/user/me").status_code == 401
+    assert acme.get("/api/v1/user/agents").status_code == 401
 
 
 def test_user_site_health(user_client: TestClient) -> None:

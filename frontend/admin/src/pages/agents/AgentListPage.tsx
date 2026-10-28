@@ -12,7 +12,10 @@ import { useTenant } from '../../tenant/TenantContext'
 export default function AgentListPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
-  const { canWrite } = useAuth()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:agent:create')
+  const canUpdate = hasPermission('button:agent:update')
+  const canDelete = hasPermission('button:agent:delete')
   const { isPlatform } = useTenant()
   const [items, setItems] = useState<AgentSummary[]>([])
   const [total, setTotal] = useState(0)
@@ -44,7 +47,7 @@ export default function AgentListPage() {
     void load()
   }, [load])
 
-  const handleDelete = async (id: number) => {
+  const handleDelete = async (id: string) => {
     try {
       await deleteAgent(id)
       message.success('已删除')
@@ -121,7 +124,7 @@ export default function AgentListPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
-          disabled={!canWrite || (!isPlatform && record.is_platform)}
+          disabled={!canUpdate || (!isPlatform && record.is_platform)}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -143,13 +146,13 @@ export default function AgentListPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 160,
+      width: 260,
       render: (_: unknown, record: AgentSummary) => (
         <Space size={4}>
           <Button type="link" size="small" onClick={() => navigate(`/agents/${record.id}/edit`)}>
             配置
           </Button>
-          {canWrite && (isPlatform || !record.is_platform) && (
+          {canDelete && (isPlatform || !record.is_platform) && (
             <Popconfirm
               title="确认删除该智能体？"
               description="删除后关联配置将一并移除。"
@@ -163,7 +166,9 @@ export default function AgentListPage() {
               </Button>
             </Popconfirm>
           )}
-          {canWrite && !isPlatform && record.is_platform && <Tag bordered={false}>只读</Tag>}
+          {!canUpdate && !canDelete && !isPlatform && record.is_platform && (
+            <Tag bordered={false}>只读</Tag>
+          )}
         </Space>
       ),
     },
@@ -178,7 +183,7 @@ export default function AgentListPage() {
             创建并配置智能体，设置模型、提示词、渠道与可用工具技能。
           </p>
         </div>
-        {canWrite && (
+        {canCreate && (
           <Button type="primary" icon={<PlusOutlined />} onClick={() => navigate('/agents/new')}>
             新建智能体
           </Button>

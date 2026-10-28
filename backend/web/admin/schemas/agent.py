@@ -1,6 +1,7 @@
 """智能体配置的请求/响应模型，与 agents.config JSONB 结构一一对应。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -118,8 +119,9 @@ class AgentPayload(BaseModel):
     description: str = Field(default="", max_length=5000)
     is_enabled: bool = True
     config: AgentConfig = Field(default_factory=AgentConfig)
-    tool_ids: list[int] = Field(default_factory=list)
-    skill_ids: list[int] = Field(default_factory=list)
+    tool_ids: list[UUID] = Field(default_factory=list)
+    skill_ids: list[UUID] = Field(default_factory=list)
+    department_id: UUID | None = None
 
 
 class AgentSummaryOut(BaseModel):
@@ -127,13 +129,14 @@ class AgentSummaryOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     name: str
     avatar_url: str
     description: str
     is_enabled: bool
-    tenant_id: int | None = None
+    tenant_id: UUID | None = None
     is_platform: bool = False
+    department_id: UUID | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -142,5 +145,30 @@ class AgentOut(AgentSummaryOut):
     """智能体详情。"""
 
     config: AgentConfig
-    tool_ids: list[int] = Field(default_factory=list)
-    skill_ids: list[int] = Field(default_factory=list)
+    tool_ids: list[UUID] = Field(default_factory=list)
+    skill_ids: list[UUID] = Field(default_factory=list)
+    created_by: UUID | None = None
+    visibility_mode: str = "all"
+
+
+class AgentVisibilityDepartmentItem(BaseModel):
+    """可见部门条目。"""
+
+    department_id: UUID
+    include_subtree: bool = True
+
+
+class AgentVisibilityOut(BaseModel):
+    """智能体 user 端可见范围配置。"""
+
+    mode: str = "all"
+    departments: list[AgentVisibilityDepartmentItem] = Field(default_factory=list)
+    user_ids: list[UUID] = Field(default_factory=list)
+
+
+class AgentVisibilityPayload(BaseModel):
+    """智能体 user 端可见范围配置入参。"""
+
+    mode: str = Field(default="all", pattern="^(all|custom)$")
+    departments: list[AgentVisibilityDepartmentItem] = Field(default_factory=list)
+    user_ids: list[UUID] = Field(default_factory=list)

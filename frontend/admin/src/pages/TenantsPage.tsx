@@ -1,10 +1,12 @@
-import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, Form, Input, Modal, Switch, Table, Tag, Typography } from 'antd'
+import { PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { App, Button, Divider, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { createTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant } from '../api/types'
+import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
@@ -21,7 +23,11 @@ interface EditFormValues {
 }
 
 export default function TenantsPage() {
+  const navigate = useNavigate()
   const { message } = App.useApp()
+  const { hasPermission } = useAuth()
+  const canCreate = hasPermission('button:tenant:create')
+  const canUpdate = hasPermission('button:tenant:update')
   const { context } = useTenant()
   const [items, setItems] = useState<Tenant[]>([])
   const [total, setTotal] = useState(0)
@@ -141,6 +147,7 @@ export default function TenantsPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
+          disabled={!canUpdate}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -155,18 +162,33 @@ export default function TenantsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 250,
       render: (_: unknown, record: Tenant) => (
-        <Button
-          type="link"
-          size="small"
-          onClick={() => {
-            setEditing(record)
-            editForm.setFieldsValue({ name: record.name })
-          }}
-        >
-          编辑
-        </Button>
+        <Space size={4}>
+          <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
+            详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<RobotOutlined />}
+            onClick={() => navigate(`/tenants/${record.id}?tab=agents`)}
+          >
+            开通智能体
+          </Button>
+          {canUpdate && (
+            <Button
+              type="link"
+              size="small"
+              onClick={() => {
+                setEditing(record)
+                editForm.setFieldsValue({ name: record.name })
+              }}
+            >
+              编辑
+            </Button>
+          )}
+        </Space>
       ),
     },
   ]
@@ -180,16 +202,18 @@ export default function TenantsPage() {
             创建租户并分配子域名，租户内资源与管理员账号彼此隔离；仅产品级平台可维护。
           </p>
         </div>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={() => {
-            createForm.resetFields()
-            setCreateOpen(true)
-          }}
-        >
-          新建租户
-        </Button>
+        {canCreate && (
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              createForm.resetFields()
+              setCreateOpen(true)
+            }}
+          >
+            新建租户
+          </Button>
+        )}
       </div>
 
       <div className="page-toolbar">
@@ -238,6 +262,9 @@ export default function TenantsPage() {
         width={560}
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            租户信息
+          </Divider>
           <Form.Item
             name="code"
             label="租户编码"
@@ -259,6 +286,10 @@ export default function TenantsPage() {
           >
             <Input placeholder="例如：Acme 公司" />
           </Form.Item>
+
+          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
+            管理员账号
+          </Divider>
           <Form.Item
             name="admin_username"
             label="租户管理员账号"

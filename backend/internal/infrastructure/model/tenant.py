@@ -2,10 +2,10 @@
 
 from datetime import datetime
 
-from sqlalchemy import BigInteger, Boolean, DateTime, String, func
+from sqlalchemy import Boolean, DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 
 class TenantModel(Base):
@@ -13,7 +13,7 @@ class TenantModel(Base):
 
     __tablename__ = "tenants"
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    id: Mapped[UuidPrimaryKey]
     code: Mapped[str] = mapped_column(String(63), unique=True, nullable=False)
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

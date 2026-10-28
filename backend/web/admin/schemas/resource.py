@@ -2,6 +2,7 @@
 
 from datetime import datetime
 from typing import Any
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -12,6 +13,15 @@ class ResourcePayload(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     description: str = Field(default="", max_length=5000)
     is_enabled: bool = True
+    # 资源归属智能体；为空表示尚未纳入任何智能体
+    agent_id: UUID | None = Field(default=None)
+
+
+class ResourceCloneRequest(BaseModel):
+    """克隆资源到目标智能体请求。"""
+
+    agent_id: UUID = Field()
+    name: str | None = Field(default=None, min_length=1, max_length=100)
 
 
 class SkillPayload(ResourcePayload):
@@ -26,8 +36,8 @@ class SkillOut(SkillPayload):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int | None = None
+    id: UUID
+    tenant_id: UUID | None = None
     is_platform: bool = False
     created_at: datetime
     updated_at: datetime
@@ -45,8 +55,8 @@ class ToolOut(ToolPayload):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int | None = None
+    id: UUID
+    tenant_id: UUID | None = None
     is_platform: bool = False
     created_at: datetime
     updated_at: datetime
@@ -64,8 +74,8 @@ class ComponentOut(ComponentPayload):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int | None = None
+    id: UUID
+    tenant_id: UUID | None = None
     is_platform: bool = False
     created_at: datetime
     updated_at: datetime
@@ -84,8 +94,8 @@ class PromptOut(PromptPayload):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
-    tenant_id: int | None = None
+    id: UUID
+    tenant_id: UUID | None = None
     is_platform: bool = False
     created_at: datetime
     updated_at: datetime

@@ -7,6 +7,8 @@ from typing import Literal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
+from internal.engine.llm import shutdown_llm_clients
+from internal.infrastructure.bootstrap import ensure_platform_admin
 from internal.infrastructure.config.settings import Settings, get_settings
 from internal.infrastructure.middleware.access_log import AccessLogMiddleware
 from internal.infrastructure.middleware.audit import AuditMiddleware
@@ -31,8 +33,16 @@ _SITE_META: dict[SiteName, tuple[str, str]] = {
 
 
 @asynccontextmanager
-async def lifespan(_: FastAPI):
+async def lifespan(application: FastAPI):
+    site = getattr(application.state, "site", None)
+    settings = get_settings()
+    if site == "admin":
+        try:
+            ensure_platform_admin(settings)
+        except Exception:
+            logger.exception("平台管理员自动初始化失败")
     yield
+    await shutdown_llm_clients()
     dispose_engine()
 
 
@@ -52,6 +62,7 @@ def create_app(site: SiteName, settings: Settings | None = None) -> FastAPI:
         redoc_url=None,
         openapi_url="/openapi.json" if docs_enabled else None,
     )
+    application.state.site = site
 
     if settings.cors_origin_list:
         application.add_middleware(

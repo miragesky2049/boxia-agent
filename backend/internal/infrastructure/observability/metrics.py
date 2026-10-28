@@ -28,6 +28,40 @@ HTTP_DURATION = Histogram(
     buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
 )
 
+# LLM 调用指标：tenant 用短码（platform = 0000...），避免 UUID 爆炸标签
+LLM_DURATION = Histogram(
+    "boxia_llm_request_duration_seconds",
+    "LLM /chat/completions 调用耗时",
+    ["tenant", "model", "status"],
+    buckets=(0.5, 1.0, 2.0, 5.0, 10.0, 20.0, 30.0, 60.0, 120.0),
+)
+LLM_TOKENS = Counter(
+    "boxia_llm_tokens_total",
+    "LLM token 用量",
+    ["tenant", "model", "type"],
+)
+
+# 工具调用指标
+TOOL_DURATION = Histogram(
+    "boxia_tool_invoke_duration_seconds",
+    "工具调用耗时",
+    ["tenant", "tool", "status"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0),
+)
+TOOL_CALLS = Counter(
+    "boxia_tool_invoke_total",
+    "工具调用次数",
+    ["tenant", "tool", "status"],
+)
+
+# Agent 运行轮次（function calling 迭代数）
+AGENT_ITERATIONS = Histogram(
+    "boxia_agent_run_iterations",
+    "单次 agent 运行的 LLM 迭代数",
+    ["tenant"],
+    buckets=(1, 2, 3, 5, 8, 12),
+)
+
 
 def _pool_metric(getter: str) -> int:
     """仅对队列连接池采集指标（NullPool 等无此能力）。"""

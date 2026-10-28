@@ -14,9 +14,12 @@ if str(BACKEND_DIR) not in sys.path:
 
 from internal.infrastructure.config.settings import get_settings  # noqa: E402
 from internal.infrastructure.model import (  # noqa: E402,F401
+    access,
     admin_user,
     agent,
     audit_log,
+    department,
+    employment,
     refresh_token,
     resource,
     tenant,

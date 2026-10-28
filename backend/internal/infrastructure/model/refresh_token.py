@@ -3,10 +3,10 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import BigInteger, DateTime, ForeignKey, Index, Integer, String, Uuid, func
+from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Uuid, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from internal.infrastructure.model.base import Base
+from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 
 class RefreshTokenModel(Base):
@@ -19,9 +19,9 @@ class RefreshTokenModel(Base):
         Index("ix_refresh_tokens_expires_at", "expires_at"),
     )
 
-    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    user_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("admin_users.id", ondelete="CASCADE"), nullable=False
+    id: Mapped[UuidPrimaryKey]
+    user_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("admin_users.id", ondelete="CASCADE"), nullable=False
     )
     token_hash: Mapped[str] = mapped_column(String(64), unique=True, nullable=False)
     family_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
@@ -32,6 +32,6 @@ class RefreshTokenModel(Base):
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     rotated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    replaced_by_id: Mapped[int | None] = mapped_column(BigInteger)
+    replaced_by_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     ip: Mapped[str | None] = mapped_column(String(45))
     user_agent: Mapped[str | None] = mapped_column(String(255))

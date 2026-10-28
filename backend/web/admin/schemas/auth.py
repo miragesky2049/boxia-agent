@@ -1,6 +1,7 @@
 """登录、令牌与管理员账号模型。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -17,13 +18,15 @@ class AdminUserOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True)
 
-    id: int
+    id: UUID
     username: str
     display_name: str
-    role: str
+    role_id: UUID | None = None
+    role_code: str = ""
+    role_name: str = ""
     is_active: bool
     must_change_password: bool
-    tenant_id: int | None = None
+    tenant_id: UUID | None = None
     is_platform: bool = False
     created_at: datetime
     updated_at: datetime
@@ -55,20 +58,23 @@ class ChangePasswordRequest(BaseModel):
 
 
 class AdminUserCreateRequest(BaseModel):
-    """创建管理员请求；tenant_id 仅产品级平台可指定。"""
+    """创建管理员请求；必须绑定具备管理端访问权限的角色。"""
+
+    model_config = ConfigDict(extra="forbid")
 
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(min_length=1, max_length=64)
-    role: str = Field(default="admin", max_length=16)
-    tenant_id: int | None = Field(default=None, ge=1)
+    role_id: UUID = Field()
 
 
 class AdminUserUpdateRequest(BaseModel):
     """调整管理员请求。"""
 
+    model_config = ConfigDict(extra="forbid")
+
     display_name: str | None = Field(default=None, min_length=1, max_length=64)
-    role: str | None = Field(default=None, max_length=16)
+    role_id: UUID | None = Field(default=None)
     is_active: bool | None = None
 
 

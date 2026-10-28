@@ -1,6 +1,7 @@
 """技能包文件读写模型。"""
 
 from datetime import datetime
+from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -40,6 +41,7 @@ class SkillFileWriteRequest(BaseModel):
 
 
 class SkillCloneRequest(BaseModel):
-    """克隆技能到当前租户请求。"""
+    """克隆技能请求；指定 agent_id 时克隆到目标智能体，否则克隆到当前租户。"""
 
     name: str | None = Field(default=None, min_length=1, max_length=100)
+    agent_id: UUID | None = Field(default=None)

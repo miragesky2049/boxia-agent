@@ -9,8 +9,8 @@ from uuid import UUID
 class RefreshToken:
     """服务端持久化的刷新令牌（仅存哈希）。"""
 
-    id: int
-    user_id: int
+    id: UUID
+    user_id: UUID
     token_hash: str
     family_id: UUID
     token_version: int
@@ -18,6 +18,6 @@ class RefreshToken:
     expires_at: datetime
     rotated_at: datetime | None = None
     revoked_at: datetime | None = None
-    replaced_by_id: int | None = None
+    replaced_by_id: UUID | None = None
     ip: str | None = None
     user_agent: str | None = None

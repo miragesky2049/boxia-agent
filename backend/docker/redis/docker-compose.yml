@@ -1,0 +1,30 @@
+name: redis # Compose 项目名（stack 名），与 docker/ 下 postgresql stack 独立
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    # 本地开发：只绑 127.0.0.1，避免暴露到局域网
+    ports:
+      - "127.0.0.1:6379:6379"
+    command:
+      - "redis-server"
+      - "--appendonly"
+      - "yes"
+      - "--maxmemory"
+      - "256mb"
+      - "--maxmemory-policy"
+      - "allkeys-lru"
+    volumes:
+      # 短期记忆落 AOF，重启不丢；命名卷独立于本 stack
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redisdata:
+    name: redisdata

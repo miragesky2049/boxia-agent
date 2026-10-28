@@ -1,18 +1,24 @@
 """管理端写操作审计中间件。"""
 
 import logging
+import re
 
 from starlette.concurrency import run_in_threadpool
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.infrastructure.observability.context import get_request_id
 from internal.infrastructure.observability.metrics import AUDIT_WRITE_FAILURE
 
 logger = logging.getLogger("boxia.audit")
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+# 主键为 UUID：只把形如 8-4-4-4-12 的路径段识别为资源 ID，避免误记子路径
+_UUID_SEGMENT = re.compile(
+    r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
+)
 
 
 class AuditMiddleware(BaseHTTPMiddleware):
@@ -28,7 +34,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if resource_type is None:
             return response
 
+        # 平台账号 tenant_id 为 None 时归一化为 PLATFORM_TENANT_ID；租户账号用真实租户 id
+        tenant_id = principal.tenant_id or PLATFORM_TENANT_ID
         payload = {
+            "tenant_id": tenant_id,
             "actor_id": principal.user_id,
             "actor_username": principal.username,
             "action": f"{request.method.lower()}.{resource_type}",
@@ -52,7 +61,9 @@ def _parse_resource(path: str) -> tuple[str | None, str]:
             if not parts or not parts[0] or parts[0] in {"auth", "users"}:
                 return None, ""
             resource_type = parts[0]
-            resource_id = parts[1] if len(parts) > 1 and parts[1].isdigit() else ""
+            resource_id = (
+                parts[1] if len(parts) > 1 and _UUID_SEGMENT.fullmatch(parts[1]) else ""
+            )
             return resource_type, resource_id
     return None, ""
 

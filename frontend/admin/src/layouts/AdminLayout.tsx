@@ -1,18 +1,23 @@
 import {
   ApartmentOutlined,
-  AppstoreOutlined,
-  FileTextOutlined,
+  BankOutlined,
+  ClusterOutlined,
+  DeploymentUnitOutlined,
+  IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
   RobotOutlined,
+  SafetyCertificateOutlined,
+  SafetyOutlined,
   TeamOutlined,
-  ThunderboltOutlined,
   ToolOutlined,
   UserOutlined,
+  UserSwitchOutlined,
 } from '@ant-design/icons'
 import { Avatar, Dropdown, Layout, Menu, Tag } from 'antd'
 import type { MenuProps } from 'antd'
 import { useEffect } from 'react'
+import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
@@ -20,10 +25,32 @@ import './AdminLayout.css'
 
 const { Header, Sider, Content } = Layout
 
-const ROLE_LABELS = {
-  superadmin: '超级管理员',
-  admin: '管理员',
-  viewer: '只读',
+const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
+  agents: { icon: <RobotOutlined />, label: '智能体管理' },
+  workflows: { icon: <DeploymentUnitOutlined />, label: '工作流' },
+  tools: { icon: <ToolOutlined />, label: '工具管理' },
+  grants: { icon: <SafetyOutlined />, label: '用户授权' },
+  users: { icon: <TeamOutlined />, label: '用户管理' },
+  roles: { icon: <SafetyCertificateOutlined />, label: '角色管理' },
+  departments: { icon: <ClusterOutlined />, label: '部门管理' },
+  employments: { icon: <IdcardOutlined />, label: '任职管理' },
+  'mgmt-units': { icon: <BankOutlined />, label: '管理单元' },
+  'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
+  tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
+}
+
+interface MenuGroup {
+  icon: ReactNode
+  label: string
+  children: string[]
+}
+
+const MENU_GROUPS: Record<string, MenuGroup> = {
+  organization: {
+    icon: <ClusterOutlined />,
+    label: '组织架构',
+    children: ['departments', 'employments', 'mgmt-units'],
+  },
 }
 
 const ENV_LABELS = {
@@ -36,7 +63,7 @@ const ENV_LABELS = {
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { user, signOut, isSuperAdmin, mustChangePassword } = useAuth()
+  const { user, signOut, roleName, menus, mustChangePassword } = useAuth()
   const { platformName, scopeLabel, isPlatform, context } = useTenant()
 
   useEffect(() => {
@@ -45,21 +72,45 @@ export default function AdminLayout() {
     }
   }, [mustChangePassword, navigate])
 
-  const menuItems: MenuProps['items'] = [
-    { key: '/agents', icon: <RobotOutlined />, label: '智能体管理' },
-    { key: '/skills', icon: <ThunderboltOutlined />, label: '技能管理' },
-    { key: '/tools', icon: <ToolOutlined />, label: '工具管理' },
-    { key: '/components', icon: <AppstoreOutlined />, label: '组件管理' },
-    { key: '/prompts', icon: <FileTextOutlined />, label: '提示词管理' },
-    ...(isSuperAdmin ? [{ key: '/users', icon: <TeamOutlined />, label: '管理员管理' }] : []),
-    ...(isSuperAdmin && isPlatform
-      ? [{ key: '/tenants', icon: <ApartmentOutlined />, label: '租户管理' }]
-      : []),
-  ]
+  // 菜单以后端返回为准，前端只负责图标、文案与分组映射
+  const groupedKeys = new Set(Object.values(MENU_GROUPS).flatMap((group) => group.children))
+  const menuItems: MenuProps['items'] = []
+  menus.forEach((key) => {
+    if (!groupedKeys.has(key)) {
+      const meta = MENU_META[key]
+      if (meta) {
+        menuItems.push({ key: `/${key}`, icon: meta.icon, label: meta.label })
+      }
+      return
+    }
+    const groupEntry = Object.entries(MENU_GROUPS).find(([, group]) =>
+      group.children.includes(key),
+    )
+    if (!groupEntry) return
+    const [groupKey, group] = groupEntry
+    const groupMenuKey = `group:${groupKey}`
+    if (menuItems.some((item) => item && 'key' in item && item.key === groupMenuKey)) return
+    const children: NonNullable<MenuProps['items']> = group.children
+      .filter((child) => menus.includes(child))
+      .flatMap((child) => {
+        const meta = MENU_META[child]
+        return meta ? [{ key: `/${child}`, icon: meta.icon, label: meta.label }] : []
+      })
+    if (children.length > 0) {
+      menuItems.push({
+        key: groupMenuKey,
+        icon: group.icon,
+        label: group.label,
+        children,
+      })
+    }
+  })
 
   const selectedKey =
-    menuItems.map((item) => String(item?.key)).find((key) => location.pathname.startsWith(key)) ??
-    '/agents'
+    menus
+      .map((key) => `/${key}`)
+      .sort((left, right) => right.length - left.length)
+      .find((candidate) => location.pathname.startsWith(candidate)) ?? '/agents'
 
   const userMenu: MenuProps['items'] = [
     {
@@ -115,7 +166,7 @@ export default function AdminLayout() {
             <button type="button" className="admin-header__user">
               <Avatar size={30} icon={<UserOutlined />} />
               <span>{user?.display_name || user?.username}</span>
-              {user && <Tag bordered={false}>{ROLE_LABELS[user.role]}</Tag>}
+              {user && roleName && <Tag bordered={false}>{roleName}</Tag>}
             </button>
           </Dropdown>
         </Header>
