@@ -4,6 +4,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.resource import Component, Prompt, Skill, Tool
 from internal.domain.repository.protocols import (
@@ -97,8 +98,9 @@ class SqlAlchemyUnitOfWork:
     """请求级工作单元，应用服务通过它提交业务事务。"""
 
     def __init__(self, tenant_id: UUID | None = None) -> None:
-        # tenant_id 为 None 表示产品级平台上下文，非空表示租户级上下文。
-        self.tenant_id = tenant_id
+        # tenant_id 为 None 视为产品级上下文，归一化为 PLATFORM_TENANT_ID（全零 UUID）。
+        # 所有仓储过滤统一使用 UUID，不再出现 Optional 分支。
+        self.tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
         self.session: Session = get_session_factory()()
         self.tenants: TenantRepository = PostgresTenantRepository(self.session)
         self.admin_users: AdminUserRepository = PostgresAdminUserRepository(self.session)

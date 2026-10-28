@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import AgentTenantOpening
 from internal.domain.entity.resource import Agent
 from internal.domain.entity.tenant import Tenant
@@ -67,7 +68,7 @@ class PostgresAgentTenantOpeningRepository:
         rows = self._session.scalars(
             select(AgentModel.id).where(
                 AgentModel.id.in_(agent_ids),
-                AgentModel.tenant_id.is_(None),
+                AgentModel.tenant_id == PLATFORM_TENANT_ID,
             )
         ).all()
         return set(rows)
@@ -156,7 +157,7 @@ class PostgresAgentTenantOpeningRepository:
                     AgentTenantOpeningModel.tenant_id == tenant_id,
                 ),
             )
-            .where(AgentModel.tenant_id.is_(None))
+            .where(AgentModel.tenant_id == PLATFORM_TENANT_ID)
         )
         if opened_only:
             stmt = stmt.where(AgentTenantOpeningModel.id.is_not(None))
@@ -214,7 +215,7 @@ class PostgresAgentTenantOpeningRepository:
         row = self._session.scalar(
             select(AgentModel).where(
                 AgentModel.id == agent_id,
-                AgentModel.tenant_id.is_(None),
+                AgentModel.tenant_id == PLATFORM_TENANT_ID,
             )
         )
         return self._to_agent(row) if row else None

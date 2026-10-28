@@ -20,7 +20,7 @@ from web.deps.db import UowDep
 
 def build_data_scope_snapshot(uow: UowDep, principal: AdminAuthDep) -> UserDataScope | None:
     """组装 UserDataScope；平台账号或拥有全量数据权限时返回 None（不叠加行过滤）。"""
-    if principal.is_platform or principal.tenant_id is None:
+    if principal.is_platform:
         return None
     if DATA_ALL in principal.permissions:
         return None

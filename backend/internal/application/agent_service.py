@@ -12,6 +12,7 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.application.resource_service import MAX_PAGE_SIZE
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.agent_visibility import (
     VISIBILITY_MODES,
     VISIBILITY_MODE_ALL,
@@ -76,6 +77,9 @@ class AgentService:
         self._ensure_manageable(existing)
         if self._uow.agents.name_exists(values["name"], exclude_id=agent_id):
             raise ConflictError("智能体名称已存在")
+        # 更新时未传 department_id（或为 None）沿用原部门：租户智能体所属部门必填，不允许清空
+        if not values.get("department_id"):
+            values["department_id"] = str(existing.department_id) if existing.department_id else None
         values = self._with_validated_relations(values)
         updated = self._uow.agents.update(agent_id, values)
         if updated is None:
@@ -109,7 +113,7 @@ class AgentService:
         existing = self._uow.agents.get(agent_id)
         if existing is None:
             raise NotFoundError("智能体不存在")
-        if existing.tenant_id is None:
+        if existing.tenant_id == PLATFORM_TENANT_ID:
             raise ValidationError("产品级智能体不配置 user 端可见范围")
         visibility = self._uow.agents.get_visibility(agent_id)
         if visibility is None:
@@ -128,7 +132,7 @@ class AgentService:
         if existing is None:
             raise NotFoundError("智能体不存在")
         self._ensure_manageable(existing)
-        if existing.tenant_id is None:
+        if existing.tenant_id == PLATFORM_TENANT_ID:
             raise ValidationError("产品级智能体不配置 user 端可见范围")
         if mode not in VISIBILITY_MODES:
             raise ValidationError(f"可见范围模式必须为 {VISIBILITY_MODES} 之一")
@@ -163,9 +167,9 @@ class AgentService:
 
     def _grant_actor(self, agent: Agent, actor_role_ids: Sequence[UUID]) -> None:
         """把租户自有智能体授权给创建者角色；平台智能体不自动授权。"""
-        tenant_id = getattr(agent, "tenant_id", None)
+        tenant_id = agent.tenant_id
         role_ids = sorted(set(actor_role_ids))
-        if tenant_id is None or not role_ids:
+        if tenant_id == PLATFORM_TENANT_ID or not role_ids:
             return
         for role_id in role_ids:
             self._uow.resource_grants.add_for_role(role_id, tenant_id, "agent", [agent.id], None)

@@ -15,6 +15,7 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.application.resource_service import MAX_PAGE_SIZE
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import (
     RESOURCE_TYPES,
     GrantSummary,
@@ -122,7 +123,7 @@ class GrantService:
         before_view = _grant_views(before)
 
         if self._context.is_platform:
-            if resource.tenant_id is not None:
+            if resource.tenant_id != PLATFORM_TENANT_ID:
                 raise ForbiddenError("租户自有资源由租户管理员授权")
             normalized = self._validate_platform_grants(grants)
             self._uow.resource_grants.replace_for_resource(
@@ -137,7 +138,7 @@ class GrantService:
                 )
             tenant_id = None
         else:
-            if resource.tenant_id is None:
+            if resource.tenant_id == PLATFORM_TENANT_ID:
                 raise ForbiddenError("产品级资源仅产品级运营管理平台可授权")
             tenant_id = self._require_tenant()
             if any(role_id is None for _, role_id in grants):
@@ -373,7 +374,7 @@ class GrantService:
             resource_id=resource.id,
             name=resource.name,
             description=resource.description,
-            is_platform=resource.tenant_id is None,
+            is_platform=resource.tenant_id == PLATFORM_TENANT_ID,
             is_enabled=resource.is_enabled,
             updated_at=resource.updated_at,
             grant_count=grant_count,
@@ -433,7 +434,7 @@ class GrantService:
                 raise ValidationError(f"管理单元 {unit.name} 已停用")
 
     def _require_tenant(self) -> UUID:
-        if self._context.tenant_id is None:
+        if self._context.is_platform:
             raise ForbiddenError("缺少租户上下文")
         return self._context.tenant_id
 

@@ -11,6 +11,7 @@ from internal.application.errors import (
     NotFoundError,
     UnauthorizedError,
 )
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import Role, User
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.permission import CONSOLE_ACCESS, DATA_ALL
@@ -146,8 +147,6 @@ class AuthService:
         user = self._uow.admin_users.get_by_id(user_id)
         if user is None or not user.is_active:
             raise UnauthorizedError("账号不存在或已被禁用")
-        if user.tenant_id is not None:
-            raise UnauthorizedError("身份凭证无效")
         if user.token_version != token_version:
             raise UnauthorizedError("登录状态已失效，请重新登录")
         if not self._uow.refresh_tokens.is_family_active(session_id):
@@ -161,7 +160,7 @@ class AuthService:
         if user.role_id is None:
             raise UnauthorizedError("账号角色已失效，请联系管理员")
         role = self._uow.roles.get_by_id(user.role_id)
-        if role is None or role.tenant_id is not None or not role.is_active:
+        if role is None or role.tenant_id != PLATFORM_TENANT_ID or not role.is_active:
             raise UnauthorizedError("账号角色已失效，请联系管理员")
         return role
 
@@ -360,11 +359,12 @@ class AuthService:
             raise UnauthorizedError("登录已过期，请重新登录")
 
         user = self._uow.admin_users.get_by_id(row.user_id)
+        expected_tenant_id = PLATFORM_TENANT_ID if tenant_id is None else tenant_id
         if (
             user is None
             or not user.is_active
             or user.token_version != row.token_version
-            or user.tenant_id != tenant_id
+            or user.tenant_id != expected_tenant_id
         ):
             self._uow.refresh_tokens.revoke_family(row.family_id)
             self._uow.commit()
@@ -555,8 +555,12 @@ class AuthService:
         if rotated_from is not None:
             self._uow.refresh_tokens.rotate(rotated_from, new_row.id)
 
+        # 平台账号的 tid 写空，与老逻辑（tenant_id=None）保持一致，便于 authenticate 分支识别
+        token_tenant_id = (
+            None if user.tenant_id == PLATFORM_TENANT_ID else user.tenant_id
+        )
         access_token, expires_in = create_access_token(
-            user.id, user.username, role.code, family, user.token_version, user.tenant_id
+            user.id, user.username, role.code, family, user.token_version, token_tenant_id
         )
         return TokenPair(
             access_token=access_token,

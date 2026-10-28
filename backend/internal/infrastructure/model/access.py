@@ -21,13 +21,14 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
 
 
 class RoleModel(Base):
-    """roles 表：tenant_id 为空表示平台角色，非空表示租户角色。"""
+    """roles 表：tenant_id 非空；平台角色 = PLATFORM_TENANT_ID（全零 UUID），租户角色 = 真实租户 ID。"""
 
     __tablename__ = "roles"
     __table_args__ = (
@@ -39,19 +40,19 @@ class RoleModel(Base):
             "ux_roles_platform_code",
             func.lower(text("code")),
             unique=True,
-            postgresql_where=text("tenant_id IS NULL"),
+            postgresql_where=text(f"tenant_id = '{PLATFORM_TENANT_ID}'"),
         ),
         Index(
             "ux_roles_platform_name",
             func.lower(text("name")),
             unique=True,
-            postgresql_where=text("tenant_id IS NULL"),
+            postgresql_where=text(f"tenant_id = '{PLATFORM_TENANT_ID}'"),
         ),
     )
 
     id: Mapped[UuidPrimaryKey]
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     code: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(64), nullable=False)
@@ -174,6 +175,7 @@ class UserRefreshTokenModel(Base):
 class ResourceGrantModel(Base):
     """resource_grants 表：资源对租户或租户角色的授权。
 
+    tenant_id 非空；产品级授权 = PLATFORM_TENANT_ID（全零 UUID），租户授权 = 真实租户 ID。
     role_id 为空表示授予整个租户；非空表示仅授予该租户的指定角色。
     """
 
@@ -184,7 +186,7 @@ class ResourceGrantModel(Base):
             name="ck_resource_grants_type",
         ),
         CheckConstraint(
-            "tenant_id IS NOT NULL OR role_id IS NOT NULL",
+            "role_id IS NOT NULL OR tenant_id IS NOT NULL",
             name="ck_resource_grants_scope",
         ),
         ForeignKeyConstraint(
@@ -218,15 +220,17 @@ class ResourceGrantModel(Base):
             "resource_id",
             "role_id",
             unique=True,
-            postgresql_where=text("tenant_id IS NULL AND role_id IS NOT NULL"),
+            postgresql_where=text(
+                f"tenant_id = '{PLATFORM_TENANT_ID}' AND role_id IS NOT NULL"
+            ),
         ),
     )
 
     id: Mapped[UuidPrimaryKey]
     resource_type: Mapped[str] = mapped_column(String(16), nullable=False)
     resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=True
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
     )
     role_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE")

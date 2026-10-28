@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.resource import Component, Prompt, Skill, Tool
 from internal.infrastructure.model.resource import (
     ComponentModel,
@@ -38,7 +39,8 @@ class PostgresResourceRepository(Generic[TResource]):
         apply_role_filter: bool = True,
     ):
         self._session = session
-        self._tenant_id = tenant_id
+        # None 归一化为 PLATFORM_TENANT_ID，消除所有 Optional 分支
+        self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
 
@@ -47,8 +49,8 @@ class PostgresResourceRepository(Generic[TResource]):
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按归属与授权过滤。"""
-        if self._tenant_id is None:
-            stmt = stmt.where(self.model.tenant_id.is_(None))
+        if self._tenant_id == PLATFORM_TENANT_ID:
+            stmt = stmt.where(self.model.tenant_id == PLATFORM_TENANT_ID)
             if self._apply_role_filter:
                 stmt = stmt.where(
                     platform_role_grant_exists(self.resource_type, self.model.id, self._role_ids)
@@ -65,7 +67,7 @@ class PostgresResourceRepository(Generic[TResource]):
             ),
         )
         platform_resource = and_(
-            self.model.tenant_id.is_(None),
+            self.model.tenant_id == PLATFORM_TENANT_ID,
             platform_resource_visible(
                 self.resource_type,
                 self.model.id,
@@ -79,16 +81,12 @@ class PostgresResourceRepository(Generic[TResource]):
 
     def _owned(self, stmt):
         """写归属范围：只能维护当前作用域自有的资源。"""
-        if self._tenant_id is None:
-            return stmt.where(self.model.tenant_id.is_(None))
         return stmt.where(self.model.tenant_id == self._tenant_id)
 
     def _get_owned(self, resource_id: UUID) -> Any | None:
         row = self._session.get(self.model, resource_id)
         if row is None:
             return None
-        if self._tenant_id is None:
-            return row if row.tenant_id is None else None
         return row if row.tenant_id == self._tenant_id else None
 
     def list_page(
@@ -227,11 +225,11 @@ class PostgresResourceRepository(Generic[TResource]):
 
     def _grantable(self, stmt):
         """角色授权候选范围：租户自有资源 + 已对本租户可见的平台资源。"""
-        if self._tenant_id is None:
-            return stmt.where(self.model.tenant_id.is_(None))
+        if self._tenant_id == PLATFORM_TENANT_ID:
+            return stmt.where(self.model.tenant_id == PLATFORM_TENANT_ID)
         tenant_owned = self.model.tenant_id == self._tenant_id
         platform_entitled = and_(
-            self.model.tenant_id.is_(None),
+            self.model.tenant_id == PLATFORM_TENANT_ID,
             platform_resource_visible(
                 self.resource_type,
                 self.model.id,

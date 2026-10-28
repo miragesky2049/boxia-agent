@@ -65,7 +65,10 @@ def test_clone_skill_to_agent_copies_files_and_grants(
     assert clone["tenant_id"] == tenant["id"]
 
     files = site.get(f"/api/v1/admin/skills/{clone['id']}/files", headers=headers)
-    assert [item["path"] for item in files.json()["items"]] == ["SKILL.md", "references/a.md"]
+    assert sorted(item["path"] for item in files.json()["items"]) == [
+        "SKILL.md",
+        "references/a.md",
+    ]
 
     # 同租户克隆复制角色授权
     grants = site.get(

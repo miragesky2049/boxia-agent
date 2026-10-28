@@ -30,9 +30,9 @@ class SkillModel(Base):
     __table_args__ = (Index("ix_skills_tenant_agent", "tenant_id", "agent_id"),)
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级资源 = PLATFORM_TENANT_ID（全零 UUID）；租户资源 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
     agent_id: Mapped[UUID | None] = mapped_column(
@@ -77,9 +77,9 @@ class ToolModel(Base):
     __table_args__ = (Index("ix_tools_tenant_agent", "tenant_id", "agent_id"),)
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级资源 = PLATFORM_TENANT_ID（全零 UUID）；租户资源 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
     agent_id: Mapped[UUID | None] = mapped_column(
@@ -103,9 +103,9 @@ class ComponentModel(Base):
     __table_args__ = (Index("ix_components_tenant_agent", "tenant_id", "agent_id"),)
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级资源 = PLATFORM_TENANT_ID（全零 UUID）；租户资源 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
     agent_id: Mapped[UUID | None] = mapped_column(
@@ -129,9 +129,9 @@ class PromptModel(Base):
     __table_args__ = (Index("ix_prompts_tenant_agent", "tenant_id", "agent_id"),)
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级资源，所有租户可见；非空表示租户私有资源。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级资源 = PLATFORM_TENANT_ID（全零 UUID）；租户资源 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     # 所属智能体；资源随智能体删除，NULL 表示尚未归属任何智能体。
     agent_id: Mapped[UUID | None] = mapped_column(

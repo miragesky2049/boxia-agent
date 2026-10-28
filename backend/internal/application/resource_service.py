@@ -14,6 +14,7 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.common import Page
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import ResourceRepository, UnitOfWork
@@ -189,9 +190,9 @@ class ResourceService(Generic[T]):
 
     def _grant_actor(self, item: T, actor_role_ids: Sequence[UUID]) -> None:
         """把租户自有资源授权给创建者角色，保证创建者立即可见；平台资源不授权。"""
-        tenant_id = getattr(item, "tenant_id", None)
+        tenant_id = item.tenant_id
         role_ids = sorted(set(actor_role_ids))
-        if tenant_id is None or not role_ids:
+        if tenant_id == PLATFORM_TENANT_ID or not role_ids:
             return
         # 克隆已复制授权时不再追加创建者角色，避免放大可见范围
         existing = [

@@ -72,12 +72,12 @@ class AgentModel(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "tenant_id IS NOT NULL OR department_id IS NULL",
+            f"tenant_id <> '00000000-0000-0000-0000-000000000000' OR department_id IS NULL",
             name="ck_agents_platform_no_dept",
         ),
         # 租户智能体所属部门必填：行级数据权限（按部门过滤）依赖该列
         CheckConstraint(
-            "tenant_id IS NULL OR department_id IS NOT NULL",
+            f"tenant_id = '00000000-0000-0000-0000-000000000000' OR department_id IS NOT NULL",
             name="ck_agents_tenant_dept_required",
         ),
         CheckConstraint(
@@ -89,9 +89,9 @@ class AgentModel(Base):
     )
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级智能体，所有租户可见；非空表示租户私有智能体。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级智能体 = PLATFORM_TENANT_ID（全零 UUID）；租户智能体 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar_url: Mapped[str] = mapped_column(String(500), nullable=False, default="")

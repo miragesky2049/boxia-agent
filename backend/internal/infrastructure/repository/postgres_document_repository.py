@@ -9,6 +9,7 @@ from uuid import UUID
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.document import Document, DocumentChunk
 from internal.infrastructure.model.document import DocumentChunkModel, DocumentModel
 
@@ -23,23 +24,19 @@ class PostgresDocumentRepository:
 
     def __init__(self, session: Session, tenant_id: UUID | None = None) -> None:
         self._session = session
-        self._tenant_id = tenant_id
+        # None 归一化为 PLATFORM_TENANT_ID，消除所有 Optional 分支
+        self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
 
     def _visible(self, stmt):
-        """读可见范围：产品级视角仅 tenant_id IS NULL；租户视角含自有 + 产品级。"""
-        if self._tenant_id is None:
-            return stmt.where(DocumentModel.tenant_id.is_(None))
+        """读可见范围：产品级视角仅产品级文档；租户视角含自有 + 产品级。"""
+        if self._tenant_id == PLATFORM_TENANT_ID:
+            return stmt.where(DocumentModel.tenant_id == PLATFORM_TENANT_ID)
         return stmt.where(
-            or_(
-                DocumentModel.tenant_id == self._tenant_id,
-                DocumentModel.tenant_id.is_(None),
-            )
+            DocumentModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID])
         )
 
     def _owned(self, stmt):
         """写归属范围：只能维护当前作用域自有的文档。"""
-        if self._tenant_id is None:
-            return stmt.where(DocumentModel.tenant_id.is_(None))
         return stmt.where(DocumentModel.tenant_id == self._tenant_id)
 
     def list_page(
@@ -136,7 +133,8 @@ class PostgresDocumentChunkRepository:
 
     def __init__(self, session: Session, tenant_id: UUID | None = None) -> None:
         self._session = session
-        self._tenant_id = tenant_id
+        # None 归一化为 PLATFORM_TENANT_ID，消除所有 Optional 分支
+        self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
 
     def replace_for_document(
         self,
@@ -185,15 +183,9 @@ class PostgresDocumentChunkRepository:
             .order_by(distance_column)
             .limit(top_k)
         )
-        if self._tenant_id is not None:
-            stmt = stmt.where(
-                or_(
-                    DocumentChunkModel.tenant_id == self._tenant_id,
-                    DocumentChunkModel.tenant_id.is_(None),
-                )
-            )
-        else:
-            stmt = stmt.where(DocumentChunkModel.tenant_id.is_(None))
+        stmt = stmt.where(
+            DocumentChunkModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID])
+        )
         if document_ids:
             stmt = stmt.where(DocumentChunkModel.document_id.in_(document_ids))
 

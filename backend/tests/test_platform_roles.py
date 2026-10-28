@@ -2,10 +2,12 @@
 
 from fastapi.testclient import TestClient
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from tests.helpers import create_tenant, tenant_admin_client
 
 ROLES_URL = "/api/v1/admin/roles"
 PLATFORM_ADMIN_PASSWORD = "Platform-pass-123"
+PLATFORM_TENANT_ID_STR = str(PLATFORM_TENANT_ID)
 
 
 def _platform_roles(client: TestClient, headers: dict[str, str]) -> dict[str, dict]:
@@ -19,7 +21,7 @@ def test_platform_roles_initialized_and_created_role_is_system(
 ) -> None:
     roles = _platform_roles(client, auth_headers)
     assert {"superadmin", "admin", "viewer"} <= set(roles)
-    assert all(item["tenant_id"] is None for item in roles.values())
+    assert all(item["tenant_id"] == PLATFORM_TENANT_ID_STR for item in roles.values())
     assert all(item["is_system"] for item in roles.values())
 
     created = client.post(
@@ -29,7 +31,7 @@ def test_platform_roles_initialized_and_created_role_is_system(
     )
     assert created.status_code == 201, created.text
     role = created.json()
-    assert role["tenant_id"] is None
+    assert role["tenant_id"] == PLATFORM_TENANT_ID_STR
     # 产品级入口创建的角色统一标记为系统角色
     assert role["is_system"] is True
 

@@ -23,9 +23,9 @@ class AuditLogModel(Base):
     )
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级平台操作；非空表示租户内操作。
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), nullable=True
+    # tenant_id 非空：产品级操作 = PLATFORM_TENANT_ID（全零 UUID）；租户操作 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     actor_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     actor_username: Mapped[str] = mapped_column(String(64), nullable=False, default="")

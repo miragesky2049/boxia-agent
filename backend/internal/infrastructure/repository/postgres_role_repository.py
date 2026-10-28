@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import Role
 from internal.infrastructure.model.access import RoleModel, UserModel, UserRoleModel
 from internal.infrastructure.model.admin_user import AdminUserModel
@@ -122,7 +123,6 @@ class PostgresRoleRepository:
 
 
 def _tenant_condition(tenant_id: UUID | None):
-    """作用域条件：None 表示平台角色，其余为租户角色。"""
-    if tenant_id is None:
-        return RoleModel.tenant_id.is_(None)
-    return RoleModel.tenant_id == tenant_id
+    """作用域条件：None 或 PLATFORM_TENANT_ID 表示平台角色，其余为租户角色。"""
+    effective = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
+    return RoleModel.tenant_id == effective

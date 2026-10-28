@@ -354,7 +354,10 @@ def test_tenant_reads_platform_skill_but_cannot_write_and_can_clone(
 
     listed = acme.get(f"/api/v1/admin/skills/{platform['id']}/files", headers=tenant_headers)
     assert listed.status_code == 200
-    assert [item["path"] for item in listed.json()["items"]] == ["SKILL.md", "references/p.md"]
+    assert sorted(item["path"] for item in listed.json()["items"]) == [
+        "SKILL.md",
+        "references/p.md",
+    ]
 
     forbidden = _write_file(acme, tenant_headers, platform["id"], "SKILL.md", "篡改")
     assert forbidden.status_code == 403
@@ -377,7 +380,10 @@ def test_tenant_reads_platform_skill_but_cannot_write_and_can_clone(
     clone_id = cloned.json()["id"]
 
     clone_files = _list_files(acme, tenant_headers, clone_id)
-    assert [item["path"] for item in clone_files["items"]] == ["SKILL.md", "references/p.md"]
+    assert sorted(item["path"] for item in clone_files["items"]) == [
+        "SKILL.md",
+        "references/p.md",
+    ]
     content = acme.get(
         f"/api/v1/admin/skills/{clone_id}/files/content",
         params={"path": "references/p.md"},

@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import date, datetime
 from uuid import UUID
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+
 # 租户初始化时自动生成的系统角色：(code, name, description)
 SYSTEM_ROLE_SEEDS = (
     ("superadmin", "超级管理员", "租户最高权限，可管理本租户全部对象与授权"),
@@ -16,10 +18,10 @@ RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
 
 @dataclass(frozen=True)
 class Role:
-    """角色；tenant_id 为空表示平台自有角色，功能权限由 role_permissions 决定。"""
+    """角色；tenant_id 非空，平台角色 = PLATFORM_TENANT_ID（全零 UUID），租户角色 = 真实租户 ID。"""
 
     id: UUID
-    tenant_id: UUID | None
+    tenant_id: UUID
     code: str
     name: str
     description: str
@@ -27,6 +29,11 @@ class Role:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级平台角色。"""
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)

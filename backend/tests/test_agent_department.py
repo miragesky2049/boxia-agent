@@ -48,11 +48,22 @@ def test_agent_bind_and_clear_department(
     listed = site.get(AGENTS_URL, headers=headers).json()
     assert listed["items"][0]["department_id"] == department["id"]
 
+    # 租户智能体所属部门必填：传 None 时沿用原部门，不允许清空
     cleared = site.put(
         f"{AGENTS_URL}/{agent_id}", json=_agent_payload("客服助手", None), headers=headers
     )
-    assert cleared.status_code == 200
-    assert cleared.json()["department_id"] is None
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["department_id"] == department["id"]
+
+    # 重新挂到另一个部门应当成功
+    other_dept = _create_dept(site, headers, "售后部")
+    rebound = site.put(
+        f"{AGENTS_URL}/{agent_id}",
+        json=_agent_payload("客服助手", other_dept["id"]),
+        headers=headers,
+    )
+    assert rebound.status_code == 200, rebound.text
+    assert rebound.json()["department_id"] == other_dept["id"]
 
 
 def test_agent_department_validation(

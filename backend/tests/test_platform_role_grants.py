@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from tests.helpers import (
     USER_PASSWORD,
     create_agent,
@@ -137,7 +138,7 @@ def test_copy_platform_role_copies_grants(client: TestClient, auth_headers) -> N
     )
     assert copied.status_code == 201, copied.text
     copy = copied.json()
-    assert copy["tenant_id"] is None
+    assert copy["tenant_id"] == str(PLATFORM_TENANT_ID)
     assert copy["is_system"] is False
 
     summary = client.get(f"{ROLES_URL}/{copy['id']}/grants/summary", headers=auth_headers)

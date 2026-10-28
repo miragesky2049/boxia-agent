@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+
 
 @dataclass(frozen=True)
 class Skill:
@@ -18,13 +20,13 @@ class Skill:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
         """是否为产品级资源（所有租户可见、仅产品级平台可维护）。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)
@@ -54,13 +56,13 @@ class Tool:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
         """是否为产品级资源。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)
@@ -75,13 +77,13 @@ class Component:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
         """是否为产品级资源。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)
@@ -97,13 +99,13 @@ class Prompt:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
         """是否为产品级资源。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)
@@ -118,9 +120,9 @@ class Agent:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
+    tenant_id: UUID
     tool_ids: list[UUID] = field(default_factory=list)
     skill_ids: list[UUID] = field(default_factory=list)
-    tenant_id: UUID | None = None
     department_id: UUID | None = None
     # 创建者（租户管理员 users.id），行级数据权限"本人创建"过滤依赖该列
     created_by: UUID | None = None
@@ -130,4 +132,4 @@ class Agent:
     @property
     def is_platform(self) -> bool:
         """是否为产品级智能体。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID

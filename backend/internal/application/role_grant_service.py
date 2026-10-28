@@ -11,6 +11,7 @@ from uuid import UUID
 from internal.application.audit import record_audit
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.application.resource_service import MAX_PAGE_SIZE
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import RESOURCE_TYPES, Role
 from internal.domain.entity.common import Page
 from internal.domain.entity.permission import DATA_ALL
@@ -100,7 +101,7 @@ class RoleGrantService:
         ids = self._validate_ids(repository, resource_ids)
         # 与平台侧按资源写入串行化，避免同一资源的并发替换相互覆盖
         self._uow.resource_grants.lock_resources(resource_type, ids)
-        if role.tenant_id is None:
+        if role.is_platform:
             self._uow.resource_grants.replace_for_platform_role(
                 role.id, resource_type, ids, actor_id
             )
@@ -139,7 +140,7 @@ class RoleGrantService:
         if not ids:
             raise ValidationError("请至少选择一个资源")
         self._uow.resource_grants.lock_resources(resource_type, ids)
-        if role.tenant_id is None:
+        if role.is_platform:
             added = self._uow.resource_grants.add_for_platform_role(
                 role.id, resource_type, ids, actor_id
             )
@@ -182,7 +183,7 @@ class RoleGrantService:
         self._ensure_resource_type(resource_type)
         # 先锁资源再判断整租户授权，避免并发取消时把已移除的角色重新写回
         self._uow.resource_grants.lock_resources(resource_type, [resource_id])
-        if role.tenant_id is None:
+        if role.is_platform:
             if not self._uow.resource_grants.remove_for_platform_role(
                 role.id, resource_type, resource_id
             ):
@@ -203,12 +204,10 @@ class RoleGrantService:
         )
         self._uow.commit()
 
-    def _scope(self) -> UUID | None:
-        """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
+    def _scope(self) -> UUID:
+        """管理作用域：平台返回 PLATFORM_TENANT_ID，租户返回本租户 ID。"""
         if self._context.is_platform:
-            return None
-        if self._context.tenant_id is None:
-            raise ForbiddenError("缺少租户上下文")
+            return PLATFORM_TENANT_ID
         return self._context.tenant_id
 
     def _require_role(self, role_id: UUID) -> Role:
@@ -225,7 +224,7 @@ class RoleGrantService:
 
     def _granted_ids(self, role: Role, resource_type: str) -> set[UUID]:
         """角色已授权资源 ID：平台角色看平台授权，租户角色合并整租户授权。"""
-        if role.tenant_id is None:
+        if role.is_platform:
             return self._uow.resource_grants.list_platform_granted_resource_ids(
                 role.id, resource_type
             )
@@ -238,7 +237,7 @@ class RoleGrantService:
         if implicit_full:
             repository = self._resource_repository(resource_type)
             return repository.list_grantable(1, 1, None, None)[1]
-        if role.tenant_id is None:
+        if role.is_platform:
             return self._uow.resource_grants.count_platform_granted(role.id, resource_type)
         return self._uow.resource_grants.count_effective_granted(
             role.id, role.tenant_id, resource_type
@@ -253,7 +252,7 @@ class RoleGrantService:
     ) -> None:
         """把整租户授权拆成除目标角色外其余角色的显式授权。"""
         tenant_id = role.tenant_id
-        if tenant_id is None:
+        if role.is_platform:
             raise ValidationError("平台角色不支持整租户授权")
         remaining = [
             item.id
@@ -295,7 +294,7 @@ class RoleGrantService:
             resource_id=resource.id,
             name=resource.name,
             description=resource.description,
-            is_platform=resource.tenant_id is None,
+            is_platform=resource.tenant_id == PLATFORM_TENANT_ID,
             is_enabled=resource.is_enabled,
             updated_at=resource.updated_at,
             is_granted=is_granted,

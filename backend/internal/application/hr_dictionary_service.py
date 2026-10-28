@@ -180,7 +180,7 @@ class HrDictionaryService:
         return normalized
 
     def _require_tenant(self) -> UUID:
-        if self._context.is_platform or self._context.tenant_id is None:
+        if self._context.is_platform:
             raise ForbiddenError("HR 字典仅可由租户平台维护")
         return self._context.tenant_id
 

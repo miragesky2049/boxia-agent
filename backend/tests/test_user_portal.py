@@ -35,6 +35,7 @@ def test_user_login_requires_tenant_subdomain(client: TestClient, user_client) -
 def test_tenant_owned_agent_requires_explicit_grant(
     client: TestClient, auth_headers, tenant_client, user_tenant_client
 ) -> None:
+    """用户端：智能体默认 visibility_mode=all 全员可见；技能仍需显式授权。"""
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -55,24 +56,24 @@ def test_tenant_owned_agent_requires_explicit_grant(
     assert login.status_code == 200, login.text
     user_headers = _headers(login.json()["access_token"])
 
-    # 严格 RBAC：未显式授权的资源对最终用户不可见
-    assert user_site.get("/api/v1/user/agents", headers=user_headers).json()["total"] == 0
+    # 智能体默认 visibility_mode=all：无需角色授权即对租户用户可见
+    assert user_site.get("/api/v1/user/agents", headers=user_headers).json()["total"] == 1
     assert (
         user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers).status_code
-        == 404
+        == 200
     )
+    # 技能未授权时不在详情里返回
+    detail = user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers)
+    assert detail.status_code == 200
+    assert detail.json()["skills"] == []
 
-    for resource_type, resource_id in (("agent", agent["id"]), ("skill", skill_id)):
-        grant_resource(
-            site,
-            headers,
-            resource_type=resource_type,
-            resource_id=resource_id,
-            grants=[{"tenant_id": tenant["id"], "role_id": viewer_role_id}],
-        )
-
-    listed = user_site.get("/api/v1/user/agents", headers=user_headers)
-    assert [item["id"] for item in listed.json()["items"]] == [agent["id"]]
+    grant_resource(
+        site,
+        headers,
+        resource_type="skill",
+        resource_id=skill_id,
+        grants=[{"tenant_id": tenant["id"], "role_id": viewer_role_id}],
+    )
 
     detail = user_site.get(f"/api/v1/user/agents/{agent['id']}", headers=user_headers)
     assert detail.status_code == 200

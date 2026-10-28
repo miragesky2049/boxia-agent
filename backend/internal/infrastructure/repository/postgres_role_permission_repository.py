@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.access import (
     PermissionResourceModel,
     RoleModel,
@@ -65,10 +66,8 @@ class PostgresRolePermissionRepository:
             )
             .where(PermissionResourceModel.code == code)
         )
-        if tenant_id is None:
-            stmt = stmt.where(RoleModel.tenant_id.is_(None))
-        else:
-            stmt = stmt.where(RoleModel.tenant_id == tenant_id)
+        effective_tenant_id = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
+        stmt = stmt.where(RoleModel.tenant_id == effective_tenant_id)
         rows = self._session.scalars(stmt).all()
         return set(rows)
 

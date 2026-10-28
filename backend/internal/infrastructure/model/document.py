@@ -29,9 +29,9 @@ class DocumentModel(Base):
     __table_args__ = (Index("ix_documents_tenant_agent", "tenant_id", "agent_id"),)
 
     id: Mapped[UuidPrimaryKey]
-    # NULL 表示产品级知识库；非空表示租户私有知识库
-    tenant_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=True
+    # tenant_id 非空：产品级知识库 = PLATFORM_TENANT_ID（全零 UUID）；租户知识库 = 真实租户 ID。
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
     )
     # 所属智能体；文档可被多个智能体通过 agent.config.retrieval.document_ids 引用，
     # 这里 agent_id 仅用于默认归属与权限收敛，不做唯一约束。
@@ -76,8 +76,8 @@ class DocumentChunkModel(Base):
     document_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False
     )
-    # 冗余存 tenant_id，便于检索时按租户过滤，避免 JOIN
-    tenant_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
+    # 冗余存 tenant_id，便于检索时按租户过滤，避免 JOIN；产品级 = PLATFORM_TENANT_ID
+    tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

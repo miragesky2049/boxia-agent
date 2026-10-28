@@ -275,7 +275,7 @@ class DepartmentService:
         return department
 
     def _require_tenant(self) -> UUID:
-        if self._context.is_platform or self._context.tenant_id is None:
+        if self._context.is_platform:
             raise ForbiddenError("组织架构仅可由租户平台维护")
         return self._context.tenant_id
 

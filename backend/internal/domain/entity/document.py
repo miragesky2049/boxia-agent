@@ -5,6 +5,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+
 
 @dataclass(frozen=True)
 class Document:
@@ -23,13 +25,13 @@ class Document:
     is_enabled: bool
     created_at: datetime
     updated_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:
         """是否为产品级知识库。"""
-        return self.tenant_id is None
+        return self.tenant_id == PLATFORM_TENANT_ID
 
 
 @dataclass(frozen=True)
@@ -42,7 +44,7 @@ class DocumentChunk:
     content: str
     token_count: int
     created_at: datetime
-    tenant_id: UUID | None = None
+    tenant_id: UUID
     embedding: list[float] | None = None
     # 结构化元数据：heading_path / source 等，检索结果拼装 prompt 时用
     metadata: dict[str, Any] = field(default_factory=dict)

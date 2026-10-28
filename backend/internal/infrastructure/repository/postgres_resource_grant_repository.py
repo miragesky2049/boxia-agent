@@ -8,6 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import GrantSummary, ResourceGrant
 from internal.infrastructure.model.access import ResourceGrantModel
 
@@ -114,7 +115,7 @@ class PostgresResourceGrantRepository:
             delete(ResourceGrantModel).where(
                 ResourceGrantModel.resource_type == resource_type,
                 ResourceGrantModel.resource_id == resource_id,
-                ResourceGrantModel.tenant_id.is_not(None),
+                ResourceGrantModel.tenant_id != PLATFORM_TENANT_ID,
             )
         )
         if grants:
@@ -393,7 +394,7 @@ class PostgresResourceGrantRepository:
         """读取平台角色在某类平台资源上已获授权的资源 ID。"""
         rows = self._session.scalars(
             select(ResourceGrantModel.resource_id).where(
-                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
                 ResourceGrantModel.role_id == role_id,
                 ResourceGrantModel.resource_type == resource_type,
             )
@@ -404,7 +405,7 @@ class PostgresResourceGrantRepository:
         """统计平台角色在某类平台资源上的有效授权数量。"""
         count = self._session.scalar(
             select(func.count(distinct(ResourceGrantModel.resource_id))).where(
-                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
                 ResourceGrantModel.role_id == role_id,
                 ResourceGrantModel.resource_type == resource_type,
             )
@@ -421,7 +422,7 @@ class PostgresResourceGrantRepository:
         """整体替换平台角色在某类平台资源上的授权。"""
         self._session.execute(
             delete(ResourceGrantModel).where(
-                ResourceGrantModel.tenant_id.is_(None),
+                ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
                 ResourceGrantModel.role_id == role_id,
                 ResourceGrantModel.resource_type == resource_type,
             )
@@ -434,7 +435,7 @@ class PostgresResourceGrantRepository:
                     {
                         "resource_type": resource_type,
                         "resource_id": resource_id,
-                        "tenant_id": None,
+                        "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
                         "granted_by": granted_by,
                     }
@@ -461,7 +462,7 @@ class PostgresResourceGrantRepository:
                     {
                         "resource_type": resource_type,
                         "resource_id": resource_id,
-                        "tenant_id": None,
+                        "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
                         "granted_by": granted_by,
                     }
@@ -472,7 +473,7 @@ class PostgresResourceGrantRepository:
                 index_elements=["resource_type", "resource_id", "role_id"],
                 # 必须与 ux_resource_grants_platform_role 的部分索引谓词完全一致
                 index_where=and_(
-                    ResourceGrantModel.tenant_id.is_(None),
+                    ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
                     ResourceGrantModel.role_id.is_not(None),
                 ),
             )
@@ -490,7 +491,7 @@ class PostgresResourceGrantRepository:
             CursorResult,
             self._session.execute(
                 delete(ResourceGrantModel).where(
-                    ResourceGrantModel.tenant_id.is_(None),
+                    ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
                     ResourceGrantModel.role_id == role_id,
                     ResourceGrantModel.resource_type == resource_type,
                     ResourceGrantModel.resource_id == resource_id,

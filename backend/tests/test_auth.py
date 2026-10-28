@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
@@ -60,7 +61,7 @@ def _insert_user(username: str, role_code: str) -> None:
                 "INSERT INTO admin_users "
                 "(id, username, password_hash, display_name, role_id, must_change_password) "
                 "VALUES (:id, :username, :hash, :display_name, "
-                "        (SELECT id FROM roles WHERE tenant_id IS NULL AND code = :role_code), "
+                "        (SELECT id FROM roles WHERE tenant_id = :tid AND code = :role_code), "
                 "        FALSE)"
             ),
             {
@@ -69,6 +70,7 @@ def _insert_user(username: str, role_code: str) -> None:
                 "hash": hash_password(ADMIN_PASSWORD),
                 "display_name": username,
                 "role_code": role_code,
+                "tid": str(PLATFORM_TENANT_ID),
             },
         )
 

@@ -34,6 +34,7 @@ from alembic.config import Config  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
+from internal.domain.constants import PLATFORM_TENANT_ID  # noqa: E402
 from internal.domain.entity.permission import (  # noqa: E402
     PERMISSION_CATALOG,
     PLATFORM_ADMIN_CODES,
@@ -91,8 +92,16 @@ def _reset_data():
         tables = ", ".join(sorted(existing))
         if tables:
             conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
-        # TRUNCATE 会清掉迁移种子，需重建权限目录、平台系统角色与角色权限关系。
+        # TRUNCATE 会清掉迁移种子，需重建产品级平台租户、权限目录、平台系统角色与角色权限关系。
         # 主键已改为应用层 UUID v7，原生 INSERT 必须显式写入 id。
+        conn.execute(
+            text(
+                "INSERT INTO tenants (id, code, name, is_active) "
+                "VALUES (:id, 'platform', '产品级平台', TRUE) "
+                "ON CONFLICT (id) DO NOTHING"
+            ),
+            {"id": str(PLATFORM_TENANT_ID)},
+        )
         conn.execute(
             text(
                 "INSERT INTO permission_resources "
@@ -116,11 +125,12 @@ def _reset_data():
             text(
                 "INSERT INTO roles "
                 "(id, tenant_id, code, name, description, is_system, is_active) "
-                "VALUES (:id, NULL, :code, :name, :description, TRUE, TRUE)"
+                "VALUES (:id, :tenant_id, :code, :name, :description, TRUE, TRUE)"
             ),
             [
                 {
                     "id": new_uuid(),
+                    "tenant_id": str(PLATFORM_TENANT_ID),
                     "code": code,
                     "name": name,
                     "description": description,
@@ -135,7 +145,8 @@ def _reset_data():
         role_ids = {
             code: role_id
             for code, role_id in conn.execute(
-                text("SELECT code, id FROM roles WHERE tenant_id IS NULL")
+                text("SELECT code, id FROM roles WHERE tenant_id = :tenant_id"),
+                {"tenant_id": str(PLATFORM_TENANT_ID)},
             ).tuples()
         }
         permission_ids = {

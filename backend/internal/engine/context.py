@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from uuid import UUID, uuid4
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+
 
 @dataclass(frozen=True)
 class AgentRunContext:
@@ -15,7 +17,7 @@ class AgentRunContext:
     """
 
     agent_id: UUID
-    tenant_id: UUID | None
+    tenant_id: UUID
     user_id: UUID | None
     # 调用方传入的会话 ID：同一对话保持一致，便于后续做历史记忆
     conversation_id: str
@@ -27,7 +29,7 @@ class AgentRunContext:
     def llm_headers(self) -> dict[str, str]:
         """LLM 出站请求附加 header（当前为本地调试直连网关，预留租户路由）。"""
         headers: dict[str, str] = {}
-        if self.tenant_id is not None:
+        if self.tenant_id != PLATFORM_TENANT_ID:
             headers["X-PAAS-Tenant-ID"] = str(self.tenant_id)
         if self.user_id is not None:
             headers["X-PAAS-User-ID"] = str(self.user_id)

@@ -6,6 +6,7 @@ from uuid import UUID
 from sqlalchemy import and_, delete, func, insert, or_, select
 from sqlalchemy.orm import Session
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.agent_visibility import (
     AgentVisibility,
     AgentVisibilityDepartment,
@@ -48,7 +49,8 @@ class PostgresAgentRepository:
         user_portal: bool = False,
     ):
         self._session = session
-        self._tenant_id = tenant_id
+        # None 归一化为 PLATFORM_TENANT_ID，消除所有 Optional 分支
+        self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
         # 行级数据权限快照：仅租户视角叠加；None 表示不叠加行过滤（如拥有全量数据权限）
@@ -61,8 +63,8 @@ class PostgresAgentRepository:
 
     def _visible(self, stmt):
         """读可见范围：平台视角仅产品级，非超管按平台角色授权过滤；租户视角按授权过滤。"""
-        if self._tenant_id is None:
-            stmt = stmt.where(AgentModel.tenant_id.is_(None))
+        if self._tenant_id == PLATFORM_TENANT_ID:
+            stmt = stmt.where(AgentModel.tenant_id == PLATFORM_TENANT_ID)
             if self._apply_role_filter:
                 stmt = stmt.where(
                     platform_role_grant_exists("agent", AgentModel.id, self._role_ids)
@@ -73,7 +75,7 @@ class PostgresAgentRepository:
             # 不再按当前用户的角色做授权收敛，后续由 user_visibility 实例级 ACL 决定。
             tenant_owned = AgentModel.tenant_id == self._tenant_id
             platform_opened = and_(
-                AgentModel.tenant_id.is_(None),
+                AgentModel.tenant_id == PLATFORM_TENANT_ID,
                 agent_opening_exists(AgentModel.id, self._tenant_id),
             )
             stmt = stmt.where(or_(tenant_owned, platform_opened))
@@ -102,16 +104,12 @@ class PostgresAgentRepository:
 
     def _owned(self, stmt):
         """写归属范围。"""
-        if self._tenant_id is None:
-            return stmt.where(AgentModel.tenant_id.is_(None))
         return stmt.where(AgentModel.tenant_id == self._tenant_id)
 
     def _owned_row(self, agent_id: UUID) -> AgentModel | None:
         row = self._session.get(AgentModel, agent_id)
         if row is None:
             return None
-        if self._tenant_id is None:
-            return row if row.tenant_id is None else None
         return row if row.tenant_id == self._tenant_id else None
 
     def list_page(
@@ -221,11 +219,11 @@ class PostgresAgentRepository:
 
     def _grantable(self, stmt):
         """角色授权候选范围：租户自有智能体 + 已对本租户可见的平台智能体。"""
-        if self._tenant_id is None:
-            return stmt.where(AgentModel.tenant_id.is_(None))
+        if self._tenant_id == PLATFORM_TENANT_ID:
+            return stmt.where(AgentModel.tenant_id == PLATFORM_TENANT_ID)
         tenant_owned = AgentModel.tenant_id == self._tenant_id
         platform_entitled = and_(
-            AgentModel.tenant_id.is_(None),
+            AgentModel.tenant_id == PLATFORM_TENANT_ID,
             agent_visible(AgentModel.id, self._tenant_id, (), False),
         )
         return stmt.where(or_(tenant_owned, platform_entitled))
@@ -338,7 +336,7 @@ class PostgresAgentRepository:
     def get_visibility(self, agent_id: UUID) -> AgentVisibility | None:
         """读取智能体 user 端可见范围配置；智能体不存在返回 None。"""
         row = self._session.get(AgentModel, agent_id)
-        if row is None or row.tenant_id is None:
+        if row is None or row.tenant_id == PLATFORM_TENANT_ID:
             # 平台智能体无 user 端可见范围概念
             return None
         dept_rows = self._session.scalars(
@@ -372,7 +370,7 @@ class PostgresAgentRepository:
     ) -> AgentVisibility | None:
         """事务内全量替换智能体 user 端可见范围；返回最新配置。"""
         row = self._owned_row(agent_id)
-        if row is None or row.tenant_id is None:
+        if row is None or row.tenant_id == PLATFORM_TENANT_ID:
             return None
         row.visibility_mode = mode
         self._session.execute(

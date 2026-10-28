@@ -1,11 +1,27 @@
 """跨测试文件复用的租户、账号与资源构造工具。"""
 
+from itertools import count
 from uuid import UUID
 
 from fastapi.testclient import TestClient
 
 TENANT_ADMIN_PASSWORD = "Tenant-password-123"
 USER_PASSWORD = "User-password-123"
+
+_department_name_counter = count(1)
+
+
+def create_department(
+    site: TestClient, headers: dict[str, str], name: str | None = None
+) -> dict:
+    """创建租户部门并返回响应体；默认名带自增后缀避免同租户重名冲突。"""
+    if name is None:
+        name = f"默认部门-{next(_department_name_counter)}"
+    response = site.post(
+        "/api/v1/admin/departments", json={"name": name}, headers=headers
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 def create_tenant(
@@ -76,22 +92,32 @@ def create_user(
 
 
 def create_agent(
-    client: TestClient, headers: dict[str, str], name: str, is_enabled: bool = True
+    client: TestClient,
+    headers: dict[str, str],
+    name: str,
+    is_enabled: bool = True,
+    department_id: str | None = None,
 ) -> dict:
-    """创建智能体（默认无关联资源）。"""
-    response = client.post(
-        "/api/v1/admin/agents",
-        json={
-            "name": name,
-            "avatar_url": "",
-            "description": "",
-            "is_enabled": is_enabled,
-            "config": {},
-            "tool_ids": [],
-            "skill_ids": [],
-        },
-        headers=headers,
-    )
+    """创建智能体（默认无关联资源）。
+
+    租户站点调用时若未传 department_id，自动创建一个默认部门并挂上，
+    以满足租户智能体"所属部门必填"的校验。
+    """
+    payload = {
+        "name": name,
+        "avatar_url": "",
+        "description": "",
+        "is_enabled": is_enabled,
+        "config": {},
+        "tool_ids": [],
+        "skill_ids": [],
+        "department_id": department_id,
+    }
+    response = client.post("/api/v1/admin/agents", json=payload, headers=headers)
+    if response.status_code == 422 and department_id is None:
+        dept = create_department(client, headers)
+        payload["department_id"] = dept["id"]
+        response = client.post("/api/v1/admin/agents", json=payload, headers=headers)
     assert response.status_code == 201, response.text
     return response.json()
 

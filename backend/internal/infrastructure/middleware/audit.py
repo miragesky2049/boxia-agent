@@ -8,6 +8,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.infrastructure.observability.context import get_request_id
 from internal.infrastructure.observability.metrics import AUDIT_WRITE_FAILURE
@@ -33,7 +34,10 @@ class AuditMiddleware(BaseHTTPMiddleware):
         if resource_type is None:
             return response
 
+        # 平台账号 tenant_id 为 None 时归一化为 PLATFORM_TENANT_ID；租户账号用真实租户 id
+        tenant_id = principal.tenant_id or PLATFORM_TENANT_ID
         payload = {
+            "tenant_id": tenant_id,
             "actor_id": principal.user_id,
             "actor_username": principal.username,
             "action": f"{request.method.lower()}.{resource_type}",

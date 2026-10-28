@@ -14,6 +14,7 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.application.resource_service import MAX_PAGE_SIZE
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import Role, User
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
@@ -478,14 +479,14 @@ class AdminUserService:
 
     def _require_tenant(self) -> UUID:
         tenant_id = self._context.tenant_id
-        if self._context.is_platform or tenant_id is None:
+        if self._context.is_platform:
             raise ForbiddenError("租户管理员仅可由租户平台维护")
         return tenant_id
 
     def _resolve_platform_role(self, role_id: UUID) -> Role:
         """解析平台账号绑定角色，必须是启用的平台角色。"""
         matched = self._uow.roles.get_by_id(role_id)
-        if matched is None or matched.tenant_id is not None:
+        if matched is None or matched.tenant_id != PLATFORM_TENANT_ID:
             raise ValidationError("角色不属于产品级平台")
         if not matched.is_active:
             raise ValidationError("角色已停用")

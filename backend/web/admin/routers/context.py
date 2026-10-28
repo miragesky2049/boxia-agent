@@ -40,7 +40,8 @@ def get_admin_context(
 ) -> AdminContextOut:
     """返回当前登录账号所在作用域、租户、环境与域名配置。"""
     settings = get_settings()
-    profile = service.get_profile(principal.user_id, principal.tenant_id)
+    tenant_id = None if principal.is_platform else principal.tenant_id
+    profile = service.get_profile(principal.user_id, tenant_id)
     return AdminContextOut(
         scope=context.scope,
         tenant=TenantOut.model_validate(context.tenant) if context.tenant else None,

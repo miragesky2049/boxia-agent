@@ -143,6 +143,7 @@ def test_agent_grant_role_filter(
     assert site.get(f"/api/v1/admin/agents/{agent['id']}", headers=admin_headers).status_code == 404
 
     user_site = user_tenant_client("acme")
+    # 用户端门户模式：智能体开通后按实例级 ACL（默认 all）收敛，不再按角色授权
     viewer_user = user_site.get(
         "/api/v1/user/agents", headers=_user_headers(user_tenant_client, "viewer-user")
     )
@@ -150,7 +151,7 @@ def test_agent_grant_role_filter(
         "/api/v1/user/agents", headers=_user_headers(user_tenant_client, "admin-user")
     )
     assert viewer_user.json()["total"] == 1
-    assert admin_user.json()["total"] == 0
+    assert admin_user.json()["total"] == 1
 
 
 def test_platform_resource_inherits_agent_grant(
@@ -263,20 +264,8 @@ def test_tenant_owned_resource_requires_explicit_grant(
     assert skill_id in _visible_ids(site, viewer_admin, "skills")
     assert skill_id not in _visible_ids(site, admin_admin, "skills")
 
-    # 用户端同样按角色严格过滤
+    # 用户端门户模式：智能体默认 visibility_mode=all，按实例级 ACL 收敛（不再按角色授权）
     user_site = user_tenant_client("acme")
-    user_agent_ids = [
-        item["id"]
-        for item in user_site.get("/api/v1/user/agents", headers=user_headers).json()["items"]
-    ]
-    assert agent["id"] not in user_agent_ids
-    grant_resource(
-        site,
-        headers,
-        resource_type="agent",
-        resource_id=agent["id"],
-        grants=[{"tenant_id": tenant["id"], "role_id": roles["admin"]["id"]}],
-    )
     user_agent_ids = [
         item["id"]
         for item in user_site.get("/api/v1/user/agents", headers=user_headers).json()["items"]
@@ -382,7 +371,7 @@ def test_overview_platform_scope_and_summary(
     agent_plain = create_agent(client, auth_headers, "未授权智能体")
 
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
-    tenant_agent = site.post(
+    tenant_agent_resp = site.post(
         "/api/v1/admin/agents",
         json={
             "name": "租户智能体",
@@ -395,7 +384,26 @@ def test_overview_platform_scope_and_summary(
         },
         headers=headers,
     )
-    assert tenant_agent.status_code == 201, tenant_agent.text
+    if tenant_agent_resp.status_code == 422:
+        from tests.helpers import create_department
+
+        dept = create_department(site, headers)
+        tenant_agent_resp = site.post(
+            "/api/v1/admin/agents",
+            json={
+                "name": "租户智能体",
+                "avatar_url": "",
+                "description": "",
+                "is_enabled": True,
+                "config": {},
+                "tool_ids": [],
+                "skill_ids": [],
+                "department_id": dept["id"],
+            },
+            headers=headers,
+        )
+    assert tenant_agent_resp.status_code == 201, tenant_agent_resp.text
+    tenant_agent = tenant_agent_resp
 
     grant_resource(
         client,

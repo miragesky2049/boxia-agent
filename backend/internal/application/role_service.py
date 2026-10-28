@@ -12,6 +12,7 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import RESOURCE_TYPES, Role
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
@@ -70,7 +71,7 @@ class RoleService:
         if self._uow.roles.name_exists(tenant_id, normalized_name):
             raise ConflictError("角色名称已存在")
 
-        is_system = tenant_id is None
+        is_system = tenant_id == PLATFORM_TENANT_ID
         role = self._uow.roles.create(
             {
                 "tenant_id": tenant_id,
@@ -181,7 +182,7 @@ class RoleService:
         """按资源类型复制源角色的显式授权；整租户授权对所有角色生效，无需重复复制。"""
         total = 0
         for resource_type in RESOURCE_TYPES:
-            if source.tenant_id is None:
+            if source.is_platform:
                 resource_ids = sorted(
                     self._uow.resource_grants.list_platform_granted_resource_ids(
                         source.id, resource_type
@@ -193,7 +194,7 @@ class RoleService:
                 )
             if not resource_ids:
                 continue
-            if source.tenant_id is None:
+            if source.is_platform:
                 total += self._uow.resource_grants.add_for_platform_role(
                     target.id, resource_type, resource_ids, granted_by
                 )
@@ -286,12 +287,10 @@ class RoleService:
         )
         self._uow.commit()
 
-    def _management_scope(self) -> UUID | None:
-        """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
+    def _management_scope(self) -> UUID:
+        """管理作用域：平台返回 PLATFORM_TENANT_ID，租户返回本租户 ID。"""
         if self._context.is_platform:
-            return None
-        if self._context.tenant_id is None:
-            raise ForbiddenError("缺少租户上下文")
+            return PLATFORM_TENANT_ID
         return self._context.tenant_id
 
     def _get_owned(self, role_id: UUID, tenant_id: UUID | None) -> Role:

@@ -7,6 +7,7 @@ from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import Role
 from internal.domain.entity.permission import (
     PLATFORM_ONLY_CODES,
@@ -165,12 +166,10 @@ class RolePermissionService:
         if unauthorized:
             raise ForbiddenError(f"不能授予自身不具备的权限：{', '.join(sorted(unauthorized))}")
 
-    def _scope(self) -> UUID | None:
-        """管理作用域：平台返回 None（平台角色），租户返回本租户 ID。"""
+    def _scope(self) -> UUID:
+        """管理作用域：平台返回 PLATFORM_TENANT_ID，租户返回本租户 ID。"""
         if self._context.is_platform:
-            return None
-        if self._context.tenant_id is None:
-            raise ForbiddenError("缺少租户上下文")
+            return PLATFORM_TENANT_ID
         return self._context.tenant_id
 
     def _require_role(self, role_id: UUID) -> Role:

@@ -30,7 +30,7 @@ def login(
     context: RequestContextDep,
 ) -> LoginResponse:
     """最终用户登录，仅支持租户子域名。"""
-    if context.tenant_id is None:
+    if context.is_platform:
         raise ForbiddenError("用户端仅支持通过租户子域名访问")
     ip, user_agent = client_meta(request)
     pair = service.login(
@@ -51,7 +51,7 @@ def refresh(
     context: RequestContextDep,
 ) -> LoginResponse:
     """轮换刷新令牌，令牌租户必须与当前子域名一致。"""
-    if context.tenant_id is None:
+    if context.is_platform:
         raise ForbiddenError("用户端仅支持通过租户子域名访问")
     ip, user_agent = client_meta(request)
     pair = service.refresh(

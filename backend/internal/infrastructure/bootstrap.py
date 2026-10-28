@@ -6,6 +6,7 @@ import logging
 
 from sqlalchemy import text
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.config.settings import Settings
 from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
@@ -43,10 +44,10 @@ def ensure_platform_admin(settings: Settings) -> None:
     with engine.begin() as conn:
         role_id = conn.execute(
             text(
-                "SELECT id FROM roles WHERE tenant_id IS NULL AND code = :code "
+                "SELECT id FROM roles WHERE tenant_id = :tid AND code = :code "
                 "AND is_active = TRUE"
             ),
-            {"code": role_code},
+            {"code": role_code, "tid": str(PLATFORM_TENANT_ID)},
         ).scalar()
         if role_id is None:
             logger.warning("平台角色 %s 不存在或已停用，跳过自动初始化", role_code)

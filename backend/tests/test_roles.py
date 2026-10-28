@@ -2,6 +2,7 @@
 
 from fastapi.testclient import TestClient
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from tests.helpers import (
     TENANT_ADMIN_PASSWORD,
     create_tenant,
@@ -232,7 +233,7 @@ def test_platform_manages_own_roles_only(
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
-    assert created.json()["tenant_id"] is None
+    assert created.json()["tenant_id"] == str(PLATFORM_TENANT_ID)
     # 产品级入口创建的角色统一标记为系统角色
     assert created.json()["is_system"] is True
 
@@ -240,7 +241,7 @@ def test_platform_manages_own_roles_only(
     assert listed.status_code == 200
     codes = {item["code"] for item in listed.json()}
     assert {"superadmin", "admin", "viewer", "ops"} <= codes
-    assert all(item["tenant_id"] is None for item in listed.json())
+    assert all(item["tenant_id"] == str(PLATFORM_TENANT_ID) for item in listed.json())
 
     tenant = client.get("/api/v1/admin/tenants", headers=auth_headers).json()
     tenant_item = next(item for item in tenant["items"] if item["code"] == "acme")

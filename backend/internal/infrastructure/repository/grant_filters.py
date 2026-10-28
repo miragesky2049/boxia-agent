@@ -7,6 +7,7 @@ from sqlalchemy import and_, exists, false, or_, true
 from sqlalchemy.orm import aliased
 from sqlalchemy.sql.elements import ColumnElement
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.access import ResourceGrantModel
 from internal.infrastructure.model.agent import AgentModel, AgentTenantOpeningModel
 
@@ -48,7 +49,7 @@ def has_any_grant(resource_type: str, resource_id_col: Any) -> ColumnElement[boo
     return exists().where(
         ResourceGrantModel.resource_type == resource_type,
         ResourceGrantModel.resource_id == resource_id_col,
-        ResourceGrantModel.tenant_id.is_not(None),
+        ResourceGrantModel.tenant_id != PLATFORM_TENANT_ID,
     )
 
 
@@ -61,7 +62,7 @@ def platform_role_grant_exists(
     return exists().where(
         ResourceGrantModel.resource_type == resource_type,
         ResourceGrantModel.resource_id == resource_id_col,
-        ResourceGrantModel.tenant_id.is_(None),
+        ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
         ResourceGrantModel.role_id.in_(role_ids),
     )
 
@@ -109,14 +110,14 @@ def agent_visible(
             grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
         )
         platform_available = and_(
-            _VisibleAgent.tenant_id.is_(None),
+            _VisibleAgent.tenant_id == PLATFORM_TENANT_ID,
             agent_opening_exists(_VisibleAgent.id, tenant_id),
             grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
         )
     else:
         tenant_owned = _VisibleAgent.tenant_id == tenant_id
         platform_available = and_(
-            _VisibleAgent.tenant_id.is_(None),
+            _VisibleAgent.tenant_id == PLATFORM_TENANT_ID,
             agent_opening_exists(_VisibleAgent.id, tenant_id),
         )
     return exists().where(
