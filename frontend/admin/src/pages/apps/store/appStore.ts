@@ -99,25 +99,55 @@ const NODE_TYPES: NodeType[] = [
 function defaultConfigFor(type: NodeType): Record<string, unknown> {
   switch (type) {
     case 'start':
-      return { inputs: [] as InputVariable[] }
+      return { inputs: [] as InputVariable[], description: '' }
     case 'llm':
-      return { model_id: '', system_prompt: '', temperature: 0.7, max_tokens: 1024 }
+      return {
+        model_id: '',
+        system_prompt: '',
+        user_prompt: '',
+        temperature: 0.7,
+        max_tokens: 1024,
+        response_format_json: false,
+        retry_enabled: false,
+        max_retries: 3,
+        description: '',
+      }
     case 'end':
-      return { outputs: [] as OutputVariable[] }
+      return { outputs: [] as OutputVariable[], description: '' }
     case 'branch':
-      return { conditions: [{ field: '', operator: 'eq', value: '' }], routes: { true: '', false: '' } }
+      return {
+        conditions: [{ field: '', operator: 'eq', value: '' }],
+        routes: { true: '', false: '' },
+        description: '',
+      }
     case 'tool':
-      return { resource_id: '', params: {} }
+      return { resource_id: '', params: {}, retry_enabled: false, max_retries: 3, description: '' }
     case 'template':
-      return { template: '' }
+      return { template: '', description: '' }
     case 'http':
-      return { url: '', method: 'GET', headers: {}, body: '' }
+      return {
+        url: '',
+        method: 'GET',
+        headers: {},
+        params: {},
+        body: '',
+        timeout_seconds: 30,
+        retry_enabled: false,
+        max_retries: 3,
+        description: '',
+      }
     case 'retrieval':
-      return { knowledge_base_id: '', query_field: 'query', top_k: 5 }
+      return { knowledge_base_id: '', query_field: 'query', top_k: 5, description: '' }
     case 'human_task':
-      return { assignee_role: 'reviewer', instructions: '' }
+      return {
+        assignee_role: 'reviewer',
+        instructions: '',
+        timeout_seconds: 3600,
+        timeout_action: 'fail',
+        description: '',
+      }
     case 'subgraph':
-      return { application_id: '', input_mapping: {} }
+      return { application_id: '', input_mapping: {}, description: '' }
     case 'sticky':
       return { content: '双击编辑注释', color: '#fffbe6' }
   }

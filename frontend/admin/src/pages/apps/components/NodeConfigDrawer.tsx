@@ -1,5 +1,5 @@
 import { PlusOutlined, CloseOutlined, BulbOutlined, CopyOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography } from 'antd'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography, Collapse } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listApps,
@@ -613,6 +613,7 @@ function normalizeConfig(nodeType: NodeType, values: Record<string, unknown>): R
   }
   if (nodeType === 'http') {
     result.headers = kvArrayToObject(result.headers)
+    result.params = kvArrayToObject(result.params)
     const body = parseJsonField(result.body, '请求体')
     if (body !== undefined) result.body = body
     else delete result.body
@@ -629,6 +630,23 @@ const BRANCH_OPERATORS: { value: string; label: string }[] = [
   { value: 'gt', label: '大于 (>)' },
   { value: 'contains', label: '包含 (contains)' },
 ]
+
+/** 通用重试配置：失败时重试开关 + 最大重试次数（参考 dify LLM/HTTP 节点的"失败时重试"） */
+function RetryConfigFields() {
+  const retryEnabled = (Form.useWatch('retry_enabled') as boolean) ?? false
+  return (
+    <>
+      <Form.Item label="失败时重试" name="retry_enabled" valuePropName="checked">
+        <Switch checkedChildren="开启" unCheckedChildren="关闭" />
+      </Form.Item>
+      {retryEnabled && (
+        <Form.Item label="最大重试次数" name="max_retries">
+          <InputNumber min={1} max={10} style={{ width: '100%' }} addonAfter="次" />
+        </Form.Item>
+      )}
+    </>
+  )
+}
 
 /** 分支条件可视化构建器：参考 coze IF 节点，行内编辑字段/操作符/值 */
 function BranchConditionsEditor({
@@ -730,6 +748,7 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
   const [form] = Form.useForm()
   // 统一在顶层调用 watch，避免条件分支里调用 hook 导致 hook 顺序变化
   const watchedSystemPrompt = (Form.useWatch('system_prompt', form) as string) ?? ''
+  const watchedUserPrompt = (Form.useWatch('user_prompt', form) as string) ?? ''
   const watchedTemplate = (Form.useWatch('template', form) as string) ?? ''
 
   // AI prompt 优化 Modal
@@ -782,7 +801,7 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
   useEffect(() => {
     if (node) {
       const cfg: Record<string, unknown> = { ...node.data.config }
-      // 把对象转成 key-value 数组供 Form.List 回显
+      // 把对象转成 key-value 数组供 Form.List 回显（http 的 params 与 headers 都需要）
       for (const key of ['params', 'headers', 'input_mapping']) {
         const v = cfg[key]
         if (v !== undefined && v !== null && typeof v === 'object' && !Array.isArray(v)) {
@@ -875,12 +894,24 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
                 nodeId={node.id}
               />
             </Form.Item>
+            <Form.Item label="用户提示词" name="user_prompt" tooltip="对应 OpenAI messages 中的 user 消息，通常用 {{#input.query#}} 引用上游字段">
+              <PromptTextArea
+                value={watchedUserPrompt}
+                onChange={(v) => form.setFieldValue('user_prompt', v)}
+                placeholder="输入 {{# 可插入上游节点输出"
+                nodeId={node.id}
+              />
+            </Form.Item>
             <Form.Item label="温度" name="temperature">
               <Slider min={0} max={2} step={0.1} marks={{ 0: '0', 1: '1', 2: '2' }} />
             </Form.Item>
             <Form.Item label="最大 tokens" name="max_tokens">
               <InputNumber min={64} max={8192} style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item label="结构化输出" name="response_format_json" valuePropName="checked" tooltip="开启后模型返回 JSON 对象（需模型支持 response_format）">
+              <Switch checkedChildren="JSON" unCheckedChildren="文本" />
+            </Form.Item>
+            <RetryConfigFields />
           </>
         )
       case 'branch': {
@@ -967,6 +998,14 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
                 }))}
               />
             </Form.Item>
+            <Form.Item label="Query 参数" name="params" tooltip="拼接到 URL 后面的 ?key=value 参数，支持 {{#input.query#}}">
+              <KeyValueEditor
+                name="params"
+                keyPlaceholder="参数名"
+                valuePlaceholder="参数值"
+                addText="添加参数"
+              />
+            </Form.Item>
             <Form.Item label="请求头" name="headers">
               <KeyValueEditor
                 name="headers"
@@ -975,9 +1014,13 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
                 addText="添加请求头"
               />
             </Form.Item>
-            <Form.Item label="请求体" name="body">
-              <Input.TextArea rows={4} style={{ fontFamily: 'monospace', fontSize: 12 }} />
+            <Form.Item label="请求体" name="body" tooltip="JSON 格式，留空表示无请求体">
+              <Input.TextArea rows={4} style={{ fontFamily: 'monospace', fontSize: 12 }} placeholder='{"key": "value"}' />
             </Form.Item>
+            <Form.Item label="超时时间" name="timeout_seconds" tooltip="请求超时秒数，超时后节点失败">
+              <InputNumber min={1} max={300} style={{ width: '100%' }} addonAfter="秒" />
+            </Form.Item>
+            <RetryConfigFields />
           </>
         )
       case 'retrieval': {
@@ -1016,6 +1059,17 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             </Form.Item>
             <Form.Item label="审批说明" name="instructions">
               <Input.TextArea rows={4} placeholder="告诉审批人需要做什么" />
+            </Form.Item>
+            <Form.Item label="超时时间" name="timeout_seconds" tooltip="审批人未在限定时间内响应时的等待时长">
+              <InputNumber min={60} max={86400} style={{ width: '100%' }} addonAfter="秒" />
+            </Form.Item>
+            <Form.Item label="超时后动作" name="timeout_action" tooltip="超时后工作流的处理方式">
+              <Select
+                options={[
+                  { value: 'fail', label: '标记为失败（fail）' },
+                  { value: 'continue', label: '自动通过并继续（continue）' },
+                ]}
+              />
             </Form.Item>
           </>
         )
@@ -1061,6 +1115,11 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
       }
     >
       <Form form={form} layout="vertical">
+        {node && node.data.nodeType !== 'sticky' && (
+          <Form.Item label="节点描述" name="description" tooltip="可选，给节点写一句说明，便于团队协作理解">
+            <Input.TextArea rows={2} placeholder="例如：调用外部订单系统查询订单状态" />
+          </Form.Item>
+        )}
         {renderConfigForm()}
       </Form>
 
