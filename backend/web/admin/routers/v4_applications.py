@@ -264,6 +264,30 @@ def list_runs(
     )
 
 
+@router.get("/applications/{application_id}/inputs")
+def get_application_inputs(
+    application_id: UUID,
+    service: V4ServiceDep,
+    context: RequestContextDep,
+) -> dict:
+    """租户查看该应用 start 节点定义的输入变量，用于动态生成运行表单。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+
+    instance = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+    if instance is None:
+        raise NotFoundError("该应用未开通或不存在")
+
+    graph = service.build_effective_graph(application_id, tenant_id)
+    start_node = next(
+        (n for n in graph.get("nodes", []) if n.get("type") == "start"),
+        None,
+    )
+    inputs = (start_node or {}).get("config", {}).get("inputs") or []
+    return {"inputs": inputs}
+
+
 @router.get("/runs/{run_id}")
 def get_run_detail(
     run_id: UUID,

@@ -4,12 +4,25 @@ import {
   PauseCircleOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons'
-import { App, Button, Card, Empty, Input, Space, Tag, Typography } from 'antd'
-import { useEffect, useState } from 'react'
+import {
+  App,
+  Button,
+  Card,
+  Empty,
+  Input,
+  InputNumber,
+  Space,
+  Switch,
+  Tag,
+  Typography,
+} from 'antd'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
+  getApplicationInputs,
   listMyApps,
   runApplication,
+  type V4ApplicationInput,
   type V4MyApp,
   type V4RunResult,
 } from '../../api/v4'
@@ -43,6 +56,60 @@ function JsonBlock({ value }: { value: unknown }) {
   )
 }
 
+function defaultValueFor(input: V4ApplicationInput): unknown {
+  if (input.default !== undefined && input.default !== null && input.default !== '') {
+    return input.default
+  }
+  switch (input.type) {
+    case 'number':
+      return 0
+    case 'boolean':
+      return false
+    case 'json':
+      return ''
+    default:
+      return ''
+  }
+}
+
+function renderField(
+  input: V4ApplicationInput,
+  value: unknown,
+  onChange: (v: unknown) => void,
+) {
+  switch (input.type) {
+    case 'number':
+      return (
+        <InputNumber
+          style={{ width: '100%' }}
+          value={typeof value === 'number' ? value : Number(value) || 0}
+          onChange={(v) => onChange(v ?? 0)}
+        />
+      )
+    case 'boolean':
+      return (
+        <Switch checked={Boolean(value)} onChange={(v) => onChange(v)} />
+      )
+    case 'json':
+      return (
+        <Input.TextArea
+          rows={6}
+          style={{ fontFamily: 'monospace', fontSize: 12 }}
+          value={typeof value === 'string' ? value : JSON.stringify(value, null, 2)}
+          placeholder='例如：{"key": "value"}'
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
+    default:
+      return (
+        <Input
+          value={typeof value === 'string' ? value : String(value ?? '')}
+          onChange={(e) => onChange(e.target.value)}
+        />
+      )
+  }
+}
+
 export default function V4RunPage() {
   const { appId } = useParams<{ appId: string }>()
   const navigate = useNavigate()
@@ -50,7 +117,11 @@ export default function V4RunPage() {
 
   const [app, setApp] = useState<V4MyApp | null>(null)
   const [loadingApp, setLoadingApp] = useState(true)
+  const [inputDefs, setInputDefs] = useState<V4ApplicationInput[]>([])
+  const [loadingDefs, setLoadingDefs] = useState(false)
+  const [formValues, setFormValues] = useState<Record<string, unknown>>({})
   const [inputsText, setInputsText] = useState('{\n\n}')
+  const [advancedMode, setAdvancedMode] = useState(false)
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<V4RunResult | null>(null)
 
@@ -71,28 +142,71 @@ export default function V4RunPage() {
       .finally(() => setLoadingApp(false))
   }, [appId, message])
 
-  const handleRun = async () => {
+  useEffect(() => {
     if (!appId) return
-    let inputs: Record<string, unknown> = {}
-    const trimmed = inputsText.trim()
-    if (trimmed) {
+    setLoadingDefs(true)
+    getApplicationInputs(appId)
+      .then((defs) => {
+        setInputDefs(defs)
+        const init: Record<string, unknown> = {}
+        defs.forEach((d) => {
+          init[d.name] = defaultValueFor(d)
+        })
+        setFormValues(init)
+        if (defs.length === 0) {
+          setAdvancedMode(true)
+        }
+      })
+      .catch(() => {
+        setAdvancedMode(true)
+      })
+      .finally(() => setLoadingDefs(false))
+  }, [appId])
+
+  const serializedInputs = useMemo<Record<string, unknown>>(() => {
+    if (advancedMode) {
+      const trimmed = inputsText.trim()
+      if (!trimmed) return {}
       try {
         const parsed = JSON.parse(trimmed)
         if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-          inputs = parsed as Record<string, unknown>
-        } else {
-          message.error('inputs 必须是 JSON 对象')
-          return
+          return parsed as Record<string, unknown>
         }
-      } catch (error) {
-        message.error(`inputs JSON 解析失败：${error instanceof Error ? error.message : '格式错误'}`)
-        return
+      } catch {
+        return null as unknown as Record<string, unknown>
       }
+      return null as unknown as Record<string, unknown>
+    }
+    const out: Record<string, unknown> = {}
+    for (const def of inputDefs) {
+      const raw = formValues[def.name]
+      if (def.type === 'json') {
+        if (typeof raw === 'string' && raw.trim()) {
+          try {
+            out[def.name] = JSON.parse(raw)
+          } catch {
+            return null as unknown as Record<string, unknown>
+          }
+        } else {
+          out[def.name] = raw ?? null
+        }
+      } else {
+        out[def.name] = raw
+      }
+    }
+    return out
+  }, [advancedMode, inputsText, inputDefs, formValues])
+
+  const handleRun = async () => {
+    if (!appId) return
+    if (serializedInputs === null) {
+      message.error(advancedMode ? 'inputs JSON 解析失败' : '存在 JSON 字段无法解析')
+      return
     }
     setRunning(true)
     setResult(null)
     try {
-      const res = await runApplication(appId, inputs)
+      const res = await runApplication(appId, serializedInputs)
       setResult(res)
       if (res.status === 'success') {
         message.success('运行完成')
@@ -106,7 +220,7 @@ export default function V4RunPage() {
     }
   }
 
-  if (loadingApp) {
+  if (loadingApp || loadingDefs) {
     return (
       <div className="page-card" style={{ textAlign: 'center', padding: 80 }}>
         <LoadingOutlined />
@@ -131,22 +245,55 @@ export default function V4RunPage() {
             运行「{app.name}」
           </Typography.Title>
         </Space>
-        <Button onClick={() => navigate(`/v4/marketplace/apps/${appId}/runs`)}>
-          查看运行历史
-        </Button>
+        <Space>
+          {inputDefs.length > 0 && (
+            <Button type="link" onClick={() => setAdvancedMode((v) => !v)}>
+              {advancedMode ? '切换到表单模式' : '高级模式（JSON）'}
+            </Button>
+          )}
+          <Button onClick={() => navigate(`/v4/marketplace/apps/${appId}/runs`)}>
+            查看运行历史
+          </Button>
+        </Space>
       </Space>
       <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
         {app.description || '暂无描述'}
       </Typography.Paragraph>
 
-      <Card size="small" title="输入参数（JSON 对象）" style={{ marginTop: 16 }}>
-        <Input.TextArea
-          value={inputsText}
-          onChange={(e) => setInputsText(e.target.value)}
-          rows={8}
-          style={{ fontFamily: 'monospace', fontSize: 13 }}
-          placeholder='例如：{"query": "查一下快递 SF123456"}'
-        />
+      <Card size="small" title="输入参数" style={{ marginTop: 16 }}>
+        {advancedMode ? (
+          <Input.TextArea
+            value={inputsText}
+            onChange={(e) => setInputsText(e.target.value)}
+            rows={8}
+            style={{ fontFamily: 'monospace', fontSize: 13 }}
+            placeholder='例如：{"query": "查一下快递 SF123456"}'
+          />
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            {inputDefs.map((def) => (
+              <div key={def.name}>
+                <Typography.Text strong>
+                  {def.name}
+                  {def.required && <span style={{ color: '#ff4d4f' }}> *</span>}
+                  <Typography.Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
+                    ({def.type})
+                  </Typography.Text>
+                </Typography.Text>
+                <div style={{ marginTop: 6 }}>
+                  {renderField(def, formValues[def.name], (v) =>
+                    setFormValues((prev) => ({ ...prev, [def.name]: v })),
+                  )}
+                </div>
+              </div>
+            ))}
+            {inputDefs.length === 0 && (
+              <Typography.Text type="secondary">
+                该应用未声明输入变量，点击运行将以空 inputs 启动。
+              </Typography.Text>
+            )}
+          </Space>
+        )}
         <Space style={{ marginTop: 12 }}>
           <Button
             type="primary"

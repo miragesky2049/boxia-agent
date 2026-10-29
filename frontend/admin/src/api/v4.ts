@@ -199,6 +199,23 @@ export async function runApplication(
   })
 }
 
+// ========== 应用输入变量 ==========
+export interface V4ApplicationInput {
+  name: string
+  type: 'string' | 'number' | 'boolean' | 'json'
+  required?: boolean
+  default?: string | number | boolean | null
+}
+
+export async function getApplicationInputs(
+  applicationId: string,
+): Promise<V4ApplicationInput[]> {
+  const data = await request<{ inputs: V4ApplicationInput[] }>(
+    `/admin/v4/marketplace/applications/${applicationId}/inputs`,
+  )
+  return data.inputs ?? []
+}
+
 // ========== 统一资源（tool / prompt / skill / knowledge） ==========
 export type V4ResourceType = 'tool' | 'prompt' | 'skill' | 'knowledge'
 
