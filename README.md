@@ -280,4 +280,7 @@ TENANT_CODE=acme uv run python -m scripts.create_admin
 
 ## 17. 许可证
 
-本项目采用 [Apache License 2.0](LICENSE)。
+本项目采用 **AGPL-3.0 + 商业授权** 双授权模式，两种授权互斥，须二选一：
+
+- **选项 A：AGPL-3.0** —— 遵守 AGPL-3.0 全部条款（衍生代码同协议开源、网络对外提供服务也须公开源码）即可免费使用。协议全文见 [LICENSE-AGPL](./LICENSE-AGPL)，双授权说明见 [LICENSE](./LICENSE)。
+- **选项 B：商业授权** —— 不想开源衍生代码、需闭源集成 / SaaS 托管 / 私有化部署 / 商业支持时，需向作者购买商业授权。档位、权利、限制与购买方式见 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
