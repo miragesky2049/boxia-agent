@@ -6,6 +6,7 @@ import json
 import logging
 from contextvars import ContextVar
 from typing import Any
+from uuid import UUID
 
 from internal.engine.llm import LLMClient
 from internal.engine.v4.registry import NodePlugin, PortSpec, register_node
@@ -23,6 +24,9 @@ SubgraphLoaderCtx: ContextVar[Any] = ContextVar("v4_subgraph_loader", default=No
 # 运行时 tool 资源解析器：由 GraphRunner 注入，签名 (resource_id: str) -> dict | None
 # 返回 tool 的 config（含 endpoint / method / params_schema），无权访问或不存在时返回 None
 ToolResolverCtx: ContextVar[Any] = ContextVar("v4_tool_resolver", default=None)
+
+# 当前租户 ID：由 GraphRunner 在 invoke 前注入，tool/http 节点构造 AgentRunContext 用
+TenantIdCtx: ContextVar[Any] = ContextVar("v4_tenant_id", default=None)
 
 
 # ========== start ==========
@@ -151,12 +155,19 @@ def _tool_node_build(config: dict[str, Any]):
 
     config.resource_id: resource 表中 type=tool 的资源 ID
     config.params: {param_name: 值或占位符}
+
+    tool_config.config 约定：
+      - endpoint: 完整 URL
+      - method: GET / POST / PUT / DELETE
+      - headers: 额外请求头（可选）
+      - body_field: 把 params 作为 body 的哪个字段传（可选，默认直接作为 json body）
     """
     resource_id = config.get("resource_id", "")
     params_config = config.get("params", {}) or {}
 
     async def tool_fn(state: dict) -> dict:
         resolver = ToolResolverCtx.get()
+        tenant_id = TenantIdCtx.get()
         params = _resolve_params(params_config, state)
 
         if resolver is None or not resource_id:
@@ -176,17 +187,69 @@ def _tool_node_build(config: dict[str, Any]):
                 }
             }
 
-        # TODO: 真正按 tool_config 的 endpoint / method 发请求（走 SSRF 防护）
-        return {
-            "output": {
-                "result": {
-                    "tool_name": tool_config.get("name"),
-                    "endpoint": tool_config.get("config", {}).get("endpoint"),
-                    "params": params,
-                },
-                "error": None,
+        tool_detail = tool_config.get("config", {}) or {}
+        endpoint = tool_detail.get("endpoint", "")
+        method = (tool_detail.get("method") or "POST").upper()
+        headers = tool_detail.get("headers", {}) or {}
+        body_field = tool_detail.get("body_field")
+
+        if not endpoint:
+            return {
+                "output": {
+                    "result": None,
+                    "error": "工具资源未配置 endpoint",
+                }
             }
-        }
+
+        from internal.engine.context import AgentRunContext
+        from internal.engine.tool_gateway import GatewayConfig, ToolExecutionError, get_tool_gateway
+
+        ctx = AgentRunContext(
+            agent_id=str(tool_config.get("id", "")),
+            tenant_id=tenant_id,
+            user_id=None,
+            conversation_id="",
+        )
+        gateway = get_tool_gateway()
+        cfg = GatewayConfig()
+
+        try:
+            if method == "GET":
+                result_text = await gateway.invoke_http(
+                    method=method,
+                    url=endpoint,
+                    headers=headers,
+                    json_body=None,
+                    params=params,
+                    context=ctx,
+                    tool_name=tool_config.get("name", resource_id),
+                    cfg=cfg,
+                )
+            else:
+                json_body = {body_field: params} if body_field else params
+                result_text = await gateway.invoke_http(
+                    method=method,
+                    url=endpoint,
+                    headers=headers,
+                    json_body=json_body,
+                    params=None,
+                    context=ctx,
+                    tool_name=tool_config.get("name", resource_id),
+                    cfg=cfg,
+                )
+            return {
+                "output": {
+                    "result": result_text,
+                    "error": None,
+                }
+            }
+        except ToolExecutionError as exc:
+            return {
+                "output": {
+                    "result": None,
+                    "error": exc.message,
+                }
+            }
 
     return tool_fn
 
@@ -208,19 +271,88 @@ def _template_node_build(config: dict[str, Any]):
 
 # ========== http（HTTP 请求） ==========
 def _http_node_build(config: dict[str, Any]):
-    """http 节点：发 HTTP 请求（走 SSRF 防护）。"""
+    """http 节点：发 HTTP 请求（走 SSRF 防护）。
+
+    config.url: 目标 URL
+    config.method: GET / POST / PUT / DELETE
+    config.headers: 额外请求头
+    config.body: 请求体（JSON 对象或占位符）
+    """
+    url_template = config.get("url", "")
+    method = (config.get("method") or "GET").upper()
+    headers_config = config.get("headers", {}) or {}
+    body_config = config.get("body")
 
     async def http_fn(state: dict) -> dict:
-        # TODO: 接 SSRF 防护 + 工具治理网关
-        return {
-            "output": {
-                "status": 200,
-                "body": f"[HTTP] {config.get('method', 'GET')} {config.get('url', '')}",
-                "headers": {},
+        import httpx
+
+        from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+
+        url = _resolve_template(url_template, state)
+        headers = _resolve_params(headers_config, state)
+        body = _resolve_template(json.dumps(body_config)) if body_config else None
+        if isinstance(body, str):
+            try:
+                body = json.loads(body)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        try:
+            validate_outbound_url(url)
+        except Exception as exc:
+            return {
+                "output": {
+                    "status": 0,
+                    "body": None,
+                    "headers": {},
+                    "error": f"URL 不安全：{exc}",
+                }
             }
-        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                if method == "GET":
+                    resp = await client.get(url, headers=headers)
+                elif method == "POST":
+                    resp = await client.post(url, headers=headers, json=body)
+                elif method == "PUT":
+                    resp = await client.put(url, headers=headers, json=body)
+                elif method == "DELETE":
+                    resp = await client.delete(url, headers=headers)
+                else:
+                    resp = await client.request(method, url, headers=headers, json=body)
+            return {
+                "output": {
+                    "status": resp.status_code,
+                    "body": resp.text[:8192],
+                    "headers": dict(resp.headers),
+                    "error": None,
+                }
+            }
+        except Exception as exc:
+            return {
+                "output": {
+                    "status": 0,
+                    "body": None,
+                    "headers": {},
+                    "error": str(exc),
+                }
+            }
 
     return http_fn
+
+
+def _resolve_template(template: str, state: dict) -> str:
+    """把 {{#input.xxx#}} / {{#output.xxx#}} 占位符替换为实际值。"""
+    if not isinstance(template, str):
+        return template
+    result = template
+    for key, value in state.get("input", {}).items():
+        result = result.replace(f"{{{{#input.{key}#}}}}", str(value))
+    for key, value in state.get("output", {}).items():
+        if isinstance(value, (str, int, float, bool)):
+            result = result.replace(f"{{{{#output.{key}#}}}}", str(value))
+    return result
 
 
 # ========== retrieval（RAG 检索） ==========

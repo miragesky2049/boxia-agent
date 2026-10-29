@@ -17,6 +17,7 @@ from internal.engine.v4.events import NodeExecutionEvent, publish
 from internal.engine.v4.nodes.builtin import (
     ModelResolverCtx,
     SubgraphLoaderCtx,
+    TenantIdCtx,
     ToolResolverCtx,
 )
 
@@ -245,6 +246,7 @@ class GraphRunner:
             SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
         )
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
+        tenant_token = TenantIdCtx.set(self.tenant_id)
 
         try:
             await self._stream_and_record({"input": input_data})
@@ -321,6 +323,7 @@ class GraphRunner:
                 SubgraphLoaderCtx.reset(subgraph_token)
             if tool_token is not None:
                 ToolResolverCtx.reset(tool_token)
+            TenantIdCtx.reset(tenant_token)
 
     async def resume(self, approval: dict[str, Any]) -> dict[str, Any]:
         """人审通过后恢复执行。approval 形如 {"approved": true, "comment": "..."}。"""
@@ -330,6 +333,7 @@ class GraphRunner:
             SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
         )
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
+        tenant_token = TenantIdCtx.set(self.tenant_id)
 
         try:
             await self._stream_and_record(Command(resume=approval))
@@ -354,6 +358,7 @@ class GraphRunner:
                 SubgraphLoaderCtx.reset(subgraph_token)
             if tool_token is not None:
                 ToolResolverCtx.reset(tool_token)
+            TenantIdCtx.reset(tenant_token)
 
     def get_interrupt_state(self) -> dict[str, Any] | None:
         """查询当前 thread 是否在等人审。"""
