@@ -432,6 +432,23 @@ export async function setAppEnabled(applicationId: string, enabled: boolean): Pr
   })
 }
 
+// ========== prompt 优化 ==========
+export interface V4PromptOptimizeResult {
+  optimized_prompt: string
+  suggestions: string[]
+}
+
+export async function optimizePrompt(payload: {
+  model_id: string
+  current_prompt: string
+  task_description?: string
+}): Promise<V4PromptOptimizeResult> {
+  return request<V4PromptOptimizeResult>('/admin/v4/prompt-optimize', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 // ========== 模型目录 ==========
 export async function listAvailableModels(): Promise<V4ModelItem[]> {
   return request<V4ModelItem[]>('/admin/v4/models/catalog/available')

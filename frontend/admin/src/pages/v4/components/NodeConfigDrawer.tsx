@@ -1,7 +1,7 @@
-import { PlusOutlined, CloseOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Select, Slider, Space } from 'antd'
+import { PlusOutlined, CloseOutlined, BulbOutlined } from '@ant-design/icons'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
-import { listAvailableModels } from '../../../api/v4'
+import { listAvailableModels, optimizePrompt, type V4PromptOptimizeResult } from '../../../api/v4'
 import {
   getUpstreamNodeIds,
   listOutputFields,
@@ -314,6 +314,53 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
   const watchedSystemPrompt = (Form.useWatch('system_prompt', form) as string) ?? ''
   const watchedTemplate = (Form.useWatch('template', form) as string) ?? ''
 
+  // AI prompt 优化 Modal
+  const [optimizeOpen, setOptimizeOpen] = useState(false)
+  const [optimizeLoading, setOptimizeLoading] = useState(false)
+  const [taskDescription, setTaskDescription] = useState('')
+  const [optimizeResult, setOptimizeResult] = useState<V4PromptOptimizeResult | null>(null)
+
+  const handleOptimizeClick = () => {
+    setOptimizeResult(null)
+    setTaskDescription('')
+    setOptimizeOpen(true)
+  }
+
+  const handleOptimizeRun = async () => {
+    const modelId = form.getFieldValue('model_id') as string | undefined
+    const currentPrompt = (form.getFieldValue('system_prompt') as string | undefined) ?? ''
+    if (!modelId) {
+      message.warning('请先在上方选择模型')
+      return
+    }
+    if (!currentPrompt.trim()) {
+      message.warning('请先填写当前 system prompt')
+      return
+    }
+    setOptimizeLoading(true)
+    setOptimizeResult(null)
+    try {
+      const result = await optimizePrompt({
+        model_id: modelId,
+        current_prompt: currentPrompt,
+        task_description: taskDescription,
+      })
+      setOptimizeResult(result)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '优化失败')
+    } finally {
+      setOptimizeLoading(false)
+    }
+  }
+
+  const handleOptimizeAccept = () => {
+    if (!optimizeResult) return
+    form.setFieldValue('system_prompt', optimizeResult.optimized_prompt)
+    message.success('已采纳优化后的 prompt，记得点"应用配置"')
+    setOptimizeOpen(false)
+    setOptimizeResult(null)
+  }
+
   useEffect(() => {
     if (node) {
       form.setFieldsValue(node.data.config)
@@ -371,7 +418,22 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             >
               <ModelSelect />
             </Form.Item>
-            <Form.Item label="系统提示词" name="system_prompt">
+            <Form.Item
+              label={
+                <Space size="small">
+                  <span>系统提示词</span>
+                  <Button
+                    size="small"
+                    type="link"
+                    icon={<BulbOutlined />}
+                    onClick={handleOptimizeClick}
+                  >
+                    AI 优化
+                  </Button>
+                </Space>
+              }
+              name="system_prompt"
+            >
               <PromptTextArea
                 value={watchedSystemPrompt}
                 onChange={(v) => form.setFieldValue('system_prompt', v)}
@@ -509,6 +571,104 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
       <Form form={form} layout="vertical">
         {renderConfigForm()}
       </Form>
+
+      <Modal
+        title="AI 优化 system prompt"
+        open={optimizeOpen}
+        onCancel={() => {
+          setOptimizeOpen(false)
+          setOptimizeResult(null)
+        }}
+        destroyOnClose
+        width={640}
+        footer={
+          optimizeResult ? (
+            <Space>
+              <Button
+                onClick={() => {
+                  setOptimizeOpen(false)
+                  setOptimizeResult(null)
+                }}
+              >
+                取消
+              </Button>
+              <Button type="primary" onClick={handleOptimizeAccept}>
+                采纳优化结果
+              </Button>
+            </Space>
+          ) : (
+            <Space>
+              <Button onClick={() => setOptimizeOpen(false)}>取消</Button>
+              <Button
+                type="primary"
+                loading={optimizeLoading}
+                onClick={handleOptimizeRun}
+              >
+                开始优化
+              </Button>
+            </Space>
+          )
+        }
+      >
+        <Space direction="vertical" style={{ width: '100%' }} size="middle">
+          <div>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+              当前 system prompt：
+            </Typography.Text>
+            <Input.TextArea
+              value={watchedSystemPrompt}
+              readOnly
+              rows={5}
+              style={{ marginTop: 4, fontSize: 12, background: '#fafafa' }}
+            />
+          </div>
+
+          {!optimizeResult && (
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                任务描述（可选，帮助 AI 理解业务意图）：
+              </Typography.Text>
+              <Input.TextArea
+                value={taskDescription}
+                onChange={(e) => setTaskDescription(e.target.value)}
+                rows={3}
+                placeholder='例如："让回答更简洁，不超过 100 字"、"主要面向售后工单场景"'
+                style={{ marginTop: 4 }}
+              />
+            </div>
+          )}
+
+          {optimizeResult && (
+            <>
+              <div>
+                <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                  优化后的 prompt：
+                </Typography.Text>
+                <Input.TextArea
+                  value={optimizeResult.optimized_prompt}
+                  readOnly
+                  rows={8}
+                  style={{ marginTop: 4, fontSize: 12, background: '#f6ffed' }}
+                />
+              </div>
+              {optimizeResult.suggestions.length > 0 && (
+                <div>
+                  <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    改动建议：
+                  </Typography.Text>
+                  <ul style={{ margin: '4px 0 0 20px', padding: 0 }}>
+                    {optimizeResult.suggestions.map((s, i) => (
+                      <li key={i} style={{ fontSize: 12, color: '#595959' }}>
+                        {s}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
+          )}
+        </Space>
+      </Modal>
     </Drawer>
   )
 }
