@@ -23,10 +23,13 @@ import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import {
+  forkRun,
   getRunDetail,
   listApplicationRuns,
+  listRunCheckpoints,
   resumeRun,
   runApplication,
+  type V4CheckpointItem,
   type V4NodeExecution,
   type V4RunDetail,
   type V4RunItem,
@@ -143,6 +146,11 @@ export default function V4RunsPage() {
   const [submitting, setSubmitting] = useState(false)
   const [rerunningId, setRerunningId] = useState<string | null>(null)
 
+  // time-travel: checkpoint 历史
+  const [checkpoints, setCheckpoints] = useState<V4CheckpointItem[]>([])
+  const [checkpointsLoading, setCheckpointsLoading] = useState(false)
+  const [forkingId, setForkingId] = useState<string | null>(null)
+
   const load = useCallback(async () => {
     if (!appId) return
     setLoading(true)
@@ -164,14 +172,44 @@ export default function V4RunsPage() {
     setDetailOpen(true)
     setDetailLoading(true)
     setDetail(null)
+    setCheckpoints([])
     try {
       const data = await getRunDetail(runId)
       setDetail(data)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载运行详情失败')
       setDetailOpen(false)
+      return
     } finally {
       setDetailLoading(false)
+    }
+    // 并行拉 checkpoint 历史（time-travel）
+    setCheckpointsLoading(true)
+    try {
+      const cps = await listRunCheckpoints(runId)
+      setCheckpoints(cps)
+    } catch {
+      // checkpoint 拉不到不阻塞详情展示
+    } finally {
+      setCheckpointsLoading(false)
+    }
+  }
+
+  const handleFork = async (checkpointId: string) => {
+    if (!detail) return
+    setForkingId(checkpointId)
+    try {
+      const result = await forkRun(detail.run.id, { checkpoint_id: checkpointId })
+      if (result.status === 'success') {
+        message.success(`已分叉，新 run=${result.new_run_id.slice(0, 8)}`)
+      } else {
+        message.info('分叉已启动，等待人审')
+      }
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '分叉失败')
+    } finally {
+      setForkingId(null)
     }
   }
 
@@ -393,6 +431,61 @@ export default function V4RunsPage() {
                 ) : (
                   detail.node_executions.map((node) => (
                     <NodeExecutionRow key={node.id} node={node} />
+                  ))
+                )}
+              </div>
+            </div>
+
+            <div>
+              <Typography.Text strong>
+                Time-travel 历史（{checkpoints.length}）
+              </Typography.Text>
+              <Typography.Paragraph type="secondary" style={{ marginTop: 4, fontSize: 12 }}>
+                从任一历史状态分叉：复制该状态到新 thread，从该节点继续跑。
+              </Typography.Paragraph>
+              <div style={{ marginTop: 8 }}>
+                {checkpointsLoading ? (
+                  <Typography.Text type="secondary">加载中...</Typography.Text>
+                ) : checkpoints.length === 0 ? (
+                  <Empty description="无 checkpoint 历史" />
+                ) : (
+                  checkpoints.map((cp, idx) => (
+                    <div
+                      key={cp.checkpoint_id || idx}
+                      style={{
+                        borderLeft: '3px solid #1677ff',
+                        padding: '8px 12px',
+                        marginBottom: 8,
+                        background: '#f0f5ff',
+                      }}
+                    >
+                      <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
+                        <Space>
+                          <Tag color="blue">#{idx + 1}</Tag>
+                          <Typography.Text code style={{ fontSize: 11 }}>
+                            {(cp.checkpoint_id || '').slice(0, 8)}
+                          </Typography.Text>
+                          {cp.next_nodes.length > 0 ? (
+                            <Tag color="orange">下一步: {cp.next_nodes.join(', ')}</Tag>
+                          ) : (
+                            <Tag>已完成</Tag>
+                          )}
+                          {cp.created_at && (
+                            <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                              {dayjs(cp.created_at).format('HH:mm:ss')}
+                            </Typography.Text>
+                          )}
+                        </Space>
+                        <Button
+                          type="link"
+                          size="small"
+                          loading={forkingId === cp.checkpoint_id}
+                          onClick={() => handleFork(cp.checkpoint_id)}
+                        >
+                          从此分叉
+                        </Button>
+                      </Space>
+                    </div>
                   ))
                 )}
               </div>

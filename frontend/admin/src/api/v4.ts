@@ -158,6 +158,44 @@ export async function getRunDetail(runId: string): Promise<V4RunDetail> {
   return request<V4RunDetail>(`/admin/v4/marketplace/runs/${runId}`)
 }
 
+export interface V4CheckpointItem {
+  checkpoint_id: string
+  next_nodes: string[]
+  input: Record<string, unknown> | null
+  output: Record<string, unknown> | null
+  node_count: number
+  created_at: string | null
+}
+
+export async function listRunCheckpoints(runId: string): Promise<V4CheckpointItem[]> {
+  const data = await request<{ checkpoints: V4CheckpointItem[] }>(
+    `/admin/v4/marketplace/runs/${runId}/checkpoints`,
+  )
+  return data.checkpoints ?? []
+}
+
+export async function forkRun(
+  runId: string,
+  payload: { checkpoint_id: string; new_input?: Record<string, unknown> },
+): Promise<{
+  status: 'success' | 'waiting_approval'
+  new_run_id: string
+  new_thread_id: string
+  output?: Record<string, unknown>
+  approval?: Record<string, unknown>
+}> {
+  return request<{
+    status: 'success' | 'waiting_approval'
+    new_run_id: string
+    new_thread_id: string
+    output?: Record<string, unknown>
+    approval?: Record<string, unknown>
+  }>(`/admin/v4/marketplace/runs/${runId}/fork`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
 export async function resumeRun(
   applicationId: string,
   threadId: string,

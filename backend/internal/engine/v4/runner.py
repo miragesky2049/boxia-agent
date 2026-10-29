@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import time
 import uuid
@@ -79,6 +80,9 @@ async def _get_checkpointer():
 # LangGraph 内部事件名过滤：这些不是用户节点，不写 run_node_execution
 _INTERNAL_NAMES = {"", "LangGraph", "Graph", "Channel"}
 
+# 后台 webhook 推送任务集合：保持引用防止 event loop 在任务完成前 GC
+_BACKGROUND_TASKS: set[asyncio.Task] = set()
+
 
 class GraphInterrupted(Exception):
     """图执行被人审 interrupt 暂停。"""
@@ -100,6 +104,7 @@ class GraphRunner:
         tool_resolver: ToolResolver | None = None,
         retrieval_service: Any | None = None,
         knowledge_resolver: Any | None = None,
+        webhook_repo: Any | None = None,
         thread_id: str | None = None,
         run_id: UUID | None = None,
         run_repo: Any | None = None,
@@ -119,6 +124,7 @@ class GraphRunner:
         self._tool_resolver = tool_resolver
         self._retrieval_service = retrieval_service
         self._knowledge_resolver = knowledge_resolver
+        self._webhook_repo = webhook_repo
         self._run_repo = run_repo
         self._usage_repo = usage_repo
         self._audit_repo = audit_repo
@@ -141,6 +147,10 @@ class GraphRunner:
     def _config(self) -> dict[str, Any]:
         # 按 tenant_id 命名空间隔离 thread_id，防止跨租户通过伪造 thread_id 访问他人 checkpoint
         return {"configurable": {"thread_id": f"{self.tenant_id}:{self.thread_id}"}}
+
+    def _config_for_thread(self, thread_id: str) -> dict[str, Any]:
+        """为指定 thread_id 构造 config（time-travel 分叉时用新 thread_id）。"""
+        return {"configurable": {"thread_id": f"{self.tenant_id}:{thread_id}"}}
 
     async def _extract_interrupt(self) -> dict[str, Any] | None:
         """从 checkpointer 中取出当前等待的人审 interrupt payload。"""
@@ -332,6 +342,15 @@ class GraphRunner:
                 output=output,
                 duration_ms=duration_ms,
             ))
+            await self._notify_webhooks("run_finished", {
+                "run_id": str(self.run_id),
+                "tenant_id": str(self.tenant_id),
+                "application_id": str(self.application_id),
+                "thread_id": self.thread_id,
+                "status": "success",
+                "output": output,
+                "duration_ms": duration_ms,
+            })
             logger.info(f"运行完成: run={self.run_id} duration={duration_ms}ms")
             return output
 
@@ -371,6 +390,15 @@ class GraphRunner:
                 error=str(e),
                 duration_ms=duration_ms,
             ))
+            await self._notify_webhooks("run_error", {
+                "run_id": str(self.run_id),
+                "tenant_id": str(self.tenant_id),
+                "application_id": str(self.application_id),
+                "thread_id": self.thread_id,
+                "status": "error",
+                "error": str(e),
+                "duration_ms": duration_ms,
+            })
             logger.error(f"运行失败: run={self.run_id} error={e}")
             raise
         finally:
@@ -436,3 +464,135 @@ class GraphRunner:
         """查询当前 thread 是否在等人审。"""
         await self._ensure_compiled()
         return await self._extract_interrupt()
+
+    async def _notify_webhooks(self, event_type: str, payload: dict[str, Any]) -> None:
+        """异步推送 webhook 通知；失败不阻塞主流程。"""
+        if self._webhook_repo is None:
+            return
+        try:
+            webhooks = self._webhook_repo.list_for_event(
+                self.tenant_id, event_type, self.application_id,
+            )
+        except Exception:  # noqa: BLE001
+            logger.exception("查 webhook 列表失败")
+            return
+        if not webhooks:
+            return
+
+        import httpx
+
+        async def _send(wh: dict[str, Any]) -> None:
+            try:
+                async with httpx.AsyncClient(timeout=5.0) as client:
+                    await client.post(wh["url"], json=payload)
+            except Exception:  # noqa: BLE001
+                logger.warning("webhook 推送失败: url=%s", wh["url"])
+
+        # fire-and-forget：保持 task 引用防止 GC，主流程不阻塞
+        for wh in webhooks:
+            task = asyncio.create_task(_send(wh))
+            _BACKGROUND_TASKS.add(task)
+            task.add_done_callback(_BACKGROUND_TASKS.discard)
+
+    async def list_checkpoint_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        """列出当前 thread 的 checkpoint 历史（time-travel 用）。
+
+        每条包含：checkpoint_id / 待执行节点 / state 摘要 / 创建时间。
+        """
+        await self._ensure_compiled()
+        result: list[dict[str, Any]] = []
+        async for state in self.compiled.aget_state_history(self._config(), limit=limit):
+            values = state.values or {}
+            result.append({
+                "checkpoint_id": state.config["configurable"].get("checkpoint_id"),
+                "next_nodes": list(state.next or []),
+                "input": values.get("input"),
+                "output": values.get("output"),
+                "node_count": len([k for k in values.keys() if k not in ("input", "output")]),
+                "created_at": getattr(state.metadata, "created_at", None),
+            })
+        return result
+
+    async def fork_from_checkpoint(
+        self,
+        source_thread_id: str,
+        checkpoint_id: str,
+        new_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """从历史 checkpoint 分叉：复制 state 到新 thread，然后从该状态继续跑。
+
+        Args:
+            source_thread_id: 原 run 的 thread_id
+            checkpoint_id: 要分叉的 checkpoint id（来自 list_checkpoint_history）
+            new_input: 可选，覆盖 input 字段（不改则沿用分叉点的 input）
+
+        Returns:
+            {"new_thread_id": str, "output": dict}
+        """
+        await self._ensure_compiled()
+        source_config = self._config_for_thread(source_thread_id)
+        source_config["configurable"]["checkpoint_id"] = checkpoint_id
+
+        # 取源 checkpoint 的 state
+        source_state = await self.compiled.aget_state(source_config)
+        values = dict(source_state.values or {})
+        if new_input is not None:
+            values["input"] = new_input
+
+        # 新 thread_id
+        new_thread_id = str(uuid.uuid4())
+        new_config = self._config_for_thread(new_thread_id)
+
+        # 用 update_state 把源 state 写到新 thread（这会创建一个新 checkpoint）
+        await self.compiled.aupdate_state(
+            new_config,
+            values=values,
+        )
+
+        # 从新 thread 继续跑（无 input，因为 state 已就绪）
+        self.thread_id = new_thread_id
+        started_at = time.time()
+
+        model_token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
+        subgraph_token = (
+            SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
+        )
+        tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
+        tenant_token = TenantIdCtx.set(self.tenant_id)
+        retrieval_token = (
+            RetrievalServiceCtx.set(self._retrieval_service) if self._retrieval_service else None
+        )
+        knowledge_token = (
+            KnowledgeResolverCtx.set(self._knowledge_resolver) if self._knowledge_resolver else None
+        )
+
+        try:
+            await self._stream_and_record(None)
+            interrupt_payload = await self._extract_interrupt()
+            if interrupt_payload is not None:
+                if self._run_repo is not None:
+                    self._run_repo.update_run_status(self.run_id, status="interrupted")
+                raise GraphInterrupted(interrupt_payload)
+
+            result = await self.compiled.aget_state(self._config())
+            output = result.values.get("output", {}) if result.values else {}
+            duration_ms = int((time.time() - started_at) * 1000)
+            if self._run_repo is not None:
+                self._run_repo.update_run_status(self.run_id, status="success", output=output)
+            logger.info(
+                f"分叉运行完成: source_thread={source_thread_id} new_thread={new_thread_id} "
+                f"duration={duration_ms}ms"
+            )
+            return {"new_thread_id": new_thread_id, "output": output}
+        finally:
+            if model_token is not None:
+                ModelResolverCtx.reset(model_token)
+            if subgraph_token is not None:
+                SubgraphLoaderCtx.reset(subgraph_token)
+            if tool_token is not None:
+                ToolResolverCtx.reset(tool_token)
+            if retrieval_token is not None:
+                RetrievalServiceCtx.reset(retrieval_token)
+            if knowledge_token is not None:
+                KnowledgeResolverCtx.reset(knowledge_token)
+            TenantIdCtx.reset(tenant_token)

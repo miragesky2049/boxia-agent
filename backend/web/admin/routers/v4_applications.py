@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import uuid
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -20,6 +21,7 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 )
 from internal.infrastructure.repository.v4.run_repository import V4RunRepository
 from internal.infrastructure.repository.v4.usage_repository import V4UsageRepository
+from internal.infrastructure.repository.v4.webhook_repository import V4WebhookRepository
 from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
@@ -97,6 +99,7 @@ def _build_runner(
     run_repo = V4RunRepository(uow.session)
     usage_repo = V4UsageRepository(uow.session)
     audit_repo = PostgresAuditLogRepository(uow.session)
+    webhook_repo = V4WebhookRepository(uow.session)
 
     # 检索服务：复用现有 RAG 用例（query 改写 -> 多 query 召回 -> rerank）
     retrieval_service = RetrievalService(uow=uow, context=context)
@@ -149,6 +152,7 @@ def _build_runner(
         tool_resolver=tool_resolver,
         retrieval_service=retrieval_service,
         knowledge_resolver=knowledge_resolver,
+        webhook_repo=webhook_repo,
         thread_id=thread_id,
         run_id=run_id,
         run_repo=run_repo,
@@ -333,3 +337,154 @@ def get_run_detail(
         "run": run,
         "node_executions": run_repo.list_node_executions(run_id),
     }
+
+
+@router.get("/runs/{run_id}/checkpoints")
+async def list_run_checkpoints(
+    run_id: UUID,
+    service: V4ServiceDep,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """列出某 run 的 checkpoint 历史（time-travel 用）。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+
+    run_repo = V4RunRepository(uow.session)
+    run = run_repo.get_run(run_id)
+    if run is None or run["tenant_id"] != tenant_id:
+        raise NotFoundError("运行记录不存在")
+
+    runner = _build_runner(
+        service, uow, context, tenant_id, run["application_id"],
+        thread_id=run["langgraph_thread_id"], run_id=run_id,
+    )
+    history = await runner.list_checkpoint_history(limit=20)
+    return {"checkpoints": history}
+
+
+class ForkPayload(BaseModel):
+    checkpoint_id: str
+    new_input: dict[str, Any] | None = None
+
+
+@router.post("/runs/{run_id}/fork")
+async def fork_run(
+    run_id: UUID,
+    payload: ForkPayload,
+    service: V4ServiceDep,
+    uow: UowDep,
+    context: RequestContextDep,
+    principal: AdminAuthDep,
+) -> dict:
+    """从历史 checkpoint 分叉重跑：复制 state 到新 thread，从该状态继续。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+
+    run_repo = V4RunRepository(uow.session)
+    run = run_repo.get_run(run_id)
+    if run is None or run["tenant_id"] != tenant_id:
+        raise NotFoundError("运行记录不存在")
+
+    # 新 run_id，新 thread 由 runner 内部生成
+    new_run_id = uuid.uuid4()
+    runner = _build_runner(
+        service, uow, context, tenant_id, run["application_id"],
+        run_id=new_run_id,
+        current_user_id=principal.user_id,
+        actor_username=principal.username,
+    )
+
+    # 先落一条新 run 记录
+    graph = service.build_effective_graph(run["application_id"], tenant_id)
+    run_repo.insert_run(
+        run_id=new_run_id,
+        tenant_id=tenant_id,
+        application_id=run["application_id"],
+        graph_snapshot=graph,
+        input_data=payload.new_input or run["input"],
+        langgraph_thread_id=runner.thread_id,
+    )
+
+    try:
+        result = await runner.fork_from_checkpoint(
+            source_thread_id=run["langgraph_thread_id"],
+            checkpoint_id=payload.checkpoint_id,
+            new_input=payload.new_input,
+        )
+        uow.commit()
+        return {
+            "status": "success",
+            "new_run_id": str(new_run_id),
+            "new_thread_id": result["new_thread_id"],
+            "output": result["output"],
+        }
+    except GraphInterrupted as exc:
+        uow.commit()
+        return {
+            "status": "waiting_approval",
+            "new_run_id": str(new_run_id),
+            "new_thread_id": runner.thread_id,
+            "approval": exc.interrupt_payload,
+        }
+    except Exception:
+        uow.commit()
+        raise
+
+
+# ========== webhook 通知订阅 CRUD ==========
+class WebhookPayload(BaseModel):
+    event_type: str = Field(..., description="run_finished / run_error / node_error")
+    url: str = Field(..., description="回调 URL")
+    application_id: UUID | None = Field(default=None, description="空 = 该租户所有应用")
+
+
+@router.get("/webhooks")
+def list_webhooks(
+    uow: UowDep,
+    context: RequestContextDep,
+) -> list[dict]:
+    """租户列出自己的 webhook 订阅。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+    return V4WebhookRepository(uow.session).list_by_tenant(tenant_id)
+
+
+@router.post("/webhooks")
+def create_webhook(
+    payload: WebhookPayload,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """创建 webhook 订阅。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+    if not payload.url.startswith(("http://", "https://")):
+        raise ValidationError("webhook URL 必须以 http:// 或 https:// 开头")
+    wid = V4WebhookRepository(uow.session).create(
+        tenant_id=tenant_id,
+        event_type=payload.event_type,
+        url=payload.url,
+        application_id=payload.application_id,
+    )
+    uow.commit()
+    return {"id": str(wid)}
+
+
+@router.delete("/webhooks/{webhook_id}")
+def delete_webhook(
+    webhook_id: UUID,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """删除 webhook 订阅。"""
+    tenant_id = context.tenant_id
+    if tenant_id is None:
+        raise ValidationError("无法识别租户")
+    V4WebhookRepository(uow.session).delete(webhook_id, tenant_id)
+    uow.commit()
+    return {"ok": True}
