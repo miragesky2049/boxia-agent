@@ -6,10 +6,10 @@ import logging
 import time
 import uuid
 from datetime import datetime
+from functools import lru_cache
 from typing import Any, Callable
 from uuid import UUID
 
-from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from internal.engine.v4.compiler import compile_graph, infer_runtime_mode
@@ -32,9 +32,34 @@ SubgraphLoader = Callable[[str], dict]
 # tool 资源解析器签名：(resource_id: str) -> dict | None
 ToolResolver = Callable[[str], Any]
 
-# 进程内 checkpointer：按 thread_id 保存图状态，支持 interrupt / resume
-# 首期用 MemorySaver（进程内），后续可换 PostgresSaver 持久化
-_CHECKPOINTER = MemorySaver()
+
+_CHECKPOINTER: Any | None = None
+
+
+def _get_checkpointer():
+    """全局单例 PostgresSaver：持久化 checkpoint，重启不丢。
+
+    懒加载：首次编译 graph 时才建连接（避免模块加载时 context manager 生命周期问题）。
+    """
+    global _CHECKPOINTER
+    if _CHECKPOINTER is not None:
+        return _CHECKPOINTER
+
+    from internal.infrastructure.config.settings import get_settings
+
+    settings = get_settings()
+    # SQLAlchemy URL 转 psycopg URL：postgresql+psycopg:// -> postgresql://
+    db_url = settings.database_url.replace("+psycopg", "")
+
+    from langgraph.checkpoint.postgres import PostgresSaver
+
+    # 用 with 管理连接生命周期，但我们要长期持有 -> 手动 __enter__
+    cm = PostgresSaver.from_conn_string(db_url)
+    saver = cm.__enter__()
+    saver.setup()
+    _CHECKPOINTER = saver
+    logger.info("PostgresSaver 已初始化，checkpoint 持久化到 %s", db_url.split("@")[-1])
+    return saver
 
 # LangGraph 内部事件名过滤：这些不是用户节点，不写 run_node_execution
 _INTERNAL_NAMES = {"", "LangGraph", "Graph", "Channel"}
@@ -86,7 +111,7 @@ class GraphRunner:
             n.get("id"): n.get("type", "unknown") for n in graph.get("nodes", [])
         }
         # 编译时挂 checkpointer，支持 interrupt 暂停
-        self.compiled = compile_graph(graph, checkpointer=_CHECKPOINTER)
+        self.compiled = compile_graph(graph, checkpointer=_get_checkpointer())
 
     def _config(self) -> dict[str, Any]:
         # 按 tenant_id 命名空间隔离 thread_id，防止跨租户通过伪造 thread_id 访问他人 checkpoint
