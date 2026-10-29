@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import Any, Callable
 
-from langgraph.graph import StateGraph
+from langgraph.graph import END, StateGraph
 
 from internal.engine.v4.registry import get_node
 
@@ -41,27 +41,20 @@ def compile_graph(graph: dict[str, Any], checkpointer: Any = None):
         node_fns[node["id"]] = node_fn
         sg.add_node(node["id"], node_fn)
 
-    # 注册边
+    # 按 source 分组收集出边，便于 branch 节点合并条件路由
+    edges_by_source: dict[str, list[dict[str, Any]]] = {}
     for edge in graph.get("edges", []):
-        source = edge["from"]
-        target = edge["to"]
-        source_fn = node_fns.get(source)
+        edges_by_source.setdefault(edge["from"], []).append(edge)
 
-        # 如果源节点是 branch 且带 router，用条件路由
+    # 注册边：普通节点直接 add_edge；带 __router__ 的 branch 节点合并所有出边为一次 conditional_edges
+    for source, out_edges in edges_by_source.items():
+        source_fn = node_fns.get(source)
         if hasattr(source_fn, "__router__"):
-            sg.add_conditional_edges(
-                source,
-                source_fn.__router__,
-                {target: target},
-            )
-        elif "when" in edge:
-            sg.add_conditional_edges(
-                source,
-                _build_router(edge["when"]),
-                {target: target},
-            )
+            path_map = {edge["to"]: edge["to"] for edge in out_edges}
+            sg.add_conditional_edges(source, source_fn.__router__, path_map)
         else:
-            sg.add_edge(source, target)
+            for edge in out_edges:
+                sg.add_edge(source, edge["to"])
 
     # 找入口节点
     start_nodes = [n for n in graph["nodes"] if n["type"] == "start"]
@@ -69,27 +62,35 @@ def compile_graph(graph: dict[str, Any], checkpointer: Any = None):
         raise ValueError("graph 缺少 start 节点")
     sg.set_entry_point(start_nodes[0]["id"])
 
+    # 所有 end 节点自动连 END；没有出边的节点也视为终点
+    connected_targets = {edge["to"] for edge in graph.get("edges", [])}
+    for node in graph.get("nodes", []):
+        if node["id"] == start_nodes[0]["id"]:
+            continue
+        if node["id"] in connected_targets:
+            continue
+        if node["type"] == "end" or node["id"] not in edges_by_source:
+            sg.add_edge(node["id"], END)
+
     return sg.compile(checkpointer=checkpointer)
 
 
 def _build_state_schema(graph: dict[str, Any]) -> type:
-    """从 graph 的 state_schema 定义构建 LangGraph state 类型。"""
-    # v4 首期：用 TypedDict 简化，后续支持动态 schema
+    """从 graph 推断 state schema。
+
+    首期用宽松 TypedDict，覆盖所有内置节点可能返回的 key，
+    让节点间的中间字段（route / usage / results / status 等）能正常传递。
+    """
     from typing import TypedDict
 
     class WorkflowState(TypedDict, total=False):
-        messages: list
         input: dict
         output: dict
+        route: str
+        usage: dict
+        results: list
+        status: str
+        error: str
+        messages: list
 
     return WorkflowState
-
-
-def _build_router(when: str):
-    """构建条件路由函数。"""
-
-    def router(state: dict) -> str:
-        # v4 首期：简单实现，后续扩展条件表达式
-        return state.get("route", when)
-
-    return router
