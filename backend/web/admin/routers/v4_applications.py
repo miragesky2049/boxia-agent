@@ -83,6 +83,8 @@ def _build_runner(
     application_id: UUID,
     thread_id: str | None = None,
     run_id: UUID | None = None,
+    current_user_id: UUID | None = None,
+    actor_username: str | None = None,
 ) -> GraphRunner:
     """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器。"""
     graph = service.build_effective_graph(application_id, tenant_id)
@@ -126,6 +128,8 @@ def _build_runner(
         run_repo=run_repo,
         usage_repo=usage_repo,
         audit_repo=audit_repo,
+        current_user_id=current_user_id,
+        actor_username=actor_username,
     )
 
 
@@ -136,6 +140,7 @@ async def run_application(
     service: V4ServiceDep,
     uow: UowDep,
     context: RequestContextDep,
+    principal: AdminAuthDep,
 ) -> dict:
     """租户运行已开通的应用。
 
@@ -150,7 +155,11 @@ async def run_application(
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    runner = _build_runner(service, uow, tenant_id, application_id)
+    runner = _build_runner(
+        service, uow, tenant_id, application_id,
+        current_user_id=principal.user_id,
+        actor_username=principal.username,
+    )
     try:
         output = await runner.invoke(payload.inputs)
         uow.commit()
@@ -202,6 +211,8 @@ async def resume_application(
     runner = _build_runner(
         service, uow, tenant_id, application_id,
         thread_id=thread_id, run_id=pending["id"],
+        current_user_id=principal.user_id,
+        actor_username=principal.username,
     )
 
     # 人审角色校验：从 checkpointer 取出当前 interrupt payload，比对 assignee_role

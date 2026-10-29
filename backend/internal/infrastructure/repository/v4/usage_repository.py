@@ -28,13 +28,14 @@ class V4UsageRepository:
         prompt_tokens: int,
         completion_tokens: int,
         total_tokens: int,
+        user_id: UUID | None = None,
     ) -> None:
         self._session.execute(
             text(
                 "INSERT INTO tenant_usage_ledger "
                 "(id, tenant_id, application_id, run_id, node_id, model_id, "
-                "prompt_tokens, completion_tokens, total_tokens) VALUES "
-                "(:id, :tid, :aid, :rid, :nid, :mid, :pt, :ct, :tt)"
+                "prompt_tokens, completion_tokens, total_tokens, user_id) VALUES "
+                "(:id, :tid, :aid, :rid, :nid, :mid, :pt, :ct, :tt, :uid)"
             ),
             {
                 "id": new_uuid(),
@@ -46,6 +47,7 @@ class V4UsageRepository:
                 "pt": prompt_tokens,
                 "ct": completion_tokens,
                 "tt": total_tokens,
+                "uid": user_id,
             },
         )
 

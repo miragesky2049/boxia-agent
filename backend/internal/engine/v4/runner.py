@@ -62,6 +62,8 @@ class GraphRunner:
         run_repo: Any | None = None,
         usage_repo: Any | None = None,
         audit_repo: Any | None = None,
+        current_user_id: UUID | None = None,
+        actor_username: str | None = None,
     ):
         self.graph = graph
         self.tenant_id = tenant_id or uuid.UUID("00000000-0000-0000-0000-000000000000")
@@ -75,6 +77,9 @@ class GraphRunner:
         self._run_repo = run_repo
         self._usage_repo = usage_repo
         self._audit_repo = audit_repo
+        # 触发本次运行的最终用户标识：落 audit_logs.actor_id / tenant_usage_ledger.user_id
+        self._current_user_id = current_user_id
+        self._actor_username = actor_username
         # 节点 id -> type 映射，用于节点执行记录
         self._node_types: dict[str, str] = {
             n.get("id"): n.get("type", "unknown") for n in graph.get("nodes", [])
@@ -202,6 +207,7 @@ class GraphRunner:
                     prompt_tokens=token_usage["prompt_tokens"],
                     completion_tokens=token_usage["completion_tokens"],
                     total_tokens=token_usage["total_tokens"],
+                    user_id=self._current_user_id,
                 )
             except Exception:  # noqa: BLE001
                 logger.exception("写 tenant_usage_ledger 失败: node=%s", node_id)
@@ -285,6 +291,8 @@ class GraphRunner:
                         "resource_type": "run",
                         "resource_id": str(self.run_id),
                         "tenant_id": self.tenant_id,
+                        "actor_id": self._current_user_id,
+                        "actor_username": self._actor_username,
                         "detail": {
                             "application_id": str(self.application_id),
                             "thread_id": self.thread_id,
