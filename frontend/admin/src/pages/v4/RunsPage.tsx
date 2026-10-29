@@ -26,6 +26,7 @@ import {
   getRunDetail,
   listApplicationRuns,
   resumeRun,
+  runApplication,
   type V4NodeExecution,
   type V4RunDetail,
   type V4RunItem,
@@ -140,6 +141,7 @@ export default function V4RunsPage() {
   const [approvingRun, setApprovingRun] = useState<V4RunItem | null>(null)
   const [approveComment, setApproveComment] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [rerunningId, setRerunningId] = useState<string | null>(null)
 
   const load = useCallback(async () => {
     if (!appId) return
@@ -194,6 +196,24 @@ export default function V4RunsPage() {
       message.error(error instanceof Error ? error.message : '审批提交失败')
     } finally {
       setSubmitting(false)
+    }
+  }
+
+  const handleRerun = async (record: V4RunItem) => {
+    if (!appId) return
+    setRerunningId(record.id)
+    try {
+      const result = await runApplication(appId, record.input ?? {})
+      if (result.status === 'success') {
+        message.success('重跑完成')
+      } else {
+        message.info('重跑已启动，等待人审')
+      }
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '重跑失败')
+    } finally {
+      setRerunningId(null)
     }
   }
 
@@ -261,6 +281,14 @@ export default function V4RunsPage() {
         <Space size="small">
           <Button type="link" size="small" onClick={() => openDetail(record.id)}>
             详情
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            loading={rerunningId === record.id}
+            onClick={() => handleRerun(record)}
+          >
+            重跑
           </Button>
           {record.status === 'interrupted' && (
             <Button type="link" size="small" onClick={() => openApprove(record)}>
