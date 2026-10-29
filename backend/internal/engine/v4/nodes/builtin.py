@@ -28,6 +28,13 @@ ToolResolverCtx: ContextVar[Any] = ContextVar("v4_tool_resolver", default=None)
 # 当前租户 ID：由 GraphRunner 在 invoke 前注入，tool/http 节点构造 AgentRunContext 用
 TenantIdCtx: ContextVar[Any] = ContextVar("v4_tenant_id", default=None)
 
+# 运行时 RetrievalService：由 GraphRunner 注入，retrieval 节点调用向量检索
+RetrievalServiceCtx: ContextVar[Any] = ContextVar("v4_retrieval_service", default=None)
+
+# 知识库资源解析器：由 GraphRunner 注入，签名 (resource_id: str) -> list[UUID] | None
+# 把 v4 knowledge 资源 id 解析为底层 document_ids，无权访问或不存在返回 None
+KnowledgeResolverCtx: ContextVar[Any] = ContextVar("v4_knowledge_resolver", default=None)
+
 
 # ========== start ==========
 def _start_node_build(config: dict[str, Any]):
@@ -359,30 +366,77 @@ def _resolve_template(template: str, state: dict) -> str:
 def _retrieval_node_build(config: dict[str, Any]):
     """retrieval 节点：从知识库检索相关文档。
 
-    config.knowledge_base_id: 知识库 ID
+    config.knowledge_base_id: v4 knowledge 资源 ID（运行时通过 KnowledgeResolverCtx 解析为 document_ids）
     config.query_field: 从 input 取哪个字段作为检索 query（默认 query）
     config.top_k: 返回前 K 条（默认 5）
+    config.enable_rerank / enable_query_rewrite: 透传给 RetrievalService，默认 True
     """
     kb_id = config.get("knowledge_base_id", "")
     query_field = config.get("query_field", "query")
     top_k = int(config.get("top_k", 5))
+    enable_rerank = bool(config.get("enable_rerank", True))
+    enable_query_rewrite = bool(config.get("enable_query_rewrite", True))
 
     async def retrieval_fn(state: dict) -> dict:
         input_data = state.get("input", {})
-        query = input_data.get(query_field, "")
-        # TODO: 接向量检索引擎，首期返回 stub
-        stub_results = [
-            {
-                "doc_id": f"doc_{i}",
-                "score": 1.0 - i * 0.1,
-                "content": f"[RAG stub] kb={kb_id or 'unset'} query={query} top_k={top_k} doc_{i}",
+        query = input_data.get(query_field, "") or ""
+        retrieval_service = RetrievalServiceCtx.get()
+        knowledge_resolver = KnowledgeResolverCtx.get()
+
+        # 未注入依赖时返回 stub，保持开发态可跑
+        if retrieval_service is None or knowledge_resolver is None or not kb_id:
+            stub_results = [
+                {
+                    "doc_id": f"doc_{i}",
+                    "score": 1.0 - i * 0.1,
+                    "content": f"[RAG stub] kb={kb_id or 'unset'} query={query} top_k={top_k} doc_{i}",
+                }
+                for i in range(top_k)
+            ]
+            return {
+                "output": {
+                    "results": stub_results,
+                    "context_text": "",
+                    "count": len(stub_results),
+                    "mode": "stub",
+                }
             }
-            for i in range(top_k)
+
+        document_ids = knowledge_resolver(kb_id)
+        if not document_ids:
+            return {
+                "output": {
+                    "results": [],
+                    "context_text": "",
+                    "count": 0,
+                    "mode": "no_permission_or_empty",
+                }
+            }
+
+        result = await retrieval_service.search(
+            query=str(query),
+            document_ids=document_ids,
+            top_k=top_k,
+            enable_rerank=enable_rerank,
+            enable_query_rewrite=enable_query_rewrite,
+        )
+        results = [
+            {
+                "doc_id": str(chunk.document_id),
+                "chunk_index": chunk.chunk_index,
+                "score": chunk.score,
+                "content": chunk.content,
+                "heading_path": chunk.metadata.get("heading_path") or [],
+            }
+            for chunk in result.chunks
         ]
         return {
             "output": {
-                "results": stub_results,
-                "count": len(stub_results),
+                "results": results,
+                "context_text": result.context_text,
+                "standalone_query": result.standalone_query,
+                "count": len(results),
+                "mode": "retrieval",
             }
         }
 

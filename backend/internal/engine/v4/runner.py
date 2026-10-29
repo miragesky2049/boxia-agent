@@ -15,7 +15,9 @@ from langgraph.types import Command
 from internal.engine.v4.compiler import compile_graph, infer_runtime_mode
 from internal.engine.v4.events import NodeExecutionEvent, publish
 from internal.engine.v4.nodes.builtin import (
+    KnowledgeResolverCtx,
     ModelResolverCtx,
+    RetrievalServiceCtx,
     SubgraphLoaderCtx,
     TenantIdCtx,
     ToolResolverCtx,
@@ -34,32 +36,45 @@ ToolResolver = Callable[[str], Any]
 
 
 _CHECKPOINTER: Any | None = None
+_CHECKPOINTER_LOCK: Any | None = None
 
 
-def _get_checkpointer():
-    """全局单例 PostgresSaver：持久化 checkpoint，重启不丢。
+async def _get_checkpointer():
+    """全局单例 AsyncPostgresSaver：持久化 checkpoint，重启不丢。
 
-    懒加载：首次编译 graph 时才建连接（避免模块加载时 context manager 生命周期问题）。
+    异步懒加载：首次 invoke/resume 时才建连接。
+    必须用 AsyncPostgresSaver（同步 PostgresSaver 的 aget_tuple 直接 raise NotImplementedError，
+    而 astream_events / aget_state 走异步路径）。
     """
-    global _CHECKPOINTER
+    global _CHECKPOINTER, _CHECKPOINTER_LOCK
     if _CHECKPOINTER is not None:
         return _CHECKPOINTER
 
-    from internal.infrastructure.config.settings import get_settings
+    import asyncio
 
-    settings = get_settings()
-    # SQLAlchemy URL 转 psycopg URL：postgresql+psycopg:// -> postgresql://
-    db_url = settings.database_url.replace("+psycopg", "")
+    if _CHECKPOINTER_LOCK is None:
+        _CHECKPOINTER_LOCK = asyncio.Lock()
 
-    from langgraph.checkpoint.postgres import PostgresSaver
+    async with _CHECKPOINTER_LOCK:
+        if _CHECKPOINTER is not None:
+            return _CHECKPOINTER
 
-    # 用 with 管理连接生命周期，但我们要长期持有 -> 手动 __enter__
-    cm = PostgresSaver.from_conn_string(db_url)
-    saver = cm.__enter__()
-    saver.setup()
-    _CHECKPOINTER = saver
-    logger.info("PostgresSaver 已初始化，checkpoint 持久化到 %s", db_url.split("@")[-1])
-    return saver
+        from internal.infrastructure.config.settings import get_settings
+
+        settings = get_settings()
+        # SQLAlchemy URL 转 psycopg URL：postgresql+psycopg:// -> postgresql://
+        db_url = settings.database_url.replace("+psycopg", "")
+
+        from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+
+        cm = AsyncPostgresSaver.from_conn_string(db_url)
+        saver = await cm.__aenter__()
+        await saver.setup()
+        # 持有 context manager 防止 __aexit__ 关闭连接
+        saver._cm = cm  # type: ignore[attr-defined]
+        _CHECKPOINTER = saver
+        logger.info("AsyncPostgresSaver 已初始化，checkpoint 持久化到 %s", db_url.split("@")[-1])
+        return saver
 
 # LangGraph 内部事件名过滤：这些不是用户节点，不写 run_node_execution
 _INTERNAL_NAMES = {"", "LangGraph", "Graph", "Channel"}
@@ -83,6 +98,8 @@ class GraphRunner:
         model_resolver: ModelResolver | None = None,
         subgraph_loader: SubgraphLoader | None = None,
         tool_resolver: ToolResolver | None = None,
+        retrieval_service: Any | None = None,
+        knowledge_resolver: Any | None = None,
         thread_id: str | None = None,
         run_id: UUID | None = None,
         run_repo: Any | None = None,
@@ -100,6 +117,8 @@ class GraphRunner:
         self._model_resolver = model_resolver
         self._subgraph_loader = subgraph_loader
         self._tool_resolver = tool_resolver
+        self._retrieval_service = retrieval_service
+        self._knowledge_resolver = knowledge_resolver
         self._run_repo = run_repo
         self._usage_repo = usage_repo
         self._audit_repo = audit_repo
@@ -110,16 +129,22 @@ class GraphRunner:
         self._node_types: dict[str, str] = {
             n.get("id"): n.get("type", "unknown") for n in graph.get("nodes", [])
         }
-        # 编译时挂 checkpointer，支持 interrupt 暂停
-        self.compiled = compile_graph(graph, checkpointer=_get_checkpointer())
+        # 编译延迟到 async _ensure_compiled()：checkpointer 是异步资源，不能在 __init__ 里建
+        self.compiled: Any = None
+
+    async def _ensure_compiled(self) -> None:
+        """首次 invoke/resume 时异步编译 graph（挂 AsyncPostgresSaver）。"""
+        if self.compiled is None:
+            checkpointer = await _get_checkpointer()
+            self.compiled = compile_graph(self.graph, checkpointer=checkpointer)
 
     def _config(self) -> dict[str, Any]:
         # 按 tenant_id 命名空间隔离 thread_id，防止跨租户通过伪造 thread_id 访问他人 checkpoint
         return {"configurable": {"thread_id": f"{self.tenant_id}:{self.thread_id}"}}
 
-    def _extract_interrupt(self) -> dict[str, Any] | None:
+    async def _extract_interrupt(self) -> dict[str, Any] | None:
         """从 checkpointer 中取出当前等待的人审 interrupt payload。"""
-        state = self.compiled.get_state(self._config())
+        state = await self.compiled.aget_state(self._config())
         if not state.next:
             return None
         for task in state.tasks:
@@ -241,6 +266,7 @@ class GraphRunner:
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行 graph。如果遇到人审 interrupt，抛 GraphInterrupted。"""
         started_at = time.time()
+        await self._ensure_compiled()
         logger.info(
             f"开始运行: run={self.run_id} thread={self.thread_id} mode={self.runtime_mode} "
             f"nodes={len(self.graph.get('nodes', []))}"
@@ -272,11 +298,17 @@ class GraphRunner:
         )
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
         tenant_token = TenantIdCtx.set(self.tenant_id)
+        retrieval_token = (
+            RetrievalServiceCtx.set(self._retrieval_service) if self._retrieval_service else None
+        )
+        knowledge_token = (
+            KnowledgeResolverCtx.set(self._knowledge_resolver) if self._knowledge_resolver else None
+        )
 
         try:
             await self._stream_and_record({"input": input_data})
             # 检查是否被 interrupt 暂停
-            interrupt_payload = self._extract_interrupt()
+            interrupt_payload = await self._extract_interrupt()
             if interrupt_payload is not None:
                 logger.info(f"运行被人审暂停: thread={self.thread_id}")
                 if self._run_repo is not None:
@@ -348,22 +380,33 @@ class GraphRunner:
                 SubgraphLoaderCtx.reset(subgraph_token)
             if tool_token is not None:
                 ToolResolverCtx.reset(tool_token)
+            if retrieval_token is not None:
+                RetrievalServiceCtx.reset(retrieval_token)
+            if knowledge_token is not None:
+                KnowledgeResolverCtx.reset(knowledge_token)
             TenantIdCtx.reset(tenant_token)
 
     async def resume(self, approval: dict[str, Any]) -> dict[str, Any]:
         """人审通过后恢复执行。approval 形如 {"approved": true, "comment": "..."}。"""
         started_at = time.time()
+        await self._ensure_compiled()
         model_token = ModelResolverCtx.set(self._model_resolver) if self._model_resolver else None
         subgraph_token = (
             SubgraphLoaderCtx.set(self._subgraph_loader) if self._subgraph_loader else None
         )
         tool_token = ToolResolverCtx.set(self._tool_resolver) if self._tool_resolver else None
         tenant_token = TenantIdCtx.set(self.tenant_id)
+        retrieval_token = (
+            RetrievalServiceCtx.set(self._retrieval_service) if self._retrieval_service else None
+        )
+        knowledge_token = (
+            KnowledgeResolverCtx.set(self._knowledge_resolver) if self._knowledge_resolver else None
+        )
 
         try:
             await self._stream_and_record(Command(resume=approval))
             # 检查是否还有下一个 interrupt
-            interrupt_payload = self._extract_interrupt()
+            interrupt_payload = await self._extract_interrupt()
             if interrupt_payload is not None:
                 if self._run_repo is not None:
                     self._run_repo.update_run_status(self.run_id, status="interrupted")
@@ -383,8 +426,13 @@ class GraphRunner:
                 SubgraphLoaderCtx.reset(subgraph_token)
             if tool_token is not None:
                 ToolResolverCtx.reset(tool_token)
+            if retrieval_token is not None:
+                RetrievalServiceCtx.reset(retrieval_token)
+            if knowledge_token is not None:
+                KnowledgeResolverCtx.reset(knowledge_token)
             TenantIdCtx.reset(tenant_token)
 
-    def get_interrupt_state(self) -> dict[str, Any] | None:
+    async def get_interrupt_state(self) -> dict[str, Any] | None:
         """查询当前 thread 是否在等人审。"""
-        return self._extract_interrupt()
+        await self._ensure_compiled()
+        return await self._extract_interrupt()

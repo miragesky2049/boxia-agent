@@ -256,6 +256,7 @@ async def debug_run_stream(
         final_state: dict[str, Any] | None = None
         token = ModelResolverCtx.set(lambda mid: model_service.get_client(mid))
         try:
+            await runner._ensure_compiled()
             async for event in runner.compiled.astream_events(
                 {"input": payload.inputs},
                 config={"configurable": {"thread_id": runner.thread_id}},

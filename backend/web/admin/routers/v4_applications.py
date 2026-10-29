@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
+from internal.application.retrieval_service import RetrievalService
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
+from internal.application.v4.resource_service import V4ResourceService
 from internal.engine.v4.runner import GraphInterrupted, GraphRunner
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
@@ -79,6 +81,7 @@ def list_my_apps(
 def _build_runner(
     service: V4ApplicationService,
     uow: UowDep,
+    context: Any,
     tenant_id: UUID,
     application_id: UUID,
     thread_id: str | None = None,
@@ -86,15 +89,17 @@ def _build_runner(
     current_user_id: UUID | None = None,
     actor_username: str | None = None,
 ) -> GraphRunner:
-    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器。"""
+    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器 + retrieval。"""
     graph = service.build_effective_graph(application_id, tenant_id)
     model_service = V4ModelService(uow.session)
-    from internal.application.v4.resource_service import V4ResourceService
 
     resource_service = V4ResourceService(uow.session)
     run_repo = V4RunRepository(uow.session)
     usage_repo = V4UsageRepository(uow.session)
     audit_repo = PostgresAuditLogRepository(uow.session)
+
+    # 检索服务：复用现有 RAG 用例（query 改写 -> 多 query 召回 -> rerank）
+    retrieval_service = RetrievalService(uow=uow, context=context)
 
     def subgraph_loader(child_app_id: str) -> dict:
         """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
@@ -116,6 +121,25 @@ def _build_runner(
             return None
         return resource_service.resolve_for_tenant(rid, tenant_id)
 
+    def knowledge_resolver(resource_id: str) -> list[UUID] | None:
+        """按租户解析 knowledge 资源为 document_ids；无权访问或配置缺失返回 None。"""
+        try:
+            rid = UUID(resource_id)
+        except ValueError:
+            return None
+        record = resource_service.resolve_for_tenant(rid, tenant_id)
+        if record is None:
+            return None
+        config = record.get("config") or {}
+        raw_ids = config.get("document_ids") or []
+        doc_ids: list[UUID] = []
+        for raw in raw_ids:
+            try:
+                doc_ids.append(UUID(str(raw)))
+            except ValueError:
+                continue
+        return doc_ids or None
+
     return GraphRunner(
         graph=graph,
         tenant_id=tenant_id,
@@ -123,6 +147,8 @@ def _build_runner(
         model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
         subgraph_loader=subgraph_loader,
         tool_resolver=tool_resolver,
+        retrieval_service=retrieval_service,
+        knowledge_resolver=knowledge_resolver,
         thread_id=thread_id,
         run_id=run_id,
         run_repo=run_repo,
@@ -156,7 +182,7 @@ async def run_application(
         raise NotFoundError("该应用未开通或不存在")
 
     runner = _build_runner(
-        service, uow, tenant_id, application_id,
+        service, uow, context, tenant_id, application_id,
         current_user_id=principal.user_id,
         actor_username=principal.username,
     )
@@ -209,7 +235,7 @@ async def resume_application(
         raise NotFoundError("没有等待审批的运行记录")
 
     runner = _build_runner(
-        service, uow, tenant_id, application_id,
+        service, uow, context, tenant_id, application_id,
         thread_id=thread_id, run_id=pending["id"],
         current_user_id=principal.user_id,
         actor_username=principal.username,
@@ -217,7 +243,7 @@ async def resume_application(
 
     # 人审角色校验：从 checkpointer 取出当前 interrupt payload，比对 assignee_role
     # fail-closed：读不到 interrupt 或节点未配 assignee_role 时拒绝恢复，避免越权放行
-    interrupt_state = runner.get_interrupt_state()
+    interrupt_state = await runner.get_interrupt_state()
     if interrupt_state is None:
         raise ForbiddenError("无法读取人审节点配置，禁止恢复执行")
 
