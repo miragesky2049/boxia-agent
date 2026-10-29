@@ -205,14 +205,19 @@ async def resume_application(
     )
 
     # 人审角色校验：从 checkpointer 取出当前 interrupt payload，比对 assignee_role
+    # fail-closed：读不到 interrupt 或节点未配 assignee_role 时拒绝恢复，避免越权放行
     interrupt_state = runner.get_interrupt_state()
-    if interrupt_state is not None:
-        required_role = interrupt_state.get("assignee_role")
-        if required_role:
-            if principal.role_code != "superadmin" and principal.role_code != required_role:
-                raise ForbiddenError(
-                    f"该人审节点要求角色 {required_role}，当前角色 {principal.role_code} 无权审批"
-                )
+    if interrupt_state is None:
+        raise ForbiddenError("无法读取人审节点配置，禁止恢复执行")
+
+    required_role = interrupt_state.get("assignee_role")
+    if not required_role:
+        raise ForbiddenError("人审节点未配置审批角色，禁止恢复执行")
+
+    if principal.role_code != "superadmin" and principal.role_code != required_role:
+        raise ForbiddenError(
+            f"该人审节点要求角色 {required_role}，当前角色 {principal.role_code} 无权审批"
+        )
 
     try:
         output = await runner.resume({"approved": payload.approved, "comment": payload.comment})
