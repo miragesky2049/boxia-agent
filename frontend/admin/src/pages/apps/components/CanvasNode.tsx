@@ -9,15 +9,18 @@ import {
   DeleteOutlined,
   EditOutlined,
   FileSearchOutlined,
+  MoreOutlined,
   PlayCircleOutlined,
+  PlusOutlined,
   StopOutlined,
   ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { App, Input, Tooltip } from 'antd'
+import { App, Dropdown, Input, Tooltip } from 'antd'
 import { useState, type ReactElement } from 'react'
 import type { NodeData, NodeType } from '../store/appStore'
 import { listOutputFields, useAppStore } from '../store/appStore'
+import { INSERTABLE_TYPES } from './NodeTypes'
 
 const TYPE_META: Record<NodeType, { color: string; icon: ReactElement; label: string }> = {
   start: { color: '#52c41a', icon: <PlayCircleOutlined />, label: '开始' },
@@ -111,6 +114,8 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
   const removeNode = useAppStore((s) => s.removeNode)
   const duplicateNode = useAppStore((s) => s.duplicateNode)
   const renameNode = useAppStore((s) => s.renameNode)
+  const addNodeAfter = useAppStore((s) => s.addNodeAfter)
+  const triggerRunStep = useAppStore((s) => s.triggerRunStep)
 
   const [hover, setHover] = useState(false)
   const [editing, setEditing] = useState(false)
@@ -153,6 +158,20 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
     setEditing(false)
   }
 
+  const handleRunStep = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    triggerRunStep(id)
+  }
+
+  const handleAddDownstream = (type: NodeType) => {
+    const err = addNodeAfter(id, type)
+    if (err) {
+      message.warning(err)
+      return
+    }
+    message.success(`已在下游添加「${INSERTABLE_TYPES.find((t) => t.type === type)?.label ?? type}」节点`)
+  }
+
   const toolBtn: React.CSSProperties = {
     width: 22,
     height: 22,
@@ -192,13 +211,14 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
         </Tooltip>
       )}
 
-      {/* 悬浮工具栏：右上角 */}
+      {/* 悬浮时顶部工具条：运行此步骤 + 更多菜单 */}
       {hover && !isRunning && (
         <div
           style={{
             position: 'absolute',
-            top: -12,
-            right: -8,
+            top: -32,
+            left: '50%',
+            transform: 'translateX(-50%)',
             display: 'flex',
             gap: 4,
             padding: 2,
@@ -210,15 +230,33 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
           }}
           onClick={(e) => e.stopPropagation()}
         >
-          <span title="重命名" style={toolBtn} onClick={startRename}>
-            <EditOutlined />
-          </span>
-          <span title="复制节点" style={toolBtn} onClick={handleDuplicate}>
-            <CopyOutlined />
-          </span>
-          <span title="删除" style={{ ...toolBtn, color: '#ff4d4f' }} onClick={handleDelete}>
-            <DeleteOutlined />
-          </span>
+          <Tooltip title="从该节点试运行">
+            <span style={{ ...toolBtn, color: '#52c41a' }} onClick={handleRunStep}>
+              <PlayCircleOutlined />
+            </span>
+          </Tooltip>
+          <Dropdown
+            trigger={['click']}
+            placement="bottomCenter"
+            menu={{
+              items: [
+                { key: 'rename', icon: <EditOutlined />, label: '重命名' },
+                { key: 'duplicate', icon: <CopyOutlined />, label: '复制节点', disabled: isEndpoint },
+                { type: 'divider' },
+                { key: 'delete', icon: <DeleteOutlined />, label: '删除', danger: true },
+              ],
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation()
+                if (key === 'rename') startRename(domEvent)
+                else if (key === 'duplicate') handleDuplicate(domEvent)
+                else if (key === 'delete') handleDelete(domEvent)
+              },
+            }}
+          >
+            <span style={toolBtn} onClick={(e) => e.stopPropagation()} title="更多操作">
+              <MoreOutlined />
+            </span>
+          </Dropdown>
         </div>
       )}
 
@@ -270,13 +308,57 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
           <span style={{ fontSize: 11, color: '#faad14' }}>运行中</span>
         )}
       </div>
+
       {hasOutput && (
-        <Tooltip
-          title={`输出字段：${listOutputFields(nodeData.nodeType).join('、')}`}
-          placement="right"
-        >
-          <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: '#fff', border: '2px solid ' + meta.color }} />
-        </Tooltip>
+        <>
+          <Tooltip
+            title={`输出字段：${listOutputFields(nodeData.nodeType).join('、')}`}
+            placement="right"
+          >
+            <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: '#fff', border: '2px solid ' + meta.color }} />
+          </Tooltip>
+          {/* 输出端口旁「+ 添加节点」 */}
+          <Dropdown
+            trigger={['click']}
+            placement="rightTop"
+            disabled={isRunning}
+            menu={{
+              items: INSERTABLE_TYPES.map((t) => ({ key: t.type, label: t.label })),
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation()
+                handleAddDownstream(key as NodeType)
+              },
+            }}
+          >
+            <Tooltip title="在该节点后添加节点" placement="right">
+              <span
+                style={{
+                  position: 'absolute',
+                  right: -14,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  width: 18,
+                  height: 18,
+                  borderRadius: '50%',
+                  background: '#fff',
+                  border: '1px solid #1677ff',
+                  color: '#1677ff',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                  fontSize: 10,
+                  opacity: hover ? 1 : 0,
+                  transition: 'opacity 0.15s',
+                  zIndex: 11,
+                }}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <PlusOutlined />
+              </span>
+            </Tooltip>
+          </Dropdown>
+        </>
       )}
     </div>
   )

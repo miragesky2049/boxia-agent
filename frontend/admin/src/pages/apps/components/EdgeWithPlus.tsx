@@ -9,17 +9,7 @@ import { Dropdown, App } from 'antd'
 import { useState } from 'react'
 import type { NodeType } from '../store/appStore'
 import { useAppStore } from '../store/appStore'
-
-const INSERTABLE_TYPES: Array<{ type: NodeType; label: string }> = [
-  { type: 'llm', label: 'LLM' },
-  { type: 'tool', label: '工具' },
-  { type: 'template', label: '模板' },
-  { type: 'http', label: 'HTTP' },
-  { type: 'retrieval', label: '检索' },
-  { type: 'branch', label: '条件分支' },
-  { type: 'human_task', label: '人审' },
-  { type: 'subgraph', label: '子图' },
-]
+import { INSERTABLE_TYPES } from './NodeTypes'
 
 /** 自定义连线：贝塞尔曲线 + 中点悬浮「+」按钮，点击弹出节点类型菜单 */
 export function EdgeWithPlus(props: EdgeProps) {

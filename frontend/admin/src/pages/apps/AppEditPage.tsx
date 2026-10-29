@@ -1,5 +1,5 @@
-import { ArrowLeftOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
-import { App, Button, Dropdown, Input, Space, Spin, Tag } from 'antd'
+import { ArrowLeftOutlined, CheckCircleOutlined, EnvironmentOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons'
+import { App, Button, Dropdown, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -25,7 +25,7 @@ import { CanvasNode } from './components/CanvasNode'
 import { StickyNode } from './components/StickyNode'
 import { EdgeWithPlus } from './components/EdgeWithPlus'
 import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
-import { useAppStore, type NodeData, type NodeType } from './store/appStore'
+import { useAppStore, listOutputFields, type NodeData, type NodeType } from './store/appStore'
 
 const nodeTypes = { appNode: CanvasNode, sticky: StickyNode }
 const edgeTypes = { default: EdgeWithPlus }
@@ -37,7 +37,7 @@ function AppEditCanvas() {
   const params = useParams<{ id: string }>()
   const appId = params.id ?? ''
   const { message, modal } = App.useApp()
-  const { screenToFlowPosition } = useReactFlow()
+  const { screenToFlowPosition, setCenter } = useReactFlow()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -51,6 +51,7 @@ function AppEditCanvas() {
   const [finalResult, setFinalResult] = useState<Record<string, unknown> | null>(null)
   const [logPanelOpen, setLogPanelOpen] = useState(false)
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false)
+  const [variableCheckOpen, setVariableCheckOpen] = useState(false)
 
   const nodes = useAppStore((s) => s.nodes)
   const edges = useAppStore((s) => s.edges)
@@ -66,6 +67,12 @@ function AppEditCanvas() {
   const copyNode = useAppStore((s) => s.copyNode)
   const pasteNode = useAppStore((s) => s.pasteNode)
   const selectedNodeId = useAppStore((s) => s.selectedNodeId)
+  const undo = useAppStore((s) => s.undo)
+  const redo = useAppStore((s) => s.redo)
+  const past = useAppStore((s) => s.past)
+  const future = useAppStore((s) => s.future)
+  const runStepNodeId = useAppStore((s) => s.runStepNodeId)
+  const clearRunStep = useAppStore((s) => s.clearRunStep)
 
   useEffect(() => {
     reset()
@@ -90,16 +97,92 @@ function AppEditCanvas() {
     return () => reset()
   }, [appId, message, loadFromGraph, reset])
 
-  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴
+  // 滚动至选中节点：把视口中心定位到选中节点
+  const handleLocateSelected = useCallback(() => {
+    if (!selectedNodeId) {
+      message.warning('请先选中一个节点')
+      return
+    }
+    const node = nodes.find((n) => n.id === selectedNodeId)
+    if (!node) return
+    const x = node.position.x + (node.measured?.width ?? 160) / 2
+    const y = node.position.y + (node.measured?.height ?? 80) / 2
+    void setCenter(x, y, { zoom: 1.2, duration: 300 })
+  }, [selectedNodeId, nodes, setCenter, message])
+
+  // 变量检查：扫描所有节点 config 中的 {{#nodeId.field#}} 引用，列出未定义/未连接的引用
+  const variableReport = useMemo(() => {
+    const definedOutputs = new Map<string, string[]>()
+    nodes.forEach((n) => {
+      const type = n.data.nodeType
+      const outputs = listOutputFields(type)
+      definedOutputs.set(n.id, outputs)
+    })
+    const refs: Array<{ nodeId: string; raw: string; valid: boolean; reason: string }> = []
+    const refRegex = /\{\{#([\w.]+)#\}\}/g
+    nodes.forEach((n) => {
+      const cfgStr = JSON.stringify(n.data.config ?? {})
+      let m: RegExpExecArray | null
+      while ((m = refRegex.exec(cfgStr)) !== null) {
+        const raw = m[1]
+        const [nodeId, field] = raw.split('.')
+        const outputs = definedOutputs.get(nodeId)
+        if (!outputs) {
+          refs.push({ nodeId: n.id, raw, valid: false, reason: `引用了不存在的节点 ${nodeId}` })
+        } else if (field && !outputs.includes(field)) {
+          refs.push({ nodeId: n.id, raw, valid: false, reason: `节点 ${nodeId} 无输出字段 ${field}` })
+        } else {
+          refs.push({ nodeId: n.id, raw, valid: true, reason: 'OK' })
+        }
+      }
+    })
+    const startNode = nodes.find((n) => n.data.nodeType === 'start')
+    const endNode = nodes.find((n) => n.data.nodeType === 'end')
+    const issues: string[] = []
+    if (!startNode) issues.push('缺少开始节点')
+    if (!endNode) issues.push('缺少结束节点')
+    const nodesWithoutIncoming = nodes.filter((n) => {
+      if (n.data.nodeType === 'start' || n.data.nodeType === 'sticky') return false
+      return !edges.some((e) => e.target === n.id)
+    })
+    if (nodesWithoutIncoming.length > 0) {
+      issues.push(`以下节点没有上游连线：${nodesWithoutIncoming.map((n) => n.data.label).join('、')}`)
+    }
+    const nodesWithoutOutgoing = nodes.filter((n) => {
+      if (n.data.nodeType === 'end' || n.data.nodeType === 'sticky') return false
+      return !edges.some((e) => e.source === n.id)
+    })
+    if (nodesWithoutOutgoing.length > 0) {
+      issues.push(`以下节点没有下游连线：${nodesWithoutOutgoing.map((n) => n.data.label).join('、')}`)
+    }
+    return { refs, issues }
+  }, [nodes, edges])
+
+  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴、Ctrl+Z/Y 撤销重做、Alt+R 试运行
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (debugRunning) return
       const target = e.target as HTMLElement | null
       const isEditable =
         target instanceof HTMLInputElement ||
         target instanceof HTMLTextAreaElement ||
         target?.isContentEditable
       if (isEditable) return
+
+      // Alt+R 试运行（不受 debugRunning 限制，可随时打开 modal）
+      if (e.altKey && e.key.toLowerCase() === 'r') {
+        e.preventDefault()
+        setDebugOpen(true)
+        return
+      }
+
+      // Alt+L 定位选中节点
+      if (e.altKey && e.key.toLowerCase() === 'l') {
+        e.preventDefault()
+        handleLocateSelected()
+        return
+      }
+
+      if (debugRunning) return
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         e.preventDefault()
@@ -113,11 +196,32 @@ function AppEditCanvas() {
       } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
         e.preventDefault()
         pasteNode()
+      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        undo()
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        redo()
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
+        e.preventDefault()
+        redo()
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [debugRunning, selectedNodeId, removeNode, copyNode, pasteNode, selectNode, message])
+  }, [debugRunning, selectedNodeId, removeNode, copyNode, pasteNode, selectNode, undo, redo, message, handleLocateSelected])
+
+  // 节点上「运行此步骤」按钮：自动打开试运行 modal 并提示
+  useEffect(() => {
+    if (runStepNodeId) {
+      const node = nodes.find((n) => n.id === runStepNodeId)
+      if (node) {
+        message.info(`将从开始节点完整试运行（当前选中：${node.data.label}）`)
+      }
+      setDebugOpen(true)
+      clearRunStep()
+    }
+  }, [runStepNodeId, nodes, clearRunStep, message])
 
   const handleNodeClick = useCallback(
     (_: unknown, node: AppNode) => {
@@ -417,12 +521,21 @@ function AppEditCanvas() {
             >
               版本
             </Button>
+            <Tooltip title="定位到选中节点（Alt+L）">
+              <Button
+                icon={<EnvironmentOutlined />}
+                onClick={handleLocateSelected}
+                disabled={!selectedNodeId}
+              >
+                定位
+              </Button>
+            </Tooltip>
             <Button
               icon={<PlayCircleOutlined />}
               onClick={() => setDebugOpen(true)}
               disabled={debugRunning}
             >
-              试运行
+              试运行 (Alt+R)
             </Button>
             <Button
               icon={<FileTextOutlined />}
@@ -499,6 +612,56 @@ function AppEditCanvas() {
               <Controls />
               <MiniMap pannable zoomable />
             </ReactFlow>
+
+            {/* 底部浮动工具栏：undo/redo + 变量检查 */}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 16,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                display: 'flex',
+                gap: 4,
+                padding: '4px 8px',
+                background: '#fff',
+                borderRadius: 8,
+                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+                border: '1px solid #f0f0f0',
+                zIndex: 20,
+                alignItems: 'center',
+              }}
+            >
+              <Tooltip title="撤销 (Ctrl+Z)">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<UndoOutlined />}
+                  disabled={past.length === 0 || debugRunning}
+                  onClick={undo}
+                />
+              </Tooltip>
+              <Tooltip title="重做 (Ctrl+Shift+Z)">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<RedoOutlined />}
+                  disabled={future.length === 0 || debugRunning}
+                  onClick={redo}
+                />
+              </Tooltip>
+              <div style={{ width: 1, height: 16, background: '#e8e8e8', margin: '0 4px' }} />
+              <Button
+                size="small"
+                type="text"
+                icon={<CheckCircleOutlined />}
+                onClick={() => setVariableCheckOpen(true)}
+              >
+                变量检查
+                {variableReport.issues.length > 0 && (
+                  <Tag color="orange" style={{ marginLeft: 4 }}>{variableReport.issues.length}</Tag>
+                )}
+              </Button>
+            </div>
           </div>
         </Dropdown>
       </div>
@@ -527,6 +690,55 @@ function AppEditCanvas() {
         finalResult={finalResult}
         onClose={() => setLogPanelOpen(false)}
       />
+
+      <Modal
+        title="变量检查"
+        open={variableCheckOpen}
+        onCancel={() => setVariableCheckOpen(false)}
+        footer={<Button onClick={() => setVariableCheckOpen(false)}>关闭</Button>}
+        width={560}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <div style={{ fontWeight: 500, marginBottom: 8 }}>结构问题</div>
+          {variableReport.issues.length === 0 ? (
+            <div style={{ color: '#52c41a' }}>✓ 无结构问题</div>
+          ) : (
+            <ul style={{ margin: 0, paddingLeft: 20, color: '#fa8c16' }}>
+              {variableReport.issues.map((issue, i) => (
+                <li key={i}>{issue}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <div style={{ fontWeight: 500, marginBottom: 8 }}>变量引用（{'{{#nodeId.field#}}'}）</div>
+          {variableReport.refs.length === 0 ? (
+            <div style={{ color: '#8c8c8c' }}>画布中未发现变量引用</div>
+          ) : (
+            <div style={{ maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
+              {variableReport.refs.map((ref, i) => (
+                <div
+                  key={i}
+                  style={{
+                    padding: '4px 8px',
+                    marginBottom: 4,
+                    background: ref.valid ? '#f6ffed' : '#fff2f0',
+                    border: `1px solid ${ref.valid ? '#b7eb8f' : '#ffccc7'}`,
+                    borderRadius: 4,
+                    fontFamily: 'monospace',
+                  }}
+                >
+                  <span style={{ color: ref.valid ? '#52c41a' : '#ff4d4f' }}>
+                    {ref.valid ? '✓' : '✗'}
+                  </span>
+                  <span style={{ marginLeft: 8 }}>{ref.raw}</span>
+                  <span style={{ marginLeft: 8, color: '#8c8c8c' }}>— {ref.reason}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   )
 }

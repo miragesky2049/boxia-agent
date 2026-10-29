@@ -43,12 +43,21 @@ export interface NodeData extends Record<string, unknown> {
   debugStatus?: 'pending' | 'running' | 'success' | 'error'
 }
 
+interface Snapshot {
+  nodes: Node<NodeData>[]
+  edges: Edge[]
+  nextIdCounter: Record<NodeType, number>
+}
+
 export interface AppState {
   nodes: Node<NodeData>[]
   edges: Edge[]
   selectedNodeId: string | null
   nextIdCounter: Record<NodeType, number>
   clipboardNode: Node<NodeData> | null
+  past: Snapshot[]
+  future: Snapshot[]
+  runStepNodeId: string | null
 
   onNodesChange: (changes: NodeChange<Node<NodeData>>[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
@@ -62,9 +71,15 @@ export interface AppState {
   pasteNode: () => void
   renameNode: (id: string, label: string) => void
   insertNodeBetween: (source: string, target: string, newType: NodeType) => void
+  addNodeAfter: (sourceNodeId: string, newType: NodeType) => string | null
   loadFromGraph: (graph: Graph) => void
   serializeToGraph: () => Graph
   reset: () => void
+  undo: () => void
+  redo: () => void
+  pushHistory: () => void
+  triggerRunStep: (nodeId: string) => void
+  clearRunStep: () => void
 }
 
 const NODE_TYPES: NodeType[] = [
@@ -236,17 +251,42 @@ function allocateNodeId(
   return { id, nextIdCounter: { ...counter, [type]: counter[type] + 1 } }
 }
 
+function takeSnapshot(state: AppState): Snapshot {
+  return {
+    nodes: JSON.parse(JSON.stringify(state.nodes)),
+    edges: JSON.parse(JSON.stringify(state.edges)),
+    nextIdCounter: { ...state.nextIdCounter },
+  }
+}
+
+const HISTORY_LIMIT = 50
+
 export const useAppStore = create<AppState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
   nextIdCounter: initialCounter(),
   clipboardNode: null,
+  past: [],
+  future: [],
+  runStepNodeId: null,
+
+  pushHistory: () => {
+    const snap = takeSnapshot(get())
+    set({
+      past: [...get().past.slice(-(HISTORY_LIMIT - 1)), snap],
+      future: [],
+    })
+  },
 
   onNodesChange: (changes) => {
+    // 拖动结束（dragging false）时快照一次，避免 mousemove 频繁入栈
+    const dragEnded = changes.some((c) => c.type === 'position' && c.dragging === false)
+    if (dragEnded) get().pushHistory()
     set({ nodes: applyNodeChanges(changes, get().nodes) })
   },
   onEdgesChange: (changes) => {
+    if (changes.length > 0) get().pushHistory()
     set({ edges: applyEdgeChanges(changes, get().edges) })
   },
   onConnect: (connection) => {
@@ -262,6 +302,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       (e) => e.source === source && e.target === target,
     )
     if (duplicate) return '两节点间已存在连线'
+    get().pushHistory()
     set({
       edges: addEdge(
         { ...connection, id: `e_${source}_${target}_${get().edges.length}` },
@@ -272,6 +313,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
   selectNode: (id) => set({ selectedNodeId: id }),
   updateNodeConfig: (id, config) => {
+    get().pushHistory()
     set({
       nodes: get().nodes.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, config } } : node,
@@ -285,6 +327,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (type === 'end' && get().nodes.some((n) => n.data.nodeType === 'end')) {
       return '画布上只能有一个结束节点'
     }
+    get().pushHistory()
     const state = get()
     const { id, nextIdCounter } = allocateNodeId(state, type)
     const newNode: Node<NodeData> = {
@@ -305,6 +348,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     return null
   },
   removeNode: (id) => {
+    get().pushHistory()
     set({
       nodes: get().nodes.filter((node) => node.id !== id),
       edges: get().edges.filter((edge) => edge.source !== id && edge.target !== id),
@@ -316,6 +360,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!src) return
     const type = src.data.nodeType
     if (type === 'start' || type === 'end') return
+    get().pushHistory()
     const state = get()
     const { id: newId, nextIdCounter } = allocateNodeId(state, type)
     const copy: Node<NodeData> = {
@@ -345,6 +390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!clip) return
     const type = clip.data.nodeType
     if (type === 'start' || type === 'end') return
+    get().pushHistory()
     const state = get()
     const { id: newId, nextIdCounter } = allocateNodeId(state, type)
     const copy: Node<NodeData> = {
@@ -360,6 +406,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     })
   },
   renameNode: (id, label) => {
+    get().pushHistory()
     set({
       nodes: get().nodes.map((node) =>
         node.id === id ? { ...node, data: { ...node.data, label } } : node,
@@ -372,6 +419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const srcNode = state.nodes.find((n) => n.id === source)
     const tgtNode = state.nodes.find((n) => n.id === target)
     if (!srcNode || !tgtNode) return
+    get().pushHistory()
     // 计算中点位置
     const x = (srcNode.position.x + tgtNode.position.x) / 2 - 80
     const y = (srcNode.position.y + tgtNode.position.y) / 2 - 30
@@ -403,6 +451,38 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: newId,
     })
   },
+  addNodeAfter: (sourceNodeId, newType) => {
+    if (newType === 'start' || newType === 'end') return '不能在下游添加开始/结束节点'
+    const state = get()
+    const srcNode = state.nodes.find((n) => n.id === sourceNodeId)
+    if (!srcNode) return '源节点不存在'
+    get().pushHistory()
+    const next = get()
+    const { id: newId, nextIdCounter } = allocateNodeId(next, newType)
+    const newNode: Node<NodeData> = {
+      id: newId,
+      type: 'appNode',
+      position: { x: srcNode.position.x + 240, y: srcNode.position.y },
+      selected: true,
+      data: {
+        nodeType: newType,
+        label: labelFor(newType),
+        config: defaultConfigFor(newType),
+      },
+    }
+    const newEdge: Edge = {
+      id: `e_${sourceNodeId}_${newId}_${next.edges.length}`,
+      source: sourceNodeId,
+      target: newId,
+    }
+    set({
+      nodes: [...next.nodes.map((n) => ({ ...n, selected: false })), newNode],
+      edges: [...next.edges, newEdge],
+      nextIdCounter,
+      selectedNodeId: newId,
+    })
+    return null
+  },
   loadFromGraph: (graph) => {
     const nodes = (graph.nodes ?? []).map(fromBackendNode)
     const edges: Edge[] = (graph.edges ?? []).map((edge: GraphEdge, index) => ({
@@ -415,6 +495,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       edges,
       nextIdCounter: bumpCounter(initialCounter(), nodes),
       selectedNodeId: null,
+      past: [],
+      future: [],
     })
   },
   serializeToGraph: () => {
@@ -424,6 +506,32 @@ export const useAppStore = create<AppState>((set, get) => ({
       edges: state.edges.map((edge) => ({ from: edge.source, to: edge.target })),
     }
   },
+  undo: () => {
+    const past = get().past
+    if (past.length === 0) return
+    const prev = past[past.length - 1]
+    const current = takeSnapshot(get())
+    set({
+      nodes: prev.nodes,
+      edges: prev.edges,
+      nextIdCounter: prev.nextIdCounter,
+      past: past.slice(0, -1),
+      future: [current, ...get().future].slice(0, HISTORY_LIMIT),
+    })
+  },
+  redo: () => {
+    const future = get().future
+    if (future.length === 0) return
+    const next = future[0]
+    const current = takeSnapshot(get())
+    set({
+      nodes: next.nodes,
+      edges: next.edges,
+      nextIdCounter: next.nextIdCounter,
+      past: [...get().past, current].slice(-HISTORY_LIMIT),
+      future: future.slice(1),
+    })
+  },
   reset: () =>
     set({
       nodes: [],
@@ -431,5 +539,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       selectedNodeId: null,
       nextIdCounter: initialCounter(),
       clipboardNode: null,
+      past: [],
+      future: [],
+      runStepNodeId: null,
     }),
+
+  triggerRunStep: (nodeId) => set({ runStepNodeId: nodeId }),
+  clearRunStep: () => set({ runStepNodeId: null }),
 }))
