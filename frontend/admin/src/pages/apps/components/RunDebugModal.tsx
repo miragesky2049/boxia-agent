@@ -30,15 +30,8 @@ export function RunDebugModal({
   const [running, setRunning] = useState(false)
   const [states, setStates] = useState<Record<string, DebugNodeState>>({})
 
-  useEffect(() => {
-    if (!open) {
-      setStates({})
-      onNodeStateChange({})
-      onFinalResult(null)
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open])
-
+  // 关闭弹窗时保留上次运行的节点状态与最终结果，运行日志面板仍可查看；
+  // 只有再次点击"开始试运行"时才会清空重新跑
   useEffect(() => {
     onRunningChange(running)
   }, [running, onRunningChange])

@@ -1,7 +1,14 @@
 import { PlusOutlined, CloseOutlined, BulbOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Typography } from 'antd'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
-import { listAvailableModels, optimizePrompt, type PromptOptimizeResult } from '../../../api/apps'
+import {
+  listApps,
+  listAvailableModels,
+  listResources,
+  optimizePrompt,
+  type PromptOptimizeResult,
+  type Resource,
+} from '../../../api/apps'
 import {
   getUpstreamNodeIds,
   listOutputFields,
@@ -63,6 +70,127 @@ function ModelSelect({
       options={(data ?? []).map((m) => ({
         value: m.model_id,
         label: `${m.display_name || m.model_id}（${m.provider_name}）`,
+      }))}
+    />
+  )
+}
+
+/** 工具资源下拉：tool 节点绑定工具用 */
+function useToolResources(): { data: Resource[] | null; loading: boolean } {
+  const [data, setData] = useState<Resource[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    setLoading(true)
+    listResources({ type: 'tool' })
+      .then(setData)
+      .catch(() => setData([]))
+      .finally(() => setLoading(false))
+  }, [])
+  return { data, loading }
+}
+
+function ToolResourceSelect({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange?: (v: string) => void
+}) {
+  const { data, loading } = useToolResources()
+  return (
+    <Select
+      loading={loading}
+      allowClear
+      showSearch
+      placeholder="选择已注册的工具资源"
+      value={value}
+      onChange={onChange}
+      optionFilterProp="label"
+      options={(data ?? [])
+        .filter((r) => r.is_enabled && !r.is_deprecated)
+        .map((r) => ({
+          value: r.id,
+          label: `${r.name}（${r.id.slice(0, 8)}…）`,
+        }))}
+    />
+  )
+}
+
+/** 知识库资源下拉：retrieval 节点绑定知识库用 */
+function useKnowledgeResources(): { data: Resource[] | null; loading: boolean } {
+  const [data, setData] = useState<Resource[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    setLoading(true)
+    listResources({ type: 'knowledge' })
+      .then(setData)
+      .catch(() => setData([]))
+      .finally(() => setLoading(false))
+  }, [])
+  return { data, loading }
+}
+
+function KnowledgeResourceSelect({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange?: (v: string) => void
+}) {
+  const { data, loading } = useKnowledgeResources()
+  return (
+    <Select
+      loading={loading}
+      allowClear
+      showSearch
+      placeholder="选择已注册的知识库"
+      value={value}
+      onChange={onChange}
+      optionFilterProp="label"
+      options={(data ?? [])
+        .filter((r) => r.is_enabled && !r.is_deprecated)
+        .map((r) => ({
+          value: r.id,
+          label: `${r.name}（${r.id.slice(0, 8)}…）`,
+        }))}
+    />
+  )
+}
+
+/** 平台应用下拉：subgraph 节点选择嵌套应用用 */
+function usePlatformApps(): { data: { id: string; name: string }[] | null; loading: boolean } {
+  const [data, setData] = useState<{ id: string; name: string }[] | null>(null)
+  const [loading, setLoading] = useState(false)
+  useEffect(() => {
+    setLoading(true)
+    listApps({ owner_type: 'platform' })
+      .then((apps) => setData(apps.map((a) => ({ id: a.id, name: a.name }))))
+      .catch(() => setData([]))
+      .finally(() => setLoading(false))
+  }, [])
+  return { data, loading }
+}
+
+function SubgraphAppSelect({
+  value,
+  onChange,
+}: {
+  value?: string
+  onChange?: (v: string) => void
+}) {
+  const { data, loading } = usePlatformApps()
+  return (
+    <Select
+      loading={loading}
+      allowClear
+      showSearch
+      placeholder="选择要嵌套调用的平台应用"
+      value={value}
+      onChange={onChange}
+      optionFilterProp="label"
+      options={(data ?? []).map((a) => ({
+        value: a.id,
+        label: `${a.name}（${a.id.slice(0, 8)}…）`,
       }))}
     />
   )
@@ -202,11 +330,11 @@ function InputVariablesEditor() {
                 {...restField}
                 name={[name, 'name']}
                 rules={[{ required: true, message: '变量名必填' }]}
-                style={{ flex: 2 }}
+                style={{ flex: 2.2, marginBottom: 0 }}
               >
                 <Input placeholder="变量名，如 query" />
               </Form.Item>
-              <Form.Item {...restField} name={[name, 'type']} style={{ flex: 1 }}>
+              <Form.Item {...restField} name={[name, 'type']} style={{ flex: 1.3, marginBottom: 0 }}>
                 <Select
                   options={['string', 'number', 'boolean', 'json'].map((t) => ({
                     value: t,
@@ -214,16 +342,16 @@ function InputVariablesEditor() {
                   }))}
                 />
               </Form.Item>
-              <Form.Item {...restField} name={[name, 'required']} valuePropName="checked" style={{ flex: 0.5 }}>
-                <Select
-                  options={[
-                    { value: true, label: '必填' },
-                    { value: false, label: '可选' },
-                  ]}
-                />
+              <Form.Item
+                {...restField}
+                name={[name, 'required']}
+                valuePropName="checked"
+                style={{ flex: 1.1, marginBottom: 0 }}
+              >
+                <Switch checkedChildren="必填" unCheckedChildren="选填" />
               </Form.Item>
-              <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1.5 }}>
-                <Input placeholder="默认值" />
+              <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1.8, marginBottom: 0 }}>
+                <Input placeholder="默认值（选填）" />
               </Form.Item>
               <Button
                 type="text"
@@ -264,7 +392,7 @@ function OutputVariablesEditor() {
                 {...restField}
                 name={[name, 'name']}
                 rules={[{ required: true, message: '输出名必填' }]}
-                style={{ flex: 1.5 }}
+                style={{ flex: 1.5, marginBottom: 0 }}
               >
                 <Input placeholder="输出名，如 answer" />
               </Form.Item>
@@ -272,7 +400,7 @@ function OutputVariablesEditor() {
                 {...restField}
                 name={[name, 'value']}
                 rules={[{ required: true, message: '取值表达式必填' }]}
-                style={{ flex: 3 }}
+                style={{ flex: 3, marginBottom: 0 }}
               >
                 <Input placeholder={'{{#llm_1.output#}}'} />
               </Form.Item>
@@ -299,6 +427,42 @@ function OutputVariablesEditor() {
       )}
     </Form.List>
   )
+}
+
+/** 把表单里的 JSON 文本字段解析为对象/数组，与后端 config 结构对齐 */
+function parseJsonField(raw: unknown, label: string): unknown {
+  if (raw === undefined || raw === null || raw === '') return undefined
+  if (typeof raw !== 'string') return raw
+  try {
+    return JSON.parse(raw)
+  } catch {
+    throw new Error(`${label}不是合法 JSON，请检查后重试`)
+  }
+}
+
+function normalizeConfig(nodeType: NodeType, values: Record<string, unknown>): Record<string, unknown> {
+  const result: Record<string, unknown> = { ...values }
+  if (nodeType === 'branch') {
+    const conditions = parseJsonField(result.conditions, '条件')
+    if (conditions !== undefined) result.conditions = conditions
+    else delete result.conditions
+  }
+  if (nodeType === 'tool') {
+    const params = parseJsonField(result.params, '参数 JSON')
+    if (params !== undefined) result.params = params
+    else result.params = {}
+  }
+  if (nodeType === 'http') {
+    const body = parseJsonField(result.body, '请求体')
+    if (body !== undefined) result.body = body
+    else delete result.body
+  }
+  if (nodeType === 'subgraph') {
+    const mapping = parseJsonField(result.input_mapping, '入参映射')
+    if (mapping !== undefined) result.input_mapping = mapping
+    else result.input_mapping = {}
+  }
+  return result
 }
 
 export function NodeConfigDrawer({ open, onClose }: Props) {
@@ -363,7 +527,15 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
 
   useEffect(() => {
     if (node) {
-      form.setFieldsValue(node.data.config)
+      const cfg: Record<string, unknown> = { ...node.data.config }
+      // 后端存的是对象/数组，TextArea 需要 JSON 字符串才能正常回显
+      for (const key of ['conditions', 'params', 'body', 'input_mapping']) {
+        const v = cfg[key]
+        if (v !== undefined && v !== null && typeof v !== 'string') {
+          cfg[key] = JSON.stringify(v, null, 2)
+        }
+      }
+      form.setFieldsValue(cfg)
     }
   }, [node, form])
 
@@ -371,9 +543,13 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
     if (!node) return
     try {
       const values = await form.validateFields()
-      updateNodeConfig(node.id, values)
+      const normalized = normalizeConfig(node.data.nodeType, values)
+      updateNodeConfig(node.id, normalized)
       message.success('配置已应用（点击工具栏"保存"提交到后端）')
-    } catch {
+    } catch (error) {
+      if (error instanceof Error) {
+        message.error(error.message)
+      }
       // 校验失败，antd 已提示
     }
   }
@@ -449,31 +625,72 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             </Form.Item>
           </>
         )
-      case 'branch':
+      case 'branch': {
+        // 分支目标节点：排除开始节点（不能作为终点）和自身
+        const routeOptions = nodes
+          .filter((n) => n.id !== node.id && n.data.nodeType !== 'start')
+          .map((n) => ({
+            value: n.id,
+            label: `${n.id}（${TYPE_LABEL[n.data.nodeType]}）`,
+          }))
         return (
           <>
-            <Form.Item label="条件（JSON 数组）" name="conditions">
+            <Form.Item
+              label="条件（JSON 数组，全部满足走 true）"
+              name="conditions"
+              tooltip="数组内条件为 AND 关系；字段从 start 节点入参中取值，支持 a.b 嵌套"
+            >
               <Input.TextArea
-                rows={3}
-                placeholder='[{"field":"input.score","operator":"gt","value":80}]'
+                rows={4}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+                placeholder='[{"field":"score","operator":"gt","value":80}]'
               />
             </Form.Item>
-            <Form.Item label="true 分支目标节点 ID" name={['routes', 'true']}>
-              <Input placeholder="例如 llm_2" />
+            <div
+              style={{ margin: '-8px 0 16px', padding: '8px 12px', background: '#fafafa', borderRadius: 4, fontSize: 12, color: '#595959', lineHeight: 1.8 }}
+            >
+              <div>field：入参字段名，如 score（从 start 入参取值，不要带 input. 前缀）</div>
+              <div>operator：eq 等于 / ne 不等于 / gt 大于 / contains 包含</div>
+              <div>value：比较值；字符串用双引号，数字直接写</div>
+            </div>
+            <Form.Item label="true 分支目标节点" name={['routes', 'true']}>
+              <Select
+                allowClear
+                showSearch
+                placeholder="选择条件满足时流向的节点"
+                options={routeOptions}
+              />
             </Form.Item>
-            <Form.Item label="false 分支目标节点 ID" name={['routes', 'false']}>
-              <Input placeholder="例如 llm_3" />
+            <Form.Item label="false 分支目标节点" name={['routes', 'false']}>
+              <Select
+                allowClear
+                showSearch
+                placeholder="选择条件不满足时流向的节点"
+                options={routeOptions}
+              />
             </Form.Item>
+            <div style={{ marginTop: -8, fontSize: 12, color: '#fa8c16' }}>
+              注意：选完目标节点后，还需从本节点拉线到对应目标节点，试运行才会生效。
+            </div>
           </>
         )
+      }
       case 'tool':
         return (
           <>
-            <Form.Item label="工具资源 ID" name="resource_id">
-              <Input placeholder="资源 UUID" />
+            <Form.Item label="工具资源" name="resource_id">
+              <ToolResourceSelect />
             </Form.Item>
-            <Form.Item label="参数 JSON" name="params">
-              <Input.TextArea rows={4} placeholder='{"key": "{{#input.query#}}"}' />
+            <Form.Item
+              label="参数 JSON"
+              name="params"
+              tooltip="调用工具时传入的参数对象，支持 {{#input.字段#}} 占位符"
+            >
+              <Input.TextArea
+                rows={4}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+                placeholder='{"key": "{{#input.query#}}"}'
+              />
             </Form.Item>
           </>
         )
@@ -510,8 +727,8 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
       case 'retrieval':
         return (
           <>
-            <Form.Item label="知识库 ID" name="knowledge_base_id">
-              <Input placeholder="知识库 UUID" />
+            <Form.Item label="知识库" name="knowledge_base_id">
+              <KnowledgeResourceSelect />
             </Form.Item>
             <Form.Item label="查询字段" name="query_field">
               <Input placeholder="从 input 取哪个字段作为 query（默认 query）" />
@@ -535,15 +752,19 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
       case 'subgraph':
         return (
           <>
-            <Form.Item label="子图应用 ID" name="application_id" rules={[{ required: true }]}>
-              <Input placeholder="要嵌套调用的应用 UUID" />
+            <Form.Item label="子图应用" name="application_id" rules={[{ required: true, message: '请选择子图应用' }]}>
+              <SubgraphAppSelect />
             </Form.Item>
             <Form.Item
               label="入参映射（JSON）"
               name="input_mapping"
               tooltip={'父 state 字段 -> 子图 input 字段，如 {"query": "query"}'}
             >
-              <Input.TextArea rows={3} placeholder='{"query": "query"}' />
+              <Input.TextArea
+                rows={3}
+                style={{ fontFamily: 'monospace', fontSize: 12 }}
+                placeholder='{"query": "query"}'
+              />
             </Form.Item>
           </>
         )
@@ -553,7 +774,7 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
   return (
     <Drawer
       title={node ? TYPE_LABEL[node.data.nodeType] : '节点配置'}
-      width={420}
+      width={560}
       open={open}
       onClose={onClose}
       destroyOnClose

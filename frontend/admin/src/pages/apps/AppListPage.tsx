@@ -224,15 +224,16 @@ export default function AppListPage() {
             value={newTemplate}
             onChange={(value) => setNewTemplate(value)}
             style={{ width: '100%', marginTop: 8 }}
-            options={TEMPLATE_OPTIONS.map((opt) => ({
-              value: opt.value,
-              label: (
+            options={TEMPLATE_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
+            optionRender={(option) => {
+              const opt = TEMPLATE_OPTIONS.find((item) => item.value === option.value)
+              return (
                 <div>
-                  <div>{opt.label}</div>
-                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>{opt.desc}</div>
+                  <div>{opt?.label}</div>
+                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>{opt?.desc}</div>
                 </div>
-              ),
-            }))}
+              )
+            }}
           />
         </div>
         <div style={{ marginBottom: 16 }}>

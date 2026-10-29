@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, HistoryOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, FileTextOutlined, HistoryOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
 import { App, Button, Input, Space, Spin, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -260,6 +260,13 @@ function AppEditCanvas() {
               disabled={debugRunning}
             >
               试运行
+            </Button>
+            <Button
+              icon={<FileTextOutlined />}
+              onClick={() => setLogPanelOpen((v) => !v)}
+              type={logPanelOpen ? 'primary' : 'default'}
+            >
+              运行日志
             </Button>
             <Button
               type="primary"
