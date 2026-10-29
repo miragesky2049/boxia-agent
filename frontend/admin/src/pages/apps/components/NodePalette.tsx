@@ -10,6 +10,7 @@ import {
   StopOutlined,
   ToolOutlined,
   UserOutlined,
+  FileTextOutlined,
 } from '@ant-design/icons'
 import type { ReactElement } from 'react'
 import type { NodeType } from '../store/appStore'
@@ -34,6 +35,14 @@ const ITEMS: Array<{
   { type: 'subgraph', label: '子图', desc: '嵌套调用另一个应用', color: '#08979c', icon: <ClusterOutlined /> },
   { type: 'end', label: '结束', desc: '工作流出口', color: '#722ed1', icon: <StopOutlined /> },
 ]
+
+const STICKY_ITEM = {
+  type: 'sticky' as NodeType,
+  label: '注释便签',
+  desc: '画布上的黄色便签',
+  color: '#faad14',
+  icon: <FileTextOutlined />,
+}
 
 interface Props {
   onAdd: (type: NodeType) => void
@@ -85,6 +94,33 @@ export function NodePalette({ onAdd }: Props) {
           <PlusOutlined style={{ color: '#bfbfbf' }} />
         </div>
       ))}
+      <div style={{ fontSize: 11, color: '#bfbfbf', margin: '8px 0 4px', paddingLeft: 4 }}>画布元素</div>
+        <div
+          draggable
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '8px 10px',
+            marginBottom: 6,
+            background: '#fffbe6',
+            border: '1px solid #ffe58f',
+            borderRadius: 6,
+            cursor: 'grab',
+          }}
+          onDragStart={(event) => {
+            event.dataTransfer.setData(APP_NODE_DND_MIME, STICKY_ITEM.type)
+            event.dataTransfer.effectAllowed = 'move'
+          }}
+          onClick={() => onAdd(STICKY_ITEM.type)}
+        >
+          <span style={{ color: STICKY_ITEM.color, fontSize: 16 }}>{STICKY_ITEM.icon}</span>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>{STICKY_ITEM.label}</div>
+            <div style={{ fontSize: 11, color: '#8c8c8c' }}>{STICKY_ITEM.desc}</div>
+          </div>
+          <PlusOutlined style={{ color: '#bfbfbf' }} />
+        </div>
       </div>
     </div>
   )

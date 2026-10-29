@@ -14,10 +14,10 @@ import {
   ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import { App, Input } from 'antd'
+import { App, Input, Tooltip } from 'antd'
 import { useState, type ReactElement } from 'react'
 import type { NodeData, NodeType } from '../store/appStore'
-import { useAppStore } from '../store/appStore'
+import { listOutputFields, useAppStore } from '../store/appStore'
 
 const TYPE_META: Record<NodeType, { color: string; icon: ReactElement; label: string }> = {
   start: { color: '#52c41a', icon: <PlayCircleOutlined />, label: '开始' },
@@ -186,7 +186,11 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      {hasInput && <Handle type="target" position={Position.Left} />}
+      {hasInput && (
+        <Tooltip title="接收上游节点输出" placement="left">
+          <Handle type="target" position={Position.Left} style={{ width: 10, height: 10, background: '#fff', border: '2px solid ' + meta.color }} />
+        </Tooltip>
+      )}
 
       {/* 悬浮工具栏：右上角 */}
       {hover && !isRunning && (
@@ -266,7 +270,14 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
           <span style={{ fontSize: 11, color: '#faad14' }}>运行中</span>
         )}
       </div>
-      {hasOutput && <Handle type="source" position={Position.Right} />}
+      {hasOutput && (
+        <Tooltip
+          title={`输出字段：${listOutputFields(nodeData.nodeType).join('、')}`}
+          placement="right"
+        >
+          <Handle type="source" position={Position.Right} style={{ width: 10, height: 10, background: '#fff', border: '2px solid ' + meta.color }} />
+        </Tooltip>
+      )}
     </div>
   )
 }

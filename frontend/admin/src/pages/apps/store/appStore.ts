@@ -10,7 +10,7 @@ import {
 import { create } from 'zustand'
 import type { Graph, GraphEdge, GraphNode } from '../../../api/apps'
 
-// apps 支持的 10 种内置节点
+// apps 支持的 10 种内置节点 + 1 种画布注释便签
 export type NodeType =
   | 'start'
   | 'llm'
@@ -22,6 +22,7 @@ export type NodeType =
   | 'retrieval'
   | 'human_task'
   | 'subgraph'
+  | 'sticky'
 
 export interface InputVariable {
   name: string
@@ -77,6 +78,7 @@ const NODE_TYPES: NodeType[] = [
   'retrieval',
   'human_task',
   'subgraph',
+  'sticky',
 ]
 
 function defaultConfigFor(type: NodeType): Record<string, unknown> {
@@ -101,6 +103,8 @@ function defaultConfigFor(type: NodeType): Record<string, unknown> {
       return { assignee_role: 'reviewer', instructions: '' }
     case 'subgraph':
       return { application_id: '', input_mapping: {} }
+    case 'sticky':
+      return { content: '双击编辑注释', color: '#fffbe6' }
   }
 }
 
@@ -132,6 +136,8 @@ export function listOutputFields(nodeType: NodeType): string[] {
       return ['output']
     case 'subgraph':
       return ['output']
+    case 'sticky':
+      return []
   }
 }
 
@@ -157,6 +163,8 @@ function labelFor(type: NodeType): string {
       return '人审'
     case 'subgraph':
       return '子图'
+    case 'sticky':
+      return '注释'
   }
 }
 
@@ -199,6 +207,7 @@ function initialCounter(): Record<NodeType, number> {
     retrieval: 1,
     human_task: 1,
     subgraph: 1,
+    sticky: 1,
   }
 }
 
@@ -280,7 +289,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { id, nextIdCounter } = allocateNodeId(state, type)
     const newNode: Node<NodeData> = {
       id,
-      type: 'appNode',
+      type: type === 'sticky' ? 'sticky' : 'appNode',
       position: position ?? nextPosition(state.nodes),
       data: {
         nodeType: type,

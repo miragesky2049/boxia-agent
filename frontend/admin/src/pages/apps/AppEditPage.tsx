@@ -1,5 +1,5 @@
 import { ArrowLeftOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
-import { App, Button, Input, Space, Spin, Tag } from 'antd'
+import { App, Button, Dropdown, Input, Space, Spin, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -22,11 +22,12 @@ import { NodePalette, APP_NODE_DND_MIME } from './components/NodePalette'
 import { RunDebugModal } from './components/RunDebugModal'
 import { RunLogPanel } from './components/RunLogPanel'
 import { CanvasNode } from './components/CanvasNode'
+import { StickyNode } from './components/StickyNode'
 import { EdgeWithPlus } from './components/EdgeWithPlus'
 import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
 import { useAppStore, type NodeData, type NodeType } from './store/appStore'
 
-const nodeTypes = { appNode: CanvasNode }
+const nodeTypes = { appNode: CanvasNode, sticky: StickyNode }
 const edgeTypes = { default: EdgeWithPlus }
 
 type AppNode = Node<NodeData>
@@ -35,7 +36,7 @@ function AppEditCanvas() {
   const navigate = useNavigate()
   const params = useParams<{ id: string }>()
   const appId = params.id ?? ''
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const { screenToFlowPosition } = useReactFlow()
 
   const [loading, setLoading] = useState(true)
@@ -122,7 +123,10 @@ function AppEditCanvas() {
     (_: unknown, node: AppNode) => {
       if (debugRunning) return
       selectNode(node.id)
-      setDrawerOpen(true)
+      // 注释便签节点双击直接编辑，不打开配置抽屉
+      if (node.data.nodeType !== 'sticky') {
+        setDrawerOpen(true)
+      }
     },
     [selectNode, debugRunning],
   )
@@ -144,7 +148,10 @@ function AppEditCanvas() {
         message.warning(error)
         return
       }
-      setDrawerOpen(true)
+      // 注释便签节点双击直接编辑内容，不打开配置抽屉
+      if (type !== 'sticky') {
+        setDrawerOpen(true)
+      }
     },
     [addNodeOfType, message, debugRunning],
   )
@@ -178,7 +185,9 @@ function AppEditCanvas() {
         message.warning(error)
         return
       }
-      setDrawerOpen(true)
+      if (type !== 'sticky') {
+        setDrawerOpen(true)
+      }
     },
     [screenToFlowPosition, addNodeOfType, message, debugRunning],
   )
@@ -437,28 +446,61 @@ function AppEditCanvas() {
 
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
         <NodePalette onAdd={handleAddNode} />
-        <div style={{ flex: 1, background: '#f5f7fa', position: 'relative' }} onDrop={handleDrop} onDragOver={handleDragOver}>
-          <ReactFlow
-            nodes={nodesWithDebug}
-            edges={edges}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            onNodesChange={onNodesChange as OnNodesChange}
-            onEdgesChange={onEdgesChange as OnEdgesChange}
-            onConnect={handleConnect as OnConnect}
-            onNodeClick={handleNodeClick}
-            onPaneClick={handlePaneClick}
-            nodesDraggable={!debugRunning}
-            nodesConnectable={!debugRunning}
-            elementsSelectable={!debugRunning}
-            fitView
-            proOptions={{ hideAttribution: true }}
+        <Dropdown
+          trigger={['contextMenu']}
+          menu={{
+            items: [
+              { key: 'paste', label: '粘贴节点 (Ctrl+V)' },
+              { key: 'layout', label: '自动整理布局' },
+              { type: 'divider' },
+              { key: 'clear', label: '清空画布', danger: true },
+            ],
+            onClick: ({ key }) => {
+              if (key === 'paste') {
+                pasteNode()
+                message.success('已粘贴节点')
+              } else if (key === 'layout') {
+                handleAutoLayout()
+              } else if (key === 'clear') {
+                modal.confirm({
+                  title: '清空画布？',
+                  content: '将删除所有节点和连线，此操作不可撤销',
+                  okText: '清空',
+                  okButtonProps: { danger: true },
+                  cancelText: '取消',
+                  onOk: () => reset(),
+                })
+              }
+            },
+          }}
+        >
+          <div
+            style={{ flex: 1, background: '#f5f7fa', position: 'relative' }}
+            onDrop={handleDrop}
+            onDragOver={handleDragOver}
           >
-            <Background color="#d9d9d9" gap={16} />
-            <Controls />
-            <MiniMap pannable zoomable />
-          </ReactFlow>
-        </div>
+            <ReactFlow
+              nodes={nodesWithDebug}
+              edges={edges}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              onNodesChange={onNodesChange as OnNodesChange}
+              onEdgesChange={onEdgesChange as OnEdgesChange}
+              onConnect={handleConnect as OnConnect}
+              onNodeClick={handleNodeClick}
+              onPaneClick={handlePaneClick}
+              nodesDraggable={!debugRunning}
+              nodesConnectable={!debugRunning}
+              elementsSelectable={!debugRunning}
+              fitView
+              proOptions={{ hideAttribution: true }}
+            >
+              <Background color="#d9d9d9" gap={16} />
+              <Controls />
+              <MiniMap pannable zoomable />
+            </ReactFlow>
+          </div>
+        </Dropdown>
       </div>
 
       <NodeConfigDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
