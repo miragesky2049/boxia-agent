@@ -5,14 +5,19 @@ import {
   BranchesOutlined,
   ClusterOutlined,
   CodeOutlined,
+  CopyOutlined,
+  DeleteOutlined,
+  EditOutlined,
   FileSearchOutlined,
   PlayCircleOutlined,
   StopOutlined,
   ToolOutlined,
   UserOutlined,
 } from '@ant-design/icons'
-import type { ReactElement } from 'react'
+import { App, Input } from 'antd'
+import { useState, type ReactElement } from 'react'
 import type { NodeData, NodeType } from '../store/appStore'
+import { useAppStore } from '../store/appStore'
 
 const TYPE_META: Record<NodeType, { color: string; icon: ReactElement; label: string }> = {
   start: { color: '#52c41a', icon: <PlayCircleOutlined />, label: '开始' },
@@ -91,7 +96,8 @@ function configSummary(nodeData: NodeDataWithDebug): string {
   }
 }
 
-export function CanvasNode({ data, selected }: NodeProps) {
+export function CanvasNode({ id, data, selected }: NodeProps) {
+  const { message, modal } = App.useApp()
   const nodeData = data as NodeDataWithDebug
   const meta = TYPE_META[nodeData.nodeType]
   const hasInput = nodeData.nodeType !== 'start'
@@ -101,6 +107,65 @@ export function CanvasNode({ data, selected }: NodeProps) {
   const border = borderColor ?? (selected ? meta.color : '#d9d9d9')
   const isRunning = debugStatus === 'running'
   const summary = configSummary(nodeData)
+
+  const removeNode = useAppStore((s) => s.removeNode)
+  const duplicateNode = useAppStore((s) => s.duplicateNode)
+  const renameNode = useAppStore((s) => s.renameNode)
+
+  const [hover, setHover] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState(nodeData.label)
+
+  const isEndpoint = nodeData.nodeType === 'start' || nodeData.nodeType === 'end'
+
+  const handleDelete = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    modal.confirm({
+      title: '删除节点？',
+      content: `将删除节点「${nodeData.label}」及其连线`,
+      okText: '删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: () => removeNode(id),
+    })
+  }
+
+  const handleDuplicate = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    if (isEndpoint) {
+      message.warning('开始/结束节点不能复制')
+      return
+    }
+    duplicateNode(id)
+  }
+
+  const startRename = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDraft(nodeData.label)
+    setEditing(true)
+  }
+
+  const commitRename = () => {
+    const next = draft.trim()
+    if (next && next !== nodeData.label) {
+      renameNode(id, next)
+    }
+    setEditing(false)
+  }
+
+  const toolBtn: React.CSSProperties = {
+    width: 22,
+    height: 22,
+    borderRadius: 4,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: 12,
+    color: '#595959',
+    background: '#fff',
+    border: '1px solid #e8e8e8',
+    cursor: 'pointer',
+  }
 
   return (
     <div
@@ -116,16 +181,72 @@ export function CanvasNode({ data, selected }: NodeProps) {
           : selected
             ? `0 0 0 3px ${meta.color}33`
             : '0 1px 4px rgba(0,0,0,0.08)',
+        position: 'relative',
       }}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
     >
       {hasInput && <Handle type="target" position={Position.Left} />}
+
+      {/* 悬浮工具栏：右上角 */}
+      {hover && !isRunning && (
+        <div
+          style={{
+            position: 'absolute',
+            top: -12,
+            right: -8,
+            display: 'flex',
+            gap: 4,
+            padding: 2,
+            background: '#fff',
+            borderRadius: 6,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+            border: '1px solid #f0f0f0',
+            zIndex: 10,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <span title="重命名" style={toolBtn} onClick={startRename}>
+            <EditOutlined />
+          </span>
+          <span title="复制节点" style={toolBtn} onClick={handleDuplicate}>
+            <CopyOutlined />
+          </span>
+          <span title="删除" style={{ ...toolBtn, color: '#ff4d4f' }} onClick={handleDelete}>
+            <DeleteOutlined />
+          </span>
+        </div>
+      )}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ color: meta.color, fontSize: 16 }}>{meta.icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: '#999' }}>{meta.label}</div>
-          <div style={{ fontSize: 13, fontWeight: 500, color: '#262626' }}>
-            {nodeData.label}
-          </div>
+          {editing ? (
+            <Input
+              autoFocus
+              size="small"
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onPressEnter={commitRename}
+              onBlur={commitRename}
+              onClick={(e) => e.stopPropagation()}
+              style={{ fontSize: 13, height: 22, padding: '0 6px' }}
+              maxLength={20}
+            />
+          ) : (
+            <div
+              style={{ fontSize: 13, fontWeight: 500, color: '#262626', cursor: 'text' }}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                setDraft(nodeData.label)
+                setEditing(true)
+              }}
+              title="双击重命名"
+            >
+              {nodeData.label}
+            </div>
+          )}
           <div
             style={{
               fontSize: 11,

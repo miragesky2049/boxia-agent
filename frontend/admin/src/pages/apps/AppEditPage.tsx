@@ -22,10 +22,12 @@ import { NodePalette, APP_NODE_DND_MIME } from './components/NodePalette'
 import { RunDebugModal } from './components/RunDebugModal'
 import { RunLogPanel } from './components/RunLogPanel'
 import { CanvasNode } from './components/CanvasNode'
+import { EdgeWithPlus } from './components/EdgeWithPlus'
 import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
 import { useAppStore, type NodeData, type NodeType } from './store/appStore'
 
 const nodeTypes = { appNode: CanvasNode }
+const edgeTypes = { default: EdgeWithPlus }
 
 type AppNode = Node<NodeData>
 
@@ -59,6 +61,10 @@ function AppEditCanvas() {
   const loadFromGraph = useAppStore((s) => s.loadFromGraph)
   const serializeToGraph = useAppStore((s) => s.serializeToGraph)
   const reset = useAppStore((s) => s.reset)
+  const removeNode = useAppStore((s) => s.removeNode)
+  const copyNode = useAppStore((s) => s.copyNode)
+  const pasteNode = useAppStore((s) => s.pasteNode)
+  const selectedNodeId = useAppStore((s) => s.selectedNodeId)
 
   useEffect(() => {
     reset()
@@ -82,6 +88,35 @@ function AppEditCanvas() {
       .finally(() => setLoading(false))
     return () => reset()
   }, [appId, message, loadFromGraph, reset])
+
+  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (debugRunning) return
+      const target = e.target as HTMLElement | null
+      const isEditable =
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        target?.isContentEditable
+      if (isEditable) return
+
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+        e.preventDefault()
+        removeNode(selectedNodeId)
+        selectNode(null)
+        setDrawerOpen(false)
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selectedNodeId) {
+        e.preventDefault()
+        copyNode(selectedNodeId)
+        message.success('已复制节点，可按 Ctrl+V 粘贴')
+      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
+        e.preventDefault()
+        pasteNode()
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [debugRunning, selectedNodeId, removeNode, copyNode, pasteNode, selectNode, message])
 
   const handleNodeClick = useCallback(
     (_: unknown, node: AppNode) => {
@@ -407,6 +442,7 @@ function AppEditCanvas() {
             nodes={nodesWithDebug}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
             onNodesChange={onNodesChange as OnNodesChange}
             onEdgesChange={onEdgesChange as OnEdgesChange}
             onConnect={handleConnect as OnConnect}

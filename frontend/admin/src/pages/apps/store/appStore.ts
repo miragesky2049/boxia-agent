@@ -47,6 +47,7 @@ export interface AppState {
   edges: Edge[]
   selectedNodeId: string | null
   nextIdCounter: Record<NodeType, number>
+  clipboardNode: Node<NodeData> | null
 
   onNodesChange: (changes: NodeChange<Node<NodeData>>[]) => void
   onEdgesChange: (changes: EdgeChange[]) => void
@@ -55,6 +56,11 @@ export interface AppState {
   updateNodeConfig: (id: string, config: Record<string, unknown>) => void
   addNodeOfType: (type: NodeType, position?: { x: number; y: number }) => string | null
   removeNode: (id: string) => void
+  duplicateNode: (id: string) => void
+  copyNode: (id: string) => void
+  pasteNode: () => void
+  renameNode: (id: string, label: string) => void
+  insertNodeBetween: (source: string, target: string, newType: NodeType) => void
   loadFromGraph: (graph: Graph) => void
   serializeToGraph: () => Graph
   reset: () => void
@@ -211,11 +217,22 @@ function bumpCounter(
   return next
 }
 
+/** 为指定类型分配一个新节点 id，同时推进计数器 */
+function allocateNodeId(
+  state: AppState,
+  type: NodeType,
+): { id: string; nextIdCounter: Record<NodeType, number> } {
+  const counter = state.nextIdCounter
+  const id = `${type}_${counter[type]}`
+  return { id, nextIdCounter: { ...counter, [type]: counter[type] + 1 } }
+}
+
 export const useAppStore = create<AppState>((set, get) => ({
   nodes: [],
   edges: [],
   selectedNodeId: null,
   nextIdCounter: initialCounter(),
+  clipboardNode: null,
 
   onNodesChange: (changes) => {
     set({ nodes: applyNodeChanges(changes, get().nodes) })
@@ -259,12 +276,12 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (type === 'end' && get().nodes.some((n) => n.data.nodeType === 'end')) {
       return '画布上只能有一个结束节点'
     }
-    const counter = get().nextIdCounter
-    const id = `${type}_${counter[type]}`
+    const state = get()
+    const { id, nextIdCounter } = allocateNodeId(state, type)
     const newNode: Node<NodeData> = {
       id,
       type: 'appNode',
-      position: position ?? nextPosition(get().nodes),
+      position: position ?? nextPosition(state.nodes),
       data: {
         nodeType: type,
         label: labelFor(type),
@@ -272,8 +289,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       },
     }
     set({
-      nodes: [...get().nodes, newNode],
-      nextIdCounter: { ...counter, [type]: counter[type] + 1 },
+      nodes: [...state.nodes, newNode],
+      nextIdCounter,
       selectedNodeId: id,
     })
     return null
@@ -283,6 +300,98 @@ export const useAppStore = create<AppState>((set, get) => ({
       nodes: get().nodes.filter((node) => node.id !== id),
       edges: get().edges.filter((edge) => edge.source !== id && edge.target !== id),
       selectedNodeId: get().selectedNodeId === id ? null : get().selectedNodeId,
+    })
+  },
+  duplicateNode: (id) => {
+    const src = get().nodes.find((n) => n.id === id)
+    if (!src) return
+    const type = src.data.nodeType
+    if (type === 'start' || type === 'end') return
+    const state = get()
+    const { id: newId, nextIdCounter } = allocateNodeId(state, type)
+    const copy: Node<NodeData> = {
+      ...src,
+      id: newId,
+      position: { x: src.position.x + 40, y: src.position.y + 60 },
+      selected: true,
+      data: {
+        ...src.data,
+        label: `${src.data.label} 副本`,
+        config: JSON.parse(JSON.stringify(src.data.config ?? {})),
+      },
+    }
+    set({
+      nodes: [...state.nodes.map((n) => ({ ...n, selected: false })), copy],
+      nextIdCounter,
+      selectedNodeId: newId,
+    })
+  },
+  copyNode: (id) => {
+    const src = get().nodes.find((n) => n.id === id)
+    if (!src) return
+    set({ clipboardNode: JSON.parse(JSON.stringify(src)) })
+  },
+  pasteNode: () => {
+    const clip = get().clipboardNode
+    if (!clip) return
+    const type = clip.data.nodeType
+    if (type === 'start' || type === 'end') return
+    const state = get()
+    const { id: newId, nextIdCounter } = allocateNodeId(state, type)
+    const copy: Node<NodeData> = {
+      ...clip,
+      id: newId,
+      position: { x: clip.position.x + 40, y: clip.position.y + 60 },
+      selected: true,
+    }
+    set({
+      nodes: [...state.nodes.map((n) => ({ ...n, selected: false })), copy],
+      nextIdCounter,
+      selectedNodeId: newId,
+    })
+  },
+  renameNode: (id, label) => {
+    set({
+      nodes: get().nodes.map((node) =>
+        node.id === id ? { ...node, data: { ...node.data, label } } : node,
+      ),
+    })
+  },
+  insertNodeBetween: (source, target, newType) => {
+    const state = get()
+    if (newType === 'start' || newType === 'end') return
+    const srcNode = state.nodes.find((n) => n.id === source)
+    const tgtNode = state.nodes.find((n) => n.id === target)
+    if (!srcNode || !tgtNode) return
+    // 计算中点位置
+    const x = (srcNode.position.x + tgtNode.position.x) / 2 - 80
+    const y = (srcNode.position.y + tgtNode.position.y) / 2 - 30
+    const { id: newId, nextIdCounter } = allocateNodeId(state, newType)
+    const newNode: Node<NodeData> = {
+      id: newId,
+      type: 'appNode',
+      position: { x, y },
+      selected: true,
+      data: {
+        nodeType: newType,
+        label: labelFor(newType),
+        config: defaultConfigFor(newType),
+      },
+    }
+    // 移除原 source→target 连线
+    const remainingEdges = state.edges.filter(
+      (e) => !(e.source === source && e.target === target),
+    )
+    const newEdges: Edge[] = [
+      ...remainingEdges,
+      { id: `e_${source}_${newId}_${remainingEdges.length}`, source, target: newId },
+      { id: `e_${newId}_${target}_${remainingEdges.length + 1}`, source: newId, target },
+    ]
+    set({
+      nodes: [...state.nodes.map((n) => ({ ...n, selected: false })), newNode],
+      edges: newEdges,
+      nextIdCounter,
+      selectedNodeId: newId,
     })
   },
   loadFromGraph: (graph) => {
@@ -312,5 +421,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       edges: [],
       selectedNodeId: null,
       nextIdCounter: initialCounter(),
+      clipboardNode: null,
     }),
 }))
