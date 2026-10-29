@@ -31,6 +31,7 @@ import { useAuth } from '../../auth/AuthContext'
 
 const RESOURCE_TABS: { key: ResourceType; label: string }[] = [
   { key: 'tool', label: '工具' },
+  { key: 'app', label: '应用' },
 ]
 
 const CATEGORY_ORDER: PermissionCategory[] = [

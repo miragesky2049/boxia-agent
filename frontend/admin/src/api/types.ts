@@ -376,7 +376,7 @@ export interface ResourceGrant {
   created_at: string
 }
 
-export type ResourceType = 'tool'
+export type ResourceType = 'tool' | 'app'
 
 export type GrantBatchMode = 'merge' | 'replace' | 'clear'
 
