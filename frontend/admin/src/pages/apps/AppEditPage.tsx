@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, FileTextOutlined, HistoryOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, SaveOutlined } from '@ant-design/icons'
 import { App, Button, Input, Space, Spin, Tag } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -215,6 +215,109 @@ function AppEditCanvas() {
     }
   }
 
+  // 自动布局：按拓扑层级从左到右排列（参考 dify/coze 的"整理节点"）
+  const handleAutoLayout = useCallback(() => {
+    if (nodes.length === 0) return
+    // 计算每个节点的层级
+    const inDegree = new Map<string, number>()
+    nodes.forEach((n) => inDegree.set(n.id, 0))
+    edges.forEach((e) => inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1))
+
+    const level = new Map<string, number>()
+    const queue: string[] = []
+    inDegree.forEach((d, id) => {
+      if (d === 0) {
+        level.set(id, 0)
+        queue.push(id)
+      }
+    })
+
+    while (queue.length > 0) {
+      const id = queue.shift()!
+      const lvl = level.get(id) ?? 0
+      edges
+        .filter((e) => e.source === id)
+        .forEach((e) => {
+          const nextLvl = (level.get(e.target) ?? 0)
+          if (lvl + 1 > nextLvl) level.set(e.target, lvl + 1)
+          inDegree.set(e.target, (inDegree.get(e.target) ?? 1) - 1)
+          if ((inDegree.get(e.target) ?? 0) === 0) queue.push(e.target)
+        })
+    }
+
+    // 每层的节点按 y 位置堆叠
+    const levelNodes = new Map<number, string[]>()
+    level.forEach((lvl, id) => {
+      const arr = levelNodes.get(lvl) ?? []
+      arr.push(id)
+      levelNodes.set(lvl, arr)
+    })
+
+    const newPositions = new Map<string, { x: number; y: number }>()
+    const H_GAP = 280
+    const V_GAP = 120
+    levelNodes.forEach((ids, lvl) => {
+      ids.forEach((id, idx) => {
+        newPositions.set(id, { x: lvl * H_GAP, y: idx * V_GAP })
+      })
+    })
+
+    // 更新节点位置
+    nodes.forEach((n) => {
+      const pos = newPositions.get(n.id)
+      if (pos) n.position = pos
+    })
+
+    message.success('已自动整理节点布局')
+  }, [nodes, edges, message])
+
+  // 导出画布为 PNG（参考 dify/coze 的"导出图片"）
+  const handleExportImage = useCallback(async () => {
+    const canvasEl = document.querySelector('.react-flow')
+    if (!canvasEl) {
+      message.warning('未找到画布')
+      return
+    }
+    try {
+      // 简单实现：截取画布区域
+      const rect = canvasEl.getBoundingClientRect()
+      const svg = canvasEl.querySelector('svg')
+      if (!svg) throw new Error('no svg')
+
+      const serializer = new XMLSerializer()
+      const svgStr = serializer.serializeToString(svg)
+      const img = new Image()
+      const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
+      const url = URL.createObjectURL(svgBlob)
+
+      img.onload = () => {
+        const canvas = document.createElement('canvas')
+        canvas.width = rect.width * 2
+        canvas.height = rect.height * 2
+        const ctx = canvas.getContext('2d')!
+        ctx.fillStyle = '#f5f7fa'
+        ctx.fillRect(0, 0, canvas.width, canvas.height)
+        ctx.scale(2, 2)
+        ctx.drawImage(img, 0, 0, rect.width, rect.height)
+        URL.revokeObjectURL(url)
+
+        canvas.toBlob((blob) => {
+          if (!blob) return
+          const url2 = URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url2
+          a.download = `${name || 'workflow'}.png`
+          a.click()
+          URL.revokeObjectURL(url2)
+          message.success('已导出画布图片')
+        })
+      }
+      img.src = url
+    } catch (error) {
+      message.error('导出失败：' + (error instanceof Error ? error.message : '未知错误'))
+    }
+  }, [name, message])
+
   if (loading) {
     return (
       <div className="page-card" style={{ textAlign: 'center', padding: 80 }}>
@@ -247,6 +350,22 @@ function AppEditCanvas() {
           {runtimeMode && <Tag color={runtimeMode === 'agent_loop' ? 'purple' : 'blue'}>{runtimeMode}</Tag>}
           {debugRunning && <Tag color="orange">试运行中（画布只读）</Tag>}
           <Space style={{ marginLeft: 'auto' }}>
+            <Button
+              icon={<LayoutOutlined />}
+              onClick={handleAutoLayout}
+              disabled={debugRunning || nodes.length === 0}
+              title="自动整理节点布局"
+            >
+              整理布局
+            </Button>
+            <Button
+              icon={<PictureOutlined />}
+              onClick={handleExportImage}
+              disabled={nodes.length === 0}
+              title="导出画布为 PNG 图片"
+            >
+              导出图片
+            </Button>
             <Button
               icon={<HistoryOutlined />}
               onClick={() => setVersionDrawerOpen(true)}
