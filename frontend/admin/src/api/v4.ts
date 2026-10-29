@@ -112,6 +112,7 @@ export async function listMyApps(): Promise<V4MyApp[]> {
 export interface V4RunItem {
   id: string
   application_id: string
+  langgraph_thread_id: string
   status: 'running' | 'success' | 'error' | 'interrupted'
   input: Record<string, unknown> | null
   output: Record<string, unknown> | null
@@ -140,7 +141,6 @@ export interface V4NodeExecution {
 export interface V4RunDetail {
   run: V4RunItem & {
     tenant_id: string
-    langgraph_thread_id: string
   }
   node_executions: V4NodeExecution[]
 }
@@ -156,6 +156,29 @@ export async function listApplicationRuns(
 
 export async function getRunDetail(runId: string): Promise<V4RunDetail> {
   return request<V4RunDetail>(`/admin/v4/marketplace/runs/${runId}`)
+}
+
+export async function resumeRun(
+  applicationId: string,
+  threadId: string,
+  payload: { approved: boolean; comment: string },
+): Promise<{
+  status: 'success' | 'waiting_approval'
+  output?: Record<string, unknown>
+  thread_id: string
+  run_id: string
+  approval?: Record<string, unknown>
+}> {
+  return request<{
+    status: 'success' | 'waiting_approval'
+    output?: Record<string, unknown>
+    thread_id: string
+    run_id: string
+    approval?: Record<string, unknown>
+  }>(`/admin/v4/marketplace/applications/${applicationId}/runs/${threadId}/resume`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 // ========== 统一资源（tool / prompt / skill / knowledge） ==========

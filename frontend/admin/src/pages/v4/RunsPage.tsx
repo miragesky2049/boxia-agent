@@ -11,6 +11,8 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Input,
+  Modal,
   Space,
   Table,
   Tag,
@@ -23,6 +25,7 @@ import { useParams } from 'react-router-dom'
 import {
   getRunDetail,
   listApplicationRuns,
+  resumeRun,
   type V4NodeExecution,
   type V4RunDetail,
   type V4RunItem,
@@ -132,6 +135,12 @@ export default function V4RunsPage() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [detail, setDetail] = useState<V4RunDetail | null>(null)
 
+  // 审批 Modal
+  const [approveOpen, setApproveOpen] = useState(false)
+  const [approvingRun, setApprovingRun] = useState<V4RunItem | null>(null)
+  const [approveComment, setApproveComment] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
   const load = useCallback(async () => {
     if (!appId) return
     setLoading(true)
@@ -161,6 +170,30 @@ export default function V4RunsPage() {
       setDetailOpen(false)
     } finally {
       setDetailLoading(false)
+    }
+  }
+
+  const openApprove = (record: V4RunItem) => {
+    setApprovingRun(record)
+    setApproveComment('')
+    setApproveOpen(true)
+  }
+
+  const submitApproval = async (approved: boolean) => {
+    if (!approvingRun || !appId) return
+    setSubmitting(true)
+    try {
+      await resumeRun(appId, approvingRun.langgraph_thread_id, {
+        approved,
+        comment: approveComment,
+      })
+      message.success(approved ? '已批准，流程继续' : '已拒绝')
+      setApproveOpen(false)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '审批提交失败')
+    } finally {
+      setSubmitting(false)
     }
   }
 
@@ -223,11 +256,18 @@ export default function V4RunsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 100,
+      width: 160,
       render: (_, record) => (
-        <Button type="link" size="small" onClick={() => openDetail(record.id)}>
-          详情
-        </Button>
+        <Space size="small">
+          <Button type="link" size="small" onClick={() => openDetail(record.id)}>
+            详情
+          </Button>
+          {record.status === 'interrupted' && (
+            <Button type="link" size="small" onClick={() => openApprove(record)}>
+              审批
+            </Button>
+          )}
+        </Space>
       ),
     },
   ]
@@ -332,6 +372,47 @@ export default function V4RunsPage() {
           </Space>
         )}
       </Drawer>
+
+      <Modal
+        open={approveOpen}
+        title="人审节点审批"
+        onCancel={() => setApproveOpen(false)}
+        footer={
+          <Space>
+            <Button onClick={() => setApproveOpen(false)}>取消</Button>
+            <Button danger loading={submitting} onClick={() => submitApproval(false)}>
+              拒绝
+            </Button>
+            <Button type="primary" loading={submitting} onClick={() => submitApproval(true)}>
+              批准
+            </Button>
+          </Space>
+        }
+      >
+        {approvingRun && (
+          <Space direction="vertical" style={{ width: '100%' }} size="middle">
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                运行快照：
+              </Typography.Text>
+              <div style={{ marginTop: 4 }}>
+                <JsonBlock value={approvingRun.input} />
+              </div>
+            </div>
+            <div>
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                审批意见：
+              </Typography.Text>
+              <Input.TextArea
+                rows={3}
+                value={approveComment}
+                onChange={(e) => setApproveComment(e.target.value)}
+                placeholder="可填写审批备注（可选）"
+              />
+            </div>
+          </Space>
+        )}
+      </Modal>
     </div>
   )
 }

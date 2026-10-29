@@ -104,7 +104,7 @@ class V4RunRepository:
         limit: int = 50,
     ) -> list[dict]:
         sql = (
-            "SELECT id, application_id, status, input, output, error, started_at, finished_at "
+            "SELECT id, application_id, langgraph_thread_id, status, input, output, error, started_at, finished_at "
             "FROM run WHERE tenant_id = :tid"
         )
         params: dict[str, Any] = {"tid": tenant_id}
