@@ -46,7 +46,7 @@ class ResumePayload(BaseModel):
 
 
 def get_app_service(uow: UowDep) -> ApplicationService:
-    return ApplicationService(uow.session)
+    return ApplicationService(uow)
 
 
 AppServiceDep = Annotated[ApplicationService, Depends(get_app_service)]

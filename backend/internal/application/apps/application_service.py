@@ -6,9 +6,8 @@ import json
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
 from internal.application.errors import NotFoundError, ValidationError
+from internal.domain.repository.protocols import UnitOfWork
 from internal.engine.graph.compiler import infer_runtime_mode
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 
@@ -44,8 +43,9 @@ def values_equal(a: Any, b: Any) -> bool:
 
 
 class ApplicationService:
-    def __init__(self, session: Session):
-        self._repo = ApplicationRepository(session)
+    def __init__(self, uow: UnitOfWork):
+        self._uow = uow
+        self._repo = ApplicationRepository(uow.session)
 
     # ========== 市场浏览（租户端） ==========
     def list_marketplace(self) -> list[dict]:
@@ -69,6 +69,7 @@ class ApplicationService:
             raise ValidationError("该应用已被禁用")
 
         instance_id = self._repo.subscribe(tenant_id, application_id)
+        self._uow.commit()
         return {"instance_id": instance_id, "application_id": application_id}
 
     def list_my_apps(self, tenant_id: UUID) -> list[dict]:
@@ -91,13 +92,15 @@ class ApplicationService:
         """平台管理员创建新应用（未上架）。"""
         if not name.strip():
             raise ValidationError("应用名称不能为空")
-        return self._repo.create_application(
+        app_id = self._repo.create_application(
             name=name.strip(),
             owner_type="platform",
             owner_id=None,
             description=description,
             created_by=created_by,
         )
+        self._uow.commit()
+        return app_id
 
     def update_application(
         self,
@@ -112,6 +115,7 @@ class ApplicationService:
         self._repo.update_application(
             application_id, name=name, description=description, avatar_url=avatar_url
         )
+        self._uow.commit()
 
     def set_listed_in_market(self, application_id: UUID, listed: bool) -> None:
         app = self._repo.get_application(application_id)
@@ -122,11 +126,13 @@ class ApplicationService:
         if listed and not app["is_enabled"]:
             raise ValidationError("应用已被禁用，无法上架")
         self._repo.set_listed_in_market(application_id, listed)
+        self._uow.commit()
 
     def set_enabled(self, application_id: UUID, enabled: bool) -> None:
         if self._repo.get_application(application_id) is None:
             raise NotFoundError("应用不存在")
         self._repo.set_enabled(application_id, enabled)
+        self._uow.commit()
 
     def save_graph(self, application_id: UUID, graph: dict[str, Any]) -> dict[str, Any]:
         """保存 graph 定义，自动推断 runtime_mode，并对变化的 config 字段写入新版本。
@@ -153,6 +159,7 @@ class ApplicationService:
         self._repo.update_graph(application_id, graph, runtime_mode)
 
         versioned = self._snapshot_changed_fields(application_id, old_graph, graph)
+        self._uow.commit()
         return {"runtime_mode": runtime_mode, "versioned_fields": versioned}
 
     def _snapshot_changed_fields(
@@ -251,6 +258,7 @@ class ApplicationService:
         if record is None:
             raise NotFoundError("指定字段版本不存在")
         self._repo.upsert_pin(tenant_id, application_id, field_path, version)
+        self._uow.commit()
 
     def unpin_field(
         self,
@@ -260,6 +268,7 @@ class ApplicationService:
     ) -> None:
         """租户取消 pin，回到 latest。"""
         self._repo.delete_pin(tenant_id, application_id, field_path)
+        self._uow.commit()
 
     def list_pins(self, tenant_id: UUID, application_id: UUID) -> list[dict]:
         return self._repo.list_pins(tenant_id, application_id)

@@ -31,7 +31,7 @@ router = APIRouter(
 
 
 def get_app_service(uow: UowDep) -> ApplicationService:
-    return ApplicationService(uow.session)
+    return ApplicationService(uow)
 
 
 AppServiceDep = Depends(get_app_service)

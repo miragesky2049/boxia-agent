@@ -41,8 +41,21 @@ interface Props {
 
 export function NodePalette({ onAdd }: Props) {
   return (
-    <div style={{ width: 200, borderRight: '1px solid #f0f0f0', padding: 12, background: '#fafafa' }}>
-      <div style={{ fontSize: 12, color: '#8c8c8c', marginBottom: 8 }}>节点库（拖拽到画布）</div>
+    <div
+      style={{
+        width: 200,
+        borderRight: '1px solid #f0f0f0',
+        background: '#fafafa',
+        display: 'flex',
+        flexDirection: 'column',
+        height: '100%',
+        overflow: 'hidden',
+      }}
+    >
+      <div style={{ fontSize: 12, color: '#8c8c8c', padding: '12px 12px 8px', flexShrink: 0 }}>
+        节点库（拖拽到画布）
+      </div>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '0 12px 12px' }}>
       {ITEMS.map((item) => (
         <div
           key={item.type}
@@ -72,6 +85,7 @@ export function NodePalette({ onAdd }: Props) {
           <PlusOutlined style={{ color: '#bfbfbf' }} />
         </div>
       ))}
+      </div>
     </div>
   )
 }

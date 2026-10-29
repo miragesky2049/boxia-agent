@@ -105,7 +105,7 @@ class ApplicationRepository:
     ) -> list[dict]:
         sql = (
             "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-            "is_listed_in_market, created_at FROM application"
+            "is_listed_in_market, created_at, updated_at FROM application"
         )
         conditions: list[str] = []
         params: dict[str, Any] = {}

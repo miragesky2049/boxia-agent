@@ -20,7 +20,7 @@ const RolesPage = lazy(() => import('./pages/RolesPage'))
 const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
 const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
-const AppListPage = lazy(() => import('./pages/apps/AppListPage'))
+const AppsIndexPage = lazy(() => import('./pages/apps/AppsIndexPage'))
 const AppEditPage = lazy(() => import('./pages/apps/AppEditPage'))
 const MarketplacePage = lazy(() => import('./pages/apps/MarketplacePage'))
 const RunPage = lazy(() => import('./pages/apps/RunPage'))
@@ -50,7 +50,7 @@ export default function AppRouter() {
             }
           >
             <Route path="/" element={<Navigate to="/apps" replace />} />
-            <Route path="/apps" element={<AppListPage />} />
+            <Route path="/apps" element={<AppsIndexPage />} />
             <Route path="/apps/:id/edit" element={<AppEditPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/marketplace/apps/:appId/run" element={<RunPage />} />
