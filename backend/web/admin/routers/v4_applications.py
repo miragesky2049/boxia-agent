@@ -22,6 +22,7 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 from internal.infrastructure.repository.v4.run_repository import V4RunRepository
 from internal.infrastructure.repository.v4.usage_repository import V4UsageRepository
 from internal.infrastructure.repository.v4.webhook_repository import V4WebhookRepository
+from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
@@ -463,8 +464,8 @@ def create_webhook(
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    if not payload.url.startswith(("http://", "https://")):
-        raise ValidationError("webhook URL 必须以 http:// 或 https:// 开头")
+    # SSRF 防护：拒绝 loopback/链路本地/云元数据/组播/保留地址，校验 DNS 解析
+    validate_outbound_url(payload.url)
     wid = V4WebhookRepository(uow.session).create(
         tenant_id=tenant_id,
         event_type=payload.event_type,

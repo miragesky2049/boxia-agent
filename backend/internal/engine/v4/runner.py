@@ -481,9 +481,14 @@ class GraphRunner:
 
         import httpx
 
+        from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+
         async def _send(wh: dict[str, Any]) -> None:
             try:
-                async with httpx.AsyncClient(timeout=5.0) as client:
+                # 发送前二次校验 DNS（防御创建后域名切换到内网）
+                validate_outbound_url(wh["url"])
+                # follow_redirects=False：防止 302 跳到内网地址绕过 SSRF 校验
+                async with httpx.AsyncClient(timeout=5.0, follow_redirects=False) as client:
                     await client.post(wh["url"], json=payload)
             except Exception:  # noqa: BLE001
                 logger.warning("webhook 推送失败: url=%s", wh["url"])
