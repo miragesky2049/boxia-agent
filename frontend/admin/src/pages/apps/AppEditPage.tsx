@@ -363,7 +363,7 @@ function AppEditCanvas() {
     }
   }
 
-  // 自动布局：按拓扑层级从左到右排列（参考 dify/coze 的"整理节点"）
+  // 自动布局：按拓扑层级从左到右排列
   const handleAutoLayout = useCallback(() => {
     if (nodes.length === 0) return
     // 计算每个节点的层级
@@ -419,7 +419,7 @@ function AppEditCanvas() {
     message.success('已自动整理节点布局')
   }, [nodes, edges, message])
 
-  // 导出画布为 PNG（参考 dify/coze 的"导出图片"）
+  // 导出画布为 PNG
   const handleExportImage = useCallback(async () => {
     const canvasEl = document.querySelector('.react-flow')
     if (!canvasEl) {

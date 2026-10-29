@@ -135,8 +135,18 @@ class LLMClient(ABC):
         temperature: float | None = None,
         max_tokens: int | None = None,
         context: AgentRunContext | None = None,
+        response_format: dict[str, Any] | None = None,
+        top_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
     ) -> LLMResponse:
-        """调用 /chat/completions 并返回聚合结果。"""
+        """调用 /chat/completions 并返回聚合结果。
+
+        response_format: 可选，OpenAI response_format 字典（如 {"type": "json_object"}），
+                        模型不支持时由网关返回 4xx，调用方自行处理。
+        top_p / presence_penalty / frequency_penalty: OpenAI Chat Completions 标准采样参数，
+                        None 时不传，由网关默认值决定。
+        """
 
 
 class OpenAICompatLLMClient(LLMClient):
@@ -174,6 +184,10 @@ class OpenAICompatLLMClient(LLMClient):
         temperature: float | None = None,
         max_tokens: int | None = None,
         context: AgentRunContext | None = None,
+        response_format: dict[str, Any] | None = None,
+        top_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
     ) -> LLMResponse:
         """发起一次非流式 chat completions 调用，带自动重试。"""
         payload: dict[str, Any] = {
@@ -186,6 +200,15 @@ class OpenAICompatLLMClient(LLMClient):
         if tools:
             payload["tools"] = [tool.to_openai() for tool in tools]
             payload["tool_choice"] = "auto"
+        if response_format is not None:
+            payload["response_format"] = response_format
+        # OpenAI 标准采样参数：None 时不传，避免覆盖网关默认值
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if presence_penalty is not None:
+            payload["presence_penalty"] = presence_penalty
+        if frequency_penalty is not None:
+            payload["frequency_penalty"] = frequency_penalty
 
         headers = {
             "Authorization": f"Bearer {self._api_key}",

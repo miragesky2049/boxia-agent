@@ -1,5 +1,5 @@
 import { PlusOutlined, CloseOutlined, BulbOutlined, CopyOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography, Collapse } from 'antd'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listApps,
@@ -518,7 +518,7 @@ function OutputVariablesEditor({ nodeId }: { nodeId: string }) {
   )
 }
 
-/** 通用 key-value 动态编辑器：替代裸 JSON TextArea（参考 coze/dify 的参数表单） */
+/** 通用 key-value 动态编辑器：替代裸 JSON TextArea，提供结构化参数录入 */
 function KeyValueEditor({
   name,
   keyPlaceholder,
@@ -631,7 +631,7 @@ const BRANCH_OPERATORS: { value: string; label: string }[] = [
   { value: 'contains', label: '包含 (contains)' },
 ]
 
-/** 通用重试配置：失败时重试开关 + 最大重试次数（参考 dify LLM/HTTP 节点的"失败时重试"） */
+/** 通用重试配置：失败时重试开关 + 最大重试次数 */
 function RetryConfigFields() {
   const retryEnabled = (Form.useWatch('retry_enabled') as boolean) ?? false
   return (
@@ -648,7 +648,7 @@ function RetryConfigFields() {
   )
 }
 
-/** 分支条件可视化构建器：参考 coze IF 节点，行内编辑字段/操作符/值 */
+/** 分支条件可视化构建器：行内编辑字段/操作符/值 */
 function BranchConditionsEditor({
   startInputs,
 }: {
@@ -739,7 +739,7 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
 
   const node = nodes.find((n) => n.id === selectedNodeId)
 
-  // 下游节点列表（参考 dify "下一步" 区域）
+  // 下游节点列表
   const downstreamNodes = useMemo(() => {
     if (!node) return []
     const targetIds = edges.filter((e) => e.source === node.id).map((e) => e.target)
@@ -911,6 +911,18 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             <Form.Item label="结构化输出" name="response_format_json" valuePropName="checked" tooltip="开启后模型返回 JSON 对象（需模型支持 response_format）">
               <Switch checkedChildren="JSON" unCheckedChildren="文本" />
             </Form.Item>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>高级采样参数（留空则用模型默认值）</Typography.Text>
+            <Space.Compact block style={{ display: 'flex', marginTop: 8 }}>
+              <Form.Item label="Top P" name="top_p" style={{ flex: 1, marginBottom: 8 }}>
+                <InputNumber min={0} max={1} step={0.05} placeholder="1.0" style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label="Presence" name="presence_penalty" style={{ flex: 1, marginBottom: 8, marginLeft: 8 }}>
+                <InputNumber min={-2} max={2} step={0.1} placeholder="0" style={{ width: '100%' }} />
+              </Form.Item>
+              <Form.Item label="Frequency" name="frequency_penalty" style={{ flex: 1, marginBottom: 8, marginLeft: 8 }}>
+                <InputNumber min={-2} max={2} step={0.1} placeholder="0" style={{ width: '100%' }} />
+              </Form.Item>
+            </Space.Compact>
             <RetryConfigFields />
           </>
         )
@@ -1019,6 +1031,9 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             </Form.Item>
             <Form.Item label="超时时间" name="timeout_seconds" tooltip="请求超时秒数，超时后节点失败">
               <InputNumber min={1} max={300} style={{ width: '100%' }} addonAfter="秒" />
+            </Form.Item>
+            <Form.Item label="验证 SSL 证书" name="verify_ssl" valuePropName="checked" tooltip="关闭后允许访问自签名证书的内网服务（仅内网测试用）">
+              <Switch checkedChildren="验证" unCheckedChildren="跳过" />
             </Form.Item>
             <RetryConfigFields />
           </>

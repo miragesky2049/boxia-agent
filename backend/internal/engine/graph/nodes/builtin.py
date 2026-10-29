@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 from contextvars import ContextVar
-from typing import Any
+from typing import Any, Awaitable, Callable
 from uuid import UUID
 
 from internal.engine.llm import LLMClient
@@ -36,6 +37,48 @@ RetrievalServiceCtx: ContextVar[Any] = ContextVar("retrieval_service", default=N
 KnowledgeResolverCtx: ContextVar[Any] = ContextVar("knowledge_resolver", default=None)
 
 
+# ========== 通用重试辅助 ==========
+async def _run_with_retry(
+    action: Callable[[], Awaitable[dict[str, Any]]],
+    *,
+    retry_enabled: bool,
+    max_retries: int,
+    node_label: str,
+) -> dict[str, Any]:
+    """节点级失败重试：工作流编排平台通用的失败重试语义。
+
+    - action 返回的 dict 中 error 字段非空即视为失败
+    - action 可额外返回 retryable: bool，显式声明该错误是否值得重试
+      （缺省 True；HTTP 4xx / LLM 4xx 这类业务错误应标 False，避免无意义重试）
+    - 指数退避：第 n 次重试等待 (2 ** n) 秒（1s, 2s, 4s…）
+    - retry_enabled=False 时直接执行一次
+    """
+    if not retry_enabled:
+        return await action()
+
+    attempts = max(1, int(max_retries) + 1)
+    last_error: str | None = None
+    for attempt in range(1, attempts + 1):
+        result = await action()
+        error = result.get("error")
+        if not error:
+            return result
+        last_error = str(error)
+        retryable = result.get("retryable", True)
+        if not retryable or attempt >= attempts:
+            break
+        backoff = 2 ** (attempt - 1)
+        logger.warning(
+            "%s 节点第 %d 次失败，将在 %ds 后重试：%s",
+            node_label,
+            attempt,
+            backoff,
+            last_error,
+        )
+        await asyncio.sleep(backoff)
+    return result
+
+
 # ========== start ==========
 def _start_node_build(config: dict[str, Any]):
     async def start_fn(state: dict) -> dict:
@@ -49,22 +92,41 @@ def _llm_node_build(node_config: dict[str, Any]):
     """llm 节点：调用模型网关。
 
     LLMClient 通过 ModelResolverCtx 注入，节点工厂闭包捕获 node_config。
+    LLM 节点通用语义：
+      - system_prompt / user_prompt 独立配置，user_prompt 支持 {{#input.xxx#}} 占位符
+      - response_format_json=True 时透传 OpenAI response_format={"type": "json_object"}
+      - retry_enabled=True 时节点级失败重试（指数退避）
     """
     system_prompt: str = node_config.get("system_prompt", "")
+    user_prompt_template: str = node_config.get("user_prompt", "")
     model_id: str = node_config.get("model_id", "")
     temperature: float = node_config.get("temperature", 0.7)
+    max_tokens: int | None = node_config.get("max_tokens")
+    response_json: bool = bool(node_config.get("response_format_json", False))
+    retry_enabled: bool = bool(node_config.get("retry_enabled", False))
+    max_retries: int = int(node_config.get("max_retries", 3) or 3)
+    # OpenAI 标准采样参数：None 表示不配置，由网关默认值决定
+    top_p: float | None = node_config.get("top_p")
+    presence_penalty: float | None = node_config.get("presence_penalty")
+    frequency_penalty: float | None = node_config.get("frequency_penalty")
 
-    async def llm_fn(state: dict) -> dict:
+    async def _do_llm(state: dict) -> dict:
         resolver = ModelResolverCtx.get()
         user_input = state.get("input", {})
-        user_message = user_input.get("message") or user_input.get("query") or str(user_input)
+
+        # user_prompt 优先：未配置时回退到 input.message/query
+        if user_prompt_template:
+            user_message = _resolve_template(user_prompt_template, state)
+        else:
+            user_message = user_input.get("message") or user_input.get("query") or str(user_input)
 
         if resolver is None or not model_id:
             return {
                 "output": {
-                    "content": f"[LLM stub] model={model_id} input={user_message[:80]}",
+                    "content": f"[LLM stub] model={model_id} input={str(user_message)[:80]}",
                     "model": model_id,
-                }
+                },
+                "error": None,
             }
 
         client: LLMClient = resolver(model_id)
@@ -73,10 +135,26 @@ def _llm_node_build(node_config: dict[str, Any]):
             messages.append({"role": "system", "content": system_prompt})
         messages.append({"role": "user", "content": str(user_message)})
 
-        resp = await client.chat(
-            messages=messages,
-            temperature=temperature,
-        )
+        response_format = {"type": "json_object"} if response_json else None
+        try:
+            resp = await client.chat(
+                messages=messages,
+                temperature=temperature,
+                max_tokens=max_tokens,
+                response_format=response_format,
+                top_p=top_p,
+                presence_penalty=presence_penalty,
+                frequency_penalty=frequency_penalty,
+            )
+        except Exception as exc:
+            return {
+                "output": {
+                    "content": None,
+                    "model": model_id,
+                },
+                "error": str(exc),
+            }
+
         return {
             "output": {
                 "content": resp.content,
@@ -87,6 +165,20 @@ def _llm_node_build(node_config: dict[str, Any]):
                 "completion_tokens": resp.usage.completion_tokens,
                 "total_tokens": resp.usage.total_tokens,
             },
+            "error": None,
+        }
+
+    async def llm_fn(state: dict) -> dict:
+        result = await _run_with_retry(
+            lambda: _do_llm(state),
+            retry_enabled=retry_enabled,
+            max_retries=max_retries,
+            node_label="LLM",
+        )
+        # _run_with_retry 失败时返回的是 {"output":..., "error":...}，与成功结构对齐
+        return {
+            "output": result.get("output", {}),
+            "usage": result.get("usage", {}),
         }
 
     return llm_fn
@@ -171,8 +263,10 @@ def _tool_node_build(config: dict[str, Any]):
     """
     resource_id = config.get("resource_id", "")
     params_config = config.get("params", {}) or {}
+    retry_enabled = bool(config.get("retry_enabled", False))
+    max_retries = int(config.get("max_retries", 3) or 3)
 
-    async def tool_fn(state: dict) -> dict:
+    async def _do_tool(state: dict) -> dict:
         resolver = ToolResolverCtx.get()
         tenant_id = TenantIdCtx.get()
         params = _resolve_params(params_config, state)
@@ -258,6 +352,15 @@ def _tool_node_build(config: dict[str, Any]):
                 }
             }
 
+    async def tool_fn(state: dict) -> dict:
+        result = await _run_with_retry(
+            lambda: _do_tool(state),
+            retry_enabled=retry_enabled,
+            max_retries=max_retries,
+            node_label="TOOL",
+        )
+        return {"output": result.get("output", {})}
+
     return tool_fn
 
 
@@ -280,23 +383,34 @@ def _template_node_build(config: dict[str, Any]):
 def _http_node_build(config: dict[str, Any]):
     """http 节点：发 HTTP 请求（走 SSRF 防护）。
 
-    config.url: 目标 URL
-    config.method: GET / POST / PUT / DELETE
-    config.headers: 额外请求头
-    config.body: 请求体（JSON 对象或占位符）
+    HTTP 节点通用语义：
+      - config.url: 目标 URL，支持 {{#input.xxx#}} 占位符
+      - config.method: GET / POST / PUT / DELETE / PATCH
+      - config.headers: 额外请求头 KV
+      - config.params: Query 参数 KV，运行时拼接到 URL 后面
+      - config.body: 请求体（JSON 对象或占位符）
+      - config.timeout_seconds: 请求超时秒数（默认 30）
+      - config.verify_ssl: 是否校验 TLS 证书（默认 True）
+      - config.retry_enabled / max_retries: 节点级失败重试
     """
     url_template = config.get("url", "")
     method = (config.get("method") or "GET").upper()
     headers_config = config.get("headers", {}) or {}
+    params_config = config.get("params", {}) or {}
     body_config = config.get("body")
+    timeout_seconds = float(config.get("timeout_seconds", 30) or 30)
+    retry_enabled = bool(config.get("retry_enabled", False))
+    max_retries = int(config.get("max_retries", 3) or 3)
+    verify_ssl = bool(config.get("verify_ssl", True))
 
-    async def http_fn(state: dict) -> dict:
+    async def _do_http(state: dict) -> dict:
         import httpx
 
         from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 
         url = _resolve_template(url_template, state)
         headers = _resolve_params(headers_config, state)
+        query_params = _resolve_params(params_config, state)
         body = _resolve_template(json.dumps(body_config)) if body_config else None
         if isinstance(body, str):
             try:
@@ -317,24 +431,39 @@ def _http_node_build(config: dict[str, Any]):
             }
 
         try:
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=timeout_seconds, verify=verify_ssl) as client:
                 if method == "GET":
-                    resp = await client.get(url, headers=headers)
+                    resp = await client.get(url, headers=headers, params=query_params or None)
                 elif method == "POST":
-                    resp = await client.post(url, headers=headers, json=body)
+                    resp = await client.post(url, headers=headers, params=query_params or None, json=body)
                 elif method == "PUT":
-                    resp = await client.put(url, headers=headers, json=body)
+                    resp = await client.put(url, headers=headers, params=query_params or None, json=body)
                 elif method == "DELETE":
-                    resp = await client.delete(url, headers=headers)
+                    resp = await client.delete(url, headers=headers, params=query_params or None)
+                elif method == "PATCH":
+                    resp = await client.patch(url, headers=headers, params=query_params or None, json=body)
                 else:
-                    resp = await client.request(method, url, headers=headers, json=body)
+                    resp = await client.request(
+                        method, url, headers=headers, params=query_params or None, json=body
+                    )
+            # HTTP 4xx/5xx 也算失败；4xx 是业务错误（参数/权限/资源不存在），重试无意义
+            if resp.status_code >= 400:
+                return {
+                    "output": {
+                        "status": resp.status_code,
+                        "body": resp.text[:8192],
+                        "headers": dict(resp.headers),
+                    },
+                    "error": f"HTTP {resp.status_code}",
+                    "retryable": resp.status_code >= 500,
+                }
             return {
                 "output": {
                     "status": resp.status_code,
                     "body": resp.text[:8192],
                     "headers": dict(resp.headers),
-                    "error": None,
-                }
+                },
+                "error": None,
             }
         except Exception as exc:
             return {
@@ -342,9 +471,18 @@ def _http_node_build(config: dict[str, Any]):
                     "status": 0,
                     "body": None,
                     "headers": {},
-                    "error": str(exc),
-                }
+                },
+                "error": str(exc),
             }
+
+    async def http_fn(state: dict) -> dict:
+        result = await _run_with_retry(
+            lambda: _do_http(state),
+            retry_enabled=retry_enabled,
+            max_retries=max_retries,
+            node_label="HTTP",
+        )
+        return {"output": result.get("output", {})}
 
     return http_fn
 
@@ -452,11 +590,15 @@ def _human_task_node_build(config: dict[str, Any]):
 
     config.assignee_role: 指派角色（如 reviewer / approver）
     config.instructions: 审批说明
+    config.timeout_seconds: 审批超时秒数（默认 3600s）
+    config.timeout_action: 超时动作，"fail"（默认）或 "continue"（自动通过）
     """
     from langgraph.types import interrupt
 
     assignee_role = config.get("assignee_role", "reviewer")
     instructions = config.get("instructions", "")
+    timeout_seconds = int(config.get("timeout_seconds", 3600) or 3600)
+    timeout_action = config.get("timeout_action", "fail")
 
     async def human_task_fn(state: dict) -> dict:
         snapshot = state.get("input", {})
@@ -465,16 +607,23 @@ def _human_task_node_build(config: dict[str, Any]):
             "type": "human_approval",
             "assignee_role": assignee_role,
             "instructions": instructions,
+            "timeout_seconds": timeout_seconds,
+            "timeout_action": timeout_action,
             "snapshot": snapshot,
         })
         # decision 形如 {"approved": bool, "comment": str}
         approved = bool(decision.get("approved", False)) if isinstance(decision, dict) else False
         comment = decision.get("comment", "") if isinstance(decision, dict) else ""
+        # 上游 runner 在超时后会按 timeout_action 构造 decision：
+        #   - fail: 直接抛错，不会走到这里
+        #   - continue: 传入 {"approved": True, "comment": "auto approved by timeout"}
         return {
             "output": {
                 "status": "approved" if approved else "rejected",
                 "assignee_role": assignee_role,
                 "comment": comment,
+                "timeout_seconds": timeout_seconds,
+                "timeout_action": timeout_action,
                 "snapshot": snapshot,
             }
         }
@@ -576,7 +725,15 @@ register_node(
         config_schema={
             "model_id": {"type": "string"},
             "system_prompt": {"type": "string"},
+            "user_prompt": {"type": "string"},
             "temperature": {"type": "number", "default": 0.7},
+            "max_tokens": {"type": "number"},
+            "top_p": {"type": "number"},
+            "presence_penalty": {"type": "number"},
+            "frequency_penalty": {"type": "number"},
+            "response_format_json": {"type": "boolean", "default": False},
+            "retry_enabled": {"type": "boolean", "default": False},
+            "max_retries": {"type": "number", "default": 3},
         },
         build=_llm_node_build,
         input_ports=[PortSpec(name="input", type="object")],
@@ -622,6 +779,8 @@ register_node(
         config_schema={
             "resource_id": {"type": "string"},
             "params": {"type": "object"},
+            "retry_enabled": {"type": "boolean", "default": False},
+            "max_retries": {"type": "number", "default": 3},
         },
         build=_tool_node_build,
         input_ports=[PortSpec(name="input", type="object")],
@@ -649,6 +808,13 @@ register_node(
         config_schema={
             "url": {"type": "string"},
             "method": {"type": "string", "default": "GET"},
+            "headers": {"type": "object"},
+            "params": {"type": "object"},
+            "body": {"type": "object"},
+            "timeout_seconds": {"type": "number", "default": 30},
+            "verify_ssl": {"type": "boolean", "default": True},
+            "retry_enabled": {"type": "boolean", "default": False},
+            "max_retries": {"type": "number", "default": 3},
         },
         build=_http_node_build,
         input_ports=[PortSpec(name="input", type="object")],
@@ -684,6 +850,8 @@ register_node(
         config_schema={
             "assignee_role": {"type": "string", "default": "reviewer"},
             "instructions": {"type": "string"},
+            "timeout_seconds": {"type": "number", "default": 3600},
+            "timeout_action": {"type": "string", "default": "fail"},
         },
         build=_human_task_node_build,
         input_ports=[PortSpec(name="input", type="object")],
