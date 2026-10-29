@@ -139,7 +139,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       switchMode: context?.tenant_switch_mode ?? 'none',
       selectableTenants,
       platformName: context?.platform_name ?? 'AI智能体运营管理平台',
-      scopeLabel: isPlatform ? '产品级运营管理平台' : (context?.tenant?.name ?? '租户'),
+      scopeLabel: isPlatform ? '产品级平台' : (context?.tenant?.name ?? '租户'),
       switchTenant,
     }
   }, [context, loading, error, selectableTenants, switchTenant])
