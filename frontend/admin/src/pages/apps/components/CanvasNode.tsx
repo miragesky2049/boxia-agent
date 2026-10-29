@@ -118,6 +118,10 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
   const triggerRunStep = useAppStore((s) => s.triggerRunStep)
 
   const [hover, setHover] = useState(false)
+  // 工具条在节点外（top:-32），鼠标从节点移到工具条时会触发节点 mouseleave，
+  // 因此工具条自身也绑定 hover；选中节点时常显，提升可发现性
+  const [toolbarHover, setToolbarHover] = useState(false)
+  const showToolbar = (hover || toolbarHover || selected) && !isRunning
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(nodeData.label)
 
@@ -144,7 +148,7 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
     duplicateNode(id)
   }
 
-  const startRename = (e: React.MouseEvent) => {
+  const startRename = (e: React.SyntheticEvent) => {
     e.stopPropagation()
     setDraft(nodeData.label)
     setEditing(true)
@@ -169,7 +173,7 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
       message.warning(err)
       return
     }
-    message.success(`已在下游添加「${INSERTABLE_TYPES.find((t) => t.type === type)?.label ?? type}」节点`)
+    message.success(`已在当前节点后新增「${INSERTABLE_TYPES.find((t) => t.type === type)?.label ?? type}」节点`)
   }
 
   const toolBtn: React.CSSProperties = {
@@ -189,8 +193,8 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
   return (
     <div
       style={{
-        minWidth: 160,
-        maxWidth: 220,
+        minWidth: 168,
+        maxWidth: 232,
         padding: '10px 14px',
         borderRadius: 8,
         background: '#fff',
@@ -211,8 +215,8 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
         </Tooltip>
       )}
 
-      {/* 悬浮时顶部工具条：运行此步骤 + 更多菜单 */}
-      {hover && !isRunning && (
+      {/* 悬浮/选中时顶部工具条：运行此步骤 + 更多菜单 */}
+      {showToolbar && (
         <div
           style={{
             position: 'absolute',
@@ -229,7 +233,19 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
             zIndex: 10,
           }}
           onClick={(e) => e.stopPropagation()}
+          onMouseEnter={() => setToolbarHover(true)}
+          onMouseLeave={() => setToolbarHover(false)}
         >
+          {/* 透明连接区：填补工具条与节点之间的间隙，避免鼠标移过去时闪烁 */}
+          <div
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              top: '100%',
+              height: 8,
+            }}
+          />
           <Tooltip title="从该节点试运行">
             <span style={{ ...toolBtn, color: '#52c41a' }} onClick={handleRunStep}>
               <PlayCircleOutlined />
@@ -260,8 +276,8 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
         </div>
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        <span style={{ color: meta.color, fontSize: 16 }}>{meta.icon}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+        <span style={{ color: meta.color, fontSize: 18 }}>{meta.icon}</span>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontSize: 11, color: '#999' }}>{meta.label}</div>
           {editing ? (
@@ -273,12 +289,12 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
               onPressEnter={commitRename}
               onBlur={commitRename}
               onClick={(e) => e.stopPropagation()}
-              style={{ fontSize: 13, height: 22, padding: '0 6px' }}
+              style={{ fontSize: 14, height: 24, padding: '0 6px' }}
               maxLength={20}
             />
           ) : (
             <div
-              style={{ fontSize: 13, fontWeight: 500, color: '#262626', cursor: 'text' }}
+              style={{ fontSize: 14, fontWeight: 500, color: '#262626', cursor: 'text' }}
               onDoubleClick={(e) => {
                 e.stopPropagation()
                 setDraft(nodeData.label)
@@ -291,7 +307,7 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
           )}
           <div
             style={{
-              fontSize: 11,
+              fontSize: 12,
               color: '#8c8c8c',
               marginTop: 2,
               fontFamily: 'monospace',
@@ -348,7 +364,7 @@ export function CanvasNode({ id, data, selected }: NodeProps) {
                   justifyContent: 'center',
                   cursor: 'pointer',
                   fontSize: 10,
-                  opacity: hover ? 1 : 0,
+                  opacity: hover || selected ? 1 : 0,
                   transition: 'opacity 0.15s',
                   zIndex: 11,
                 }}

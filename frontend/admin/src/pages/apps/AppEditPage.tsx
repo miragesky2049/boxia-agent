@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, CheckCircleOutlined, EnvironmentOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, CheckCircleOutlined, DownOutlined, EnvironmentOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons'
 import { App, Button, Dropdown, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -9,6 +9,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useViewport,
   type Node,
   type OnConnect,
   type OnEdgesChange,
@@ -37,7 +38,8 @@ function AppEditCanvas() {
   const params = useParams<{ id: string }>()
   const appId = params.id ?? ''
   const { message, modal } = App.useApp()
-  const { screenToFlowPosition, setCenter } = useReactFlow()
+  const { screenToFlowPosition, setCenter, zoomTo, fitView } = useReactFlow()
+  const { zoom } = useViewport()
 
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -606,10 +608,14 @@ function AppEditCanvas() {
               nodesConnectable={!debugRunning}
               elementsSelectable={!debugRunning}
               fitView
+              fitViewOptions={{ padding: 0.3, maxZoom: 0.9 }}
+              defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
+              minZoom={0.3}
+              maxZoom={1.5}
               proOptions={{ hideAttribution: true }}
             >
               <Background color="#d9d9d9" gap={16} />
-              <Controls />
+              <Controls showInteractive={false} />
               <MiniMap pannable zoomable />
             </ReactFlow>
 
@@ -661,6 +667,34 @@ function AppEditCanvas() {
                   <Tag color="orange" style={{ marginLeft: 4 }}>{variableReport.issues.length}</Tag>
                 )}
               </Button>
+              <div style={{ width: 1, height: 16, background: '#e8e8e8', margin: '0 4px' }} />
+              <Dropdown
+                trigger={['click']}
+                placement="topCenter"
+                menu={{
+                  items: [
+                    { key: '25', label: '缩放到 25%' },
+                    { key: '50', label: '缩放到 50%' },
+                    { key: '75', label: '缩放到 75%' },
+                    { key: '100', label: '缩放到 100%' },
+                    { key: '150', label: '缩放到 150%' },
+                    { key: '200', label: '缩放到 200%' },
+                    { type: 'divider' },
+                    { key: 'fit', label: '自适应视图' },
+                  ],
+                  onClick: ({ key }) => {
+                    if (key === 'fit') {
+                      void fitView({ padding: 0.3, duration: 300 })
+                    } else {
+                      void zoomTo(Number(key) / 100, { duration: 200 })
+                    }
+                  },
+                }}
+              >
+                <Button size="small" type="text" style={{ minWidth: 72 }}>
+                  {Math.round(zoom * 100)}% <DownOutlined style={{ fontSize: 10, marginLeft: 4 }} />
+                </Button>
+              </Dropdown>
             </div>
           </div>
         </Dropdown>

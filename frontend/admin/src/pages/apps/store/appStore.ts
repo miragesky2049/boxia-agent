@@ -29,11 +29,13 @@ export interface InputVariable {
   type: 'string' | 'number' | 'boolean' | 'json'
   required: boolean
   default: string
+  description?: string
 }
 
 export interface OutputVariable {
   name: string
   value: string
+  description?: string
 }
 
 export interface NodeData extends Record<string, unknown> {
@@ -99,7 +101,12 @@ const NODE_TYPES: NodeType[] = [
 function defaultConfigFor(type: NodeType): Record<string, unknown> {
   switch (type) {
     case 'start':
-      return { inputs: [] as InputVariable[], description: '' }
+      return {
+        inputs: [
+          { name: 'input', type: 'string' as const, required: true, default: '', description: '' },
+        ] as InputVariable[],
+        description: '',
+      }
     case 'llm':
       return {
         model_id: '',
@@ -116,7 +123,12 @@ function defaultConfigFor(type: NodeType): Record<string, unknown> {
         description: '',
       }
     case 'end':
-      return { outputs: [] as OutputVariable[], description: '' }
+      return {
+        outputs: [
+          { name: 'output', value: '', description: '' } as OutputVariable,
+        ],
+        description: '',
+      }
     case 'branch':
       return {
         conditions: [{ field: '', operator: 'eq', value: '' }],
@@ -217,8 +229,16 @@ function labelFor(type: NodeType): string {
   }
 }
 
+/** 同类型节点自动编号：第二个起返回 "LLM 2"、"LLM 3" 等；开始/结束不编号 */
+function labelWithIndex(type: NodeType, nodes: Array<Node<NodeData>>): string {
+  const base = labelFor(type)
+  if (type === 'start' || type === 'end' || type === 'sticky') return base
+  const count = nodes.filter((n) => n.data.nodeType === type).length
+  return count === 0 ? base : `${base} ${count + 1}`
+}
+
 function nextPosition(nodes: Node<NodeData>[]): { x: number; y: number } {
-  return { x: 80 + nodes.length * 220, y: 80 + (nodes.length % 4) * 90 }
+  return { x: 80 + nodes.length * 260, y: 80 + (nodes.length % 4) * 100 }
 }
 
 function fromBackendNode(node: GraphNode): Node<NodeData> {
@@ -370,7 +390,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       position: position ?? nextPosition(state.nodes),
       data: {
         nodeType: type,
-        label: labelFor(type),
+        label: labelWithIndex(type, state.nodes),
         config: defaultConfigFor(type),
       },
     }
@@ -455,8 +475,8 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!srcNode || !tgtNode) return
     get().pushHistory()
     // 计算中点位置
-    const x = (srcNode.position.x + tgtNode.position.x) / 2 - 80
-    const y = (srcNode.position.y + tgtNode.position.y) / 2 - 30
+    const x = (srcNode.position.x + tgtNode.position.x) / 2 - 100
+    const y = (srcNode.position.y + tgtNode.position.y) / 2 - 40
     const { id: newId, nextIdCounter } = allocateNodeId(state, newType)
     const newNode: Node<NodeData> = {
       id: newId,
@@ -465,7 +485,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       selected: true,
       data: {
         nodeType: newType,
-        label: labelFor(newType),
+        label: labelWithIndex(newType, state.nodes),
         config: defaultConfigFor(newType),
       },
     }
@@ -493,14 +513,26 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().pushHistory()
     const next = get()
     const { id: newId, nextIdCounter } = allocateNodeId(next, newType)
+    // 基于已有下游节点的最右位置继续排，避免连续添加时节点重叠
+    const downstreamIds = next.edges
+      .filter((e) => e.source === sourceNodeId)
+      .map((e) => e.target)
+    const downstreamNodes = next.nodes.filter((n) => downstreamIds.includes(n.id))
+    let posX = srcNode.position.x + 280
+    let posY = srcNode.position.y
+    if (downstreamNodes.length > 0) {
+      const rightmost = downstreamNodes.reduce((a, b) => (a.position.x > b.position.x ? a : b))
+      posX = rightmost.position.x + 280
+      posY = rightmost.position.y + 28
+    }
     const newNode: Node<NodeData> = {
       id: newId,
       type: 'appNode',
-      position: { x: srcNode.position.x + 240, y: srcNode.position.y },
+      position: { x: posX, y: posY },
       selected: true,
       data: {
         nodeType: newType,
-        label: labelFor(newType),
+        label: labelWithIndex(newType, next.nodes),
         config: defaultConfigFor(newType),
       },
     }

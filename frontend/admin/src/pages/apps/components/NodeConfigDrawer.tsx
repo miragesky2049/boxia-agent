@@ -1,5 +1,14 @@
-import { PlusOutlined, CloseOutlined, BulbOutlined, CopyOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography } from 'antd'
+import {
+  PlusOutlined,
+  CloseOutlined,
+  BulbOutlined,
+  CopyOutlined,
+  DownOutlined,
+  RightOutlined,
+  InfoCircleOutlined,
+  ImportOutlined,
+} from '@ant-design/icons'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listApps,
@@ -322,86 +331,250 @@ const VAR_TYPE_META: Record<string, { label: string; color: string }> = {
   json: { label: 'json', color: 'purple' },
 }
 
-/** start 节点输入变量动态列表 */
+/** 变量名校验：只能包含字母、数字或下划线，且以字母或下划线开头 */
+const VAR_NAME_RULE = /^[a-zA-Z_][a-zA-Z0-9_]*$/
+
+/** 解析 JSON 导入的变量定义，支持对象形式和简写形式 */
+function parseImportedVariables(raw: string): Array<{ name: string; type: string; required: boolean; default: string; description: string }> {
+  const parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('请输入 JSON 对象，形如 { "变量名": {...} }')
+  }
+  const result: Array<{ name: string; type: string; required: boolean; default: string; description: string }> = []
+  for (const [name, value] of Object.entries(parsed)) {
+    const trimmed = name.trim()
+    if (!trimmed) continue
+    if (!VAR_NAME_RULE.test(trimmed)) {
+      throw new Error(`变量名 "${trimmed}" 只能包含字母、数字或下划线，且以字母或下划线开头`)
+    }
+    if (typeof value === 'string') {
+      result.push({ name: trimmed, type: value, required: true, default: '', description: '' })
+    } else if (value && typeof value === 'object') {
+      const v = value as Record<string, unknown>
+      result.push({
+        name: trimmed,
+        type: typeof v.type === 'string' ? v.type : 'string',
+        required: v.required !== false,
+        default: v.default !== undefined ? String(v.default) : '',
+        description: typeof v.description === 'string' ? v.description : '',
+      })
+    } else {
+      throw new Error(`变量 ${trimmed} 的值必须是类型字符串或对象`)
+    }
+  }
+  return result
+}
+
+/** start 节点输入变量动态列表：整体可折叠，支持 JSON 批量导入 */
 function InputVariablesEditor() {
-  const variables: { name: string; type: string; required: boolean; default: string }[] =
+  const { message } = App.useApp()
+  const variables: { name: string; type: string; required: boolean; default: string; description?: string }[] =
     Form.useWatch('inputs') ?? []
+
+  const [collapsed, setCollapsed] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+
+  const handleImport = (add: (v: unknown) => void) => {
+    try {
+      const list = parseImportedVariables(importText)
+      if (list.length === 0) {
+        message.warning('未解析到任何变量')
+        return
+      }
+      for (const item of list) {
+        add(item)
+      }
+      message.success(`已导入 ${list.length} 个变量`)
+      setImportOpen(false)
+      setImportText('')
+      setCollapsed(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'JSON 解析失败')
+    }
+  }
 
   return (
     <Form.List name="inputs">
       {(fields, { add, remove }) => (
-        <>
-          {fields.map(({ key, name, ...restField }) => (
-            <Space.Compact key={key} style={{ display: 'flex', marginBottom: 8 }} block>
-              <Form.Item
-                {...restField}
-                name={[name, 'name']}
-                rules={[{ required: true, message: '变量名必填' }]}
-                style={{ flex: 2.2, marginBottom: 0 }}
-              >
-                <Input placeholder="变量名，如 query" />
-              </Form.Item>
-              <Form.Item {...restField} name={[name, 'type']} style={{ flex: 1.3, marginBottom: 0 }}>
-                <Select
-                  optionLabelProp="label"
-                  options={Object.entries(VAR_TYPE_META).map(([value, meta]) => ({
-                    value,
-                    label: meta.label,
-                  }))}
-                  optionRender={(opt) => {
-                    const meta = VAR_TYPE_META[opt.value as string]
-                    return (
-                      <Space size={4}>
-                        <Tag color={meta?.color} style={{ marginInlineEnd: 0 }}>{meta?.label}</Tag>
-                        <span style={{ fontSize: 12, color: '#8c8c8c' }}>{opt.value}</span>
-                      </Space>
-                    )
-                  }}
+        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px', background: '#fafafa' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: collapsed ? 0 : 10 }}>
+            <Button
+              type="text"
+              size="small"
+              icon={collapsed ? <RightOutlined /> : <DownOutlined />}
+              onClick={() => setCollapsed((v) => !v)}
+              style={{ padding: '0 4px' }}
+            />
+            <span style={{ fontWeight: 500, fontSize: 14, color: '#262626' }}>输入</span>
+            <Tooltip title="定义 start 节点接受的入参，下游节点可通过 {{#input.变量名#}} 引用">
+              <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 14 }} />
+            </Tooltip>
+            {variables.length > 0 && (
+              <Tag style={{ marginInlineEnd: 0, marginLeft: 4 }} color="default">
+                {variables.length}
+              </Tag>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <Tooltip title="从 JSON 批量导入">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ImportOutlined />}
+                  onClick={() => setImportOpen(true)}
                 />
-              </Form.Item>
-              <Form.Item
-                {...restField}
-                name={[name, 'required']}
-                valuePropName="checked"
-                style={{ flex: 1.1, marginBottom: 0 }}
-              >
-                <Switch checkedChildren="必填" unCheckedChildren="选填" />
-              </Form.Item>
-              <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1.6, marginBottom: 0 }}>
-                <Input placeholder="默认值（选填）" />
-              </Form.Item>
+              </Tooltip>
               <Button
+                size="small"
                 type="text"
-                icon={<CopyOutlined />}
-                title="复制此行"
+                icon={<PlusOutlined />}
                 onClick={() => {
-                  const current = variables[name]
-                  if (!current) return
-                  add({ ...current, name: `${current.name}_copy` }, name + 1)
+                  add({ name: '', type: 'string', required: true, default: '', description: '' })
+                  setCollapsed(false)
                 }}
               />
-              <Button
-                type="text"
-                danger
-                icon={<CloseOutlined />}
-                onClick={() => remove(name)}
-              />
-            </Space.Compact>
-          ))}
-          <Button
-            type="dashed"
-            onClick={() => add({ name: '', type: 'string', required: true, default: '' })}
-            block
-            icon={<PlusOutlined />}
-          >
-            添加输入变量
-          </Button>
-          {variables.length === 0 && (
-            <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-              未定义输入变量，试运行时可直接传 JSON
             </div>
+          </div>
+
+          {!collapsed && (
+            <>
+              {fields.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: 12,
+                    color: '#8c8c8c',
+                    padding: '0 4px 6px',
+                  }}
+                >
+                  <span style={{ flex: 1.4 }}>变量名</span>
+                  <span style={{ flex: 1, marginLeft: 8 }}>类型</span>
+                  <span style={{ width: 48, textAlign: 'center' }}>必填</span>
+                  <span style={{ width: 56, marginLeft: 8 }} />
+                </div>
+              )}
+
+              {fields.map(({ key, name, ...restField }) => (
+                <div
+                  key={key}
+                  style={{
+                    marginBottom: 8,
+                    padding: 8,
+                    background: '#fff',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'name']}
+                      rules={[
+                        { required: true, message: '变量名必填' },
+                        {
+                          pattern: VAR_NAME_RULE,
+                          message: '只能包含字母、数字或下划线，且以字母或下划线开头',
+                        },
+                      ]}
+                      style={{ flex: 1.4, marginBottom: 0 }}
+                    >
+                      <Input placeholder="如 customer" />
+                    </Form.Item>
+                    <Form.Item {...restField} name={[name, 'type']} style={{ flex: 1, marginBottom: 0 }}>
+                      <Select
+                        optionLabelProp="label"
+                        options={Object.entries(VAR_TYPE_META).map(([value, meta]) => ({
+                          value,
+                          label: meta.label,
+                        }))}
+                        optionRender={(opt) => {
+                          const meta = VAR_TYPE_META[opt.value as string]
+                          return (
+                            <Space size={4}>
+                              <Tag color={meta?.color} style={{ marginInlineEnd: 0 }}>{meta?.label}</Tag>
+                              <span style={{ fontSize: 12, color: '#8c8c8c' }}>{opt.value}</span>
+                            </Space>
+                          )
+                        }}
+                      />
+                    </Form.Item>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'required']}
+                      valuePropName="checked"
+                      style={{ width: 48, marginBottom: 0, textAlign: 'center' }}
+                    >
+                      <Switch size="small" />
+                    </Form.Item>
+                    <Space size={2} style={{ width: 56, marginLeft: 8 }}>
+                      <Button
+                        type="text"
+                        size="small"
+                        icon={<CopyOutlined />}
+                        title="复制此行"
+                        style={{ padding: 0, color: '#8c8c8c' }}
+                        onClick={() => {
+                          const current = variables[name]
+                          if (!current) return
+                          add({ ...current, name: `${current.name}_copy` }, name + 1)
+                        }}
+                      />
+                      <Button
+                        type="text"
+                        size="small"
+                        danger
+                        icon={<CloseOutlined />}
+                        title="删除此行"
+                        style={{ padding: 0 }}
+                        onClick={() => remove(name)}
+                      />
+                    </Space>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                    <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1, marginBottom: 0 }}>
+                      <Input placeholder="默认值" size="small" />
+                    </Form.Item>
+                    <Form.Item {...restField} name={[name, 'description']} style={{ flex: 1.4, marginBottom: 0 }}>
+                      <Input placeholder="描述：帮助大模型理解参数作用" size="small" />
+                    </Form.Item>
+                  </div>
+                </div>
+              ))}
+
+              {fields.length === 0 && (
+                <div style={{ padding: '12px 8px', fontSize: 12, color: '#999', textAlign: 'center' }}>
+                  未定义输入变量，点击右上角 + 添加，或通过 JSON 批量导入
+                </div>
+              )}
+            </>
           )}
-        </>
+
+          <Modal
+            title="从 JSON 导入变量"
+            open={importOpen}
+            onCancel={() => {
+              setImportOpen(false)
+              setImportText('')
+            }}
+            onOk={() => handleImport(add)}
+            okText="导入"
+            cancelText="取消"
+            width={560}
+          >
+            <div style={{ marginBottom: 8, fontSize: 12, color: '#8c8c8c' }}>
+              支持对象形式，值可以是类型字符串或对象：
+            </div>
+            <Input.TextArea
+              rows={10}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={`{\n  "customer": {\n    "type": "string",\n    "required": true,\n    "default": "",\n    "description": "客户名称"\n  },\n  "order_id": "string"\n}`}
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </Modal>
+        </div>
       )}
     </Form.List>
   )
@@ -469,50 +642,209 @@ function OutputValueInput({
   )
 }
 
-/** end 节点输出变量动态列表 */
+/** 解析 JSON 导入的输出变量定义 */
+function parseImportedOutputs(raw: string): Array<{ name: string; value: string; description: string }> {
+  const parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('请输入 JSON 对象，形如 { "输出名": {...} }')
+  }
+  const result: Array<{ name: string; value: string; description: string }> = []
+  for (const [name, value] of Object.entries(parsed)) {
+    const trimmed = name.trim()
+    if (!trimmed) continue
+    if (!VAR_NAME_RULE.test(trimmed)) {
+      throw new Error(`输出名 "${trimmed}" 只能包含字母、数字或下划线，且以字母或下划线开头`)
+    }
+    if (typeof value === 'string') {
+      result.push({ name: trimmed, value, description: '' })
+    } else if (value && typeof value === 'object') {
+      const v = value as Record<string, unknown>
+      result.push({
+        name: trimmed,
+        value: typeof v.value === 'string' ? v.value : '',
+        description: typeof v.description === 'string' ? v.description : '',
+      })
+    } else {
+      throw new Error(`输出 ${trimmed} 的值必须是取值字符串或对象`)
+    }
+  }
+  return result
+}
+
+/** end 节点输出变量动态列表：整体可折叠，支持 JSON 批量导入 */
 function OutputVariablesEditor({ nodeId }: { nodeId: string }) {
+  const { message } = App.useApp()
+  const variables: { name: string; value: string; description?: string }[] =
+    Form.useWatch('outputs') ?? []
+
+  const [collapsed, setCollapsed] = useState(false)
+  const [importOpen, setImportOpen] = useState(false)
+  const [importText, setImportText] = useState('')
+
+  const handleImport = (add: (v: unknown) => void) => {
+    try {
+      const list = parseImportedOutputs(importText)
+      if (list.length === 0) {
+        message.warning('未解析到任何输出变量')
+        return
+      }
+      for (const item of list) {
+        add(item)
+      }
+      message.success(`已导入 ${list.length} 个输出变量`)
+      setImportOpen(false)
+      setImportText('')
+      setCollapsed(false)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : 'JSON 解析失败')
+    }
+  }
+
   return (
     <Form.List name="outputs">
       {(fields, { add, remove }) => (
-        <>
-          {fields.map(({ key, name, ...restField }) => (
-            <Space.Compact key={key} style={{ display: 'flex', marginBottom: 8 }} block>
-              <Form.Item
-                {...restField}
-                name={[name, 'name']}
-                rules={[{ required: true, message: '输出名必填' }]}
-                style={{ flex: 1.5, marginBottom: 0 }}
-              >
-                <Input placeholder="输出名，如 answer" />
-              </Form.Item>
-              <Form.Item
-                {...restField}
-                name={[name, 'value']}
-                rules={[{ required: true, message: '取值表达式必填' }]}
-                style={{ flex: 3, marginBottom: 0 }}
-              >
-                <OutputValueInput nodeId={nodeId} />
-              </Form.Item>
+        <div style={{ border: '1px solid #f0f0f0', borderRadius: 8, padding: '10px 12px', background: '#fafafa' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: collapsed ? 0 : 10 }}>
+            <Button
+              type="text"
+              size="small"
+              icon={collapsed ? <RightOutlined /> : <DownOutlined />}
+              onClick={() => setCollapsed((v) => !v)}
+              style={{ padding: '0 4px' }}
+            />
+            <span style={{ fontWeight: 500, fontSize: 14, color: '#262626' }}>输出</span>
+            <Tooltip title="定义 end 节点最终返回给调用方的字段">
+              <InfoCircleOutlined style={{ color: '#8c8c8c', fontSize: 14 }} />
+            </Tooltip>
+            {variables.length > 0 && (
+              <Tag style={{ marginInlineEnd: 0, marginLeft: 4 }} color="default">
+                {variables.length}
+              </Tag>
+            )}
+            <div style={{ marginLeft: 'auto', display: 'flex', gap: 4 }}>
+              <Tooltip title="从 JSON 批量导入">
+                <Button
+                  size="small"
+                  type="text"
+                  icon={<ImportOutlined />}
+                  onClick={() => setImportOpen(true)}
+                />
+              </Tooltip>
               <Button
+                size="small"
                 type="text"
-                danger
-                icon={<CloseOutlined />}
-                onClick={() => remove(name)}
+                icon={<PlusOutlined />}
+                onClick={() => {
+                  add({ name: '', value: '', description: '' })
+                  setCollapsed(false)
+                }}
               />
-            </Space.Compact>
-          ))}
-          <Button
-            type="dashed"
-            onClick={() => add({ name: '', value: '' })}
-            block
-            icon={<PlusOutlined />}
-          >
-            添加输出变量
-          </Button>
-          <div style={{ marginTop: 8, fontSize: 12, color: '#999' }}>
-            留空则自动汇聚最后一个 LLM 节点的输出
+            </div>
           </div>
-        </>
+
+          {!collapsed && (
+            <>
+              {fields.length > 0 && (
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    fontSize: 12,
+                    color: '#8c8c8c',
+                    padding: '0 4px 6px',
+                  }}
+                >
+                  <span style={{ flex: 1.2 }}>输出名</span>
+                  <span style={{ flex: 2 }}>取值表达式</span>
+                  <span style={{ width: 32, marginLeft: 8 }} />
+                </div>
+              )}
+
+              {fields.map(({ key, name, ...restField }) => (
+                <div
+                  key={key}
+                  style={{
+                    marginBottom: 8,
+                    padding: 8,
+                    background: '#fff',
+                    border: '1px solid #f0f0f0',
+                    borderRadius: 6,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'name']}
+                      rules={[
+                        { required: true, message: '输出名必填' },
+                        {
+                          pattern: VAR_NAME_RULE,
+                          message: '只能包含字母、数字或下划线，且以字母或下划线开头',
+                        },
+                      ]}
+                      style={{ flex: 1.2, marginBottom: 0 }}
+                    >
+                      <Input placeholder="如 output" />
+                    </Form.Item>
+                    <Form.Item
+                      {...restField}
+                      name={[name, 'value']}
+                      rules={[{ required: true, message: '取值表达式必填' }]}
+                      style={{ flex: 2, marginBottom: 0 }}
+                    >
+                      <OutputValueInput nodeId={nodeId} />
+                    </Form.Item>
+                    <Button
+                      type="text"
+                      size="small"
+                      danger
+                      icon={<CloseOutlined />}
+                      title="删除此行"
+                      style={{ width: 32, padding: 0, marginLeft: 8 }}
+                      onClick={() => remove(name)}
+                    />
+                  </div>
+
+                  <div style={{ marginTop: 8 }}>
+                    <Form.Item {...restField} name={[name, 'description']} style={{ marginBottom: 0 }}>
+                      <Input placeholder="描述：该输出字段的业务含义" size="small" />
+                    </Form.Item>
+                  </div>
+                </div>
+              ))}
+
+              {fields.length === 0 && (
+                <div style={{ padding: '12px 8px', fontSize: 12, color: '#999', textAlign: 'center' }}>
+                  未定义输出变量，留空则自动汇聚最后一个 LLM 节点的输出
+                </div>
+              )}
+            </>
+          )}
+
+          <Modal
+            title="从 JSON 导入输出变量"
+            open={importOpen}
+            onCancel={() => {
+              setImportOpen(false)
+              setImportText('')
+            }}
+            onOk={() => handleImport(add)}
+            okText="导入"
+            cancelText="取消"
+            width={560}
+          >
+            <div style={{ marginBottom: 8, fontSize: 12, color: '#8c8c8c' }}>
+              支持对象形式，值可以是取值表达式或对象：
+            </div>
+            <Input.TextArea
+              rows={10}
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              placeholder={`{\n  "answer": {\n    "value": "{{#llm_1.output#}}",\n    "description": "最终回答"\n  },\n  "tokens": "{{#llm_1.usage.total_tokens#}}"\n}`}
+              style={{ fontFamily: 'monospace', fontSize: 12 }}
+            />
+          </Modal>
+        </div>
       )}
     </Form.List>
   )
@@ -958,23 +1290,9 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
 
     switch (type) {
       case 'start':
-        return (
-          <>
-            <div style={{ marginBottom: 8, fontSize: 13, color: '#595959' }}>
-              输入变量：定义 start 节点接受的字段
-            </div>
-            <InputVariablesEditor />
-          </>
-        )
+        return <InputVariablesEditor />
       case 'end':
-        return (
-          <>
-            <div style={{ marginBottom: 8, fontSize: 13, color: '#595959' }}>
-              输出变量：定义 end 节点最终返回的字段
-            </div>
-            <OutputVariablesEditor nodeId={node.id} />
-          </>
-        )
+        return <OutputVariablesEditor nodeId={node.id} />
       case 'llm':
         return (
           <>
