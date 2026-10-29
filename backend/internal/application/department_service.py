@@ -197,8 +197,6 @@ class DepartmentService:
             raise ConflictError("存在子部门，不能删除；如不再使用请停用部门")
         if self._uow.departments.count_employments(tenant_id, department_id):
             raise ConflictError("部门下存在任职记录，不能删除；如不再使用请停用部门")
-        if self._uow.departments.count_agents(tenant_id, department_id):
-            raise ConflictError("部门下存在归属智能体，不能删除；如不再使用请停用部门")
         self._uow.departments.delete(department_id)
         self._audit(
             "department.deleted",

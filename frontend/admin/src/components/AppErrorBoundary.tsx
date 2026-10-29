@@ -34,7 +34,7 @@ export default class AppErrorBoundary extends Component<Props, State> {
           <Button key="reload" type="primary" onClick={() => window.location.reload()}>
             刷新页面
           </Button>,
-          <Button key="home" onClick={() => window.location.assign('/agents')}>
+          <Button key="home" onClick={() => window.location.assign('/apps')}>
             返回首页
           </Button>,
         ]}

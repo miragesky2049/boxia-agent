@@ -5,7 +5,6 @@ from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
 from internal.domain.entity.access import (
-    AgentTenantOpening,
     GrantSummary,
     ResourceGrant,
     Role,
@@ -13,9 +12,7 @@ from internal.domain.entity.access import (
     UserRefreshToken,
 )
 from internal.domain.entity.admin_user import AdminUser
-from internal.domain.entity.agent_visibility import AgentVisibility
 from internal.domain.entity.audit_log import AuditLog
-from internal.domain.entity.data_scope import UserDataScope
 from internal.domain.entity.department import Department
 from internal.domain.entity.employment import Employment
 from internal.domain.entity.hr_dictionary import HrDictionary
@@ -26,10 +23,9 @@ from internal.domain.entity.mgmt_unit import (
 )
 from internal.domain.entity.permission import PermissionResource
 from internal.domain.entity.refresh_token import RefreshToken
-from internal.domain.entity.resource import Agent, Component, Prompt, Skill, SkillFile, Tool
+from internal.domain.entity.resource import Tool
 from internal.domain.entity.tenant import Tenant
 from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
-from internal.domain.entity.workflow import Workflow, WorkflowTemplate
 
 TResource = TypeVar("TResource")
 
@@ -158,7 +154,7 @@ class AuditLogRepository(Protocol):
 
 
 class ResourceRepository(Protocol[TResource]):
-    """通用资源仓储（技能/工具/组件/提示词）。"""
+    """通用资源仓储（工具）。"""
 
     def list_page(
         self,
@@ -166,7 +162,6 @@ class ResourceRepository(Protocol[TResource]):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        agent_id: UUID | None = None,
         manageable_only: bool = False,
         grant_state: str | None = None,
         grant_tenant_id: UUID | None = None,
@@ -188,13 +183,7 @@ class ResourceRepository(Protocol[TResource]):
     def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
         """名称是否已存在。"""
 
-    def list_for_agent(self, agent_id: UUID, is_enabled: bool | None = None) -> list[TResource]:
-        """读取归属于指定智能体的可见资源。"""
-
-    def list_ids_for_agent(self, agent_id: UUID) -> list[UUID]:
-        """按归属读取智能体下全部资源 ID，忽略角色可见性过滤（删除清理用）。"""
-
-    def ids_exist(self, ids: list[UUID], agent_id: UUID | None = None) -> set[UUID]:
+    def ids_exist(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中真实存在的部分。"""
 
     def ids_owned(self, ids: list[UUID]) -> set[UUID]:
@@ -214,88 +203,6 @@ class ResourceRepository(Protocol[TResource]):
 
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中可向本租户角色授权的部分。"""
-
-
-class SkillFileRepository(Protocol):
-    """技能包文件仓储，调用前必须由应用层完成所属技能的作用域校验。"""
-
-    def list_by_skill(
-        self, skill_id: UUID, prefix: str | None = None, include_content: bool = False
-    ) -> list[SkillFile]:
-        """按路径排序列出技能包文件；默认不加载正文。"""
-
-    def get(self, skill_id: UUID, path: str) -> SkillFile | None:
-        """按相对路径查询文件。"""
-
-    def upsert(self, skill_id: UUID, path: str, content: str) -> SkillFile:
-        """新增或覆盖文件，自动维护哈希、大小与媒体类型。"""
-
-    def delete(self, skill_id: UUID, path: str) -> bool:
-        """删除文件。"""
-
-    def replace_all(self, skill_id: UUID, files: list[tuple[str, str]]) -> list[SkillFile]:
-        """事务内全量替换技能包文件。"""
-
-    def stats(self, skill_id: UUID) -> tuple[int, int]:
-        """返回文件数与总字节数。"""
-
-
-class AgentRepository(Protocol):
-    """智能体仓储。"""
-
-    def list_page(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        is_enabled: bool | None,
-        manageable_only: bool = False,
-        grant_state: str | None = None,
-        grant_tenant_id: UUID | None = None,
-    ) -> tuple[list[Agent], int]:
-        """分页查询；manageable_only 仅返回当前作用域可授权的智能体。"""
-
-    def get(self, agent_id: UUID) -> Agent | None:
-        """查询详情（含工具/技能关联）。"""
-
-    def create(self, values: dict) -> Agent:
-        """创建智能体并写入关联。"""
-
-    def update(self, agent_id: UUID, values: dict) -> Agent | None:
-        """全量更新并替换关联。"""
-
-    def delete(self, agent_id: UUID) -> bool:
-        """删除。"""
-
-    def ids_owned(self, ids: list[UUID]) -> set[UUID]:
-        """返回给定 id 中归属于当前作用域的部分（授权写操作校验）。"""
-
-    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
-        """名称是否已存在。"""
-
-    def list_grantable(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        ids: list[UUID] | None = None,
-    ) -> tuple[list[Agent], int]:
-        """分页查询可向本租户角色授权的智能体：租户自有 + 平台资源。"""
-
-    def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
-        """返回给定 id 中可向本租户角色授权的部分。"""
-
-    def get_visibility(self, agent_id: UUID) -> AgentVisibility | None:
-        """读取智能体 user 端可见范围配置；平台智能体或不存在返回 None。"""
-
-    def replace_visibility(
-        self,
-        agent_id: UUID,
-        mode: str,
-        departments: list[tuple[UUID, bool]],
-        user_ids: list[UUID],
-    ) -> AgentVisibility | None:
-        """事务内全量替换智能体 user 端可见范围；返回最新配置。"""
 
 
 class RoleRepository(Protocol):
@@ -623,52 +530,6 @@ class ResourceGrantRepository(Protocol):
         """删除平台角色对单个平台资源的授权。"""
 
 
-class AgentTenantOpeningRepository(Protocol):
-    """平台智能体与租户的开通关系仓储。"""
-
-    def get(self, agent_id: UUID, tenant_id: UUID) -> AgentTenantOpening | None:
-        """查询单条开通关系。"""
-
-    def open(self, agent_id: UUID, tenant_id: UUID, opened_by: UUID | None) -> AgentTenantOpening:
-        """开通智能体；重复开通保持原开通时间并返回现有记录。"""
-
-    def close(self, agent_id: UUID, tenant_id: UUID) -> bool:
-        """关闭开通；返回是否存在并删除成功。"""
-
-    def list_platform_agent_ids(self, agent_ids: list[UUID]) -> set[UUID]:
-        """返回给定 id 中属于平台级智能体的部分。"""
-
-    def open_many(self, agent_ids: list[UUID], tenant_id: UUID, opened_by: UUID | None) -> None:
-        """批量开通；已开通的保持原开通时间。"""
-
-    def close_many(self, agent_ids: list[UUID], tenant_id: UUID) -> int:
-        """批量关闭；返回实际删除的数量。"""
-
-    def sync_for_resource(
-        self, agent_id: UUID, tenant_ids: set[UUID], opened_by: UUID | None
-    ) -> None:
-        """按给定租户集合同步开通关系，用于兼容旧的整资源授权接口。"""
-
-    def list_for_tenant(
-        self,
-        tenant_id: UUID,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        is_enabled: bool | None,
-        opened_only: bool,
-    ) -> tuple[list[tuple[Agent, AgentTenantOpening | None]], int]:
-        """分页查询平台智能体及该租户的开通状态。"""
-
-    def list_opened_tenants(
-        self, agent_id: UUID, page: int, page_size: int, keyword: str | None
-    ) -> tuple[list[tuple[Tenant, AgentTenantOpening]], int]:
-        """分页查询已开通该智能体的租户。"""
-
-    def get_platform_agent(self, agent_id: UUID) -> Agent | None:
-        """查询平台级智能体，忽略平台角色的数据授权过滤。"""
-
-
 class DepartmentRepository(Protocol):
     """部门仓储：物化路径树，所有调用均在单一租户作用域内。"""
 
@@ -711,9 +572,6 @@ class DepartmentRepository(Protocol):
 
     def count_employments(self, tenant_id: UUID, department_id: UUID) -> int:
         """统计部门下全部任职记录数（含历史）。"""
-
-    def count_agents(self, tenant_id: UUID, department_id: UUID) -> int:
-        """统计归属该部门的智能体数。"""
 
     def lock_subtree_and_parent(
         self,
@@ -951,63 +809,6 @@ class UserMgmtUnitGrantRepository(Protocol):
         """批量读取单元 id -> 名称映射（前端展示用）。"""
 
 
-class WorkflowRepository(Protocol):
-    """工作流仓储。"""
-
-    def list_page(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        is_enabled: bool | None,
-    ) -> tuple[list[Workflow], int]:
-        """分页查询可见工作流。"""
-
-    def get(self, workflow_id: UUID) -> Workflow | None:
-        """按主键查询；不可见返回 None。"""
-
-    def create(self, values: dict) -> Workflow:
-        """创建工作流。"""
-
-    def update(self, workflow_id: UUID, values: dict) -> Workflow | None:
-        """全量更新仅本租户自有工作流；平台工作流对租户不可写。"""
-
-    def delete(self, workflow_id: UUID) -> bool:
-        """删除仅本租户自有工作流。"""
-
-    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
-        """本租户作用域内名称是否已存在（忽略大小写）。"""
-
-
-class WorkflowTemplateRepository(Protocol):
-    """工作流模板仓储：仅产品级可写，租户只读启用模板。"""
-
-    def list_page(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        category: str | None,
-        include_disabled: bool = False,
-    ) -> tuple[list[WorkflowTemplate], int]:
-        """分页查询模板；租户视角仅返回启用中的。"""
-
-    def get(self, template_id: UUID) -> WorkflowTemplate | None:
-        """按主键查询模板。"""
-
-    def create(self, values: dict) -> WorkflowTemplate:
-        """创建模板；强制 tenant_id = PLATFORM_TENANT_ID。"""
-
-    def update(self, template_id: UUID, values: dict) -> WorkflowTemplate | None:
-        """全量更新模板（仅平台视角）。"""
-
-    def delete(self, template_id: UUID) -> bool:
-        """删除模板（仅平台视角）。"""
-
-    def name_exists(self, name: str, exclude_id: UUID | None = None) -> bool:
-        """模板名称是否已存在（忽略大小写，全表唯一）。"""
-
-
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -1022,29 +823,15 @@ class UnitOfWork(Protocol):
     users: UserRepository
     user_refresh_tokens: UserRefreshTokenRepository
     resource_grants: ResourceGrantRepository
-    agent_openings: AgentTenantOpeningRepository
     departments: DepartmentRepository
     employments: EmploymentRepository
     hr_dictionaries: HrDictionaryRepository
     mgmt_units: MgmtUnitRepository
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
-    agents: AgentRepository
-    skills: ResourceRepository[Skill]
-    skill_files: SkillFileRepository
     tools: ResourceRepository[Tool]
-    components: ResourceRepository[Component]
-    prompts: ResourceRepository[Prompt]
-    workflows: WorkflowRepository
-    workflow_templates: WorkflowTemplateRepository
 
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
-        """按当前账号角色重建资源与智能体仓储。"""
-
-    def apply_data_scope(self, snapshot: UserDataScope | None = None) -> None:
-        """按行级数据权限快照重建智能体仓储；None 表示不叠加行过滤。"""
-
-    def apply_user_visibility(self, context: object | None = None) -> None:
-        """按 user 端实例级可见范围重建智能体仓储；None 表示不叠加（仅 user 端调用）。"""
+        """按当前账号角色重建资源仓储。"""
 
     def commit(self) -> None:
         """提交事务。"""
@@ -1054,10 +841,3 @@ class UnitOfWork(Protocol):
 
     def close(self) -> None:
         """释放会话。"""
-
-
-# 便于在类型注解中直接引用具体资源仓储
-SkillRepository = ResourceRepository[Skill]
-ToolRepository = ResourceRepository[Tool]
-ComponentRepository = ResourceRepository[Component]
-PromptRepository = ResourceRepository[Prompt]

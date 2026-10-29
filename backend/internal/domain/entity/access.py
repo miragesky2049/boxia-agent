@@ -13,7 +13,7 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
+RESOURCE_TYPES = ("tool",)
 
 
 @dataclass(frozen=True)
@@ -105,17 +105,6 @@ class ResourceGrant:
     role_id: UUID | None
     granted_by: UUID | None
     created_at: datetime
-
-
-@dataclass(frozen=True)
-class AgentTenantOpening:
-    """平台智能体对租户的开通关系；不代表角色级可见性。"""
-
-    id: UUID
-    agent_id: UUID
-    tenant_id: UUID
-    opened_by: UUID | None
-    opened_at: datetime
 
 
 @dataclass(frozen=True)

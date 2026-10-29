@@ -270,14 +270,7 @@ class RoleGrantService:
 
     def _resource_repository(self, resource_type: str) -> Any:
         self._ensure_resource_type(resource_type)
-        repositories = {
-            "agent": self._uow.agents,
-            "skill": self._uow.skills,
-            "tool": self._uow.tools,
-            "component": self._uow.components,
-            "prompt": self._uow.prompts,
-        }
-        return repositories[resource_type]
+        return self._uow.tools
 
     @staticmethod
     def _validate_ids(repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:

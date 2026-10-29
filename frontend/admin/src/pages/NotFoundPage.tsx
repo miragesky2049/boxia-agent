@@ -10,7 +10,7 @@ export default function NotFoundPage() {
       title="404"
       subTitle="页面不存在或已被移除。"
       extra={
-        <Button type="primary" onClick={() => navigate('/agents', { replace: true })}>
+        <Button type="primary" onClick={() => navigate('/apps', { replace: true })}>
           返回智能体管理
         </Button>
       }

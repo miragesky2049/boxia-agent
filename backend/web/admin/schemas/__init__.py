@@ -14,13 +14,7 @@ from web.admin.schemas.auth import (
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.context import AdminContextOut, PublicContextOut
 from web.admin.schemas.resource import (
-    ComponentOut,
-    ComponentPayload,
-    PromptOut,
-    PromptPayload,
     ResourcePayload,
-    SkillOut,
-    SkillPayload,
     ToolOut,
     ToolPayload,
 )
@@ -43,19 +37,13 @@ __all__ = [
     "AppEnv",
     "AuditLogOut",
     "ChangePasswordRequest",
-    "ComponentOut",
-    "ComponentPayload",
     "LoginRequest",
     "LoginResponse",
     "PageOut",
     "PasswordPolicyOut",
-    "PromptOut",
-    "PromptPayload",
     "PublicContextOut",
     "RefreshRequest",
     "ResourcePayload",
-    "SkillOut",
-    "SkillPayload",
     "TenantCreateRequest",
     "TenantOut",
     "TenantResolution",

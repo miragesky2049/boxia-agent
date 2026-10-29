@@ -30,11 +30,7 @@ import type {
 import { useAuth } from '../../auth/AuthContext'
 
 const RESOURCE_TABS: { key: ResourceType; label: string }[] = [
-  { key: 'agent', label: '智能体' },
-  { key: 'skill', label: '技能' },
   { key: 'tool', label: '工具' },
-  { key: 'component', label: '组件' },
-  { key: 'prompt', label: '提示词' },
 ]
 
 const CATEGORY_ORDER: PermissionCategory[] = [
@@ -42,11 +38,7 @@ const CATEGORY_ORDER: PermissionCategory[] = [
   'menu',
   'page',
   'button',
-  'agent',
-  'skill',
   'tool',
-  'component',
-  'prompt',
 ]
 
 const CATEGORY_LABELS: Record<PermissionCategory, string> = {
@@ -54,11 +46,7 @@ const CATEGORY_LABELS: Record<PermissionCategory, string> = {
   menu: '菜单',
   page: '页面',
   button: '操作按钮',
-  agent: '智能体',
-  skill: '技能',
   tool: '工具',
-  component: '组件',
-  prompt: '提示词',
 }
 
 interface PermissionGroup {
@@ -78,7 +66,7 @@ export default function RoleDetailPage() {
   const [role, setRole] = useState<Role | null>(null)
   const [roleLoading, setRoleLoading] = useState(false)
   const [counts, setCounts] = useState<Record<string, number>>({})
-  const [resourceType, setResourceType] = useState<ResourceType>('agent')
+  const [resourceType, setResourceType] = useState<ResourceType>('tool')
   const [items, setItems] = useState<RoleGrantResource[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)

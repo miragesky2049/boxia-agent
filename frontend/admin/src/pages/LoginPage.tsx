@@ -52,7 +52,7 @@ export default function LoginPage() {
   const canSwitchScope = context?.tenant_switch_mode !== 'none' && isPlatform
 
   if (user) {
-    return <Navigate to={user.must_change_password ? '/change-password' : '/agents'} replace />
+    return <Navigate to={user.must_change_password ? '/change-password' : '/apps'} replace />
   }
 
   const handleSubmit = async (values: LoginFormValues) => {
@@ -64,7 +64,7 @@ export default function LoginPage() {
         navigate('/change-password', { replace: true })
         return
       }
-      const next = safeNextPath(location.search, '/agents')
+      const next = safeNextPath(location.search, '/apps')
       navigate(next, { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {

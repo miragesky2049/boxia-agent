@@ -115,15 +115,15 @@ describe('RequireAuth', () => {
     vi.stubGlobal('fetch', vi.fn())
 
     render(
-      <MemoryRouter initialEntries={['/agents']}>
+      <MemoryRouter initialEntries={['/apps']}>
         <AuthProvider>
           <Routes>
             <Route path="/login" element={<div>login-page</div>} />
             <Route
-              path="/agents"
+              path="/apps"
               element={
                 <RequireAuth>
-                  <div>agents-page</div>
+                  <div>apps-page</div>
                 </RequireAuth>
               }
             />

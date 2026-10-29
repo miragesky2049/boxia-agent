@@ -8,7 +8,6 @@ from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
 from internal.domain.entity.department import Department
-from internal.infrastructure.model.agent import AgentModel
 from internal.infrastructure.model.department import DepartmentModel
 from internal.infrastructure.model.employment import EmploymentModel
 
@@ -116,18 +115,6 @@ class PostgresDepartmentRepository:
             .where(
                 EmploymentModel.tenant_id == tenant_id,
                 EmploymentModel.department_id == department_id,
-            )
-        )
-        return int(total or 0)
-
-    def count_agents(self, tenant_id: UUID, department_id: UUID) -> int:
-        """统计归属该部门的智能体数。"""
-        total = self._session.scalar(
-            select(func.count())
-            .select_from(AgentModel)
-            .where(
-                AgentModel.tenant_id == tenant_id,
-                AgentModel.department_id == department_id,
             )
         )
         return int(total or 0)

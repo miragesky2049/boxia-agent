@@ -1,4 +1,4 @@
-"""技能、工具、组件、提示词的 PostgreSQL 仓储实现。"""
+"""工具的 PostgreSQL 仓储实现。"""
 
 from typing import Any, Generic, TypeVar
 from uuid import UUID
@@ -7,13 +7,8 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.entity.resource import Component, Prompt, Skill, Tool
-from internal.infrastructure.model.resource import (
-    ComponentModel,
-    PromptModel,
-    SkillModel,
-    ToolModel,
-)
+from internal.domain.entity.resource import Tool
+from internal.infrastructure.model.resource import ToolModel
 from internal.infrastructure.repository.grant_filters import (
     has_any_grant,
     platform_resource_visible,
@@ -39,7 +34,6 @@ class PostgresResourceRepository(Generic[TResource]):
         apply_role_filter: bool = True,
     ):
         self._session = session
-        # None 归一化为 PLATFORM_TENANT_ID，消除所有 Optional 分支
         self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
@@ -71,7 +65,6 @@ class PostgresResourceRepository(Generic[TResource]):
             platform_resource_visible(
                 self.resource_type,
                 self.model.id,
-                self.model.agent_id,
                 self._tenant_id,
                 self._role_ids,
                 self._apply_role_filter,
@@ -95,15 +88,11 @@ class PostgresResourceRepository(Generic[TResource]):
         page_size: int,
         keyword: str | None,
         is_enabled: bool | None,
-        agent_id: UUID | None = None,
         manageable_only: bool = False,
         grant_state: str | None = None,
         grant_tenant_id: UUID | None = None,
     ) -> tuple[list[TResource], int]:
-        """分页查询，关键字模糊匹配名称与描述。
-
-        manageable_only 仅返回当前作用域可授权的资源；grant_state 按直接授权记录筛选。
-        """
+        """分页查询，关键字模糊匹配名称与描述。"""
         stmt = (
             self._owned(select(self.model))
             if manageable_only
@@ -116,8 +105,6 @@ class PostgresResourceRepository(Generic[TResource]):
                 else tenant_grant_exists(self.resource_type, self.model.id, grant_tenant_id)
             )
             stmt = stmt.where(condition if grant_state == "granted" else ~condition)
-        if agent_id is not None:
-            stmt = stmt.where(self.model.agent_id == agent_id)
         if keyword and keyword.strip():
             pattern = f"%{keyword.strip()}%"
             stmt = stmt.where(
@@ -189,21 +176,11 @@ class PostgresResourceRepository(Generic[TResource]):
         )
         return self._to_entity(row) if row else None
 
-    def list_for_agent(self, agent_id: UUID, is_enabled: bool | None = None) -> list[TResource]:
-        """读取归属于指定智能体的可见资源（用户端运行时使用）。"""
-        stmt = self._visible(select(self.model)).where(self.model.agent_id == agent_id)
-        if is_enabled is not None:
-            stmt = stmt.where(self.model.is_enabled.is_(is_enabled))
-        rows = self._session.scalars(stmt.order_by(self.model.id.asc())).all()
-        return [self._to_entity(row) for row in rows]
-
-    def ids_exist(self, ids: list[UUID], agent_id: UUID | None = None) -> set[UUID]:
+    def ids_exist(self, ids: list[UUID]) -> set[UUID]:
         """返回可见范围内真实存在的 id 集合。"""
         if not ids:
             return set()
         stmt = self._visible(select(self.model.id)).where(self.model.id.in_(ids))
-        if agent_id is not None:
-            stmt = stmt.where(self.model.agent_id == agent_id)
         rows = self._session.scalars(stmt).all()
         return set(rows)
 
@@ -216,13 +193,6 @@ class PostgresResourceRepository(Generic[TResource]):
         ).all()
         return set(rows)
 
-    def list_ids_for_agent(self, agent_id: UUID) -> list[UUID]:
-        """按归属读取智能体下的全部资源 ID，忽略角色可见性过滤。"""
-        rows = self._session.scalars(
-            self._owned(select(self.model.id)).where(self.model.agent_id == agent_id)
-        ).all()
-        return list(rows)
-
     def _grantable(self, stmt):
         """角色授权候选范围：租户自有资源 + 已对本租户可见的平台资源。"""
         if self._tenant_id == PLATFORM_TENANT_ID:
@@ -233,7 +203,6 @@ class PostgresResourceRepository(Generic[TResource]):
             platform_resource_visible(
                 self.resource_type,
                 self.model.id,
-                self.model.agent_id,
                 self._tenant_id,
                 (),
                 False,
@@ -277,27 +246,6 @@ class PostgresResourceRepository(Generic[TResource]):
         return set(rows)
 
 
-class PostgresSkillRepository(PostgresResourceRepository[Skill]):
-    """技能仓储。"""
-
-    model = SkillModel
-    resource_type = "skill"
-
-    def _to_entity(self, row: SkillModel) -> Skill:
-        return Skill(
-            id=row.id,
-            name=row.name,
-            description=row.description,
-            content=row.content,
-            config=row.config,
-            is_enabled=row.is_enabled,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            tenant_id=row.tenant_id,
-            agent_id=row.agent_id,
-        )
-
-
 class PostgresToolRepository(PostgresResourceRepository[Tool]):
     """工具仓储。"""
 
@@ -315,48 +263,4 @@ class PostgresToolRepository(PostgresResourceRepository[Tool]):
             created_at=row.created_at,
             updated_at=row.updated_at,
             tenant_id=row.tenant_id,
-            agent_id=row.agent_id,
-        )
-
-
-class PostgresComponentRepository(PostgresResourceRepository[Component]):
-    """组件仓储。"""
-
-    model = ComponentModel
-    resource_type = "component"
-
-    def _to_entity(self, row: ComponentModel) -> Component:
-        return Component(
-            id=row.id,
-            name=row.name,
-            description=row.description,
-            type=row.type,
-            config=row.config,
-            is_enabled=row.is_enabled,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            tenant_id=row.tenant_id,
-            agent_id=row.agent_id,
-        )
-
-
-class PostgresPromptRepository(PostgresResourceRepository[Prompt]):
-    """提示词仓储。"""
-
-    model = PromptModel
-    resource_type = "prompt"
-
-    def _to_entity(self, row: PromptModel) -> Prompt:
-        return Prompt(
-            id=row.id,
-            name=row.name,
-            description=row.description,
-            content=row.content,
-            variables=row.variables,
-            category=row.category,
-            is_enabled=row.is_enabled,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-            tenant_id=row.tenant_id,
-            agent_id=row.agent_id,
         )

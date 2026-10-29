@@ -12,19 +12,16 @@ from internal.application.employment_service import EmploymentService
 from internal.application.grant_service import GrantService
 from internal.application.hr_dictionary_service import HrDictionaryService
 from internal.application.ingestion_service import IngestionService
-from internal.application.mcp_sync_service import McpSyncService
 from internal.application.mgmt_unit_service import MgmtUnitService
 from internal.application.resource_service import ResourceService
 from internal.application.retrieval_service import RetrievalService
 from internal.application.role_grant_service import RoleGrantService
 from internal.application.role_permission_service import RolePermissionService
 from internal.application.role_service import RoleService
-from internal.application.skill_package_service import SkillPackageService
-from internal.application.skill_service import SkillService
 from internal.application.tenant_service import TenantService
 from internal.application.user_admin_service import UserAdminService
 from internal.application.user_auth_service import UserAuthService
-from internal.domain.entity.resource import Component, Prompt, Tool
+from internal.domain.entity.resource import Tool
 from internal.engine.llm import OpenAICompatLLMClient
 from internal.engine.query_rewrite import LLMQueryRewriter, QueryRewriter
 from internal.engine.rerank import RerankClient, SiliconFlowRerankClient
@@ -45,35 +42,9 @@ def get_user_auth_service(uow: UowDep) -> UserAuthService:
     return UserAuthService(uow)
 
 
-def get_skill_service(uow: AdminScopedUowDep, context: RequestContextDep) -> SkillService:
-    """技能用例（含 SKILL.md 同步）。"""
-    return SkillService(uow.skills, "技能", "skill", uow, context)
-
-
-def get_skill_package_service(
-    uow: AdminScopedUowDep, context: RequestContextDep
-) -> SkillPackageService:
-    """技能包文件读写、导入导出与克隆用例。"""
-    return SkillPackageService(uow, context)
-
-
 def get_tool_service(uow: AdminScopedUowDep, context: RequestContextDep) -> ResourceService[Tool]:
     """工具用例。"""
     return ResourceService(uow.tools, "工具", "tool", uow, context)
-
-
-def get_component_service(
-    uow: AdminScopedUowDep, context: RequestContextDep
-) -> ResourceService[Component]:
-    """组件用例。"""
-    return ResourceService(uow.components, "组件", "component", uow, context)
-
-
-def get_prompt_service(
-    uow: AdminScopedUowDep, context: RequestContextDep
-) -> ResourceService[Prompt]:
-    """提示词用例。"""
-    return ResourceService(uow.prompts, "提示词", "prompt", uow, context)
 
 
 def get_admin_user_service(uow: UowDep, context: RequestContextDep) -> AdminUserService:
@@ -159,11 +130,6 @@ def get_query_rewriter() -> QueryRewriter:
     return LLMQueryRewriter(llm)
 
 
-def get_mcp_sync_service(uow: AdminScopedUowDep, context: RequestContextDep) -> McpSyncService:
-    """MCP 工具同步用例。"""
-    return McpSyncService(uow, context)
-
-
 def get_document_service(uow: AdminScopedUowDep, context: RequestContextDep) -> DocumentService:
     """知识库文档 CRUD 用例。"""
     return DocumentService(uow, context)
@@ -187,11 +153,7 @@ def get_retrieval_service(uow: UserScopedUowDep, context: RequestContextDep) -> 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserAuthServiceDep = Annotated[UserAuthService, Depends(get_user_auth_service)]
-SkillServiceDep = Annotated[SkillService, Depends(get_skill_service)]
-SkillPackageServiceDep = Annotated[SkillPackageService, Depends(get_skill_package_service)]
 ToolServiceDep = Annotated[ResourceService[Tool], Depends(get_tool_service)]
-ComponentServiceDep = Annotated[ResourceService[Component], Depends(get_component_service)]
-PromptServiceDep = Annotated[ResourceService[Prompt], Depends(get_prompt_service)]
 AdminUserServiceDep = Annotated[AdminUserService, Depends(get_admin_user_service)]
 AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
 TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
@@ -204,7 +166,6 @@ EmploymentServiceDep = Annotated[EmploymentService, Depends(get_employment_servi
 HrDictionaryServiceDep = Annotated[HrDictionaryService, Depends(get_hr_dictionary_service)]
 MgmtUnitServiceDep = Annotated[MgmtUnitService, Depends(get_mgmt_unit_service)]
 GrantServiceDep = Annotated[GrantService, Depends(get_grant_service)]
-McpSyncServiceDep = Annotated[McpSyncService, Depends(get_mcp_sync_service)]
 DocumentServiceDep = Annotated[DocumentService, Depends(get_document_service)]
 IngestionServiceDep = Annotated[IngestionService, Depends(get_ingestion_service)]
 RetrievalServiceDep = Annotated[RetrievalService, Depends(get_retrieval_service)]
@@ -213,21 +174,16 @@ __all__ = [
     "AdminUserServiceDep",
     "AuditServiceDep",
     "AuthServiceDep",
-    "ComponentServiceDep",
     "UserAdminServiceDep",
     "DepartmentServiceDep",
     "EmploymentServiceDep",
     "GrantServiceDep",
-    "PromptServiceDep",
     "RoleGrantServiceDep",
     "RolePermissionServiceDep",
     "RoleServiceDep",
-    "SkillPackageServiceDep",
-    "SkillServiceDep",
     "TenantServiceDep",
     "ToolServiceDep",
     "UserAuthServiceDep",
-    "McpSyncServiceDep",
     "DocumentServiceDep",
     "IngestionServiceDep",
     "RetrievalServiceDep",

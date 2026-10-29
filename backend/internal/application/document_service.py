@@ -1,4 +1,4 @@
-"""知识库文档 CRUD 用例：与 ResourceService 平行，但字段差异较大，独立实现。"""
+"""知识库文档 CRUD 用例。"""
 
 from __future__ import annotations
 
@@ -28,14 +28,13 @@ class DocumentService:
         page: int,
         page_size: int,
         keyword: str | None = None,
-        agent_id: UUID | None = None,
         ingest_status: str | None = None,
     ) -> Page[Document]:
         """分页查询文档元数据。"""
         page = max(page, 1)
         page_size = min(max(page_size, 1), 100)
         items, total = self._uow.documents.list_page(
-            page, page_size, keyword, agent_id, ingest_status
+            page, page_size, keyword, ingest_status
         )
         return Page(items=items, total=total, page=page, page_size=page_size)
 
@@ -52,18 +51,11 @@ class DocumentService:
         title: str,
         source_type: str,
         content: str | bytes,
-        agent_id: UUID | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> Document:
         """创建文档元数据，并立刻触发切分 + 向量化（同步链路，便于 dev 联调）。"""
         if not title.strip():
             raise ValidationError("文档标题不能为空")
-        if agent_id is not None:
-            agent = self._uow.agents.get(agent_id)
-            if agent is None:
-                raise ValidationError("所属智能体不存在或无权访问")
-            if not self._context.can_manage(agent.tenant_id):
-                raise ForbiddenError("无权在该智能体下维护文档")
 
         try:
             text = extract_text(source_type, content)
@@ -86,7 +78,6 @@ class DocumentService:
             "metadata": metadata or {},
             "is_enabled": True,
             "tenant_id": self._context.tenant_id,
-            "agent_id": agent_id,
         }
         document = self._uow.documents.create(values)
         self._uow.commit()
@@ -94,7 +85,7 @@ class DocumentService:
         return document
 
     def update(self, document_id: UUID, values: dict[str, Any]) -> Document:
-        """更新文档元数据（标题、归属、启用状态）。"""
+        """更新文档元数据（标题、启用状态）。"""
         existing = self.get(document_id)
         if not self._context.can_manage(existing.tenant_id):
             raise ForbiddenError("无权维护该文档")

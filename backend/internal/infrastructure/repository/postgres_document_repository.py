@@ -44,7 +44,6 @@ class PostgresDocumentRepository:
         page: int,
         page_size: int,
         keyword: str | None,
-        agent_id: UUID | None = None,
         ingest_status: str | None = None,
     ) -> tuple[list[Document], int]:
         """分页查询；按创建时间倒序。"""
@@ -54,9 +53,6 @@ class PostgresDocumentRepository:
             like = f"%{keyword.strip()}%"
             base = base.where(DocumentModel.title.ilike(like))
             count_stmt = count_stmt.where(DocumentModel.title.ilike(like))
-        if agent_id is not None:
-            base = base.where(DocumentModel.agent_id == agent_id)
-            count_stmt = count_stmt.where(DocumentModel.agent_id == agent_id)
         if ingest_status:
             base = base.where(DocumentModel.ingest_status == ingest_status)
             count_stmt = count_stmt.where(DocumentModel.ingest_status == ingest_status)
@@ -112,7 +108,6 @@ class PostgresDocumentRepository:
         return Document(
             id=row.id,
             tenant_id=row.tenant_id,
-            agent_id=row.agent_id,
             title=row.title,
             source_type=row.source_type,
             source_uri=row.source_uri,
