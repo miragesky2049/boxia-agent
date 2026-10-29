@@ -27,6 +27,7 @@ const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPa
 const V4AppListPage = lazy(() => import('./pages/v4/AppListPage'))
 const V4AppEditPage = lazy(() => import('./pages/v4/AppEditPage'))
 const V4MarketplacePage = lazy(() => import('./pages/v4/MarketplacePage'))
+const V4RunPage = lazy(() => import('./pages/v4/RunPage'))
 const V4RunsPage = lazy(() => import('./pages/v4/RunsPage'))
 const V4ResourcesPage = lazy(() => import('./pages/v4/ResourcesPage'))
 
@@ -55,6 +56,7 @@ export default function AppRouter() {
             <Route path="/v4/apps" element={<V4AppListPage />} />
             <Route path="/v4/apps/:id/edit" element={<V4AppEditPage />} />
             <Route path="/v4/marketplace" element={<V4MarketplacePage />} />
+            <Route path="/v4/marketplace/apps/:appId/run" element={<V4RunPage />} />
             <Route path="/v4/marketplace/apps/:appId/runs" element={<V4RunsPage />} />
             <Route path="/v4/resources" element={<V4ResourcesPage />} />
             <Route

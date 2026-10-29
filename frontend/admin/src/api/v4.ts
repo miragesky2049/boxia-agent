@@ -181,6 +181,24 @@ export async function resumeRun(
   })
 }
 
+export type V4RunResult = {
+  status: 'success' | 'waiting_approval'
+  output?: Record<string, unknown>
+  thread_id: string
+  run_id: string
+  approval?: Record<string, unknown>
+}
+
+export async function runApplication(
+  applicationId: string,
+  inputs: Record<string, unknown>,
+): Promise<V4RunResult> {
+  return request<V4RunResult>(`/admin/v4/marketplace/applications/${applicationId}/run`, {
+    method: 'POST',
+    body: JSON.stringify({ inputs }),
+  })
+}
+
 // ========== 统一资源（tool / prompt / skill / knowledge） ==========
 export type V4ResourceType = 'tool' | 'prompt' | 'skill' | 'knowledge'
 

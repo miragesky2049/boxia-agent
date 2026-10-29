@@ -74,11 +74,11 @@ export default function V4MarketplacePage() {
                   actions={[
                     subscribed ? (
                       <Button
-                        key="runs"
+                        key="run"
                         type="link"
-                        onClick={() => navigate(`/v4/marketplace/apps/${item.id}/runs`)}
+                        onClick={() => navigate(`/v4/marketplace/apps/${item.id}/run`)}
                       >
-                        运行历史
+                        运行
                       </Button>
                     ) : (
                       <Button
@@ -90,6 +90,15 @@ export default function V4MarketplacePage() {
                         立即开通
                       </Button>
                     ),
+                    subscribed ? (
+                      <Button
+                        key="runs"
+                        type="link"
+                        onClick={() => navigate(`/v4/marketplace/apps/${item.id}/runs`)}
+                      >
+                        运行历史
+                      </Button>
+                    ) : null,
                     subscribed ? (
                       <Tag color="green" key="subscribed" style={{ margin: 0 }}>
                         已开通
