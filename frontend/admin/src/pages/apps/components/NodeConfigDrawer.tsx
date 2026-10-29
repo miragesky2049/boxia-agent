@@ -624,12 +624,53 @@ function normalizeConfig(nodeType: NodeType, values: Record<string, unknown>): R
   return result
 }
 
-const BRANCH_OPERATORS: { value: string; label: string }[] = [
-  { value: 'eq', label: '等于 (==)' },
-  { value: 'ne', label: '不等于 (!=)' },
-  { value: 'gt', label: '大于 (>)' },
-  { value: 'contains', label: '包含 (contains)' },
-]
+type BranchOperator = { value: string; label: string; needsValue: boolean }
+
+/** 按变量类型分组的条件操作符；needsValue=false 时不渲染值输入框 */
+const OPERATORS_BY_TYPE: Record<string, BranchOperator[]> = {
+  string: [
+    { value: 'eq', label: '等于', needsValue: true },
+    { value: 'ne', label: '不等于', needsValue: true },
+    { value: 'contains', label: '包含', needsValue: true },
+    { value: 'not_contains', label: '不包含', needsValue: true },
+    { value: 'startswith', label: '开头是', needsValue: true },
+    { value: 'endswith', label: '结尾是', needsValue: true },
+    { value: 'regex', label: '正则匹配', needsValue: true },
+    { value: 'length_eq', label: '长度等于', needsValue: true },
+    { value: 'length_ne', label: '长度不等于', needsValue: true },
+    { value: 'length_gt', label: '长度大于', needsValue: true },
+    { value: 'length_gte', label: '长度大于等于', needsValue: true },
+    { value: 'length_lt', label: '长度小于', needsValue: true },
+    { value: 'length_lte', label: '长度小于等于', needsValue: true },
+    { value: 'length_between', label: '长度区间', needsValue: true },
+    { value: 'is_empty', label: '为空', needsValue: false },
+    { value: 'is_not_empty', label: '非空', needsValue: false },
+  ],
+  number: [
+    { value: 'eq', label: '等于', needsValue: true },
+    { value: 'ne', label: '不等于', needsValue: true },
+    { value: 'gt', label: '大于', needsValue: true },
+    { value: 'gte', label: '大于等于', needsValue: true },
+    { value: 'lt', label: '小于', needsValue: true },
+    { value: 'lte', label: '小于等于', needsValue: true },
+    { value: 'between', label: '区间 [min,max]', needsValue: true },
+    { value: 'is_empty', label: '为空', needsValue: false },
+    { value: 'is_not_empty', label: '非空', needsValue: false },
+  ],
+  boolean: [
+    { value: 'eq', label: '是 true', needsValue: false },
+    { value: 'ne', label: '是 false', needsValue: false },
+  ],
+  json: [
+    { value: 'eq', label: '等于（JSON 串）', needsValue: true },
+    { value: 'ne', label: '不等于（JSON 串）', needsValue: true },
+    { value: 'has_key', label: '包含字段', needsValue: true },
+    { value: 'is_empty', label: '为空', needsValue: false },
+    { value: 'is_not_empty', label: '非空', needsValue: false },
+  ],
+}
+
+const DEFAULT_OPERATORS: BranchOperator[] = OPERATORS_BY_TYPE.string
 
 /** 通用重试配置：失败时重试开关 + 最大重试次数 */
 function RetryConfigFields() {
@@ -648,16 +689,120 @@ function RetryConfigFields() {
   )
 }
 
-/** 分支条件可视化构建器：行内编辑字段/操作符/值 */
+/** 单行条件：根据所选字段类型动态过滤操作符，并按操作符渲染值输入控件 */
+function ConditionRow({
+  fieldName,
+  startInputs,
+  onRemove,
+}: {
+  fieldName: number
+  startInputs: { name: string; type: string }[]
+  onRemove: () => void
+}) {
+  const form = Form.useFormInstance()
+  const fieldOptions = startInputs.map((v) => ({
+    value: v.name,
+    label: `${v.name}（${VAR_TYPE_META[v.type]?.label ?? v.type}）`,
+  }))
+  const fieldTypeMap = useMemo(
+    () => Object.fromEntries(startInputs.map((v) => [v.name, v.type])),
+    [startInputs],
+  )
+
+  const watchedField = (Form.useWatch(['conditions', fieldName, 'field']) as string) ?? ''
+  const watchedOperator = (Form.useWatch(['conditions', fieldName, 'operator']) as string) ?? 'eq'
+
+  const varType = fieldTypeMap[watchedField] ?? 'string'
+  const operators = OPERATORS_BY_TYPE[varType] ?? DEFAULT_OPERATORS
+  const operatorMeta = operators.find((op) => op.value === watchedOperator)
+  const needsValue = operatorMeta?.needsValue ?? true
+
+  const handleFieldChange = (val: string) => {
+    const nextType = fieldTypeMap[val] ?? 'string'
+    const nextOperators = OPERATORS_BY_TYPE[nextType] ?? DEFAULT_OPERATORS
+    // 切字段时若当前操作符不在新类型的操作符集合里，回退到第一个
+    if (!nextOperators.find((op) => op.value === watchedOperator)) {
+      form.setFieldValue(['conditions', fieldName, 'operator'], nextOperators[0].value)
+    }
+  }
+
+  const renderValueInput = () => {
+    if (!needsValue) return null
+    const baseRules = [{ required: true, message: '请输入比较值' }]
+    if (varType === 'number') {
+      return (
+        <Form.Item
+          name={[fieldName, 'value']}
+          rules={baseRules}
+          style={{ flex: 1.8, marginBottom: 0, marginLeft: 8 }}
+        >
+          <InputNumber
+            style={{ width: '100%' }}
+            placeholder={watchedOperator === 'between' ? '如 10,100' : '数值'}
+          />
+        </Form.Item>
+      )
+    }
+    return (
+      <Form.Item
+        name={[fieldName, 'value']}
+        rules={baseRules}
+        style={{ flex: 1.8, marginBottom: 0, marginLeft: 8 }}
+      >
+        <Input
+          placeholder={
+            watchedOperator === 'between'
+              ? 'min,max（逗号分隔）'
+              : watchedOperator === 'regex'
+                ? '正则表达式'
+                : watchedOperator === 'has_key'
+                  ? '字段名'
+                  : '比较值'
+          }
+        />
+      </Form.Item>
+    )
+  }
+
+  return (
+    <Space.Compact style={{ display: 'flex', marginBottom: 8 }} block>
+      <Form.Item
+        name={[fieldName, 'field']}
+        rules={[{ required: true, message: '请选择字段' }]}
+        style={{ flex: 2, marginBottom: 0 }}
+      >
+        <Select
+          showSearch
+          placeholder={fieldOptions.length ? '选择入参字段' : '先在开始节点定义字段'}
+          options={fieldOptions}
+          notFoundContent="开始节点未定义入参"
+          onChange={handleFieldChange}
+        />
+      </Form.Item>
+      <Form.Item
+        name={[fieldName, 'operator']}
+        style={{ flex: 1.6, marginBottom: 0, marginLeft: 8 }}
+      >
+        <Select options={operators} />
+      </Form.Item>
+      {renderValueInput()}
+      <Button
+        type="text"
+        danger
+        icon={<CloseOutlined />}
+        style={{ marginLeft: 8 }}
+        onClick={onRemove}
+      />
+    </Space.Compact>
+  )
+}
+
+/** 分支条件可视化构建器：行内编辑字段/操作符/值，按变量类型过滤操作符 */
 function BranchConditionsEditor({
   startInputs,
 }: {
   startInputs: { name: string; type: string }[]
 }) {
-  const fieldOptions = startInputs.map((v) => ({
-    value: v.name,
-    label: `${v.name}（${VAR_TYPE_META[v.type]?.label ?? v.type}）`,
-  }))
   return (
     <Form.List name="conditions">
       {(fields, { add, remove }) => (
@@ -676,44 +821,13 @@ function BranchConditionsEditor({
             <span style={{ flex: 1.8, marginLeft: 8 }}>比较值</span>
             <span style={{ width: 32, marginLeft: 8 }} />
           </div>
-          {fields.map(({ key, name, ...restField }) => (
-            <Space.Compact key={key} style={{ display: 'flex', marginBottom: 8 }} block>
-              <Form.Item
-                {...restField}
-                name={[name, 'field']}
-                rules={[{ required: true, message: '请选择字段' }]}
-                style={{ flex: 2, marginBottom: 0 }}
-              >
-                <Select
-                  showSearch
-                  placeholder={fieldOptions.length ? '选择入参字段' : '先在开始节点定义字段'}
-                  options={fieldOptions}
-                  notFoundContent="开始节点未定义入参"
-                />
-              </Form.Item>
-              <Form.Item
-                {...restField}
-                name={[name, 'operator']}
-                style={{ flex: 1.6, marginBottom: 0, marginLeft: 8 }}
-              >
-                <Select options={BRANCH_OPERATORS} />
-              </Form.Item>
-              <Form.Item
-                {...restField}
-                name={[name, 'value']}
-                rules={[{ required: true, message: '请输入比较值' }]}
-                style={{ flex: 1.8, marginBottom: 0, marginLeft: 8 }}
-              >
-                <Input placeholder="比较值" />
-              </Form.Item>
-              <Button
-                type="text"
-                danger
-                icon={<CloseOutlined />}
-                style={{ marginLeft: 8 }}
-                onClick={() => remove(name)}
-              />
-            </Space.Compact>
+          {fields.map(({ key, name }) => (
+            <ConditionRow
+              key={key}
+              fieldName={name}
+              startInputs={startInputs}
+              onRemove={() => remove(name)}
+            />
           ))}
           <Button
             type="dashed"

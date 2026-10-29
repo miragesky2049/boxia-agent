@@ -237,15 +237,177 @@ def _eval_conditions(conditions: list[dict], data: dict) -> bool:
 
 
 def _compare(actual, operator: str, expected) -> bool:
+    """按操作符对 actual 与 expected 求值。
+
+    支持的操作符：
+      - eq / ne：宽松相等（字符串 "123" 与数字 123 视为相等）
+      - gt / gte / lt / lte：数值比较，非数值时尝试转换
+      - between：expected 为 "min,max" 字符串，闭区间
+      - contains / not_contains：字符串包含 / 不包含
+      - startswith / endswith：字符串前缀 / 后缀
+      - regex：正则匹配（re.search）
+      - is_empty / is_not_empty：None、空串、空容器均视为空
+      - has_key：expected 为 key 名，actual 为 dict 时判断 key 存在
+    """
+    # 空值判断类操作符不依赖 expected
+    if operator == "is_empty":
+        return _is_empty(actual)
+    if operator == "is_not_empty":
+        return not _is_empty(actual)
+
+    # 以下操作符都需要 actual 非空
+    if actual is None:
+        return False
+
+    # 数值类操作符：尝试把 actual 转成 float
+    if operator in {"gt", "gte", "lt", "lte", "between"}:
+        actual_num = _to_number(actual)
+        if actual_num is None:
+            return False
+        if operator == "between":
+            # expected 可能是 "min,max" 字符串或 [min, max] 列表
+            lo, hi = _parse_range(expected)
+            if lo is None or hi is None:
+                return False
+            return lo <= actual_num <= hi
+        expected_num = _to_number(expected)
+        if expected_num is None:
+            return False
+        if operator == "gt":
+            return actual_num > expected_num
+        if operator == "gte":
+            return actual_num >= expected_num
+        if operator == "lt":
+            return actual_num < expected_num
+        if operator == "lte":
+            return actual_num <= expected_num
+
     if operator == "eq":
-        return actual == expected
+        return _loose_equal(actual, expected)
     if operator == "ne":
-        return actual != expected
-    if operator == "gt":
-        return actual is not None and actual > expected
+        return not _loose_equal(actual, expected)
     if operator == "contains":
-        return actual is not None and expected in actual
+        return _to_str(expected) in _to_str(actual)
+    if operator == "not_contains":
+        return _to_str(expected) not in _to_str(actual)
+    if operator == "startswith":
+        return _to_str(actual).startswith(_to_str(expected))
+    if operator == "endswith":
+        return _to_str(actual).endswith(_to_str(expected))
+    if operator == "regex":
+        import re
+
+        try:
+            return re.search(_to_str(expected), _to_str(actual)) is not None
+        except re.error:
+            return False
+    if operator == "has_key":
+        return isinstance(actual, dict) and _to_str(expected) in actual
+
+    # 长度类操作符：对字符串 / 列表 / dict / 元组 / set 取 len
+    length_ops = {
+        "length_eq",
+        "length_ne",
+        "length_gt",
+        "length_gte",
+        "length_lt",
+        "length_lte",
+        "length_between",
+    }
+    if operator in length_ops:
+        length = _length_of(actual)
+        if length is None:
+            return False
+        if operator == "length_between":
+            lo, hi = _parse_range(expected)
+            if lo is None or hi is None:
+                return False
+            return lo <= length <= hi
+        expected_num = _to_number(expected)
+        if expected_num is None:
+            return False
+        if operator == "length_eq":
+            return length == expected_num
+        if operator == "length_ne":
+            return length != expected_num
+        if operator == "length_gt":
+            return length > expected_num
+        if operator == "length_gte":
+            return length >= expected_num
+        if operator == "length_lt":
+            return length < expected_num
+        if operator == "length_lte":
+            return length <= expected_num
+
     return False
+
+
+def _length_of(value):
+    """对字符串 / 列表 / dict / 元组 / set 返回 len；其他类型返回 None。"""
+    if isinstance(value, (str, list, dict, tuple, set)):
+        return len(value)
+    return None
+
+
+def _is_empty(value) -> bool:
+    if value is None:
+        return True
+    if isinstance(value, str):
+        return value == ""
+    if isinstance(value, (list, dict, tuple, set)):
+        return len(value) == 0
+    return False
+
+
+def _to_str(value) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        return value
+    return str(value)
+
+
+def _to_number(value):
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value.strip())
+        except ValueError:
+            return None
+    return None
+
+
+def _loose_equal(actual, expected) -> bool:
+    """宽松相等：字符串与数字之间自动转换；dict 与 JSON 字符串之间自动解析。"""
+    if actual == expected:
+        return True
+    num_actual = _to_number(actual)
+    num_expected = _to_number(expected)
+    if num_actual is not None and num_expected is not None:
+        return num_actual == num_expected
+    # dict vs JSON 字符串
+    if isinstance(actual, dict) and isinstance(expected, str):
+        try:
+            import json as _json
+
+            return actual == _json.loads(expected)
+        except (ValueError, TypeError):
+            return False
+    return False
+
+
+def _parse_range(expected):
+    """把 '10,100' 或 [10, 100] 解析为 (lo, hi)，失败返回 (None, None)。"""
+    if isinstance(expected, (list, tuple)) and len(expected) == 2:
+        lo = _to_number(expected[0])
+        hi = _to_number(expected[1])
+        return lo, hi
+    if isinstance(expected, str):
+        parts = [p.strip() for p in expected.split(",")]
+        if len(parts) == 2:
+            return _to_number(parts[0]), _to_number(parts[1])
+    return None, None
 
 
 # ========== tool（调工具） ==========
