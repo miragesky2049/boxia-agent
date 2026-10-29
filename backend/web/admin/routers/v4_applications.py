@@ -9,7 +9,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from internal.application.errors import NotFoundError, ValidationError
+from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.application.v4.application_service import V4ApplicationService
 from internal.application.v4.model_service import V4ModelService
 from internal.engine.v4.runner import GraphInterrupted, GraphRunner
@@ -18,6 +18,7 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 )
 from internal.infrastructure.repository.v4.run_repository import V4RunRepository
 from internal.infrastructure.repository.v4.usage_repository import V4UsageRepository
+from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
 
@@ -175,11 +176,15 @@ async def resume_application(
     service: V4ServiceDep,
     uow: UowDep,
     context: RequestContextDep,
+    principal: AdminAuthDep,
 ) -> dict:
     """人审节点恢复执行：提交审批结果后继续跑图。
 
     resume 前先查 run 表校验 ownership：thread_id 必须属于 (tenant_id, application_id)
     且状态为 interrupted，否则 404。防止跨租户通过伪造 thread_id 接管他人运行。
+
+    同时校验人审节点配置的 assignee_role：当前 principal 的 role_code 必须匹配，
+    superadmin 始终放行（超管兜底）。不匹配抛 403。
     """
     tenant_id = context.tenant_id
     if tenant_id is None:
@@ -198,6 +203,17 @@ async def resume_application(
         service, uow, tenant_id, application_id,
         thread_id=thread_id, run_id=pending["id"],
     )
+
+    # 人审角色校验：从 checkpointer 取出当前 interrupt payload，比对 assignee_role
+    interrupt_state = runner.get_interrupt_state()
+    if interrupt_state is not None:
+        required_role = interrupt_state.get("assignee_role")
+        if required_role:
+            if principal.role_code != "superadmin" and principal.role_code != required_role:
+                raise ForbiddenError(
+                    f"该人审节点要求角色 {required_role}，当前角色 {principal.role_code} 无权审批"
+                )
+
     try:
         output = await runner.resume({"approved": payload.approved, "comment": payload.comment})
         uow.commit()
