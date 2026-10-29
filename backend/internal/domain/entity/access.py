@@ -13,7 +13,7 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-RESOURCE_TYPES = ("tool",)
+RESOURCE_TYPES = ("tool", "app")
 
 
 @dataclass(frozen=True)

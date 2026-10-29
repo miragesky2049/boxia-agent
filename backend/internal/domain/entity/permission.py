@@ -60,6 +60,9 @@ def _perm(
 PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm(CONSOLE_ACCESS, "管理端访问", "system", "access", 5, "登录管理后台的入口权限"),
     _perm(DATA_ALL, "全量数据权限", "system", "manage", 6, "跳过数据权限过滤，可访问全部资源"),
+    _perm("menu:apps", "应用管理", "menu", "view", 10),
+    _perm("menu:marketplace", "应用市场", "menu", "view", 12),
+    _perm("menu:resources", "资源管理", "menu", "view", 14),
     _perm("menu:tools", "工具管理", "menu", "view", 16),
     _perm("menu:grants", "用户授权", "menu", "view", 20),
     _perm("menu:roles", "角色管理", "menu", "view", 30),
@@ -70,6 +73,9 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("menu:admin-users", "管理员账号", "menu", "view", 50),
     _perm("menu:tenants", "租户管理", "menu", "view", 60),
     _perm("menu:audit", "审计日志", "menu", "view", 70),
+    _perm("page:apps", "应用管理页面", "page", "view", 110),
+    _perm("page:marketplace", "应用市场页面", "page", "view", 112),
+    _perm("page:resources", "资源管理页面", "page", "view", 114),
     _perm("page:tools", "工具管理页面", "page", "view", 116),
     _perm("page:grants", "用户授权页面", "page", "view", 120),
     _perm("page:roles", "角色管理页面", "page", "view", 130),
@@ -112,6 +118,10 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:mgmt-unit:update", "管理单元-编辑", "button", "update", 381),
     _perm("button:mgmt-unit:delete", "管理单元-删除", "button", "delete", 382),
     _perm("button:mgmt-unit:grant", "管理单元-授权用户", "button", "manage", 384),
+    _perm("button:audit:clear", "审计日志-清空", "button", "delete", 390),
+    _perm("button:app:create", "应用-新建", "button", "create", 400),
+    _perm("button:app:update", "应用-编辑", "button", "update", 401),
+    _perm("button:app:delete", "应用-删除", "button", "delete", 402),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)
@@ -200,6 +210,12 @@ _RESOURCE_BUTTON_CODES = frozenset(
 _CONSOLE_CODES = frozenset(
     {
         CONSOLE_ACCESS,
+        "menu:apps",
+        "page:apps",
+        "menu:marketplace",
+        "page:marketplace",
+        "menu:resources",
+        "page:resources",
         "menu:tools",
         "page:tools",
     }

@@ -18,6 +18,9 @@ def _menus(principal: AdminPrincipal) -> list[str]:
     menus = [code.split(":", 1)[1] for code in principal.permissions if code.startswith("menu:")]
     # 按行业通用使用频次排序：核心业务 > 日常运营 > 组织建模 > 系统级
     order = [
+        "apps",
+        "marketplace",
+        "resources",
         "tools",
         "grants",
         "users",
