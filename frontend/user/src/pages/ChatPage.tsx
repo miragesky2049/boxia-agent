@@ -6,7 +6,7 @@ import {
   SendOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
-import { Alert, App as AntdApp, Button, Collapse, Spin, Tag, Tooltip } from 'antd'
+import { Alert, Button, Collapse, Spin, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
@@ -15,8 +15,6 @@ import { getAgent } from '../api/agents'
 import { runAgentStream } from '../api/agentRun'
 import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
 import type { UserAgentDetail } from '../api/types'
-import { ActionBar, UploadMaterial } from '../components/boxiaclaw-cmp'
-import type { ActionBarAction, UploadedMaterialFile } from '../components/boxiaclaw-cmp'
 
 interface Message {
   id: string
@@ -32,138 +30,6 @@ const SUGGESTED_PROMPTS = [
   '帮我快速梳理当前任务的关键点',
   '演示一次你的核心能力',
 ]
-
-/**
- * 组件渲染协议：assistant 消息中使用围栏代码块声明前端组件，
- * 语言标记为 boxiaclaw-component，内容为 JSON：
- *
- * ```boxiaclaw-component
- * {"name":"@boxiaclaw-elearning-cmp/upload-material","props":{"sceneRobotId":"xxx"}}
- * ```
- */
-const COMPONENT_BLOCK_RE = /```boxiaclaw-component\s*\n([\s\S]*?)```/g
-
-interface ContentSegment {
-  type: 'markdown' | 'component'
-  value: string
-}
-
-function parseContentSegments(content: string): ContentSegment[] {
-  const segments: ContentSegment[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  COMPONENT_BLOCK_RE.lastIndex = 0
-  while ((match = COMPONENT_BLOCK_RE.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ type: 'markdown', value: content.slice(lastIndex, match.index) })
-    }
-    segments.push({ type: 'component', value: match[1].trim() })
-    lastIndex = COMPONENT_BLOCK_RE.lastIndex
-  }
-  if (lastIndex < content.length) {
-    segments.push({ type: 'markdown', value: content.slice(lastIndex) })
-  }
-  return segments
-}
-
-interface ComponentBlockPayload {
-  name: string
-  props?: Record<string, unknown>
-}
-
-function isComponentBlockPayload(data: unknown): data is ComponentBlockPayload {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    typeof (data as { name?: unknown }).name === 'string'
-  )
-}
-
-function BoxiaclawComponentBlock({ json }: { json: string }) {
-  const { message } = AntdApp.useApp()
-
-  const parsed = useMemo(() => {
-    try {
-      return { ok: true, data: JSON.parse(json) as unknown }
-    } catch (err) {
-      return {
-        ok: false as const,
-        error: err instanceof Error ? err.message : 'JSON 解析失败',
-      }
-    }
-  }, [json])
-
-  if (!parsed.ok) {
-    return (
-      <Alert
-        type="error"
-        showIcon
-        message="组件声明解析失败"
-        description={parsed.error}
-      />
-    )
-  }
-
-  const data = parsed.data
-  if (!isComponentBlockPayload(data)) {
-    return <Alert type="warning" showIcon message="组件声明格式不正确" description={json} />
-  }
-
-  if (data.name === '@boxiaclaw-elearning-cmp/upload-material') {
-    const props = data.props ?? {}
-    return (
-      <UploadMaterial
-        sceneRobotId={typeof props.sceneRobotId === 'string' ? props.sceneRobotId : undefined}
-        disabled={typeof props.disabled === 'boolean' ? props.disabled : undefined}
-        onUploaded={(files: UploadedMaterialFile[]) => {
-          message.success(`已上传 ${files.filter((f) => f.status === 'done').length} 份资料`)
-        }}
-        onSkip={() => {
-          message.info('已跳过资料上传')
-        }}
-      />
-    )
-  }
-
-  if (data.name === '@boxiaclaw-elearning-cmp/action-bar') {
-    const placement =
-      data.props?.placement === 'right' || data.props?.placement === 'center'
-        ? data.props.placement
-        : 'left'
-    const rawActions = Array.isArray(data.props?.actions) ? data.props.actions : []
-    const actions: ActionBarAction[] = rawActions.map((a) => {
-      const item = (a ?? {}) as Record<string, unknown>
-      return {
-        label: typeof item.label === 'string' ? item.label : '',
-        type: item.type === 'primary' || item.type === 'text' ? item.type : 'secondary',
-        action:
-          typeof item.action === 'object' && item.action !== null
-            ? (item.action as { type: string })
-            : undefined,
-      }
-    })
-    return (
-      <ActionBar
-        placement={placement}
-        actions={actions}
-        onAction={(action) => {
-          if (action.action?.type === 'goto_free_detail') {
-            message.success('剧本已保存，即将进入详情')
-          }
-        }}
-      />
-    )
-  }
-
-  return (
-    <Alert
-      type="warning"
-      showIcon
-      message={`未识别的组件：${data.name}`}
-      description={json}
-    />
-  )
-}
 
 let messageSeq = 0
 function nextMessageId(): string {
@@ -525,16 +391,9 @@ export default function ChatPage() {
                       ) : (
                         <>
                           <div className="chat-bubble__content chat-markdown">
-                            {parseContentSegments(m.content).map((seg, idx) => {
-                              if (seg.type === 'component') {
-                                return <BoxiaclawComponentBlock key={idx} json={seg.value} />
-                              }
-                              return (
-                                <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>
-                                  {seg.value}
-                                </ReactMarkdown>
-                              )
-                            })}
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {m.content}
+                            </ReactMarkdown>
                           </div>
                           {m.toolTraces && m.toolTraces.length > 0 && renderToolTraces(m.toolTraces)}
                         </>
