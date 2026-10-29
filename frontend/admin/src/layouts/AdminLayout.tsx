@@ -3,6 +3,7 @@ import {
   BankOutlined,
   ClusterOutlined,
   DeploymentUnitOutlined,
+  FileSearchOutlined,
   IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
@@ -37,6 +38,7 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   'mgmt-units': { icon: <BankOutlined />, label: '管理单元' },
   'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
+  audit: { icon: <FileSearchOutlined />, label: '审计日志' },
 }
 
 interface MenuGroup {
