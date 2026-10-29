@@ -1,5 +1,5 @@
-import { PlusOutlined, CloseOutlined, BulbOutlined } from '@ant-design/icons'
-import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Typography } from 'antd'
+import { PlusOutlined, CloseOutlined, BulbOutlined, CopyOutlined } from '@ant-design/icons'
+import { App, Button, Drawer, Empty, Form, Input, InputNumber, Modal, Select, Slider, Space, Switch, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import {
   listApps,
@@ -315,6 +315,13 @@ function PromptTextArea({
   )
 }
 
+const VAR_TYPE_META: Record<string, { label: string; color: string }> = {
+  string: { label: 'str', color: 'blue' },
+  number: { label: 'num', color: 'green' },
+  boolean: { label: 'bool', color: 'orange' },
+  json: { label: 'json', color: 'purple' },
+}
+
 /** start 节点输入变量动态列表 */
 function InputVariablesEditor() {
   const variables: { name: string; type: string; required: boolean; default: string }[] =
@@ -336,10 +343,20 @@ function InputVariablesEditor() {
               </Form.Item>
               <Form.Item {...restField} name={[name, 'type']} style={{ flex: 1.3, marginBottom: 0 }}>
                 <Select
-                  options={['string', 'number', 'boolean', 'json'].map((t) => ({
-                    value: t,
-                    label: t,
+                  optionLabelProp="label"
+                  options={Object.entries(VAR_TYPE_META).map(([value, meta]) => ({
+                    value,
+                    label: meta.label,
                   }))}
+                  optionRender={(opt) => {
+                    const meta = VAR_TYPE_META[opt.value as string]
+                    return (
+                      <Space size={4}>
+                        <Tag color={meta?.color} style={{ marginInlineEnd: 0 }}>{meta?.label}</Tag>
+                        <span style={{ fontSize: 12, color: '#8c8c8c' }}>{opt.value}</span>
+                      </Space>
+                    )
+                  }}
                 />
               </Form.Item>
               <Form.Item
@@ -350,9 +367,19 @@ function InputVariablesEditor() {
               >
                 <Switch checkedChildren="必填" unCheckedChildren="选填" />
               </Form.Item>
-              <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1.8, marginBottom: 0 }}>
+              <Form.Item {...restField} name={[name, 'default']} style={{ flex: 1.6, marginBottom: 0 }}>
                 <Input placeholder="默认值（选填）" />
               </Form.Item>
+              <Button
+                type="text"
+                icon={<CopyOutlined />}
+                title="复制此行"
+                onClick={() => {
+                  const current = variables[name]
+                  if (!current) return
+                  add({ ...current, name: `${current.name}_copy` }, name + 1)
+                }}
+              />
               <Button
                 type="text"
                 danger
@@ -380,8 +407,70 @@ function InputVariablesEditor() {
   )
 }
 
+/** 输出值输入框 + 弹窗选择上游变量 */
+function OutputValueInput({
+  value,
+  onChange,
+  nodeId,
+}: {
+  value?: string
+  onChange?: (v: string) => void
+  nodeId: string
+}) {
+  const hints = useUpstreamVariableHints(nodeId)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  return (
+    <>
+      <Space.Compact style={{ display: 'flex', width: '100%' }}>
+        <Input
+          value={value}
+          onChange={(e) => onChange?.(e.target.value)}
+          placeholder={'{{#llm_1.output#}}'}
+          style={{ flex: 1, fontFamily: 'monospace', fontSize: 12 }}
+        />
+        <Button onClick={() => setPickerOpen(true)}>选择变量</Button>
+      </Space.Compact>
+      <Modal
+        title="选择上游变量"
+        open={pickerOpen}
+        onCancel={() => setPickerOpen(false)}
+        onOk={() => setPickerOpen(false)}
+        okText="确定"
+        width={520}
+      >
+        {hints.length === 0 ? (
+          <Empty description="暂无上游节点输出字段" />
+        ) : (
+          <div style={{ maxHeight: 360, overflow: 'auto' }}>
+            {hints.map((h) => (
+              <div
+                key={h.value}
+                onClick={() => {
+                  onChange?.(h.value)
+                  setPickerOpen(false)
+                }}
+                style={{
+                  padding: '8px 10px',
+                  cursor: 'pointer',
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  borderBottom: '1px solid #f0f0f0',
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.background = '#f5f5f5')}
+                onMouseLeave={(e) => (e.currentTarget.style.background = '#fff')}
+              >
+                {h.label}
+              </div>
+            ))}
+          </div>
+        )}
+      </Modal>
+    </>
+  )
+}
+
 /** end 节点输出变量动态列表 */
-function OutputVariablesEditor() {
+function OutputVariablesEditor({ nodeId }: { nodeId: string }) {
   return (
     <Form.List name="outputs">
       {(fields, { add, remove }) => (
@@ -402,7 +491,7 @@ function OutputVariablesEditor() {
                 rules={[{ required: true, message: '取值表达式必填' }]}
                 style={{ flex: 3, marginBottom: 0 }}
               >
-                <Input placeholder={'{{#llm_1.output#}}'} />
+                <OutputValueInput nodeId={nodeId} />
               </Form.Item>
               <Button
                 type="text"
@@ -429,6 +518,62 @@ function OutputVariablesEditor() {
   )
 }
 
+/** 通用 key-value 动态编辑器：替代裸 JSON TextArea（参考 coze/dify 的参数表单） */
+function KeyValueEditor({
+  name,
+  keyPlaceholder,
+  valuePlaceholder,
+  addText,
+}: {
+  name: string
+  keyPlaceholder?: string
+  valuePlaceholder?: string
+  addText?: string
+}) {
+  return (
+    <Form.List name={name}>
+      {(fields, { add, remove }) => (
+        <>
+          {fields.map(({ key, name, ...restField }) => (
+            <Space.Compact key={key} style={{ display: 'flex', marginBottom: 8 }} block>
+              <Form.Item
+                {...restField}
+                name={[name, 'key']}
+                rules={[{ required: true, message: '键名必填' }]}
+                style={{ flex: 1.5, marginBottom: 0 }}
+              >
+                <Input placeholder={keyPlaceholder ?? '键名'} />
+              </Form.Item>
+              <Form.Item
+                {...restField}
+                name={[name, 'value']}
+                style={{ flex: 2.5, marginBottom: 0, marginLeft: 8 }}
+              >
+                <Input placeholder={valuePlaceholder ?? '值，支持 {{#input.query#}}'} />
+              </Form.Item>
+              <Button
+                type="text"
+                danger
+                icon={<CloseOutlined />}
+                style={{ marginLeft: 8 }}
+                onClick={() => remove(name)}
+              />
+            </Space.Compact>
+          ))}
+          <Button
+            type="dashed"
+            onClick={() => add({ key: '', value: '' })}
+            block
+            icon={<PlusOutlined />}
+          >
+            {addText ?? '添加一行'}
+          </Button>
+        </>
+      )}
+    </Form.List>
+  )
+}
+
 /** 把表单里的 JSON 文本字段解析为对象/数组，与后端 config 结构对齐 */
 function parseJsonField(raw: unknown, label: string): unknown {
   if (raw === undefined || raw === null || raw === '') return undefined
@@ -440,39 +585,148 @@ function parseJsonField(raw: unknown, label: string): unknown {
   }
 }
 
+/** 把 [{key, value}] 数组转回对象 */
+function kvArrayToObject(arr: unknown): Record<string, string> {
+  if (!Array.isArray(arr)) return {}
+  const obj: Record<string, string> = {}
+  for (const item of arr) {
+    if (item && typeof item === 'object' && 'key' in item && item.key) {
+      obj[(item as { key: string }).key] = String((item as { value?: unknown }).value ?? '')
+    }
+  }
+  return obj
+}
+
+/** 把对象转成 [{key, value}] 数组供 Form.List 使用 */
+function objectToKvArray(obj: unknown): { key: string; value: string }[] {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return []
+  return Object.entries(obj as Record<string, unknown>).map(([key, value]) => ({
+    key,
+    value: String(value ?? ''),
+  }))
+}
+
 function normalizeConfig(nodeType: NodeType, values: Record<string, unknown>): Record<string, unknown> {
   const result: Record<string, unknown> = { ...values }
-  if (nodeType === 'branch') {
-    const conditions = parseJsonField(result.conditions, '条件')
-    if (conditions !== undefined) result.conditions = conditions
-    else delete result.conditions
-  }
   if (nodeType === 'tool') {
-    const params = parseJsonField(result.params, '参数 JSON')
-    if (params !== undefined) result.params = params
-    else result.params = {}
+    result.params = kvArrayToObject(result.params)
   }
   if (nodeType === 'http') {
+    result.headers = kvArrayToObject(result.headers)
     const body = parseJsonField(result.body, '请求体')
     if (body !== undefined) result.body = body
     else delete result.body
   }
   if (nodeType === 'subgraph') {
-    const mapping = parseJsonField(result.input_mapping, '入参映射')
-    if (mapping !== undefined) result.input_mapping = mapping
-    else result.input_mapping = {}
+    result.input_mapping = kvArrayToObject(result.input_mapping)
   }
   return result
+}
+
+const BRANCH_OPERATORS: { value: string; label: string }[] = [
+  { value: 'eq', label: '等于 (==)' },
+  { value: 'ne', label: '不等于 (!=)' },
+  { value: 'gt', label: '大于 (>)' },
+  { value: 'contains', label: '包含 (contains)' },
+]
+
+/** 分支条件可视化构建器：参考 coze IF 节点，行内编辑字段/操作符/值 */
+function BranchConditionsEditor({
+  startInputs,
+}: {
+  startInputs: { name: string; type: string }[]
+}) {
+  const fieldOptions = startInputs.map((v) => ({
+    value: v.name,
+    label: `${v.name}（${VAR_TYPE_META[v.type]?.label ?? v.type}）`,
+  }))
+  return (
+    <Form.List name="conditions">
+      {(fields, { add, remove }) => (
+        <>
+          <div
+            style={{
+              display: 'flex',
+              fontSize: 12,
+              color: '#8c8c8c',
+              marginBottom: 4,
+              padding: '0 4px',
+            }}
+          >
+            <span style={{ flex: 2 }}>字段</span>
+            <span style={{ flex: 1.6, marginLeft: 8 }}>操作符</span>
+            <span style={{ flex: 1.8, marginLeft: 8 }}>比较值</span>
+            <span style={{ width: 32, marginLeft: 8 }} />
+          </div>
+          {fields.map(({ key, name, ...restField }) => (
+            <Space.Compact key={key} style={{ display: 'flex', marginBottom: 8 }} block>
+              <Form.Item
+                {...restField}
+                name={[name, 'field']}
+                rules={[{ required: true, message: '请选择字段' }]}
+                style={{ flex: 2, marginBottom: 0 }}
+              >
+                <Select
+                  showSearch
+                  placeholder={fieldOptions.length ? '选择入参字段' : '先在开始节点定义字段'}
+                  options={fieldOptions}
+                  notFoundContent="开始节点未定义入参"
+                />
+              </Form.Item>
+              <Form.Item
+                {...restField}
+                name={[name, 'operator']}
+                style={{ flex: 1.6, marginBottom: 0, marginLeft: 8 }}
+              >
+                <Select options={BRANCH_OPERATORS} />
+              </Form.Item>
+              <Form.Item
+                {...restField}
+                name={[name, 'value']}
+                rules={[{ required: true, message: '请输入比较值' }]}
+                style={{ flex: 1.8, marginBottom: 0, marginLeft: 8 }}
+              >
+                <Input placeholder="比较值" />
+              </Form.Item>
+              <Button
+                type="text"
+                danger
+                icon={<CloseOutlined />}
+                style={{ marginLeft: 8 }}
+                onClick={() => remove(name)}
+              />
+            </Space.Compact>
+          ))}
+          <Button
+            type="dashed"
+            onClick={() => add({ field: '', operator: 'eq', value: '' })}
+            block
+            icon={<PlusOutlined />}
+          >
+            添加条件（多条件为 AND 关系）
+          </Button>
+        </>
+      )}
+    </Form.List>
+  )
 }
 
 export function NodeConfigDrawer({ open, onClose }: Props) {
   const { message } = App.useApp()
   const selectedNodeId = useAppStore((s) => s.selectedNodeId)
   const nodes = useAppStore((s) => s.nodes)
+  const edges = useAppStore((s) => s.edges)
   const updateNodeConfig = useAppStore((s) => s.updateNodeConfig)
   const removeNode = useAppStore((s) => s.removeNode)
 
   const node = nodes.find((n) => n.id === selectedNodeId)
+
+  // 下游节点列表（参考 dify "下一步" 区域）
+  const downstreamNodes = useMemo(() => {
+    if (!node) return []
+    const targetIds = edges.filter((e) => e.source === node.id).map((e) => e.target)
+    return nodes.filter((n) => targetIds.includes(n.id))
+  }, [node, nodes, edges])
   const [form] = Form.useForm()
   // 统一在顶层调用 watch，避免条件分支里调用 hook 导致 hook 顺序变化
   const watchedSystemPrompt = (Form.useWatch('system_prompt', form) as string) ?? ''
@@ -528,12 +782,16 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
   useEffect(() => {
     if (node) {
       const cfg: Record<string, unknown> = { ...node.data.config }
-      // 后端存的是对象/数组，TextArea 需要 JSON 字符串才能正常回显
-      for (const key of ['conditions', 'params', 'body', 'input_mapping']) {
+      // 把对象转成 key-value 数组供 Form.List 回显
+      for (const key of ['params', 'headers', 'input_mapping']) {
         const v = cfg[key]
-        if (v !== undefined && v !== null && typeof v !== 'string') {
-          cfg[key] = JSON.stringify(v, null, 2)
+        if (v !== undefined && v !== null && typeof v === 'object' && !Array.isArray(v)) {
+          cfg[key] = objectToKvArray(v)
         }
+      }
+      // body 仍是 JSON TextArea，需要字符串化
+      if (cfg.body !== undefined && cfg.body !== null && typeof cfg.body !== 'string') {
+        cfg.body = JSON.stringify(cfg.body, null, 2)
       }
       form.setFieldsValue(cfg)
     }
@@ -581,7 +839,7 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             <div style={{ marginBottom: 8, fontSize: 13, color: '#595959' }}>
               输出变量：定义 end 节点最终返回的字段
             </div>
-            <OutputVariablesEditor />
+            <OutputVariablesEditor nodeId={node.id} />
           </>
         )
       case 'llm':
@@ -633,26 +891,15 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
             value: n.id,
             label: `${n.id}（${TYPE_LABEL[n.data.nodeType]}）`,
           }))
+        // 从 start 节点收集入参字段，作为条件 field 的候选
+        const startNode = nodes.find((n) => n.data.nodeType === 'start')
+        const startInputs = ((startNode?.data.config?.inputs as Array<{ name: string; type: string }>) ?? [])
+          .filter((v) => v && v.name)
         return (
           <>
-            <Form.Item
-              label="条件（JSON 数组，全部满足走 true）"
-              name="conditions"
-              tooltip="数组内条件为 AND 关系；字段从 start 节点入参中取值，支持 a.b 嵌套"
-            >
-              <Input.TextArea
-                rows={4}
-                style={{ fontFamily: 'monospace', fontSize: 12 }}
-                placeholder='[{"field":"score","operator":"gt","value":80}]'
-              />
+            <Form.Item label="条件（全部满足走 true 分支）">
+              <BranchConditionsEditor startInputs={startInputs} />
             </Form.Item>
-            <div
-              style={{ margin: '-8px 0 16px', padding: '8px 12px', background: '#fafafa', borderRadius: 4, fontSize: 12, color: '#595959', lineHeight: 1.8 }}
-            >
-              <div>field：入参字段名，如 score（从 start 入参取值，不要带 input. 前缀）</div>
-              <div>operator：eq 等于 / ne 不等于 / gt 大于 / contains 包含</div>
-              <div>value：比较值；字符串用双引号，数字直接写</div>
-            </div>
             <Form.Item label="true 分支目标节点" name={['routes', 'true']}>
               <Select
                 allowClear
@@ -682,14 +929,15 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
               <ToolResourceSelect />
             </Form.Item>
             <Form.Item
-              label="参数 JSON"
+              label="调用参数"
               name="params"
-              tooltip="调用工具时传入的参数对象，支持 {{#input.字段#}} 占位符"
+              tooltip="调用工具时传入的参数，支持 {{#input.字段#}} 占位符"
             >
-              <Input.TextArea
-                rows={4}
-                style={{ fontFamily: 'monospace', fontSize: 12 }}
-                placeholder='{"key": "{{#input.query#}}"}'
+              <KeyValueEditor
+                name="params"
+                keyPlaceholder="参数名"
+                valuePlaceholder="参数值"
+                addText="添加参数"
               />
             </Form.Item>
           </>
@@ -719,25 +967,47 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
                 }))}
               />
             </Form.Item>
+            <Form.Item label="请求头" name="headers">
+              <KeyValueEditor
+                name="headers"
+                keyPlaceholder="Header 名，如 Authorization"
+                valuePlaceholder="Header 值"
+                addText="添加请求头"
+              />
+            </Form.Item>
             <Form.Item label="请求体" name="body">
-              <Input.TextArea rows={4} />
+              <Input.TextArea rows={4} style={{ fontFamily: 'monospace', fontSize: 12 }} />
             </Form.Item>
           </>
         )
-      case 'retrieval':
+      case 'retrieval': {
+        const startNodeForRetrieval = nodes.find((n) => n.data.nodeType === 'start')
+        const startInputOptions = ((startNodeForRetrieval?.data.config?.inputs as Array<{ name: string }>) ?? [])
+          .filter((v) => v && v.name)
+          .map((v) => ({ value: v.name, label: v.name }))
         return (
           <>
             <Form.Item label="知识库" name="knowledge_base_id">
               <KnowledgeResourceSelect />
             </Form.Item>
-            <Form.Item label="查询字段" name="query_field">
-              <Input placeholder="从 input 取哪个字段作为 query（默认 query）" />
+            <Form.Item label="查询字段" name="query_field" tooltip="从开始节点入参中取哪个字段作为检索 query">
+              <Select
+                allowClear
+                showSearch
+                placeholder={startInputOptions.length ? '选择开始节点的入参字段' : '先在开始节点定义入参'}
+                options={startInputOptions}
+                notFoundContent="开始节点未定义入参"
+              />
             </Form.Item>
             <Form.Item label="Top K" name="top_k">
               <InputNumber min={1} max={50} style={{ width: '100%' }} />
             </Form.Item>
+            <Form.Item label="相似度阈值" name="score_threshold" tooltip="低于此分数的召回结果会被过滤（0-1）">
+              <Slider min={0} max={1} step={0.05} marks={{ 0: '0', 0.5: '0.5', 1: '1' }} />
+            </Form.Item>
           </>
         )
+      }
       case 'human_task':
         return (
           <>
@@ -756,14 +1026,15 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
               <SubgraphAppSelect />
             </Form.Item>
             <Form.Item
-              label="入参映射（JSON）"
+              label="入参映射"
               name="input_mapping"
-              tooltip={'父 state 字段 -> 子图 input 字段，如 {"query": "query"}'}
+              tooltip="父 state 字段 -> 子图 input 字段，如 query -> query"
             >
-              <Input.TextArea
-                rows={3}
-                style={{ fontFamily: 'monospace', fontSize: 12 }}
-                placeholder='{"query": "query"}'
+              <KeyValueEditor
+                name="input_mapping"
+                keyPlaceholder="父 state 字段"
+                valuePlaceholder="子图 input 字段"
+                addText="添加映射"
               />
             </Form.Item>
           </>
@@ -792,6 +1063,37 @@ export function NodeConfigDrawer({ open, onClose }: Props) {
       <Form form={form} layout="vertical">
         {renderConfigForm()}
       </Form>
+
+      {node && node.data.nodeType !== 'end' && (
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid #f0f0f0' }}>
+          <div style={{ fontSize: 13, color: '#595959', marginBottom: 8 }}>下一步</div>
+          {downstreamNodes.length === 0 ? (
+            <div style={{ fontSize: 12, color: '#999' }}>
+              尚未连接下游节点，从本节点右侧圆点拉线到目标节点
+            </div>
+          ) : (
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              {downstreamNodes.map((n) => (
+                <div
+                  key={n.id}
+                  style={{
+                    padding: '6px 10px',
+                    background: '#fafafa',
+                    borderRadius: 4,
+                    fontSize: 12,
+                    color: '#262626',
+                  }}
+                >
+                  <Tag color="blue" style={{ marginInlineEnd: 8 }}>
+                    {TYPE_LABEL[n.data.nodeType]}
+                  </Tag>
+                  {n.id}
+                </div>
+              ))}
+            </Space>
+          )}
+        </div>
+      )}
 
       <Modal
         title="AI 优化 system prompt"
