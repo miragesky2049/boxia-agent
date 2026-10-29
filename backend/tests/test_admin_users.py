@@ -173,9 +173,9 @@ def test_platform_account_binds_platform_role(
 
     # 平台只读账号仍可登录，资源范围由角色授权决定（此时为空）
     operator_headers = _login(client, "platform-viewer", OPERATOR_PASSWORD)
-    listed = client.get("/api/v1/admin/agents", headers=operator_headers)
+    listed = client.get("/api/v1/admin/apps", headers=operator_headers)
     assert listed.status_code == 200, listed.text
-    assert listed.json()["total"] == 0
+    assert len(listed.json()) == 0
 
 
 def test_platform_account_rejects_tenant_role(

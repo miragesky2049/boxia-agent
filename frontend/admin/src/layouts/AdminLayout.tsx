@@ -1,15 +1,16 @@
 import {
   ApartmentOutlined,
+  AppstoreOutlined,
   BankOutlined,
   ClusterOutlined,
-  DeploymentUnitOutlined,
+  DatabaseOutlined,
   FileSearchOutlined,
   IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
-  RobotOutlined,
   SafetyCertificateOutlined,
   SafetyOutlined,
+  ShopOutlined,
   TeamOutlined,
   ToolOutlined,
   UserOutlined,
@@ -27,8 +28,9 @@ import './AdminLayout.css'
 const { Header, Sider, Content } = Layout
 
 const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
-  agents: { icon: <RobotOutlined />, label: '智能体管理' },
-  workflows: { icon: <DeploymentUnitOutlined />, label: '工作流' },
+  apps: { icon: <AppstoreOutlined />, label: '应用管理' },
+  marketplace: { icon: <ShopOutlined />, label: '应用市场' },
+  resources: { icon: <DatabaseOutlined />, label: '资源管理' },
   tools: { icon: <ToolOutlined />, label: '工具管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
   users: { icon: <TeamOutlined />, label: '用户管理' },
@@ -112,7 +114,7 @@ export default function AdminLayout() {
     menus
       .map((key) => `/${key}`)
       .sort((left, right) => right.length - left.length)
-      .find((candidate) => location.pathname.startsWith(candidate)) ?? '/agents'
+      .find((candidate) => location.pathname.startsWith(candidate)) ?? '/apps'
 
   const userMenu: MenuProps['items'] = [
     {
@@ -137,7 +139,7 @@ export default function AdminLayout() {
   return (
     <Layout className="admin-layout">
       <Sider width={224} theme="light" className="admin-sider">
-        <div className="admin-sider__brand" onClick={() => navigate('/agents')}>
+        <div className="admin-sider__brand" onClick={() => navigate('/apps')}>
           <span className="admin-sider__logo">B</span>
           <span className="admin-sider__title">
             {platformName}

@@ -8,10 +8,6 @@ import AdminLayout from './layouts/AdminLayout'
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
-const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
-const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
-const WorkflowListPage = lazy(() => import('./pages/workflows/WorkflowListPage'))
-const WorkflowEditPage = lazy(() => import('./pages/workflows/WorkflowEditPage'))
 const ToolListPage = lazy(() => import('./pages/tools/ToolListPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const DepartmentsPage = lazy(() => import('./pages/departments/DepartmentsPage'))
@@ -53,7 +49,7 @@ export default function AppRouter() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Navigate to="/agents" replace />} />
+            <Route path="/" element={<Navigate to="/apps" replace />} />
             <Route path="/apps" element={<AppListPage />} />
             <Route path="/apps/:id/edit" element={<AppEditPage />} />
             <Route path="/marketplace" element={<MarketplacePage />} />
@@ -65,46 +61,6 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:audit">
                   <AuditLogsPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/agents"
-              element={
-                <RequirePermission permission="page:agents">
-                  <AgentListPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/agents/new"
-              element={
-                <RequirePermission permission="page:agents">
-                  <AgentEditPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/agents/:id/edit"
-              element={
-                <RequirePermission permission="page:agents">
-                  <AgentEditPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/workflows"
-              element={
-                <RequirePermission permission="page:workflows">
-                  <WorkflowListPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/workflows/:id/edit"
-              element={
-                <RequirePermission permission="page:workflows">
-                  <WorkflowEditPage />
                 </RequirePermission>
               }
             />
