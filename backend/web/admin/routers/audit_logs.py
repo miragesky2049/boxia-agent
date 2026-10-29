@@ -32,3 +32,13 @@ def list_audit_logs(
         page=result.page,
         page_size=result.page_size,
     )
+
+
+@router.delete("")
+def clear_audit_logs(
+    service: AuditServiceDep,
+    _permission: None = Depends(require_permission("button:audit:clear")),
+) -> dict:
+    """清空审计日志：产品级清全部，租户级只清本租户。"""
+    count = service.clear()
+    return {"deleted": count}

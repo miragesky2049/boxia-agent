@@ -1,12 +1,12 @@
-import { FileSearchOutlined } from '@ant-design/icons'
+import { ClearOutlined, FileSearchOutlined } from '@ant-design/icons'
 import { App, Button, Drawer, Input, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
-import { listAuditLogs, type AuditLogItem } from '../api/audit'
+import { clearAuditLogs, listAuditLogs, type AuditLogItem } from '../api/audit'
 
 export default function AuditLogsPage() {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const [items, setItems] = useState<AuditLogItem[]>([])
   const [total, setTotal] = useState(0)
   const [page, setPage] = useState(1)
@@ -31,6 +31,19 @@ export default function AuditLogsPage() {
       setLoading(false)
     }
   }, [page, pageSize, action, message])
+
+  const handleClear = () => {
+    void (async () => {
+      try {
+        const result = await clearAuditLogs()
+        message.success(`已清空 ${result.deleted} 条审计日志`)
+        setPage(1)
+        void load()
+      } catch (error) {
+        message.error(error instanceof Error ? error.message : '清空失败')
+      }
+    })()
+  }
 
   useEffect(() => {
     void load()
@@ -114,6 +127,22 @@ export default function AuditLogsPage() {
         />
         <Button type="primary" onClick={() => void load()} loading={loading}>
           查询
+        </Button>
+        <Button
+          danger
+          icon={<ClearOutlined />}
+          onClick={() =>
+            modal.confirm({
+              title: '确认清空全部审计日志？',
+              content: '清空后不可恢复，建议先导出备份。',
+              okText: '确认清空',
+              okButtonProps: { danger: true },
+              cancelText: '取消',
+              onOk: handleClear,
+            })
+          }
+        >
+          清空日志
         </Button>
       </Space>
 

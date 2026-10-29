@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.audit_log import AuditLog
@@ -58,6 +58,15 @@ class PostgresAuditLogRepository:
             .limit(page_size)
         ).all()
         return [self._to_entity(row) for row in rows], int(total)
+
+    def delete_all(self, tenant_id: UUID | None = None) -> int:
+        """清空审计日志；tenant_id 非空时只清该租户，否则清空全部（平台级）。"""
+        stmt = delete(AuditLogModel)
+        if tenant_id is not None:
+            stmt = stmt.where(AuditLogModel.tenant_id == tenant_id)
+        result = self._session.execute(stmt)
+        self._session.flush()
+        return int(result.rowcount or 0)
 
     @staticmethod
     def _to_entity(row: AuditLogModel) -> AuditLog:

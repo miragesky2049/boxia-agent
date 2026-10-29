@@ -36,3 +36,7 @@ export async function listAuditLogs(params: {
   const qs = query.toString()
   return request<AuditLogPage>(`/admin/audit-logs${qs ? `?${qs}` : ''}`)
 }
+
+export async function clearAuditLogs(): Promise<{ deleted: number }> {
+  return request<{ deleted: number }>('/admin/audit-logs', { method: 'DELETE' })
+}

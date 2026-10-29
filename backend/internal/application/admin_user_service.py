@@ -542,3 +542,9 @@ class AuditService:
             page, page_size, action, actor_id, self._context.tenant_id
         )
         return Page(items=items, total=total, page=page, page_size=page_size)
+
+    def clear(self) -> int:
+        """清空审计日志：产品级清空全部，租户级只清本租户。返回删除条数。"""
+        count = self._uow.audit_logs.delete_all(self._context.tenant_id)
+        self._uow.commit()
+        return count
