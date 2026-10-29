@@ -80,20 +80,20 @@ def ensure_platform_admin(settings: Settings) -> None:
         logger.info("自动初始化平台管理员账号成功: %s", username)
 
 
-def ensure_v4_model_catalog() -> None:
-    """启动时把 settings.llm_* 种子写入 v4 model_provider / model_catalog。
+def ensure_model_catalog() -> None:
+    """启动时把 settings.llm_* 种子写入 model_provider / model_catalog。
 
     只在不存在时插入，不覆盖管理员在 admin 端改过的凭证。
     """
-    from internal.application.v4.model_service import V4ModelService
+    from internal.application.apps.model_service import ModelService
 
     session_factory = get_session_factory()
     session = session_factory()
     try:
-        V4ModelService(session).seed_from_settings()
+        ModelService(session).seed_from_settings()
         session.commit()
     except Exception:
-        logger.exception("v4 模型目录 seed 失败")
+        logger.exception("模型目录 seed 失败")
         session.rollback()
     finally:
         session.close()

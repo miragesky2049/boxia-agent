@@ -24,12 +24,12 @@ const RolesPage = lazy(() => import('./pages/RolesPage'))
 const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
 const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
-const V4AppListPage = lazy(() => import('./pages/v4/AppListPage'))
-const V4AppEditPage = lazy(() => import('./pages/v4/AppEditPage'))
-const V4MarketplacePage = lazy(() => import('./pages/v4/MarketplacePage'))
-const V4RunPage = lazy(() => import('./pages/v4/RunPage'))
-const V4RunsPage = lazy(() => import('./pages/v4/RunsPage'))
-const V4ResourcesPage = lazy(() => import('./pages/v4/ResourcesPage'))
+const AppListPage = lazy(() => import('./pages/apps/AppListPage'))
+const AppEditPage = lazy(() => import('./pages/apps/AppEditPage'))
+const MarketplacePage = lazy(() => import('./pages/apps/MarketplacePage'))
+const RunPage = lazy(() => import('./pages/apps/RunPage'))
+const RunsPage = lazy(() => import('./pages/apps/RunsPage'))
+const ResourcesPage = lazy(() => import('./pages/apps/ResourcesPage'))
 const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage'))
 
 export default function AppRouter() {
@@ -54,12 +54,12 @@ export default function AppRouter() {
             }
           >
             <Route path="/" element={<Navigate to="/agents" replace />} />
-            <Route path="/v4/apps" element={<V4AppListPage />} />
-            <Route path="/v4/apps/:id/edit" element={<V4AppEditPage />} />
-            <Route path="/v4/marketplace" element={<V4MarketplacePage />} />
-            <Route path="/v4/marketplace/apps/:appId/run" element={<V4RunPage />} />
-            <Route path="/v4/marketplace/apps/:appId/runs" element={<V4RunsPage />} />
-            <Route path="/v4/resources" element={<V4ResourcesPage />} />
+            <Route path="/apps" element={<AppListPage />} />
+            <Route path="/apps/:id/edit" element={<AppEditPage />} />
+            <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/marketplace/apps/:appId/run" element={<RunPage />} />
+            <Route path="/marketplace/apps/:appId/runs" element={<RunsPage />} />
+            <Route path="/resources" element={<ResourcesPage />} />
             <Route
               path="/audit"
               element={
