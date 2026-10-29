@@ -13,7 +13,7 @@ import type {
   UploadMaterialProps,
   UploadMaterialRequest,
 } from './types'
-import './senclaw-cmp.css'
+import './boxiaclaw-cmp.css'
 
 let fileSeq = 0
 function nextFileId(): string {

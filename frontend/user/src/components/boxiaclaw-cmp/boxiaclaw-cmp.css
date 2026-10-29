@@ -1,4 +1,4 @@
-/* ============ senclaw-cmp: @senclaw-elearning-cmp/upload-material ============ */
+/* ============ boxiaclaw-cmp: @boxiaclaw-elearning-cmp/upload-material ============ */
 .um-card {
   background: #ffffff;
   border: 1px solid rgba(15, 23, 42, 0.08);
@@ -126,7 +126,7 @@
   gap: 8px;
 }
 
-/* ============ senclaw-cmp: @senclaw-elearning-cmp/action-bar ============ */
+/* ============ boxiaclaw-cmp: @boxiaclaw-elearning-cmp/action-bar ============ */
 .ab-row {
   display: flex;
   gap: 8px;

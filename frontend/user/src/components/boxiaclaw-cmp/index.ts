@@ -1,5 +1,5 @@
 /**
- * @senclaw-elearning-cmp 组件库
+ * @boxiaclaw-elearning-cmp 组件库
  *
  * boxia AI 陪练自由剧本创建流程中使用的前端组件，对应 skill free-script-creation-v8
  * 中声明的两个 uicomponents：
@@ -9,7 +9,7 @@
  *
  * 用法：
  * ```tsx
- * import { UploadMaterial, ActionBar } from './components/senclaw-cmp'
+ * import { UploadMaterial, ActionBar } from './components/boxiaclaw-cmp'
  * ```
  */
 export { default as UploadMaterial } from './UploadMaterial'

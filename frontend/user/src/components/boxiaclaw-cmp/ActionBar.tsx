@@ -1,7 +1,7 @@
 import { Button } from 'antd'
 import type { ButtonProps } from 'antd'
 import type { ActionBarAction, ActionBarActionType, ActionBarProps } from './types'
-import './senclaw-cmp.css'
+import './boxiaclaw-cmp.css'
 
 /**
  * antd Button 无 secondary 类型，secondary 用 default + 主色描边近似。

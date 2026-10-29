@@ -15,8 +15,8 @@ import { getAgent } from '../api/agents'
 import { runAgentStream } from '../api/agentRun'
 import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
 import type { UserAgentDetail } from '../api/types'
-import { ActionBar, UploadMaterial } from '../components/senclaw-cmp'
-import type { ActionBarAction, UploadedMaterialFile } from '../components/senclaw-cmp'
+import { ActionBar, UploadMaterial } from '../components/boxiaclaw-cmp'
+import type { ActionBarAction, UploadedMaterialFile } from '../components/boxiaclaw-cmp'
 
 interface Message {
   id: string
@@ -35,13 +35,13 @@ const SUGGESTED_PROMPTS = [
 
 /**
  * 组件渲染协议：assistant 消息中使用围栏代码块声明前端组件，
- * 语言标记为 senclaw-component，内容为 JSON：
+ * 语言标记为 boxiaclaw-component，内容为 JSON：
  *
- * ```senclaw-component
- * {"name":"@senclaw-elearning-cmp/upload-material","props":{"sceneRobotId":"xxx"}}
+ * ```boxiaclaw-component
+ * {"name":"@boxiaclaw-elearning-cmp/upload-material","props":{"sceneRobotId":"xxx"}}
  * ```
  */
-const COMPONENT_BLOCK_RE = /```senclaw-component\s*\n([\s\S]*?)```/g
+const COMPONENT_BLOCK_RE = /```boxiaclaw-component\s*\n([\s\S]*?)```/g
 
 interface ContentSegment {
   type: 'markdown' | 'component'
@@ -79,7 +79,7 @@ function isComponentBlockPayload(data: unknown): data is ComponentBlockPayload {
   )
 }
 
-function SenclawComponentBlock({ json }: { json: string }) {
+function BoxiaclawComponentBlock({ json }: { json: string }) {
   const { message } = AntdApp.useApp()
 
   const parsed = useMemo(() => {
@@ -109,7 +109,7 @@ function SenclawComponentBlock({ json }: { json: string }) {
     return <Alert type="warning" showIcon message="组件声明格式不正确" description={json} />
   }
 
-  if (data.name === '@senclaw-elearning-cmp/upload-material') {
+  if (data.name === '@boxiaclaw-elearning-cmp/upload-material') {
     const props = data.props ?? {}
     return (
       <UploadMaterial
@@ -125,7 +125,7 @@ function SenclawComponentBlock({ json }: { json: string }) {
     )
   }
 
-  if (data.name === '@senclaw-elearning-cmp/action-bar') {
+  if (data.name === '@boxiaclaw-elearning-cmp/action-bar') {
     const placement =
       data.props?.placement === 'right' || data.props?.placement === 'center'
         ? data.props.placement
@@ -527,7 +527,7 @@ export default function ChatPage() {
                           <div className="chat-bubble__content chat-markdown">
                             {parseContentSegments(m.content).map((seg, idx) => {
                               if (seg.type === 'component') {
-                                return <SenclawComponentBlock key={idx} json={seg.value} />
+                                return <BoxiaclawComponentBlock key={idx} json={seg.value} />
                               }
                               return (
                                 <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>

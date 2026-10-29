@@ -1,7 +1,7 @@
 import type { CSSProperties } from 'react'
 
 /**
- * @senclaw-elearning-cmp/upload-material 组件类型定义
+ * @boxiaclaw-elearning-cmp/upload-material 组件类型定义
  *
  * 用于自由剧本创建流程中引导用户上传业务资料（产品知识 / 示例对话 /
  * 对话方法论 / 评分规则）。上传完成后由后端解析并通过
@@ -45,7 +45,7 @@ export interface UploadMaterialProps {
 }
 
 /**
- * @senclaw-elearning-cmp/action-bar 组件类型定义
+ * @boxiaclaw-elearning-cmp/action-bar 组件类型定义
  *
  * 在剧本生成完成后渲染"保存并进入剧本详情"等动作按钮。
  */
