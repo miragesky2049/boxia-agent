@@ -1,687 +1,664 @@
-import {
-  ArrowLeftOutlined,
-  CheckCircleOutlined,
-  DownOutlined,
-  EnvironmentOutlined,
-  HistoryOutlined,
-  LayoutOutlined,
-  PictureOutlined,
-  RedoOutlined,
-  SafetyOutlined,
-  SaveOutlined,
-  UndoOutlined,
-} from '@ant-design/icons'
-import { App, Button, Dropdown, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
-import {
-  Background,
-  Controls,
-  MiniMap,
-  ReactFlow,
-  ReactFlowProvider,
-  useReactFlow,
-  useViewport,
-  type Node,
-  type OnConnect,
-  type OnEdgesChange,
-  type OnNodesChange,
-} from '@xyflow/react'
-import '@xyflow/react/dist/style.css'
+import { FreeLayoutEditor, WorkflowNodeRenderer } from '@flowgram.ai/free-layout-editor';
+import type {
+  WorkflowNodeRegistry,
+  WorkflowNodeEntity,
+  WorkflowPortEntity,
+  WorkflowLinesManager,
+  WorkflowJSON,
+  FreeLayoutPluginContext,
+} from '@flowgram.ai/free-layout-editor';
+import '@flowgram.ai/free-layout-editor/index.css';
+import { useParams } from 'react-router-dom';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Divider, message } from 'antd';
+import { getAppGraph, saveAppGraph, debugRunAppStream } from '../../api/apps';
+import { ApiError } from '../../api/client';
 
-import { getApp, getAppGraph, saveAppGraph, updateApp } from '../../api/apps'
-import { NodeConfigDrawer } from './components/NodeConfigDrawer'
-import { NodePalette, APP_NODE_DND_MIME } from './components/NodePalette'
-import { CanvasNode } from './components/CanvasNode'
-import { StickyNode } from './components/StickyNode'
-import { EdgeWithPlus } from './components/EdgeWithPlus'
-import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
-import { VisibilityScopeDrawer } from './components/VisibilityScopeDrawer'
-import { useAppStore, listOutputFields, type NodeData, type NodeType } from './store/appStore'
+// ========== 节点类型定义 ==========
+type NodeTypeKey = 'start' | 'end' | 'llm' | 'http' | 'if_else';
 
-const nodeTypes = { appNode: CanvasNode, sticky: StickyNode }
-const edgeTypes = { default: EdgeWithPlus }
-
-type AppNode = Node<NodeData>
-
-function AppEditCanvas() {
-  const navigate = useNavigate()
-  const params = useParams<{ id: string }>()
-  const appId = params.id ?? ''
-  const { message, modal } = App.useApp()
-  const { screenToFlowPosition, setCenter, zoomTo, fitView } = useReactFlow()
-  const { zoom } = useViewport()
-
-  const [loading, setLoading] = useState(true)
-  const [saving, setSaving] = useState(false)
-  const [name, setName] = useState('')
-  const [description, setDescription] = useState('')
-  const [runtimeMode, setRuntimeMode] = useState<'dag' | 'agent_loop' | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
-  const [versionDrawerOpen, setVersionDrawerOpen] = useState(false)
-  const [variableCheckOpen, setVariableCheckOpen] = useState(false)
-  const [visibilityDrawerOpen, setVisibilityDrawerOpen] = useState(false)
-
-  const nodes = useAppStore((s) => s.nodes)
-  const edges = useAppStore((s) => s.edges)
-  const onNodesChange = useAppStore((s) => s.onNodesChange)
-  const onEdgesChange = useAppStore((s) => s.onEdgesChange)
-  const onConnect = useAppStore((s) => s.onConnect)
-  const addNodeOfType = useAppStore((s) => s.addNodeOfType)
-  const selectNode = useAppStore((s) => s.selectNode)
-  const loadFromGraph = useAppStore((s) => s.loadFromGraph)
-  const serializeToGraph = useAppStore((s) => s.serializeToGraph)
-  const reset = useAppStore((s) => s.reset)
-  const removeNode = useAppStore((s) => s.removeNode)
-  const copyNode = useAppStore((s) => s.copyNode)
-  const pasteNode = useAppStore((s) => s.pasteNode)
-  const selectedNodeId = useAppStore((s) => s.selectedNodeId)
-  const undo = useAppStore((s) => s.undo)
-  const redo = useAppStore((s) => s.redo)
-  const past = useAppStore((s) => s.past)
-  const future = useAppStore((s) => s.future)
-
-  useEffect(() => {
-    reset()
-    if (!appId) {
-      setLoading(false)
-      return
-    }
-    setLoading(true)
-    Promise.all([getApp(appId), getAppGraph(appId).catch(() => null)])
-      .then(([app, graphData]) => {
-        setName(app.name)
-        setDescription(app.description ?? '')
-        if (graphData) {
-          loadFromGraph(graphData.graph)
-          setRuntimeMode(graphData.runtime_mode)
-        }
-      })
-      .catch((error: unknown) => {
-        message.error(error instanceof Error ? error.message : '加载应用失败')
-      })
-      .finally(() => setLoading(false))
-    return () => reset()
-  }, [appId, message, loadFromGraph, reset])
-
-  // 滚动至选中节点：把视口中心定位到选中节点
-  const handleLocateSelected = useCallback(() => {
-    if (!selectedNodeId) {
-      message.warning('请先选中一个节点')
-      return
-    }
-    const node = nodes.find((n) => n.id === selectedNodeId)
-    if (!node) return
-    const x = node.position.x + (node.measured?.width ?? 160) / 2
-    const y = node.position.y + (node.measured?.height ?? 80) / 2
-    void setCenter(x, y, { zoom: 1.2, duration: 300 })
-  }, [selectedNodeId, nodes, setCenter, message])
-
-  // 变量检查：扫描所有节点 config 中的 {{#nodeId.field#}} 引用，列出未定义/未连接的引用
-  const variableReport = useMemo(() => {
-    const definedOutputs = new Map<string, string[]>()
-    nodes.forEach((n) => {
-      const type = n.data.nodeType
-      const outputs = listOutputFields(type)
-      definedOutputs.set(n.id, outputs)
-    })
-    const refs: Array<{ nodeId: string; raw: string; valid: boolean; reason: string }> = []
-    const refRegex = /\{\{#([\w.]+)#\}\}/g
-    nodes.forEach((n) => {
-      const cfgStr = JSON.stringify(n.data.config ?? {})
-      let m: RegExpExecArray | null
-      while ((m = refRegex.exec(cfgStr)) !== null) {
-        const raw = m[1]
-        const [nodeId, field] = raw.split('.')
-        const outputs = definedOutputs.get(nodeId)
-        if (!outputs) {
-          refs.push({ nodeId: n.id, raw, valid: false, reason: `引用了不存在的节点 ${nodeId}` })
-        } else if (field && !outputs.includes(field)) {
-          refs.push({ nodeId: n.id, raw, valid: false, reason: `节点 ${nodeId} 无输出字段 ${field}` })
-        } else {
-          refs.push({ nodeId: n.id, raw, valid: true, reason: 'OK' })
-        }
-      }
-    })
-    const startNode = nodes.find((n) => n.data.nodeType === 'start')
-    const endNode = nodes.find((n) => n.data.nodeType === 'end')
-    const issues: string[] = []
-    if (!startNode) issues.push('缺少开始节点')
-    if (!endNode) issues.push('缺少结束节点')
-    const nodesWithoutIncoming = nodes.filter((n) => {
-      if (n.data.nodeType === 'start' || n.data.nodeType === 'sticky') return false
-      return !edges.some((e) => e.target === n.id)
-    })
-    if (nodesWithoutIncoming.length > 0) {
-      issues.push(`以下节点没有上游连线：${nodesWithoutIncoming.map((n) => n.data.label).join('、')}`)
-    }
-    const nodesWithoutOutgoing = nodes.filter((n) => {
-      if (n.data.nodeType === 'end' || n.data.nodeType === 'sticky') return false
-      return !edges.some((e) => e.source === n.id)
-    })
-    if (nodesWithoutOutgoing.length > 0) {
-      issues.push(`以下节点没有下游连线：${nodesWithoutOutgoing.map((n) => n.data.label).join('、')}`)
-    }
-    return { refs, issues }
-  }, [nodes, edges])
-
-  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴、Ctrl+Z/Y 撤销重做、Alt+L 定位
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement | null
-      const isEditable =
-        target instanceof HTMLInputElement ||
-        target instanceof HTMLTextAreaElement ||
-        target?.isContentEditable
-      if (isEditable) return
-
-      // Alt+L 定位选中节点
-      if (e.altKey && e.key.toLowerCase() === 'l') {
-        e.preventDefault()
-        handleLocateSelected()
-        return
-      }
-
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
-        e.preventDefault()
-        removeNode(selectedNodeId)
-        selectNode(null)
-        setDrawerOpen(false)
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && selectedNodeId) {
-        e.preventDefault()
-        copyNode(selectedNodeId)
-        message.success('已复制节点，可按 Ctrl+V 粘贴')
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'v') {
-        e.preventDefault()
-        pasteNode()
-      } else if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        undo()
-      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') {
-        e.preventDefault()
-        redo()
-      } else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
-        e.preventDefault()
-        redo()
-      }
-    }
-    window.addEventListener('keydown', handler)
-    return () => window.removeEventListener('keydown', handler)
-  }, [selectedNodeId, removeNode, copyNode, pasteNode, selectNode, undo, redo, message, handleLocateSelected])
-
-  const handleNodeClick = useCallback(
-    (_: unknown, node: AppNode) => {
-      selectNode(node.id)
-      // 注释便签节点双击直接编辑，不打开配置抽屉
-      if (node.data.nodeType !== 'sticky') {
-        setDrawerOpen(true)
-      }
-    },
-    [selectNode],
-  )
-
-  const handlePaneClick = useCallback(() => {
-    selectNode(null)
-    setDrawerOpen(false)
-  }, [selectNode])
-
-  const handleAddNode = useCallback(
-    (type: NodeType) => {
-      const error = addNodeOfType(type)
-      if (error) {
-        message.warning(error)
-        return
-      }
-      // 注释便签节点双击直接编辑内容，不打开配置抽屉
-      if (type !== 'sticky') {
-        setDrawerOpen(true)
-      }
-    },
-    [addNodeOfType, message],
-  )
-
-  const handleConnect = useCallback<OnConnect>(
-    (connection) => {
-      const error = onConnect(connection)
-      if (error) message.warning(error)
-    },
-    [onConnect, message],
-  )
-
-  const handleDragOver = useCallback((event: React.DragEvent) => {
-    event.preventDefault()
-    event.dataTransfer.dropEffect = 'move'
-  }, [])
-
-  const handleDrop = useCallback(
-    (event: React.DragEvent) => {
-      event.preventDefault()
-      const type = event.dataTransfer.getData(APP_NODE_DND_MIME) as NodeType | ''
-      if (!type) return
-      const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
-      const error = addNodeOfType(type, position)
-      if (error) {
-        message.warning(error)
-        return
-      }
-      if (type !== 'sticky') {
-        setDrawerOpen(true)
-      }
-    },
-    [screenToFlowPosition, addNodeOfType, message],
-  )
-
-  const handleSave = async () => {
-    if (!name.trim()) {
-      message.warning('请填写应用名称')
-      return
-    }
-    setSaving(true)
-    try {
-      await updateApp(appId, { name: name.trim(), description })
-      const graph = serializeToGraph()
-      const result = await saveAppGraph(appId, graph)
-      setRuntimeMode(result.runtime_mode)
-      const changed = result.versioned_fields?.length ?? 0
-      message.success(
-        changed > 0 ? `已保存，${changed} 个字段已生成新版本` : '已保存',
-      )
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '保存失败')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  // 自动布局：按拓扑层级从左到右排列
-  const handleAutoLayout = useCallback(() => {
-    if (nodes.length === 0) return
-    // 计算每个节点的层级
-    const inDegree = new Map<string, number>()
-    nodes.forEach((n) => inDegree.set(n.id, 0))
-    edges.forEach((e) => inDegree.set(e.target, (inDegree.get(e.target) ?? 0) + 1))
-
-    const level = new Map<string, number>()
-    const queue: string[] = []
-    inDegree.forEach((d, id) => {
-      if (d === 0) {
-        level.set(id, 0)
-        queue.push(id)
-      }
-    })
-
-    while (queue.length > 0) {
-      const id = queue.shift()!
-      const lvl = level.get(id) ?? 0
-      edges
-        .filter((e) => e.source === id)
-        .forEach((e) => {
-          const nextLvl = (level.get(e.target) ?? 0)
-          if (lvl + 1 > nextLvl) level.set(e.target, lvl + 1)
-          inDegree.set(e.target, (inDegree.get(e.target) ?? 1) - 1)
-          if ((inDegree.get(e.target) ?? 0) === 0) queue.push(e.target)
-        })
-    }
-
-    // 每层的节点按 y 位置堆叠
-    const levelNodes = new Map<number, string[]>()
-    level.forEach((lvl, id) => {
-      const arr = levelNodes.get(lvl) ?? []
-      arr.push(id)
-      levelNodes.set(lvl, arr)
-    })
-
-    const newPositions = new Map<string, { x: number; y: number }>()
-    const H_GAP = 280
-    const V_GAP = 120
-    levelNodes.forEach((ids, lvl) => {
-      ids.forEach((id, idx) => {
-        newPositions.set(id, { x: lvl * H_GAP, y: idx * V_GAP })
-      })
-    })
-
-    // 更新节点位置
-    nodes.forEach((n) => {
-      const pos = newPositions.get(n.id)
-      if (pos) n.position = pos
-    })
-
-    message.success('已自动整理节点布局')
-  }, [nodes, edges, message])
-
-  // 导出画布为 PNG
-  const handleExportImage = useCallback(async () => {
-    const canvasEl = document.querySelector('.react-flow')
-    if (!canvasEl) {
-      message.warning('未找到画布')
-      return
-    }
-    try {
-      // 简单实现：截取画布区域
-      const rect = canvasEl.getBoundingClientRect()
-      const svg = canvasEl.querySelector('svg')
-      if (!svg) throw new Error('no svg')
-
-      const serializer = new XMLSerializer()
-      const svgStr = serializer.serializeToString(svg)
-      const img = new Image()
-      const svgBlob = new Blob([svgStr], { type: 'image/svg+xml;charset=utf-8' })
-      const url = URL.createObjectURL(svgBlob)
-
-      img.onload = () => {
-        const canvas = document.createElement('canvas')
-        canvas.width = rect.width * 2
-        canvas.height = rect.height * 2
-        const ctx = canvas.getContext('2d')!
-        ctx.fillStyle = '#f5f7fa'
-        ctx.fillRect(0, 0, canvas.width, canvas.height)
-        ctx.scale(2, 2)
-        ctx.drawImage(img, 0, 0, rect.width, rect.height)
-        URL.revokeObjectURL(url)
-
-        canvas.toBlob((blob) => {
-          if (!blob) return
-          const url2 = URL.createObjectURL(blob)
-          const a = document.createElement('a')
-          a.href = url2
-          a.download = `${name || 'workflow'}.png`
-          a.click()
-          URL.revokeObjectURL(url2)
-          message.success('已导出画布图片')
-        })
-      }
-      img.src = url
-    } catch (error) {
-      message.error('导出失败：' + (error instanceof Error ? error.message : '未知错误'))
-    }
-  }, [name, message])
-
-  if (loading) {
-    return (
-      <div className="page-card" style={{ textAlign: 'center', padding: 80 }}>
-        <Spin />
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 96px)' }}>
-      <div className="page-card" style={{ padding: '12px 16px', marginBottom: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <Button type="text" icon={<ArrowLeftOutlined />} onClick={() => navigate('/apps')}>
-            返回
-          </Button>
-          <Input
-            value={name}
-            onChange={(e) => setName(e.target.value)}
-            placeholder="应用名称"
-            style={{ width: 240 }}
-          />
-          <Input
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-            placeholder="描述（可选）"
-            style={{ width: 280 }}
-          />
-          {runtimeMode && <Tag color={runtimeMode === 'agent_loop' ? 'purple' : 'blue'}>{runtimeMode}</Tag>}
-          <Space style={{ marginLeft: 'auto' }}>
-            <Button
-              icon={<LayoutOutlined />}
-              onClick={handleAutoLayout}
-              disabled={nodes.length === 0}
-              title="自动整理节点布局"
-            >
-              整理布局
-            </Button>
-            <Button
-              icon={<PictureOutlined />}
-              onClick={handleExportImage}
-              disabled={nodes.length === 0}
-              title="导出画布为 PNG 图片"
-            >
-              导出图片
-            </Button>
-            <Button
-              icon={<HistoryOutlined />}
-              onClick={() => setVersionDrawerOpen(true)}
-            >
-              版本
-            </Button>
-            <Tooltip title="定位到选中节点（Alt+L）">
-              <Button
-                icon={<EnvironmentOutlined />}
-                onClick={handleLocateSelected}
-                disabled={!selectedNodeId}
-              >
-                定位
-              </Button>
-            </Tooltip>
-            <Button
-              icon={<SafetyOutlined />}
-              onClick={() => setVisibilityDrawerOpen(true)}
-            >
-              可见范围
-            </Button>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={handleSave}
-            >
-              保存
-            </Button>
-          </Space>
-        </div>
-      </div>
-
-      <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-        <NodePalette onAdd={handleAddNode} />
-        <Dropdown
-          trigger={['contextMenu']}
-          menu={{
-            items: [
-              { key: 'paste', label: '粘贴节点 (Ctrl+V)' },
-              { key: 'layout', label: '自动整理布局' },
-              { type: 'divider' },
-              { key: 'clear', label: '清空画布', danger: true },
-            ],
-            onClick: ({ key }) => {
-              if (key === 'paste') {
-                pasteNode()
-                message.success('已粘贴节点')
-              } else if (key === 'layout') {
-                handleAutoLayout()
-              } else if (key === 'clear') {
-                modal.confirm({
-                  title: '清空画布？',
-                  content: '将删除所有节点和连线，此操作不可撤销',
-                  okText: '清空',
-                  okButtonProps: { danger: true },
-                  cancelText: '取消',
-                  onOk: () => reset(),
-                })
-              }
-            },
-          }}
-        >
-          <div
-            style={{ flex: 1, background: '#f5f7fa', position: 'relative' }}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-          >
-            <ReactFlow
-              nodes={nodes}
-              edges={edges}
-              nodeTypes={nodeTypes}
-              edgeTypes={edgeTypes}
-              onNodesChange={onNodesChange as OnNodesChange}
-              onEdgesChange={onEdgesChange as OnEdgesChange}
-              onConnect={handleConnect as OnConnect}
-              onNodeClick={handleNodeClick}
-              onPaneClick={handlePaneClick}
-              fitView
-              fitViewOptions={{ padding: 0.3, maxZoom: 0.9 }}
-              defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
-              minZoom={0.3}
-              maxZoom={1.5}
-              proOptions={{ hideAttribution: true }}
-            >
-              <Background color="#d9d9d9" gap={16} />
-              <Controls showInteractive={false} />
-              <MiniMap pannable zoomable />
-            </ReactFlow>
-
-            {/* 底部浮动工具栏：undo/redo + 变量检查 */}
-            <div
-              style={{
-                position: 'absolute',
-                bottom: 16,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                display: 'flex',
-                gap: 4,
-                padding: '4px 8px',
-                background: '#fff',
-                borderRadius: 8,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
-                border: '1px solid #f0f0f0',
-                zIndex: 20,
-                alignItems: 'center',
-              }}
-            >
-              <Tooltip title="撤销 (Ctrl+Z)">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<UndoOutlined />}
-                  disabled={past.length === 0}
-                  onClick={undo}
-                />
-              </Tooltip>
-              <Tooltip title="重做 (Ctrl+Shift+Z)">
-                <Button
-                  size="small"
-                  type="text"
-                  icon={<RedoOutlined />}
-                  disabled={future.length === 0}
-                  onClick={redo}
-                />
-              </Tooltip>
-              <div style={{ width: 1, height: 16, background: '#e8e8e8', margin: '0 4px' }} />
-              <Button
-                size="small"
-                type="text"
-                icon={<CheckCircleOutlined />}
-                onClick={() => setVariableCheckOpen(true)}
-              >
-                变量检查
-                {variableReport.issues.length > 0 && (
-                  <Tag color="orange" style={{ marginLeft: 4 }}>{variableReport.issues.length}</Tag>
-                )}
-              </Button>
-              <div style={{ width: 1, height: 16, background: '#e8e8e8', margin: '0 4px' }} />
-              <Dropdown
-                trigger={['click']}
-                placement="topCenter"
-                menu={{
-                  items: [
-                    { key: '25', label: '缩放到 25%' },
-                    { key: '50', label: '缩放到 50%' },
-                    { key: '75', label: '缩放到 75%' },
-                    { key: '100', label: '缩放到 100%' },
-                    { key: '150', label: '缩放到 150%' },
-                    { key: '200', label: '缩放到 200%' },
-                    { type: 'divider' },
-                    { key: 'fit', label: '自适应视图' },
-                  ],
-                  onClick: ({ key }) => {
-                    if (key === 'fit') {
-                      void fitView({ padding: 0.3, duration: 300 })
-                    } else {
-                      void zoomTo(Number(key) / 100, { duration: 200 })
-                    }
-                  },
-                }}
-              >
-                <Button size="small" type="text" style={{ minWidth: 72 }}>
-                  {Math.round(zoom * 100)}% <DownOutlined style={{ fontSize: 10, marginLeft: 4 }} />
-                </Button>
-              </Dropdown>
-            </div>
-          </div>
-        </Dropdown>
-      </div>
-
-      <NodeConfigDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
-
-      <VersionHistoryDrawer
-        open={versionDrawerOpen}
-        applicationId={appId}
-        onClose={() => setVersionDrawerOpen(false)}
-      />
-
-      <VisibilityScopeDrawer
-        open={visibilityDrawerOpen}
-        applicationId={appId}
-        onClose={() => setVisibilityDrawerOpen(false)}
-      />
-
-      <Modal
-        title="变量检查"
-        open={variableCheckOpen}
-        onCancel={() => setVariableCheckOpen(false)}
-        footer={<Button onClick={() => setVariableCheckOpen(false)}>关闭</Button>}
-        width={560}
-      >
-        <div style={{ marginBottom: 12 }}>
-          <div style={{ fontWeight: 500, marginBottom: 8 }}>结构问题</div>
-          {variableReport.issues.length === 0 ? (
-            <div style={{ color: '#52c41a' }}>✓ 无结构问题</div>
-          ) : (
-            <ul style={{ margin: 0, paddingLeft: 20, color: '#fa8c16' }}>
-              {variableReport.issues.map((issue, i) => (
-                <li key={i}>{issue}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-        <div>
-          <div style={{ fontWeight: 500, marginBottom: 8 }}>变量引用（{'{{#nodeId.field#}}'}）</div>
-          {variableReport.refs.length === 0 ? (
-            <div style={{ color: '#8c8c8c' }}>画布中未发现变量引用</div>
-          ) : (
-            <div style={{ maxHeight: 300, overflowY: 'auto', fontSize: 12 }}>
-              {variableReport.refs.map((ref, i) => (
-                <div
-                  key={i}
-                  style={{
-                    padding: '4px 8px',
-                    marginBottom: 4,
-                    background: ref.valid ? '#f6ffed' : '#fff2f0',
-                    border: `1px solid ${ref.valid ? '#b7eb8f' : '#ffccc7'}`,
-                    borderRadius: 4,
-                    fontFamily: 'monospace',
-                  }}
-                >
-                  <span style={{ color: ref.valid ? '#52c41a' : '#ff4d4f' }}>
-                    {ref.valid ? '✓' : '✗'}
-                  </span>
-                  <span style={{ marginLeft: 8 }}>{ref.raw}</span>
-                  <span style={{ marginLeft: 8, color: '#8c8c8c' }}>— {ref.reason}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </Modal>
-    </div>
-  )
+interface NodeTypeMeta {
+  type: string;
+  cozeType: string;
+  title: string;
+  color: string;
+  width: number;
+  defaultPorts: Array<{ type: 'input' | 'output' }>;
 }
 
-export default function AppEditPage() {
+const NODE_TYPES: Record<NodeTypeKey, NodeTypeMeta> = {
+  start:   { type: 'start',   cozeType: '1',  title: '开始', color: '#1677ff', width: 100, defaultPorts: [{ type: 'output' }] },
+  end:     { type: 'end',     cozeType: '2',  title: '结束', color: '#52c41a', width: 100, defaultPorts: [{ type: 'input' }] },
+  llm:     { type: 'llm',     cozeType: '3',  title: '大模型', color: '#722ed1', width: 160, defaultPorts: [{ type: 'input' }, { type: 'output' }] },
+  http:    { type: 'http',    cozeType: '45', title: 'HTTP 请求', color: '#fa8c16', width: 160, defaultPorts: [{ type: 'input' }, { type: 'output' }] },
+  if_else: { type: 'if_else', cozeType: '8',  title: '条件分支', color: '#eb2f96', width: 160, defaultPorts: [{ type: 'input' }, { type: 'output' }] },
+};
+
+const NODE_TYPE_BY_REGISTRY: Record<string, NodeTypeMeta> = Object.fromEntries(
+  Object.values(NODE_TYPES).map((m) => [m.type, m]),
+);
+
+// ========== 运行时节点状态（用于高亮） ==========
+type RunNodeStatus = 'running' | 'success' | 'error';
+
+// ========== 节点渲染组件（双击打开配置） ==========
+function makeNodeRenderer(
+  meta: NodeTypeMeta,
+  _ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>,
+  onNodeDoubleClick: (node: WorkflowNodeEntity) => void,
+) {
+  return function NodeRenderer({ node }: { node: WorkflowNodeEntity }) {
+    const title = (node.data as { title?: string })?.title || meta.title;
+    return (
+      <WorkflowNodeRenderer node={node}>
+        <div
+          onDoubleClick={() => onNodeDoubleClick(node)}
+          style={{
+            padding: '12px 20px',
+            background: meta.color,
+            color: '#fff',
+            borderRadius: 8,
+            fontSize: 14,
+            fontWeight: 500,
+            textAlign: 'center',
+            minWidth: meta.width - 40,
+            cursor: 'pointer',
+            userSelect: 'none',
+          }}
+        >
+          {title}
+        </div>
+      </WorkflowNodeRenderer>
+    );
+  };
+}
+
+const nodeRegistries: WorkflowNodeRegistry[] = Object.values(NODE_TYPES).map((meta) => ({
+  type: meta.type,
+  meta: {
+    defaultPorts: meta.defaultPorts,
+    size: { width: meta.width, height: 40 },
+    renderKey: meta.type,
+  },
+}));
+
+// ========== 默认图 ==========
+const DEFAULT_GRAPH: WorkflowJSON = {
+  nodes: [
+    {
+      id: 'start-1',
+      type: 'start',
+      meta: { position: { x: 200, y: 200 } },
+      data: {},
+    } as WorkflowJSON['nodes'][number],
+  ],
+  edges: [],
+};
+
+// ========== 格式适配 ==========
+function toCozeIR(flowgram: WorkflowJSON): Record<string, unknown> {
+  const nodes = (flowgram.nodes || []).map((n) => {
+    const meta = NODE_TYPE_BY_REGISTRY[n.type as string];
+    const cozeType = meta?.cozeType ?? n.type;
+    const data = (n.data || {}) as Record<string, unknown>;
+    const config = ((data.config || {}) as Record<string, unknown>);
+    return {
+      id: n.id,
+      type: cozeType,
+      meta: { position: (n.meta as { position?: { x: number; y: number } })?.position ?? { x: 0, y: 0 } },
+      data: {
+        nodeMeta: { title: data.title || meta?.title || '' },
+        inputs: {
+          inputParameters: ((config.inputParameters || []) as Array<{ name: string; input: unknown }>),
+          ...config,
+        },
+        outputs: (data.outputs || []) as unknown[],
+      },
+    };
+  });
+
+  const edges = (flowgram.edges || []).map((e) => {
+    const edge = e as unknown as Record<string, unknown>;
+    return {
+      id: (edge.id as string) || `edge-${Math.random().toString(36).slice(2, 8)}`,
+      sourceNodeID: edge.source,
+      targetNodeID: edge.target,
+      sourcePortID: edge.sourcePortID,
+      targetPortID: edge.targetPortID,
+    };
+  });
+
+  return { nodes, edges };
+}
+
+function fromCozeIR(coze: unknown): WorkflowJSON {
+  if (!coze || typeof coze !== 'object') return DEFAULT_GRAPH;
+  const raw = coze as { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> };
+  if (!Array.isArray(raw.nodes) || raw.nodes.length === 0) return DEFAULT_GRAPH;
+
+  const cozeToRegistry: Record<string, string> = Object.fromEntries(
+    Object.values(NODE_TYPES).map((m) => [m.cozeType, m.type]),
+  );
+
+  const nodes = raw.nodes.map((n) => {
+    const cozeType = String(n.type ?? '');
+    const registryType = cozeToRegistry[cozeType] || String(n.type || 'default');
+    const data = (n.data || {}) as Record<string, unknown>;
+    const nodeMeta = (data.nodeMeta || {}) as { title?: string };
+    const inputs = (data.inputs || {}) as Record<string, unknown>;
+    return {
+      id: String(n.id),
+      type: registryType,
+      meta: {
+        position: (n.meta as { position?: { x: number; y: number } })?.position ?? { x: 0, y: 0 },
+      },
+      data: {
+        title: nodeMeta.title,
+        config: inputs,
+        outputs: (data.outputs || []) as unknown[],
+      },
+    } as WorkflowJSON['nodes'][number];
+  });
+
+  const edges = (raw.edges || []).map((e) => ({
+    id: String(e.id ?? `edge-${Math.random().toString(36).slice(2, 8)}`),
+    source: e.sourceNodeID,
+    target: e.targetNodeID,
+    sourcePortID: e.sourcePortID,
+    targetPortID: e.targetPortID,
+  })) as WorkflowJSON['edges'];
+
+  return { nodes, edges };
+}
+
+// ========== 节点配置表单 ==========
+interface NodeConfigValues {
+  title?: string;
+  // LLM
+  modelName?: string;
+  prompt?: string;
+  temperature?: number;
+  maxTokens?: number;
+  // HTTP
+  url?: string;
+  method?: string;
+  headers?: string;
+  body?: string;
+  // if_else
+  condition?: string;
+}
+
+function NodeConfigForm({
+  nodeType,
+  values,
+  onChange,
+}: {
+  nodeType: NodeTypeKey;
+  values: NodeConfigValues;
+  onChange: (patch: Partial<NodeConfigValues>) => void;
+}) {
   return (
-    <ReactFlowProvider>
-      <AppEditCanvas />
-    </ReactFlowProvider>
-  )
+    <Space direction="vertical" style={{ width: '100%' }} size={12}>
+      <div>
+        <Typography.Text type="secondary">节点标题</Typography.Text>
+        <Input
+          value={values.title}
+          onChange={(e) => onChange({ title: e.target.value })}
+          placeholder="节点显示名"
+        />
+      </div>
+
+      {nodeType === 'llm' && (
+        <>
+          <Divider style={{ margin: '4px 0' }} orientation="left" orientationMargin={0}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>模型</Typography.Text>
+          </Divider>
+          <div>
+            <Typography.Text type="secondary">模型名称</Typography.Text>
+            <Input
+              value={values.modelName}
+              onChange={(e) => onChange({ modelName: e.target.value })}
+              placeholder="如：gpt-4o / qwen-max"
+            />
+          </div>
+          <div style={{ display: 'flex', gap: 12 }}>
+            <div style={{ flex: 1 }}>
+              <Typography.Text type="secondary">Temperature</Typography.Text>
+              <InputNumber
+                value={values.temperature ?? 0.7}
+                min={0}
+                max={2}
+                step={0.1}
+                onChange={(v) => onChange({ temperature: v ?? 0.7 })}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div style={{ flex: 1 }}>
+              <Typography.Text type="secondary">最大 Token</Typography.Text>
+              <InputNumber
+                value={values.maxTokens ?? 2048}
+                min={1}
+                max={128000}
+                onChange={(v) => onChange({ maxTokens: v ?? 2048 })}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </div>
+          <div>
+            <Typography.Text type="secondary">系统 Prompt</Typography.Text>
+            <Input.TextArea
+              rows={6}
+              value={values.prompt}
+              onChange={(e) => onChange({ prompt: e.target.value })}
+              placeholder="你是一个助手..."
+            />
+          </div>
+        </>
+      )}
+
+      {nodeType === 'http' && (
+        <>
+          <Divider style={{ margin: '4px 0' }} orientation="left" orientationMargin={0}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>请求</Typography.Text>
+          </Divider>
+          <div>
+            <Typography.Text type="secondary">URL</Typography.Text>
+            <Input
+              value={values.url}
+              onChange={(e) => onChange({ url: e.target.value })}
+              placeholder="https://api.example.com/endpoint"
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">方法</Typography.Text>
+            <Select
+              value={values.method || 'GET'}
+              onChange={(v) => onChange({ method: v })}
+              options={['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].map((m) => ({ value: m, label: m }))}
+              style={{ width: '100%' }}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">请求头（JSON）</Typography.Text>
+            <Input.TextArea
+              rows={3}
+              value={values.headers}
+              onChange={(e) => onChange({ headers: e.target.value })}
+              placeholder={'{"Content-Type": "application/json"}'}
+            />
+          </div>
+          <div>
+            <Typography.Text type="secondary">请求体</Typography.Text>
+            <Input.TextArea
+              rows={4}
+              value={values.body}
+              onChange={(e) => onChange({ body: e.target.value })}
+              placeholder={'{\n  "key": "value"\n}'}
+            />
+          </div>
+        </>
+      )}
+
+      {nodeType === 'if_else' && (
+        <div>
+          <Divider style={{ margin: '4px 0' }} orientation="left" orientationMargin={0}>
+            <Typography.Text type="secondary" style={{ fontSize: 12 }}>条件</Typography.Text>
+          </Divider>
+          <Typography.Text type="secondary">条件表达式</Typography.Text>
+          <Input.TextArea
+            rows={3}
+            value={values.condition}
+            onChange={(e) => onChange({ condition: e.target.value })}
+            placeholder="如：{{start.output.user_id}} == 'admin'"
+          />
+        </div>
+      )}
+    </Space>
+  );
+}
+
+// ========== 页面组件 ==========
+type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
+
+export default function AppEditPage() {
+  const { id } = useParams<{ id: string }>();
+  const [initialData, setInitialData] = useState<WorkflowJSON | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeType, setSelectedNodeType] = useState<NodeTypeKey>('llm');
+  const [configValues, setConfigValues] = useState<NodeConfigValues>({});
+  const [running, setRunning] = useState(false);
+  const [runLogs, setRunLogs] = useState<Array<{ time: string; text: string; level?: 'info' | 'error' }>>([]);
+  const ctxRef = useRef<FreeLayoutPluginContext | null>(null);
+  const saveTimerRef = useRef<number | null>(null);
+  const nodeCounterRef = useRef<Record<string, number>>({});
+
+  // ========== 加载图 ==========
+  useEffect(() => {
+    if (!id) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        try {
+          const resp = await getAppGraph(id);
+          if (cancelled) return;
+          setInitialData(fromCozeIR(resp.graph));
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 404) {
+            if (!cancelled) setInitialData(DEFAULT_GRAPH);
+          } else {
+            throw err;
+          }
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setLoadError(err instanceof Error ? err.message : '加载画布失败');
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [id]);
+
+  useEffect(() => {
+    return () => {
+      if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    };
+  }, []);
+
+  // ========== 保存 ==========
+  const scheduleSave = useCallback(() => {
+    if (!ctxRef.current || !id) return;
+    if (saveTimerRef.current) window.clearTimeout(saveTimerRef.current);
+    setSaveStatus('saving');
+    saveTimerRef.current = window.setTimeout(async () => {
+      try {
+        const flowgram = ctxRef.current!.document.toJSON() as unknown as WorkflowJSON;
+        const cozeIR = toCozeIR(flowgram);
+        await saveAppGraph(id, cozeIR as never);
+        setSaveStatus('saved');
+      } catch {
+        setSaveStatus('error');
+      }
+    }, 800);
+  }, [id]);
+
+  // ========== 添加节点 ==========
+  const addNode = useCallback((typeKey: NodeTypeKey) => {
+    const ctx = ctxRef.current;
+    if (!ctx) return;
+    const meta = NODE_TYPES[typeKey];
+    nodeCounterRef.current[typeKey] = (nodeCounterRef.current[typeKey] ?? 0) + 1;
+    const nodeId = `${typeKey}-${Date.now().toString(36)}-${nodeCounterRef.current[typeKey]}`;
+    const offsetX = 120 + Math.random() * 200;
+    const offsetY = 100 + Math.random() * 150;
+    const root = ctx.document.getNode('root');
+    ctx.document.addNode({
+      id: nodeId,
+      type: meta.type,
+      meta: { position: { x: 300 + offsetX, y: 200 + offsetY } },
+      data: { title: meta.title, config: {} },
+      parent: root,
+    });
+  }, []);
+
+  // ========== 双击节点打开配置 ==========
+  const handleNodeDoubleClick = useCallback((node: WorkflowNodeEntity) => {
+    setSelectedNodeId(node.id);
+    // node.id 形如 `${typeKey}-...`，直接从前缀取类型
+    const prefix = node.id.split('-')[0] as NodeTypeKey;
+    const found = (Object.keys(NODE_TYPES) as NodeTypeKey[]).includes(prefix) ? prefix : 'llm';
+    setSelectedNodeType(found);
+    const data = (node.data || {}) as { title?: string; config?: NodeConfigValues };
+    setConfigValues({
+      title: data.title,
+      ...(data.config || {}),
+    });
+  }, []);
+
+  const renderNodes = Object.fromEntries(
+    Object.values(NODE_TYPES).map((meta) => [
+      meta.type,
+      makeNodeRenderer(meta, ctxRef, handleNodeDoubleClick),
+    ]),
+  ) as Record<string, React.ComponentType<{ node: WorkflowNodeEntity }>>;
+
+  // ========== 抽屉配置变更 ==========
+  const handleConfigChange = useCallback((patch: Partial<NodeConfigValues>) => {
+    setConfigValues((prev) => {
+      const next = { ...prev, ...patch };
+      const ctx = ctxRef.current;
+      if (ctx && selectedNodeId) {
+        const node = ctx.document.getNode(selectedNodeId);
+        if (node) {
+          node.data = {
+            ...(node.data as Record<string, unknown>),
+            title: next.title,
+            config: next,
+          };
+        }
+      }
+      return next;
+    });
+  }, [selectedNodeId]);
+
+  // ========== 连线校验：只能 output → input ==========
+  const canAddLine = useCallback((
+    _ctx: FreeLayoutPluginContext,
+    fromPort: WorkflowPortEntity,
+    toPort: WorkflowPortEntity,
+    _lines: WorkflowLinesManager,
+    silent?: boolean,
+  ) => {
+    const fromType = (fromPort as unknown as { portType?: string }).portType;
+    const toType = (toPort as unknown as { portType?: string }).portType;
+    const ok = fromType === 'output' && toType === 'input';
+    if (!ok && !silent) {
+      message.warning('只能从输出端口连到输入端口');
+    }
+    return ok;
+  }, []);
+
+  // ========== 运行时高亮（直接操作 DOM，绕过 FlowGram 响应式） ==========
+  const NODE_SHADOW: Record<RunNodeStatus, string> = {
+    running: '0 0 0 4px rgba(24,144,255,0.35)',
+    success: '0 0 0 4px rgba(82,196,26,0.35)',
+    error: '0 0 0 4px rgba(255,77,79,0.35)',
+  };
+
+  const setNodeRunStatus = useCallback((nodeId: string, status: RunNodeStatus | undefined) => {
+    const el = document.getElementById(nodeId);
+    if (!el) return;
+    const inner = el.querySelector<HTMLElement>('div[draggable="true"] > div');
+    if (!inner) return;
+    if (status === undefined) {
+      inner.style.boxShadow = '';
+      inner.classList.remove('boxia-node-running');
+    } else {
+      inner.style.boxShadow = NODE_SHADOW[status];
+      if (status === 'running') inner.classList.add('boxia-node-running');
+      else inner.classList.remove('boxia-node-running');
+    }
+  }, []);
+
+  const clearAllRunStatus = useCallback(() => {
+    document.querySelectorAll('.gedit-flow-activity-node').forEach((el) => {
+      const inner = el.querySelector<HTMLElement>('div[draggable="true"] > div');
+      if (!inner) return;
+      inner.style.boxShadow = '';
+      inner.classList.remove('boxia-node-running');
+    });
+  }, []);
+
+  // ========== 试运行 ==========
+  const handleRun = useCallback(async () => {
+    if (!id || running) return;
+    setRunning(true);
+    setRunLogs([]);
+    clearAllRunStatus();
+    const appendLog = (text: string, level: 'info' | 'error' = 'info') => {
+      const time = new Date().toLocaleTimeString();
+      setRunLogs((prev) => [...prev, { time, text, level }]);
+    };
+    try {
+      const ctx = ctxRef.current;
+      let graph: Record<string, unknown>;
+      if (ctx) {
+        const flowgram = ctx.document.toJSON() as unknown as WorkflowJSON;
+        graph = toCozeIR(flowgram);
+      } else {
+        graph = {};
+      }
+      appendLog('启动试运行...');
+      await debugRunAppStream(
+        { graph: graph as never, inputs: {} },
+        (event) => {
+          if (event.event === 'node_start') {
+            const nodeId = String(event.data.node_id || '');
+            if (nodeId) setNodeRunStatus(nodeId, 'running');
+            appendLog(`→ 开始节点 ${nodeId} (${event.data.node_type})`);
+          } else if (event.event === 'node_end') {
+            const nodeId = String(event.data.node_id || '');
+            const status = event.data.status === 'error' ? 'error' : 'success';
+            if (nodeId) setNodeRunStatus(nodeId, status as RunNodeStatus);
+            appendLog(`← 完成节点 ${nodeId}：${event.data.status}`, status as 'info' | 'error');
+          } else if (event.event === 'result') {
+            appendLog(`✓ 运行完成：${JSON.stringify(event.data.output || {})}`);
+          } else if (event.event === 'error') {
+            appendLog(`✗ 错误：${event.data.message || event.data.error}`, 'error');
+          }
+        },
+      );
+      appendLog('试运行结束');
+    } catch (err) {
+      appendLog(`试运行失败：${err instanceof Error ? err.message : String(err)}`, 'error');
+    } finally {
+      setRunning(false);
+    }
+  }, [id, running, clearAllRunStatus, setNodeRunStatus]);
+
+  // ========== 渲染 ==========
+  if (!id) return <div style={{ padding: 24 }}>缺少应用 ID</div>;
+  if (loadError) return <div style={{ padding: 24, color: '#d4380d' }}>加载失败：{loadError}</div>;
+  if (!initialData) return <div style={{ padding: 24 }}>加载中…</div>;
+
+  return (
+    <div style={{ display: 'flex', width: '100%', height: 'calc(100vh - 108px)' }}>
+      {/* 左侧节点面板 */}
+      <div style={{
+        width: 180, padding: 12, background: '#fafafa',
+        borderRight: '1px solid #f0f0f0',
+        display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto',
+      }}>
+        <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>节点库</div>
+        {(Object.keys(NODE_TYPES) as NodeTypeKey[]).map((key) => {
+          const meta = NODE_TYPES[key];
+          return (
+            <button
+              key={key}
+              onClick={() => addNode(key)}
+              disabled={key === 'start'}
+              style={{
+                padding: '8px 12px', background: '#fff',
+                border: '1px solid #d9d9d9', borderRadius: 6,
+                cursor: key === 'start' ? 'not-allowed' : 'pointer',
+                fontSize: 13, color: meta.color, textAlign: 'left',
+                opacity: key === 'start' ? 0.5 : 1,
+              }}
+            >
+              <span style={{
+                display: 'inline-block', width: 8, height: 8,
+                borderRadius: '50%', background: meta.color, marginRight: 8,
+              }} />
+              {meta.title}
+            </button>
+          );
+        })}
+
+        <div style={{ marginTop: 'auto', paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
+          <Button
+            type="primary"
+            block
+            loading={running}
+            onClick={handleRun}
+            style={{ background: '#52c41a', borderColor: '#52c41a' }}
+          >
+            ▶ 试运行
+          </Button>
+        </div>
+      </div>
+
+      {/* 画布区域 */}
+      <div style={{ flex: 1, position: 'relative' }}>
+        <style>{`
+          .gedit-playground-container {
+            position: relative !important;
+            width: 100% !important;
+            height: 100% !important;
+          }
+          @keyframes boxia-pulse {
+            0%, 100% { box-shadow: 0 0 0 4px rgba(24,144,255,0.35); }
+            50% { box-shadow: 0 0 0 8px rgba(24,144,255,0.15); }
+          }
+          .boxia-node-running {
+            animation: boxia-pulse 1.2s ease-in-out infinite;
+          }
+        `}</style>
+
+        {/* 保存状态 */}
+        <div style={{
+          position: 'absolute', top: 8, right: 16, zIndex: 100,
+          padding: '4px 12px', borderRadius: 6, background: '#fff',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.08)', fontSize: 12,
+          color: saveStatus === 'error' ? '#d4380d' : '#52c41a',
+        }}>
+          {saveStatus === 'saving' && '保存中…'}
+          {saveStatus === 'saved' && '已保存'}
+          {saveStatus === 'error' && '保存失败'}
+        </div>
+
+        {/* 试运行日志 */}
+        {runLogs.length > 0 && (
+          <div style={{
+            position: 'absolute', bottom: 16, left: 16, right: 16, zIndex: 100,
+            maxHeight: 200, overflowY: 'auto',
+            background: 'rgba(0,0,0,0.85)', color: '#d9d9d9',
+            borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 12,
+          }}>
+            {runLogs.map((log, i) => (
+              <div key={i} style={{ color: log.level === 'error' ? '#ff4d4f' : '#d9d9d9' }}>
+                <span style={{ color: '#666' }}>[{log.time}]</span> {log.text}
+              </div>
+            ))}
+          </div>
+        )}
+
+        <FreeLayoutEditor
+          nodeRegistries={nodeRegistries}
+          materials={{ renderNodes }}
+          initialData={initialData}
+          onLoad={(ctx) => { ctxRef.current = ctx; }}
+          onContentChange={() => { scheduleSave(); }}
+          canAddLine={canAddLine}
+        />
+      </div>
+
+      {/* 节点配置抽屉 */}
+      <Drawer
+        title={`配置节点 - ${NODE_TYPES[selectedNodeType]?.title || ''}`}
+        open={!!selectedNodeId}
+        onClose={() => setSelectedNodeId(null)}
+        width={420}
+      >
+        <NodeConfigForm
+          nodeType={selectedNodeType}
+          values={configValues}
+          onChange={handleConfigChange}
+        />
+        <div style={{ marginTop: 16 }}>
+          <Tag color="blue">节点 ID：{selectedNodeId}</Tag>
+        </div>
+      </Drawer>
+    </div>
+  );
 }
