@@ -15,7 +15,10 @@ from pydantic import BaseModel, Field
 from internal.application.errors import AppError, ValidationError
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
-from internal.engine.graph.runner import GraphRunner
+from internal.domain.graph.node_base import ServiceRegistry
+from internal.engine.runtime import GraphRuntime
+from internal.engine.services.http_service import HttpService
+from internal.engine.services.llm_adapter import LLMServiceAdapter, build_model_resolver
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.sse import SSE_HEADERS, sse_event
@@ -50,6 +53,7 @@ class AppUpdatePayload(BaseModel):
 
 class GraphPayload(BaseModel):
     graph: dict[str, Any]
+    changelog: str = ""
 
 
 class ListingPayload(BaseModel):
@@ -74,12 +78,6 @@ class VisibilityPayload(BaseModel):
 class DebugRunPayload(BaseModel):
     graph: dict[str, Any]
     inputs: dict[str, Any] = Field(default_factory=dict)
-
-
-class PinFieldPayload(BaseModel):
-    tenant_id: UUID
-    field_path: str = Field(..., max_length=500)
-    version: int = Field(..., ge=1)
 
 
 @router.get("")
@@ -157,56 +155,94 @@ def save_app_graph(
     application_id: UUID,
     payload: GraphPayload,
     service: ApplicationService = AppServiceDep,
+    principal: PlatformAdminDep = None,
 ) -> dict:
-    """保存 graph 定义，返回推断的 runtime_mode 与本次快照的字段版本列表。"""
-    return service.save_graph(application_id, payload.graph)
+    """保存 graph 定义：写整图版本快照 + 审计 + 缓存失效。"""
+    actor_id = getattr(principal, "user_id", None) if principal else None
+    actor_username = getattr(principal, "username", "") if principal else ""
+    return service.save_graph(
+        application_id,
+        payload.graph,
+        changelog=payload.changelog,
+        actor_id=actor_id,
+        actor_username=actor_username,
+    )
 
 
-@router.get("/{application_id}/field-versions")
-def list_field_versions(
+@router.get("/{application_id}/graph-versions")
+def list_graph_versions(
     application_id: UUID,
-    field_path: str | None = None,
     service: ApplicationService = AppServiceDep,
 ) -> list[dict]:
-    """列出某应用全部字段的版本历史；传 field_path 只看单字段。"""
-    return service.list_field_versions(application_id, field_path)
+    """列出整图版本历史（替代旧 field-versions）。"""
+    return service.list_graph_versions(application_id)
 
 
-@router.get("/{application_id}/effective-config")
-def get_effective_config(
+class RollbackGraphPayload(BaseModel):
+    version: int
+
+
+@router.post("/{application_id}/graph-rollback")
+def rollback_graph(
     application_id: UUID,
-    tenant_id: UUID | None = None,
+    payload: RollbackGraphPayload,
     service: ApplicationService = AppServiceDep,
 ) -> dict:
-    """计算租户视角下的生效 config：pin 字段用 pinned 版本，其余用 latest。"""
-    return service.get_effective_config(application_id, tenant_id)
+    """回滚到指定历史版本：把该版本 graph 作为新版本再写一次。"""
+    return service.rollback_graph(application_id, payload.version)
 
 
-@router.post("/{application_id}/field-pin", status_code=status.HTTP_201_CREATED)
-def pin_field(
+class TenantConfigPayload(BaseModel):
+    tenant_id: UUID
+    config_key: str
+    config_value: Any
+
+
+@router.post("/{application_id}/tenant-config", status_code=status.HTTP_201_CREATED)
+def set_tenant_config(
     application_id: UUID,
-    payload: PinFieldPayload,
+    payload: TenantConfigPayload,
     service: ApplicationService = AppServiceDep,
 ) -> dict:
-    """租户把某字段锁定在指定版本。"""
-    service.pin_field(
+    """设置租户级 config 覆盖（key 形如 graph.nodes.{node_id}.config.{field}）。"""
+    service.set_tenant_config(
         tenant_id=payload.tenant_id,
         application_id=application_id,
-        field_path=payload.field_path,
-        version=payload.version,
+        config_key=payload.config_key,
+        config_value=payload.config_value,
     )
     return {"ok": True}
 
 
-@router.delete("/{application_id}/field-pin")
-def unpin_field(
+@router.delete("/{application_id}/tenant-config")
+def delete_tenant_config(
     application_id: UUID,
     tenant_id: UUID,
-    field_path: str,
+    config_key: str,
     service: ApplicationService = AppServiceDep,
 ) -> dict:
-    """租户取消某字段的 pin，回到 latest。"""
-    service.unpin_field(tenant_id, application_id, field_path)
+    """删除租户级 config 覆盖。"""
+    service.delete_tenant_config(tenant_id, application_id, config_key)
+    return {"ok": True}
+
+
+class PinGraphVersionPayload(BaseModel):
+    tenant_id: UUID
+    version: int | None = None
+
+
+@router.post("/{application_id}/graph-pin")
+def pin_graph_version(
+    application_id: UUID,
+    payload: PinGraphVersionPayload,
+    service: ApplicationService = AppServiceDep,
+) -> dict:
+    """租户锁定整图版本；version=None 回到 latest。"""
+    service.pin_graph_version(
+        tenant_id=payload.tenant_id,
+        application_id=application_id,
+        version=payload.version,
+    )
     return {"ok": True}
 
 
@@ -274,79 +310,33 @@ async def debug_run_stream(
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     model_service = ModelService(uow.session)
+    services = ServiceRegistry()
+    services.register(
+        "llm",
+        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
+    )
+    services.register("http", HttpService())
 
-    async def node_callback(event_type: str, data: dict[str, Any]) -> None:
-        await queue.put(sse_event(event_type, data))
+    async def _push_node_event(etype: str, evt_payload: dict) -> None:
+        await queue.put(sse_event(etype, evt_payload))
 
-    runner = GraphRunner(
-        graph=payload.graph,
-        model_resolver=lambda mid: model_service.get_client(mid),
+    runtime = GraphRuntime(
+        canvas_json=payload.graph,
+        services=services,
+        checkpointer=None,
+        on_node_event=_push_node_event,
     )
 
-    # 用 LangGraph astream_events 逐节点推事件，最后 result 从最终 state 取
-    from internal.engine.graph.nodes.builtin import ModelResolverCtx
-
     async def runner_task() -> None:
-        node_started_at: dict[str, float] = {}
-        final_state: dict[str, Any] | None = None
-        token = ModelResolverCtx.set(lambda mid: model_service.get_client(mid))
         try:
-            await runner._ensure_compiled()
-            async for event in runner.compiled.astream_events(
-                {"input": payload.inputs},
-                config={"configurable": {"thread_id": runner.thread_id}},
-                version="v2",
-            ):
-                kind = event["event"]
-                name = event["name"]
-                # 过滤掉 LangGraph 内部链，只保留用户节点
-                if not name or name.startswith("LangGraph") or name in ("Graph", "Channel"):
-                    continue
-                if kind == "on_chain_start":
-                    node_started_at[name] = time.perf_counter()
-                    await queue.put(sse_event("node_start", {
-                        "node_id": name,
-                        "type": name,
-                    }))
-                elif kind == "on_chain_end":
-                    output = (event.get("data") or {}).get("output") or {}
-                    duration_ms = int(
-                        (time.perf_counter() - node_started_at.get(name, time.perf_counter())) * 1000
-                    )
-                    await queue.put(sse_event("node_end", {
-                        "node_id": name,
-                        "type": name,
-                        "status": "success",
-                        "duration_ms": duration_ms,
-                        "output": output if isinstance(output, dict) else {"value": output},
-                        "error": "",
-                    }))
-                    if isinstance(output, dict) and "output" in output:
-                        final_state = output
-                elif kind == "on_chain_error":
-                    err = (event.get("data") or {}).get("error")
-                    duration_ms = int(
-                        (time.perf_counter() - node_started_at.get(name, time.perf_counter())) * 1000
-                    )
-                    await queue.put(sse_event("node_end", {
-                        "node_id": name,
-                        "type": name,
-                        "status": "error",
-                        "duration_ms": duration_ms,
-                        "output": {},
-                        "error": str(err),
-                    }))
-
-            await queue.put(sse_event("result", {
-                "outputs": (final_state or {}).get("output", {}),
-            }))
+            output = await runtime.invoke(payload.inputs)
+            await queue.put(sse_event("result", {"outputs": output}))
         except AppError as exc:
             await queue.put(sse_event("error", {"message": exc.message, "code": exc.status_code}))
         except Exception as exc:  # noqa: BLE001
             logger.exception("debug stream failed")
             await queue.put(sse_event("error", {"message": str(exc), "code": 500}))
         finally:
-            ModelResolverCtx.reset(token)
             await queue.put(None)
 
     task = asyncio.create_task(runner_task())

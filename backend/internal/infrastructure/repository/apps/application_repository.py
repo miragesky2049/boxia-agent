@@ -210,11 +210,24 @@ class ApplicationRepository:
         ).all()
         return [dict(r._mapping) for r in rows]
 
-    # ========== graph ==========
+    def get_marketplace_application(self, application_id: UUID) -> dict | None:
+        """市场详情页：只返回上架且启用的平台应用（含 sale_mode/support_trial/doc_url）。"""
+        row = self._session.execute(
+            text(
+                "SELECT id, name, avatar_url, description, sale_mode, support_trial, doc_url "
+                "FROM application "
+                "WHERE id = :aid AND owner_type = 'platform' AND is_enabled = true "
+                "AND is_listed_in_market = true"
+            ),
+            {"aid": application_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    # ========== graph（schema_json 列名对齐 coze Workflow.schema_json） ==========
     def create_graph(self, application_id: UUID, graph: dict) -> None:
         self._session.execute(
             text(
-                "INSERT INTO application_graph (application_id, graph) "
+                "INSERT INTO application_graph (application_id, schema_json) "
                 "VALUES (:aid, CAST(:graph AS JSONB))"
             ),
             {"aid": application_id, "graph": json.dumps(graph)},
@@ -229,7 +242,7 @@ class ApplicationRepository:
         if existing:
             self._session.execute(
                 text(
-                    "UPDATE application_graph SET graph = CAST(:graph AS JSONB), "
+                    "UPDATE application_graph SET schema_json = CAST(:graph AS JSONB), "
                     "runtime_mode = :mode, updated_at = NOW() WHERE application_id = :aid"
                 ),
                 {"aid": application_id, "graph": json.dumps(graph), "mode": runtime_mode},
@@ -237,7 +250,7 @@ class ApplicationRepository:
         else:
             self._session.execute(
                 text(
-                    "INSERT INTO application_graph (application_id, graph, runtime_mode) "
+                    "INSERT INTO application_graph (application_id, schema_json, runtime_mode) "
                     "VALUES (:aid, CAST(:graph AS JSONB), :mode)"
                 ),
                 {"aid": application_id, "graph": json.dumps(graph), "mode": runtime_mode},
@@ -246,7 +259,7 @@ class ApplicationRepository:
     def get_graph(self, application_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
-                "SELECT graph, runtime_mode, graph_schema_version "
+                "SELECT schema_json AS graph, runtime_mode, graph_schema_version "
                 "FROM application_graph WHERE application_id = :aid"
             ),
             {"aid": application_id},
@@ -288,133 +301,149 @@ class ApplicationRepository:
         ).all()
         return [dict(r._mapping) for r in rows]
 
-    # ========== field version ==========
-    def get_latest_field_versions(self, application_id: UUID) -> dict[str, dict]:
-        """返回 {field_path: {version, value, changelog, created_at}}，每字段取最新版本。"""
-        rows = self._session.execute(
-            text(
-                "SELECT DISTINCT ON (field_path) field_path, version, value, changelog, created_at "
-                "FROM application_field_version "
-                "WHERE application_id = :aid "
-                "ORDER BY field_path, version DESC"
-            ),
-            {"aid": application_id},
-        ).all()
-        return {
-            r._mapping["field_path"]: {
-                "version": r._mapping["version"],
-                "value": r._mapping["value"],
-                "changelog": r._mapping["changelog"],
-                "created_at": r._mapping["created_at"],
-            }
-            for r in rows
-        }
-
-    def insert_field_version(
+    # ========== graph 整图版本（新 hot path） ==========
+    def insert_graph_version(
         self,
         application_id: UUID,
-        field_path: str,
         version: int,
-        value: Any,
+        graph: dict,
+        runtime_mode: str,
         changelog: str = "",
+        created_by: UUID | None = None,
     ) -> UUID:
         vid = new_uuid()
         self._session.execute(
             text(
-                "INSERT INTO application_field_version "
-                "(id, application_id, field_path, version, value, changelog, published_at) "
-                "VALUES (:id, :aid, :path, :ver, CAST(:val AS JSONB), :log, NOW())"
+                "INSERT INTO application_graph_version "
+                "(id, application_id, version, schema_json, runtime_mode, changelog, created_by) "
+                "VALUES (:id, :aid, :ver, CAST(:graph AS JSONB), :mode, :log, :by)"
             ),
             {
                 "id": vid,
                 "aid": application_id,
-                "path": field_path,
                 "ver": version,
-                "val": json.dumps(value),
+                "graph": json.dumps(graph),
+                "mode": runtime_mode,
                 "log": changelog,
+                "by": created_by,
             },
         )
         return vid
 
-    def list_field_versions(
-        self,
-        application_id: UUID,
-        field_path: str | None = None,
-    ) -> list[dict]:
-        sql = (
-            "SELECT field_path, version, value, changelog, published_at, created_at "
-            "FROM application_field_version WHERE application_id = :aid"
-        )
-        params: dict[str, Any] = {"aid": application_id}
-        if field_path:
-            sql += " AND field_path = :path"
-            params["path"] = field_path
-        sql += " ORDER BY field_path, version DESC"
-        rows = self._session.execute(text(sql), params).all()
-        return [dict(r._mapping) for r in rows]
-
-    def get_field_version(
-        self,
-        application_id: UUID,
-        field_path: str,
-        version: int,
-    ) -> dict | None:
+    def get_latest_graph_version(self, application_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
-                "SELECT field_path, version, value, changelog, published_at, created_at "
-                "FROM application_field_version "
-                "WHERE application_id = :aid AND field_path = :path AND version = :ver"
+                "SELECT id, application_id, version, schema_json AS graph, runtime_mode, changelog, created_at "
+                "FROM application_graph_version "
+                "WHERE application_id = :aid ORDER BY version DESC LIMIT 1"
             ),
-            {"aid": application_id, "path": field_path, "ver": version},
+            {"aid": application_id},
         ).first()
         return dict(row._mapping) if row else None
 
-    # ========== tenant field pin ==========
-    def list_pins(self, tenant_id: UUID, application_id: UUID) -> list[dict]:
+    def get_graph_version(self, application_id: UUID, version: int) -> dict | None:
+        row = self._session.execute(
+            text(
+                "SELECT id, application_id, version, schema_json AS graph, runtime_mode, changelog, created_at "
+                "FROM application_graph_version "
+                "WHERE application_id = :aid AND version = :ver"
+            ),
+            {"aid": application_id, "ver": version},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def list_graph_versions(self, application_id: UUID, limit: int = 50) -> list[dict]:
         rows = self._session.execute(
             text(
-                "SELECT field_path, pinned_version, created_at "
-                "FROM tenant_field_pin "
+                "SELECT id, version, runtime_mode, changelog, created_by, created_at "
+                "FROM application_graph_version "
+                "WHERE application_id = :aid ORDER BY version DESC LIMIT :lim"
+            ),
+            {"aid": application_id, "lim": limit},
+        ).all()
+        return [dict(r._mapping) for r in rows]
+
+    # ========== 租户级 config kv（新 hot path） ==========
+    def list_tenant_config(self, tenant_id: UUID, application_id: UUID) -> dict[str, Any]:
+        """一次性读出租户对某应用的所有 config 覆盖。"""
+        rows = self._session.execute(
+            text(
+                "SELECT config_key, config_value FROM tenant_application_config "
                 "WHERE tenant_id = :tid AND application_id = :aid"
             ),
             {"tid": tenant_id, "aid": application_id},
         ).all()
-        return [dict(r._mapping) for r in rows]
+        return {r._mapping["config_key"]: r._mapping["config_value"] for r in rows}
 
-    def upsert_pin(
+    def upsert_tenant_config(
         self,
         tenant_id: UUID,
         application_id: UUID,
-        field_path: str,
-        version: int,
+        config_key: str,
+        config_value: Any,
     ) -> None:
         self._session.execute(
             text(
-                "INSERT INTO tenant_field_pin (id, tenant_id, application_id, field_path, pinned_version) "
-                "VALUES (:id, :tid, :aid, :path, :ver) "
-                "ON CONFLICT ON CONSTRAINT ux_field_pin_unique "
-                "DO UPDATE SET pinned_version = EXCLUDED.pinned_version, created_at = NOW()"
+                "INSERT INTO tenant_application_config "
+                "(id, tenant_id, application_id, config_key, config_value) "
+                "VALUES (:id, :tid, :aid, :key, CAST(:val AS JSONB)) "
+                "ON CONFLICT ON CONSTRAINT ux_tenant_app_config_key "
+                "DO UPDATE SET config_value = EXCLUDED.config_value, updated_at = NOW()"
             ),
             {
                 "id": new_uuid(),
                 "tid": tenant_id,
                 "aid": application_id,
-                "path": field_path,
-                "ver": version,
+                "key": config_key,
+                "val": json.dumps(config_value),
             },
         )
 
-    def delete_pin(
+    def delete_tenant_config(
         self,
         tenant_id: UUID,
         application_id: UUID,
-        field_path: str,
-    ) -> bool:
-        deleted = self._session.execute(
+        config_key: str,
+    ) -> None:
+        self._session.execute(
             text(
-                "DELETE FROM tenant_field_pin "
-                "WHERE tenant_id = :tid AND application_id = :aid AND field_path = :path"
+                "DELETE FROM tenant_application_config "
+                "WHERE tenant_id = :tid AND application_id = :aid AND config_key = :key"
             ),
-            {"tid": tenant_id, "aid": application_id, "path": field_path},
+            {"tid": tenant_id, "aid": application_id, "key": config_key},
         )
-        return int(getattr(deleted, "rowcount", 0) or 0) > 0
+
+    def pin_graph_version(
+        self,
+        tenant_id: UUID,
+        application_id: UUID,
+        version: int | None,
+    ) -> None:
+        """租户锁定整图版本；version=None 表示回到 latest。"""
+        self._session.execute(
+            text(
+                "UPDATE tenant_application_instance "
+                "SET pinned_graph_version = :ver, updated_at = NOW() "
+                "WHERE tenant_id = :tid AND application_id = :aid"
+            ),
+            {"tid": tenant_id, "aid": application_id, "ver": version},
+        )
+
+    # ========== marketplace cursor 分页 ==========
+    def list_marketplace_paged(
+        self,
+        cursor_updated_at: datetime | None = None,
+        limit: int = 20,
+    ) -> list[dict]:
+        """cursor 分页：按 updated_at DESC，上一页最后一条的 updated_at 作 cursor。"""
+        sql = (
+            "SELECT id, name, avatar_url, description, updated_at FROM application "
+            "WHERE owner_type = 'platform' AND is_enabled = true AND is_listed_in_market = true"
+        )
+        params: dict[str, Any] = {"lim": limit}
+        if cursor_updated_at is not None:
+            sql += " AND updated_at < :cursor"
+            params["cursor"] = cursor_updated_at
+        sql += " ORDER BY updated_at DESC LIMIT :lim"
+        rows = self._session.execute(text(sql), params).all()
+        return [dict(r._mapping) for r in rows]
