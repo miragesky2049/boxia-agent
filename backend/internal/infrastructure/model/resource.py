@@ -1,4 +1,8 @@
-"""工具 ORM 模型。"""
+"""工具 ORM 模型（旧版 HTTP 工具表）。
+
+注意：v4 起新工具统一走 resource 表（type='tool'）。本表仍被 admin tools 后台使用，
+保留至后台迁移完成后再下线。
+"""
 
 from datetime import datetime
 from typing import Any
@@ -20,7 +24,10 @@ from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
 
 class ToolModel(Base):
-    """tools 表。"""
+    """tools 表（旧）：admin tools 后台维护的 HTTP 工具库。
+
+    新工具请使用 resource 表（type='tool'）。
+    """
 
     __tablename__ = "tools"
 

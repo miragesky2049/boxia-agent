@@ -2,103 +2,38 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Annotated, Any
 from uuid import UUID
 
-from fastapi import APIRouter, Query
-from sqlalchemy import text
+from fastapi import APIRouter, Depends, Query
 
+from internal.application.apps.application_service import ApplicationService
+from internal.application.errors import NotFoundError
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
 
 router = APIRouter(prefix="/agents", tags=["user-agents"])
 
 
-def _visible_apps(
-    session: Any,
-    tenant_id: UUID,
-    user_id: UUID,
-    keyword: str | None,
-) -> list[dict]:
-    """当前用户可见应用 = 已开通的产品级实例 + 本租户自建应用，再叠加 visibility_mode 过滤。
+def get_app_service(uow: UowDep) -> ApplicationService:
+    return ApplicationService(uow)
 
-    - visibility_mode='all'：任意来源都可见；
-    - visibility_mode='custom'：必须命中 application_visibility_users（直接白名单）
-      或 application_visibility_departments（所在部门命中，include_subtree 时含子部门）。
-    """
-    params: dict[str, Any] = {"tid": str(tenant_id), "uid": str(user_id)}
-    kw_clause = ""
-    if keyword:
-        kw_clause = " AND a.name ILIKE :kw"
-        params["kw"] = f"%{keyword}%"
 
-    rows = session.execute(
-        text(
-            f"""
-            SELECT DISTINCT a.id, a.name, a.avatar_url, a.description, a.is_enabled
-            FROM application a
-            WHERE a.is_enabled = true
-              AND (
-                a.owner_type = 'tenant' AND a.owner_id = :tid
-                OR a.id IN (
-                    SELECT application_id FROM tenant_application_instance
-                    WHERE tenant_id = :tid AND status = 'active'
-                )
-              )
-              AND (
-                a.visibility_mode = 'all'
-                OR a.id IN (
-                    SELECT application_id FROM application_visibility_users
-                    WHERE user_id = :uid
-                )
-                OR a.id IN (
-                    SELECT avd.application_id
-                    FROM application_visibility_departments avd
-                    JOIN user_employments ue ON ue.tenant_id = :tid
-                    JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                    WHERE ue.user_id = :uid
-                      AND ue.is_current = true
-                      AND avd.department_id = ue.department_id
-                    UNION
-                    SELECT avd.application_id
-                    FROM application_visibility_departments avd
-                    JOIN departments target_d ON target_d.id = avd.department_id
-                    JOIN user_employments ue ON ue.tenant_id = :tid
-                    JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                    WHERE ue.user_id = :uid
-                      AND ue.is_current = true
-                      AND avd.include_subtree = true
-                      AND d.path LIKE '/' || target_d.id::text || '/%'
-                )
-              )
-              {kw_clause}
-            ORDER BY a.updated_at DESC
-            """
-        ),
-        params,
-    ).all()
-    return [
-        {
-            "id": str(r._mapping["id"]),
-            "name": r._mapping["name"],
-            "avatar_url": r._mapping["avatar_url"] or "",
-            "description": r._mapping["description"] or "",
-            "is_enabled": r._mapping["is_enabled"],
-        }
-        for r in rows
-    ]
+AppServiceDep = Annotated[ApplicationService, Depends(get_app_service)]
 
 
 @router.get("")
 def list_agents(
     principal: UserAuthDep,
-    uow: UowDep,
+    service: AppServiceDep,
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=64),
 ) -> dict:
     """分页返回当前用户可见的应用卡片列表。"""
-    items = _visible_apps(uow.session, principal.tenant_id, principal.user_id, keyword)
+    items = service.list_visible_apps_for_user(
+        principal.tenant_id, principal.user_id, keyword
+    )
     total = len(items)
     start = (page - 1) * page_size
     return {
@@ -110,16 +45,54 @@ def list_agents(
 
 
 @router.get("/{agent_id}")
-def get_agent(
+async def get_agent(
     agent_id: UUID,
     principal: UserAuthDep,
-    uow: UowDep,
+    service: AppServiceDep,
 ) -> dict:
     """返回单个应用详情（用户端运行前拉取元信息）。"""
-    items = _visible_apps(uow.session, principal.tenant_id, principal.user_id, None)
-    target = next((item for item in items if item["id"] == str(agent_id)), None)
+    target = service.get_visible_app_for_user(agent_id, principal.tenant_id, principal.user_id)
     if target is None:
-        from internal.application.errors import NotFoundError
-
         raise NotFoundError("应用不存在或未开通")
-    return {**target, "config": {}, "skills": [], "tools": [], "components": [], "prompts": []}
+
+    # 从运行时 graph 中提取 agent_loop 节点配置填充前端期望的字段
+    config: dict[str, Any] = {}
+    prompts: list[dict[str, Any]] = []
+    tools: list[dict[str, Any]] = []
+    try:
+        graph = await service.get_runtime_graph(agent_id, principal.tenant_id)
+        loop_node = next(
+            (n for n in graph.get("nodes", []) if n.get("type") == "agent_loop"),
+            None,
+        )
+        if loop_node is not None:
+            node_cfg = loop_node.get("config") or {}
+            system_prompt = node_cfg.get("system_prompt") or ""
+            model_id = node_cfg.get("model_id") or ""
+            config = {
+                "system_prompt": system_prompt,
+                "model_id": model_id,
+                "max_tool_rounds": node_cfg.get("max_tool_rounds", 10),
+            }
+            if system_prompt:
+                prompts.append(
+                    {
+                        "content": system_prompt,
+                        "category": "system",
+                        "variables": node_cfg.get("prompt_variables") or {},
+                    }
+                )
+            for rid in node_cfg.get("tool_resource_ids") or []:
+                tools.append({"type": "tool", "resource_id": str(rid)})
+    except Exception:  # noqa: BLE001
+        # graph 未配置或加载失败时保持空壳兜底，不影响应用详情返回
+        pass
+
+    return {
+        **target,
+        "config": config,
+        "skills": [],
+        "tools": tools,
+        "components": [],
+        "prompts": prompts,
+    }

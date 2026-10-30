@@ -125,6 +125,9 @@ class AccessScope:
     role_ids: tuple[UUID, ...] = ()
     apply_role_filter: bool = True
     is_platform: bool = False
+    # 新增：PRIVATE / TENANT_GROUP 可见性判定需要的当前用户与租户组
+    user_id: UUID | None = None
+    tenant_group_id: UUID | None = None
 
     @property
     def has_role_filter(self) -> bool:

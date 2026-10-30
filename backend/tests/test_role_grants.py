@@ -12,7 +12,7 @@ from tests.helpers import (
     tenant_admin_client,
 )
 
-_RESOURCE_TYPES = ("tool",)
+_RESOURCE_TYPES = ("tool", "app")
 
 
 def _tool_payload(name: str) -> dict:

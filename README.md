@@ -13,6 +13,14 @@
 - **个人学习 / 开源研究**：可免费使用，受 AGPL-3.0 约束（衍生代码需同协议开源）。
 - **商用（闭源集成 / SaaS 托管 / 私有化部署）**：需购买商业授权，档位、权利、限制与联系渠道详见 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
 
+### 归属声明（Attribution）
+
+本项目的工作流画布与节点 DSL 设计参考了 [coze-studio](https://github.com/coze-dev/coze-studio)（Apache License 2.0）。依据 Apache 2.0 第 4(b) 条，本项目在分发时保留了原作者版权声明与协议文本：
+
+- Apache 2.0 协议全文：[LICENSE-APACHE](./LICENSE-APACHE)
+- 归属与衍生说明：[NOTICE](./NOTICE)
+- 原项目：https://github.com/coze-dev/coze-studio
+
 ---
 
 ## 🚀 小白速通（30 秒看完）

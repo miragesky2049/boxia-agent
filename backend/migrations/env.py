@@ -17,6 +17,7 @@ from internal.infrastructure.model import (  # noqa: E402,F401
     access,
     admin_user,
     audit_log,
+    conversation,
     department,
     document,
     employment,

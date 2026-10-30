@@ -11,20 +11,13 @@ from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
-from internal.application.retrieval_service import RetrievalService
 from internal.application.apps.application_service import ApplicationService
-from internal.application.apps.model_service import ModelService
-from internal.application.apps.resource_service import AppResourceService
-from internal.engine.graph.runner import GraphInterrupted, GraphRunner
-from internal.infrastructure.repository.postgres_audit_log_repository import (
-    PostgresAuditLogRepository,
-)
+from internal.engine.runtime import GraphInterrupted, GraphRuntime
 from internal.infrastructure.repository.apps.run_repository import RunRepository
-from internal.infrastructure.repository.apps.usage_repository import UsageRepository
-from internal.infrastructure.repository.apps.webhook_repository import WebhookRepository
 from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
+from web.deps.graph import build_runner
 from web.deps.tenant import RequestContextDep
 
 logger = logging.getLogger(__name__)
@@ -53,9 +46,59 @@ AppServiceDep = Annotated[ApplicationService, Depends(get_app_service)]
 
 
 @router.get("/applications")
-def list_marketplace(service: AppServiceDep) -> list[dict]:
-    """浏览应用市场。"""
-    return service.list_marketplace()
+def list_marketplace(
+    service: AppServiceDep,
+    cursor: str | None = None,
+    limit: int = 20,
+) -> dict:
+    """浏览应用市场（cursor 分页）。"""
+    from datetime import datetime
+    cursor_dt = datetime.fromisoformat(cursor) if cursor else None
+    return service.list_marketplace(cursor_updated_at=cursor_dt, limit=limit)
+
+
+@router.get("/applications/{application_id}")
+def get_marketplace_application(
+    application_id: UUID,
+    service: AppServiceDep,
+    uow: UowDep,
+    context: RequestContextDep,
+) -> dict:
+    """市场应用详情：基本信息 + 当前租户的授权/申请状态。
+
+    返回字段：
+    - application: 应用基本信息（name/avatar/description/sale_mode/support_trial/doc_url）
+    - my_subscription: 当前租户已开通记录（无则 null）
+    - my_latest_apply: 当前租户最近一条申请单（无则 null）
+    - inputs: start 节点定义的输入变量（运行表单用）
+    """
+    from internal.infrastructure.repository.apps.auth_repository import AuthRepository
+
+    app = service._repo.get_marketplace_application(application_id)  # noqa: SLF001
+    if app is None:
+        raise NotFoundError("应用不存在或未上架市场")
+
+    tenant_id = context.tenant_id
+    my_subscription = None
+    my_latest_apply = None
+    if tenant_id is not None:
+        auth_repo = AuthRepository(uow.session)
+        my_subscription = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+        my_latest_apply = auth_repo.get_latest_apply(tenant_id, application_id)
+
+    graph = service.build_effective_graph_sync(application_id, tenant_id)
+    start_node = next(
+        (n for n in graph.get("nodes", []) if n.get("type") == "start"),
+        None,
+    )
+    inputs = (start_node or {}).get("config", {}).get("inputs") or []
+
+    return {
+        "application": app,
+        "my_subscription": my_subscription,
+        "my_latest_apply": my_latest_apply,
+        "inputs": inputs,
+    }
 
 
 @router.post("/subscribe")
@@ -81,7 +124,7 @@ def list_my_apps(
     return service.list_my_apps(context.tenant_id)
 
 
-def _build_runner(
+async def _build_runner(
     service: ApplicationService,
     uow: UowDep,
     context: Any,
@@ -91,74 +134,16 @@ def _build_runner(
     run_id: UUID | None = None,
     current_user_id: UUID | None = None,
     actor_username: str | None = None,
-) -> GraphRunner:
-    """构造 GraphRunner：加载 effective_config graph + 租户模型解析器 + 子图加载器 + tool 解析器 + retrieval。"""
-    graph = service.build_effective_graph(application_id, tenant_id)
-    model_service = ModelService(uow.session)
-
-    resource_service = AppResourceService(uow.session)
-    run_repo = RunRepository(uow.session)
-    usage_repo = UsageRepository(uow.session)
-    audit_repo = PostgresAuditLogRepository(uow.session)
-    webhook_repo = WebhookRepository(uow.session)
-
-    # 检索服务：复用现有 RAG 用例（query 改写 -> 多 query 召回 -> rerank）
-    retrieval_service = RetrievalService(uow=uow, context=context)
-
-    def subgraph_loader(child_app_id: str) -> dict:
-        """加载子图的 effective graph JSON（按当前租户应用 pin 字段）。"""
-        try:
-            child_uuid = UUID(child_app_id)
-        except ValueError:
-            return {}
-        try:
-            return service.build_effective_graph(child_uuid, tenant_id)
-        except Exception:  # noqa: BLE001
-            logger.exception("加载子图失败: child_app_id=%s", child_app_id)
-            return {}
-
-    def tool_resolver(resource_id: str) -> dict | None:
-        """按租户解析 tool 资源：无权访问或不存在返回 None。"""
-        try:
-            rid = UUID(resource_id)
-        except ValueError:
-            return None
-        return resource_service.resolve_for_tenant(rid, tenant_id)
-
-    def knowledge_resolver(resource_id: str) -> list[UUID] | None:
-        """按租户解析 knowledge 资源为 document_ids；无权访问或配置缺失返回 None。"""
-        try:
-            rid = UUID(resource_id)
-        except ValueError:
-            return None
-        record = resource_service.resolve_for_tenant(rid, tenant_id)
-        if record is None:
-            return None
-        config = record.get("config") or {}
-        raw_ids = config.get("document_ids") or []
-        doc_ids: list[UUID] = []
-        for raw in raw_ids:
-            try:
-                doc_ids.append(UUID(str(raw)))
-            except ValueError:
-                continue
-        return doc_ids or None
-
-    return GraphRunner(
-        graph=graph,
+) -> GraphRuntime:
+    """兼容包装：转发到 web.deps.graph.build_runner。"""
+    return await build_runner(
+        service,
+        uow,
+        context,
         tenant_id=tenant_id,
         application_id=application_id,
-        model_resolver=lambda mid: model_service.get_client_for_tenant(mid, tenant_id),
-        subgraph_loader=subgraph_loader,
-        tool_resolver=tool_resolver,
-        retrieval_service=retrieval_service,
-        knowledge_resolver=knowledge_resolver,
-        webhook_repo=webhook_repo,
         thread_id=thread_id,
         run_id=run_id,
-        run_repo=run_repo,
-        usage_repo=usage_repo,
-        audit_repo=audit_repo,
         current_user_id=current_user_id,
         actor_username=actor_username,
     )
@@ -186,7 +171,7 @@ async def run_application(
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    runner = _build_runner(
+    runner = await _build_runner(
         service, uow, context, tenant_id, application_id,
         current_user_id=principal.user_id,
         actor_username=principal.username,
@@ -239,7 +224,7 @@ async def resume_application(
     if pending is None:
         raise NotFoundError("没有等待审批的运行记录")
 
-    runner = _build_runner(
+    runner = await _build_runner(
         service, uow, context, tenant_id, application_id,
         thread_id=thread_id, run_id=pending["id"],
         current_user_id=principal.user_id,
@@ -291,7 +276,7 @@ def list_runs(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
     return RunRepository(uow.session).list_runs(
-        tenant_id, application_id=application_id, limit=limit
+        tenant_id, workflow_id=application_id, limit=limit
     )
 
 
@@ -310,7 +295,7 @@ def get_application_inputs(
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    graph = service.build_effective_graph(application_id, tenant_id)
+    graph = service.build_effective_graph_sync(application_id, tenant_id)
     start_node = next(
         (n for n in graph.get("nodes", []) if n.get("type") == "start"),
         None,
@@ -357,9 +342,9 @@ async def list_run_checkpoints(
     if run is None or run["tenant_id"] != tenant_id:
         raise NotFoundError("运行记录不存在")
 
-    runner = _build_runner(
-        service, uow, context, tenant_id, run["application_id"],
-        thread_id=run["langgraph_thread_id"], run_id=run_id,
+    runner = await _build_runner(
+        service, uow, context, tenant_id, run["workflow_id"],
+        thread_id=run["thread_id"], run_id=run_id,
     )
     history = await runner.list_checkpoint_history(limit=20)
     return {"checkpoints": history}
@@ -391,27 +376,27 @@ async def fork_run(
 
     # 新 run_id，新 thread 由 runner 内部生成
     new_run_id = uuid.uuid4()
-    runner = _build_runner(
-        service, uow, context, tenant_id, run["application_id"],
+    runner = await _build_runner(
+        service, uow, context, tenant_id, run["workflow_id"],
         run_id=new_run_id,
         current_user_id=principal.user_id,
         actor_username=principal.username,
     )
 
-    # 先落一条新 run 记录
-    graph = service.build_effective_graph(run["application_id"], tenant_id)
+    # 先落一条新 run 记录（fork 用的 graph 直接复用 runner 加载的 graph）
+    graph = runner.graph_snapshot if hasattr(runner, "graph_snapshot") else service.build_effective_graph_sync(run["workflow_id"], tenant_id)
     run_repo.insert_run(
         run_id=new_run_id,
         tenant_id=tenant_id,
-        application_id=run["application_id"],
+        workflow_id=run["workflow_id"],
         graph_snapshot=graph,
         input_data=payload.new_input or run["input"],
-        langgraph_thread_id=runner.thread_id,
+        thread_id=runner.thread_id,
     )
 
     try:
         result = await runner.fork_from_checkpoint(
-            source_thread_id=run["langgraph_thread_id"],
+            source_thread_id=run["thread_id"],
             checkpoint_id=payload.checkpoint_id,
             new_input=payload.new_input,
         )
