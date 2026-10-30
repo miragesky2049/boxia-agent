@@ -1,4 +1,16 @@
-import { ArrowLeftOutlined, CheckCircleOutlined, DownOutlined, EnvironmentOutlined, FileTextOutlined, HistoryOutlined, LayoutOutlined, PictureOutlined, PlayCircleOutlined, RedoOutlined, SaveOutlined, UndoOutlined } from '@ant-design/icons'
+import {
+  ArrowLeftOutlined,
+  CheckCircleOutlined,
+  DownOutlined,
+  EnvironmentOutlined,
+  HistoryOutlined,
+  LayoutOutlined,
+  PictureOutlined,
+  RedoOutlined,
+  SafetyOutlined,
+  SaveOutlined,
+  UndoOutlined,
+} from '@ant-design/icons'
 import { App, Button, Dropdown, Input, Modal, Space, Spin, Tag, Tooltip } from 'antd'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -17,15 +29,14 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 
-import { getApp, getAppGraph, saveAppGraph, updateApp, type DebugNodeState } from '../../api/apps'
+import { getApp, getAppGraph, saveAppGraph, updateApp } from '../../api/apps'
 import { NodeConfigDrawer } from './components/NodeConfigDrawer'
 import { NodePalette, APP_NODE_DND_MIME } from './components/NodePalette'
-import { RunDebugModal } from './components/RunDebugModal'
-import { RunLogPanel } from './components/RunLogPanel'
 import { CanvasNode } from './components/CanvasNode'
 import { StickyNode } from './components/StickyNode'
 import { EdgeWithPlus } from './components/EdgeWithPlus'
 import { VersionHistoryDrawer } from './components/VersionHistoryDrawer'
+import { VisibilityScopeDrawer } from './components/VisibilityScopeDrawer'
 import { useAppStore, listOutputFields, type NodeData, type NodeType } from './store/appStore'
 
 const nodeTypes = { appNode: CanvasNode, sticky: StickyNode }
@@ -47,13 +58,9 @@ function AppEditCanvas() {
   const [description, setDescription] = useState('')
   const [runtimeMode, setRuntimeMode] = useState<'dag' | 'agent_loop' | null>(null)
   const [drawerOpen, setDrawerOpen] = useState(false)
-  const [debugOpen, setDebugOpen] = useState(false)
-  const [debugStates, setDebugStates] = useState<Record<string, DebugNodeState>>({})
-  const [debugRunning, setDebugRunning] = useState(false)
-  const [finalResult, setFinalResult] = useState<Record<string, unknown> | null>(null)
-  const [logPanelOpen, setLogPanelOpen] = useState(false)
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false)
   const [variableCheckOpen, setVariableCheckOpen] = useState(false)
+  const [visibilityDrawerOpen, setVisibilityDrawerOpen] = useState(false)
 
   const nodes = useAppStore((s) => s.nodes)
   const edges = useAppStore((s) => s.edges)
@@ -73,8 +80,6 @@ function AppEditCanvas() {
   const redo = useAppStore((s) => s.redo)
   const past = useAppStore((s) => s.past)
   const future = useAppStore((s) => s.future)
-  const runStepNodeId = useAppStore((s) => s.runStepNodeId)
-  const clearRunStep = useAppStore((s) => s.clearRunStep)
 
   useEffect(() => {
     reset()
@@ -160,7 +165,7 @@ function AppEditCanvas() {
     return { refs, issues }
   }, [nodes, edges])
 
-  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴、Ctrl+Z/Y 撤销重做、Alt+R 试运行
+  // 画布键盘快捷键：Delete 删除选中节点、Ctrl+C 复制、Ctrl+V 粘贴、Ctrl+Z/Y 撤销重做、Alt+L 定位
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
@@ -170,21 +175,12 @@ function AppEditCanvas() {
         target?.isContentEditable
       if (isEditable) return
 
-      // Alt+R 试运行（不受 debugRunning 限制，可随时打开 modal）
-      if (e.altKey && e.key.toLowerCase() === 'r') {
-        e.preventDefault()
-        setDebugOpen(true)
-        return
-      }
-
       // Alt+L 定位选中节点
       if (e.altKey && e.key.toLowerCase() === 'l') {
         e.preventDefault()
         handleLocateSelected()
         return
       }
-
-      if (debugRunning) return
 
       if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
         e.preventDefault()
@@ -211,44 +207,26 @@ function AppEditCanvas() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [debugRunning, selectedNodeId, removeNode, copyNode, pasteNode, selectNode, undo, redo, message, handleLocateSelected])
-
-  // 节点上「运行此步骤」按钮：自动打开试运行 modal 并提示
-  useEffect(() => {
-    if (runStepNodeId) {
-      const node = nodes.find((n) => n.id === runStepNodeId)
-      if (node) {
-        message.info(`将从开始节点完整试运行（当前选中：${node.data.label}）`)
-      }
-      setDebugOpen(true)
-      clearRunStep()
-    }
-  }, [runStepNodeId, nodes, clearRunStep, message])
+  }, [selectedNodeId, removeNode, copyNode, pasteNode, selectNode, undo, redo, message, handleLocateSelected])
 
   const handleNodeClick = useCallback(
     (_: unknown, node: AppNode) => {
-      if (debugRunning) return
       selectNode(node.id)
       // 注释便签节点双击直接编辑，不打开配置抽屉
       if (node.data.nodeType !== 'sticky') {
         setDrawerOpen(true)
       }
     },
-    [selectNode, debugRunning],
+    [selectNode],
   )
 
   const handlePaneClick = useCallback(() => {
-    if (debugRunning) return
     selectNode(null)
     setDrawerOpen(false)
-  }, [selectNode, debugRunning])
+  }, [selectNode])
 
   const handleAddNode = useCallback(
     (type: NodeType) => {
-      if (debugRunning) {
-        message.warning('试运行期间画布只读')
-        return
-      }
       const error = addNodeOfType(type)
       if (error) {
         message.warning(error)
@@ -259,16 +237,15 @@ function AppEditCanvas() {
         setDrawerOpen(true)
       }
     },
-    [addNodeOfType, message, debugRunning],
+    [addNodeOfType, message],
   )
 
   const handleConnect = useCallback<OnConnect>(
     (connection) => {
-      if (debugRunning) return
       const error = onConnect(connection)
       if (error) message.warning(error)
     },
-    [onConnect, message, debugRunning],
+    [onConnect, message],
   )
 
   const handleDragOver = useCallback((event: React.DragEvent) => {
@@ -279,10 +256,6 @@ function AppEditCanvas() {
   const handleDrop = useCallback(
     (event: React.DragEvent) => {
       event.preventDefault()
-      if (debugRunning) {
-        message.warning('试运行期间画布只读')
-        return
-      }
       const type = event.dataTransfer.getData(APP_NODE_DND_MIME) as NodeType | ''
       if (!type) return
       const position = screenToFlowPosition({ x: event.clientX, y: event.clientY })
@@ -295,57 +268,12 @@ function AppEditCanvas() {
         setDrawerOpen(true)
       }
     },
-    [screenToFlowPosition, addNodeOfType, message, debugRunning],
-  )
-
-  // 把 debug 状态映射到画布节点的 data.debugStatus，供 CanvasNode 高亮
-  const nodesWithDebug = useMemo<Array<Node<NodeData>>>(() => {
-    if (Object.keys(debugStates).length === 0) return nodes
-    return nodes.map((node) => {
-      const state = debugStates[node.id]
-      if (!state) return node
-      return {
-        ...node,
-        data: { ...node.data, debugStatus: state.status },
-      }
-    })
-  }, [nodes, debugStates])
-
-  const handleDebugStatesChange = useCallback(
-    (states: Record<string, DebugNodeState>) => {
-      setDebugStates(states)
-    },
-    [],
-  )
-
-  const handleRunningChange = useCallback(
-    (running: boolean) => {
-      setDebugRunning(running)
-      if (running) setLogPanelOpen(true)
-    },
-    [],
-  )
-
-  const handleFinalResult = useCallback(
-    (result: Record<string, unknown> | null) => {
-      setFinalResult(result)
-      if (result) setLogPanelOpen(true)
-    },
-    [],
-  )
-
-  const graphForDebug = useMemo(
-    () => serializeToGraph(),
-    [serializeToGraph, nodes, edges],
+    [screenToFlowPosition, addNodeOfType, message],
   )
 
   const handleSave = async () => {
     if (!name.trim()) {
       message.warning('请填写应用名称')
-      return
-    }
-    if (debugRunning) {
-      message.warning('试运行进行中，请稍后再保存')
       return
     }
     setSaving(true)
@@ -488,22 +416,19 @@ function AppEditCanvas() {
             onChange={(e) => setName(e.target.value)}
             placeholder="应用名称"
             style={{ width: 240 }}
-            disabled={debugRunning}
           />
           <Input
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="描述（可选）"
             style={{ width: 280 }}
-            disabled={debugRunning}
           />
           {runtimeMode && <Tag color={runtimeMode === 'agent_loop' ? 'purple' : 'blue'}>{runtimeMode}</Tag>}
-          {debugRunning && <Tag color="orange">试运行中（画布只读）</Tag>}
           <Space style={{ marginLeft: 'auto' }}>
             <Button
               icon={<LayoutOutlined />}
               onClick={handleAutoLayout}
-              disabled={debugRunning || nodes.length === 0}
+              disabled={nodes.length === 0}
               title="自动整理节点布局"
             >
               整理布局
@@ -519,7 +444,6 @@ function AppEditCanvas() {
             <Button
               icon={<HistoryOutlined />}
               onClick={() => setVersionDrawerOpen(true)}
-              disabled={debugRunning}
             >
               版本
             </Button>
@@ -533,25 +457,16 @@ function AppEditCanvas() {
               </Button>
             </Tooltip>
             <Button
-              icon={<PlayCircleOutlined />}
-              onClick={() => setDebugOpen(true)}
-              disabled={debugRunning}
+              icon={<SafetyOutlined />}
+              onClick={() => setVisibilityDrawerOpen(true)}
             >
-              试运行 (Alt+R)
-            </Button>
-            <Button
-              icon={<FileTextOutlined />}
-              onClick={() => setLogPanelOpen((v) => !v)}
-              type={logPanelOpen ? 'primary' : 'default'}
-            >
-              运行日志
+              可见范围
             </Button>
             <Button
               type="primary"
               icon={<SaveOutlined />}
               loading={saving}
               onClick={handleSave}
-              disabled={debugRunning}
             >
               保存
             </Button>
@@ -595,7 +510,7 @@ function AppEditCanvas() {
             onDragOver={handleDragOver}
           >
             <ReactFlow
-              nodes={nodesWithDebug}
+              nodes={nodes}
               edges={edges}
               nodeTypes={nodeTypes}
               edgeTypes={edgeTypes}
@@ -604,9 +519,6 @@ function AppEditCanvas() {
               onConnect={handleConnect as OnConnect}
               onNodeClick={handleNodeClick}
               onPaneClick={handlePaneClick}
-              nodesDraggable={!debugRunning}
-              nodesConnectable={!debugRunning}
-              elementsSelectable={!debugRunning}
               fitView
               fitViewOptions={{ padding: 0.3, maxZoom: 0.9 }}
               defaultViewport={{ x: 0, y: 0, zoom: 0.85 }}
@@ -642,7 +554,7 @@ function AppEditCanvas() {
                   size="small"
                   type="text"
                   icon={<UndoOutlined />}
-                  disabled={past.length === 0 || debugRunning}
+                  disabled={past.length === 0}
                   onClick={undo}
                 />
               </Tooltip>
@@ -651,7 +563,7 @@ function AppEditCanvas() {
                   size="small"
                   type="text"
                   icon={<RedoOutlined />}
-                  disabled={future.length === 0 || debugRunning}
+                  disabled={future.length === 0}
                   onClick={redo}
                 />
               </Tooltip>
@@ -708,21 +620,10 @@ function AppEditCanvas() {
         onClose={() => setVersionDrawerOpen(false)}
       />
 
-      <RunDebugModal
-        open={debugOpen}
-        graph={graphForDebug}
-        onClose={() => setDebugOpen(false)}
-        onNodeStateChange={handleDebugStatesChange}
-        onRunningChange={handleRunningChange}
-        onFinalResult={handleFinalResult}
-      />
-
-      <RunLogPanel
-        open={logPanelOpen}
-        running={debugRunning}
-        states={debugStates}
-        finalResult={finalResult}
-        onClose={() => setLogPanelOpen(false)}
+      <VisibilityScopeDrawer
+        open={visibilityDrawerOpen}
+        applicationId={appId}
+        onClose={() => setVisibilityDrawerOpen(false)}
       />
 
       <Modal

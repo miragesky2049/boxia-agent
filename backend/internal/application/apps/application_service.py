@@ -134,6 +134,59 @@ class ApplicationService:
         self._repo.set_enabled(application_id, enabled)
         self._uow.commit()
 
+    # ========== 数据可见范围 ==========
+    def get_visibility(self, application_id: UUID) -> dict:
+        """读取应用可见范围设置。"""
+        if self._repo.get_application(application_id) is None:
+            raise NotFoundError("应用不存在")
+        return self._repo.get_application_visibility(application_id)
+
+    def replace_visibility(
+        self,
+        application_id: UUID,
+        *,
+        mode: str,
+        departments: list[dict] | None = None,
+        users: list[UUID] | None = None,
+    ) -> dict:
+        """整体覆盖应用可见范围。
+
+        - mode='all'：忽略 departments/users，清空白名单；
+        - mode='custom'：departments/users 至少非空，否则拒绝。
+        """
+        if self._repo.get_application(application_id) is None:
+            raise NotFoundError("应用不存在")
+        if mode not in ("all", "custom"):
+            raise ValidationError("visibility_mode 只能是 all 或 custom")
+
+        depts = departments or []
+        uids = users or []
+        if mode == "custom" and not depts and not uids:
+            raise ValidationError("自定义可见范围至少需要指定一个部门或用户")
+
+        # 规范化 department_id 为 UUID
+        norm_depts: list[dict] = []
+        for d in depts:
+            did = d.get("department_id")
+            if isinstance(did, str):
+                did = UUID(did)
+            norm_depts.append(
+                {
+                    "department_id": did,
+                    "include_subtree": bool(d.get("include_subtree", True)),
+                }
+            )
+
+        norm_uids: list[UUID] = []
+        for u in uids:
+            norm_uids.append(UUID(u) if isinstance(u, str) else u)
+
+        self._repo.replace_application_visibility(
+            application_id, mode, norm_depts, norm_uids
+        )
+        self._uow.commit()
+        return self._repo.get_application_visibility(application_id)
+
     def save_graph(self, application_id: UUID, graph: dict[str, Any]) -> dict[str, Any]:
         """保存 graph 定义，自动推断 runtime_mode，并对变化的 config 字段写入新版本。
 

@@ -487,6 +487,32 @@ export async function setAppEnabled(applicationId: string, enabled: boolean): Pr
   })
 }
 
+// ========== 数据可见范围 ==========
+export interface AppVisibilityDepartment {
+  department_id: string
+  include_subtree: boolean
+}
+
+export interface AppVisibility {
+  mode: 'all' | 'custom'
+  departments: AppVisibilityDepartment[]
+  users: string[]
+}
+
+export async function getAppVisibility(applicationId: string): Promise<AppVisibility> {
+  return request<AppVisibility>(`/admin/apps/${applicationId}/visibility`)
+}
+
+export async function replaceAppVisibility(
+  applicationId: string,
+  payload: AppVisibility,
+): Promise<AppVisibility> {
+  return request<AppVisibility>(`/admin/apps/${applicationId}/visibility`, {
+    method: 'PUT',
+    body: JSON.stringify(payload),
+  })
+}
+
 // ========== prompt 优化 ==========
 export interface PromptOptimizeResult {
   optimized_prompt: string

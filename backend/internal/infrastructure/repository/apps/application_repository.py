@@ -86,6 +86,83 @@ class ApplicationRepository:
             {"enabled": enabled, "id": application_id},
         )
 
+    # ========== visibility（数据可见范围） ==========
+    def get_application_visibility(self, application_id: UUID) -> dict:
+        """读取应用可见范围：mode + 部门白名单（含子树开关）+ 用户白名单。"""
+        mode_row = self._session.execute(
+            text("SELECT visibility_mode FROM application WHERE id = :aid"),
+            {"aid": application_id},
+        ).first()
+        mode = mode_row._mapping["visibility_mode"] if mode_row else "all"
+
+        dept_rows = self._session.execute(
+            text(
+                "SELECT department_id, include_subtree FROM application_visibility_departments "
+                "WHERE application_id = :aid ORDER BY created_at"
+            ),
+            {"aid": application_id},
+        ).all()
+        user_rows = self._session.execute(
+            text(
+                "SELECT user_id FROM application_visibility_users "
+                "WHERE application_id = :aid ORDER BY created_at"
+            ),
+            {"aid": application_id},
+        ).all()
+        return {
+            "mode": mode,
+            "departments": [
+                {"department_id": str(r._mapping["department_id"]), "include_subtree": r._mapping["include_subtree"]}
+                for r in dept_rows
+            ],
+            "users": [str(r._mapping["user_id"]) for r in user_rows],
+        }
+
+    def replace_application_visibility(
+        self,
+        application_id: UUID,
+        mode: str,
+        departments: list[dict],
+        users: list[UUID],
+    ) -> None:
+        """整体覆盖可见范围：先清空两张关联表，再按入参写入；同时更新 visibility_mode。"""
+        self._session.execute(
+            text(
+                "UPDATE application SET visibility_mode = :mode, updated_at = NOW() WHERE id = :aid"
+            ),
+            {"mode": mode, "aid": application_id},
+        )
+        self._session.execute(
+            text("DELETE FROM application_visibility_departments WHERE application_id = :aid"),
+            {"aid": application_id},
+        )
+        self._session.execute(
+            text("DELETE FROM application_visibility_users WHERE application_id = :aid"),
+            {"aid": application_id},
+        )
+        if mode == "custom":
+            for dept in departments:
+                self._session.execute(
+                    text(
+                        "INSERT INTO application_visibility_departments "
+                        "(application_id, department_id, include_subtree) "
+                        "VALUES (:aid, :did, :sub)"
+                    ),
+                    {
+                        "aid": application_id,
+                        "did": dept["department_id"],
+                        "sub": dept.get("include_subtree", True),
+                    },
+                )
+            for uid in users:
+                self._session.execute(
+                    text(
+                        "INSERT INTO application_visibility_users (application_id, user_id) "
+                        "VALUES (:aid, :uid)"
+                    ),
+                    {"aid": application_id, "uid": uid},
+                )
+
     def get_application(self, application_id: UUID) -> dict | None:
         row = self._session.execute(
             text(

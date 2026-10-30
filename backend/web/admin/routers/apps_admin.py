@@ -60,6 +60,17 @@ class EnabledPayload(BaseModel):
     enabled: bool
 
 
+class VisibilityDepartmentItem(BaseModel):
+    department_id: UUID
+    include_subtree: bool = True
+
+
+class VisibilityPayload(BaseModel):
+    mode: str = Field(..., pattern="^(all|custom)$")
+    departments: list[VisibilityDepartmentItem] = Field(default_factory=list)
+    users: list[UUID] = Field(default_factory=list)
+
+
 class DebugRunPayload(BaseModel):
     graph: dict[str, Any]
     inputs: dict[str, Any] = Field(default_factory=dict)
@@ -219,6 +230,30 @@ def set_enabled(
     """启用 / 禁用应用。"""
     service.set_enabled(application_id, payload.enabled)
     return {"ok": True}
+
+
+@router.get("/{application_id}/visibility")
+def get_app_visibility(
+    application_id: UUID,
+    service: ApplicationService = AppServiceDep,
+) -> dict:
+    """读取应用可见范围设置。"""
+    return service.get_visibility(application_id)
+
+
+@router.put("/{application_id}/visibility")
+def replace_app_visibility(
+    application_id: UUID,
+    payload: VisibilityPayload,
+    service: ApplicationService = AppServiceDep,
+) -> dict:
+    """整体覆盖应用可见范围：mode=all 全员可见；mode=custom 按部门/用户白名单收敛。"""
+    return service.replace_visibility(
+        application_id,
+        mode=payload.mode,
+        departments=[d.model_dump() for d in payload.departments],
+        users=list(payload.users),
+    )
 
 
 @router.post("/debug/run/stream")
