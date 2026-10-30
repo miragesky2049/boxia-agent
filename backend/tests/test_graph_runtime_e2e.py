@@ -92,7 +92,11 @@ def test_runtime_invokes_llm_graph_writes_records():
 
 
 def test_runtime_handles_llm_failure_writes_audit():
-    """LLM 抛异常时，runtime 应更新 run 状态为 error 并写 audit。"""
+    """LLM 抛异常时，runtime 应更新 run 状态为 error 并写 audit。
+
+    注意：fixture 默认 settingOnError.processType=1（降级跳过），
+    这里显式改成 processType=0（中断），验证 run 级失败路径。
+    """
 
     class BrokenLLM:
         async def chat(self, **kwargs):
@@ -106,6 +110,12 @@ def test_runtime_handles_llm_failure_writes_audit():
             self.records.append(payload)
 
     canvas_json = _load("llm_chat.json")
+    # 显式改成中断策略，让 LLM 失败时整个 run 失败
+    for node in canvas_json.get("nodes", []):
+        if str(node.get("type")) == "3":
+            inputs = node.get("data", {}).get("inputs", {})
+            if "settingOnError" in inputs:
+                inputs["settingOnError"]["processType"] = 0
     run_repo = FakeRunRepo()
     audit_repo = FakeAuditRepo()
 

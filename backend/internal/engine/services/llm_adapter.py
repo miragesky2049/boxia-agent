@@ -1,7 +1,8 @@
 """LLM 服务适配器：把 ModelService 返回的 LLMClient 适配成节点期望的接口。
 
 domain/graph/nodes/llm.py 期望：
-    await llm_service.chat(messages, model, temperature, max_tokens, response_format) -> {content, usage}
+    await llm_service.chat(messages, model, temperature, max_tokens, response_format, tools)
+    -> LLMResponse(content, tool_calls, usage)
 
 老 LLMClient 是按 model 构造的（model 已 bake 进 client），且签名带 tools/response_format 等。
 本适配器接收一个 model_resolver 函数，在调用时按 model 取对应 client，再透传采样参数。
@@ -12,7 +13,7 @@ from __future__ import annotations
 from typing import Any, Callable
 from uuid import UUID
 
-from internal.engine.llm import LLMClient
+from internal.engine.llm import LLMClient, LLMToolSpec
 
 
 class LLMServiceAdapter:
@@ -29,11 +30,13 @@ class LLMServiceAdapter:
         temperature: float | None = None,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        tools: list[LLMToolSpec] | None = None,
     ) -> Any:
-        """返回 LLMResponse（domain llm 节点已按 .content / .usage 解构）。"""
+        """返回 LLMResponse（domain llm 节点已按 .content / .usage / .tool_calls 解构）。"""
         client = self._resolver(model)
         return await client.chat(
             messages=messages,
+            tools=tools,
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,

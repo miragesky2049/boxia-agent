@@ -2,6 +2,11 @@
 
 节点 handler 是纯业务逻辑，不直接 import langgraph / SQLAlchemy / FastAPI。
 所有依赖通过 NodeContext.services 注入，可测试性强。
+
+DDD 分层约定：
+- NodeContext 是值对象，只持有数据，不含业务行为
+- 表达式求值是领域服务能力，由 ExpressionEvaluator（domain/canvas）提供
+- handler 通过 ctx.evaluator 调用求值，不在 ctx 上写业务方法
 """
 
 from __future__ import annotations
@@ -11,7 +16,7 @@ from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
-from internal.domain.canvas.expression import Expr
+from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
 from internal.domain.canvas.model import CanvasGraph
 
 
@@ -28,13 +33,15 @@ class RuntimeEnv:
 
 @dataclass(frozen=True)
 class NodeContext:
-    """单个节点执行时的上下文。
+    """单个节点执行时的上下文（值对象）。
 
     inputs: 已求值的入参（{name: value}），由 Compiler 在调 handler 前批量求值。
-    config: 节点特定配置（model_id / temperature / url 等），未求值的字面量。
+    config: 节点特定配置（model_id / temperature / url 等），可能含 Expr（TemplatedString/Ref）。
     env: 运行时环境（tenant_id / user_id / run_id / thread_id）。
     services: 服务注册表（llm / retrieval / tool_gateway / sandbox 等）。
     subgraph: Loop/Batch 等内嵌子图节点时携带的循环体 IR，普通节点为 None。
+    eval_context: 求值上下文（含 node_outputs/globals/env），由 Compiler 逐节点构造。
+    evaluator: 表达式求值领域服务，handler 用它对 config 里的动态字段求值。
     """
 
     node_id: str
@@ -44,6 +51,8 @@ class NodeContext:
     env: RuntimeEnv
     services: "ServiceRegistry"
     subgraph: CanvasGraph | None = None
+    eval_context: EvalContext | None = None
+    evaluator: ExpressionEvaluator | None = None
 
 
 @dataclass(frozen=True)

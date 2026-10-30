@@ -21,10 +21,19 @@ def _create_listed_app(client: TestClient, headers: dict[str, str], name: str) -
 
     graph = {
         "nodes": [
-            {"id": "n1", "type": "start", "config": {"inputs": [{"name": "q", "type": "string"}]}},
-            {"id": "n2", "type": "end", "config": {}},
+            {
+                "id": "n1",
+                "type": "1",
+                "data": {"nodeMeta": {"title": "开始"}},
+                "config": {"inputs": [{"name": "q", "type": "string"}]},
+            },
+            {
+                "id": "n2",
+                "type": "2",
+                "data": {"nodeMeta": {"title": "结束"}},
+            },
         ],
-        "edges": [{"from": "n1", "to": "n2"}],
+        "edges": [{"sourceNodeID": "n1", "targetNodeID": "n2"}],
     }
     saved = client.put(
         f"/api/v1/admin/apps/{app_id}/graph",

@@ -87,8 +87,9 @@ def get_marketplace_application(
         my_latest_apply = auth_repo.get_latest_apply(tenant_id, application_id)
 
     graph = service.build_effective_graph_sync(application_id, tenant_id)
+    # coze 标准 type="1" 为 START；兼容早期简化格式 type="start"
     start_node = next(
-        (n for n in graph.get("nodes", []) if n.get("type") == "start"),
+        (n for n in graph.get("nodes", []) if n.get("type") in ("1", "start")),
         None,
     )
     inputs = (start_node or {}).get("config", {}).get("inputs") or []
@@ -296,8 +297,9 @@ def get_application_inputs(
         raise NotFoundError("该应用未开通或不存在")
 
     graph = service.build_effective_graph_sync(application_id, tenant_id)
+    # coze 标准 type="1" 为 START；兼容早期简化格式 type="start"
     start_node = next(
-        (n for n in graph.get("nodes", []) if n.get("type") == "start"),
+        (n for n in graph.get("nodes", []) if n.get("type") in ("1", "start")),
         None,
     )
     inputs = (start_node or {}).get("config", {}).get("inputs") or []

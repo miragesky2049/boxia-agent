@@ -16,6 +16,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from langgraph.types import Command
+
 from internal.domain.canvas.convert import convert_canvas
 from internal.domain.canvas.model import CanvasGraph
 from internal.domain.graph.compiler import Compiler
@@ -29,11 +31,12 @@ _UNSET = object()
 
 
 class GraphInterrupted(Exception):
-    """人审中断：本次迁移暂不抛出，预留类型给 chat_service.run_workflow 捕获。"""
+    """人审中断：节点调 interrupt() 时抛出，携带审批 payload。"""
 
-    def __init__(self, interrupt_payload: dict[str, Any]) -> None:
+    def __init__(self, interrupt_payload: dict[str, Any], thread_id: str) -> None:
         super().__init__("workflow waiting for approval")
         self.interrupt_payload = interrupt_payload
+        self.thread_id = thread_id
 
 
 class GraphRuntime:
@@ -140,15 +143,31 @@ class GraphRuntime:
         try:
             final_state_values = await self._stream_and_record(initial_state)
 
+            # 中断检测：有 checkpointer 时从持久化 state 检查是否有人审 interrupt
+            interrupt_payload = None
             if self._checkpointer_override is not None:
-                # 有 checkpointer 时从持久化 state 读 output
                 snapshot = await self._compiled.aget_state(self._config())
+                if snapshot.tasks:
+                    for task in snapshot.tasks:
+                        if getattr(task, "interrupts", None):
+                            interrupt_payload = task.interrupts[0].value
+                            break
                 output = snapshot.values.get("output", {}) if snapshot.values else {}
             else:
-                # 无 checkpointer 时直接用流式结束时的 state
                 output = (final_state_values or {}).get("output", {})
 
             duration_ms = int((time.time() - started_at) * 1000)
+
+            # 人审中断：标记 run 为 interrupted，抛 GraphInterrupted
+            if interrupt_payload is not None:
+                if self.run_repo is not None:
+                    try:
+                        self.run_repo.update_run_status(
+                            self.run_id, execute_status="interrupted",
+                        )
+                    except Exception:  # noqa: BLE001
+                        logger.exception("更新 run 状态为 interrupted 失败")
+                raise GraphInterrupted(interrupt_payload, self.thread_id)
 
             if self.run_repo is not None:
                 try:
@@ -213,7 +232,82 @@ class GraphRuntime:
             logger.error("运行失败: run=%s error=%s", self.run_id, e)
             raise
 
-    async def _stream_and_record(self, initial_state: dict[str, Any]) -> dict[str, Any]:
+    async def resume(self, resume_payload: dict[str, Any]) -> dict[str, Any]:
+        """人审批准后续跑工作流。
+
+        前提：invoke 已经抛出 GraphInterrupted，state 已持久化在 checkpointer。
+        用同一个 thread_id + Command(resume=resume_payload) 继续执行。
+
+        Args:
+            resume_payload: 审批结果，如 {"approved": True, "approver": "zhangsan", "comment": "ok"}
+
+        Returns:
+            最终 output（和正常 invoke 成功返回一致）
+
+        Raises:
+            GraphInterrupted: 再次遇到新的人审节点中断
+        """
+        started_at = time.time()
+        await self._ensure_compiled()
+
+        if self._checkpointer_override is None:
+            raise RuntimeError("resume 需要 checkpointer 开启（人审状态持久化）")
+
+        # 用 Command(resume=...) 让 langgraph 从 interrupt 点继续
+        command = Command(resume=resume_payload)
+
+        try:
+            await self._stream_and_record(command)
+
+            snapshot = await self._compiled.aget_state(self._config())
+            output = snapshot.values.get("output", {}) if snapshot.values else {}
+
+            # 检查是否还有下一个人审中断
+            if snapshot.tasks:
+                for task in snapshot.tasks:
+                    if getattr(task, "interrupts", None):
+                        interrupt_payload = task.interrupts[0].value
+                        if self.run_repo is not None:
+                            try:
+                                self.run_repo.update_run_status(
+                                    self.run_id, execute_status="interrupted",
+                                )
+                            except Exception:  # noqa: BLE001
+                                logger.exception("更新 run 状态为 interrupted 失败")
+                        raise GraphInterrupted(interrupt_payload, self.thread_id)
+
+            duration_ms = int((time.time() - started_at) * 1000)
+            if self.run_repo is not None:
+                try:
+                    self.run_repo.update_run_status(
+                        self.run_id, execute_status="success", output=output
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("更新 run 状态失败")
+
+            await self._notify_webhooks("run_finished", {
+                "run_id": str(self.run_id),
+                "tenant_id": str(self.tenant_id),
+                "application_id": str(self.application_id),
+                "thread_id": self.thread_id,
+                "status": "success",
+                "output": output,
+                "duration_ms": duration_ms,
+            })
+            return output
+
+        except Exception as e:
+            duration_ms = int((time.time() - started_at) * 1000)
+            if self.run_repo is not None:
+                try:
+                    self.run_repo.update_run_status(
+                        self.run_id, execute_status="error", error_message=str(e)
+                    )
+                except Exception:  # noqa: BLE001
+                    logger.exception("更新 run 错误状态失败")
+            raise
+
+    async def _stream_and_record(self, initial_state: dict[str, Any] | Command) -> dict[str, Any]:
         """用 astream_events 逐节点捕获 start/end，写 run_node_execution + usage ledger。
 
         返回最后一个 LangGraph 根 chain on_chain_end 的 state dict（无 checkpointer 时读 output 用）。

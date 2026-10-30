@@ -16,7 +16,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from internal.domain.canvas.expression import EnvVar, Expr, GlobalVar, Literal, Ref
+from internal.domain.canvas.expression import (
+    EnvVar,
+    Expr,
+    GlobalVar,
+    Literal,
+    Ref,
+    TemplatedString,
+)
 from internal.domain.canvas.field_mapping import (
     EDGE_FIELD_MAP,
     NODE_STANDARD_INPUT_FIELDS,
@@ -183,13 +190,16 @@ def _flatten_named_param_lists(config: dict[str, Any]) -> None:
 def _coerce_config_value(value: Any) -> Any:
     """把 inputs 里非 inputParameters 的字段压成 config。
 
-    - ValueExpressionDTO（{type, value: {...}}）→ 求值成字面量
+    - ValueExpressionDTO 纯字面量 → 脱壳成值
+    - ValueExpressionDTO 含 {{...}} 模板 / ref → 保留为 Expr，运行时由 handler 求值
     - 列表/字典递归处理
     - 其他原样返回
     """
     if _is_value_expression(value):
         expr = _convert_value_expression(value)
-        return expr.value if isinstance(expr, Literal) else value
+        if isinstance(expr, Literal):
+            return expr.value
+        return expr
     if isinstance(value, list):
         return [_coerce_config_value(item) for item in value]
     if isinstance(value, dict):
@@ -224,6 +234,9 @@ def _convert_value_expression(raw: Any) -> Expr | None:
     content = value.get("content")
 
     if kind == "literal":
+        # 字符串字面量里如果带 {{...}}，翻译成模板表达式，运行时插值
+        if isinstance(content, str) and "{{" in content:
+            return TemplatedString(content)
         return Literal(content)
 
     if kind == "ref":

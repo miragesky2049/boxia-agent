@@ -17,6 +17,7 @@ from uuid import UUID
 
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.cache.base import KvCache
+from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.cache.factory import get_kv_cache
@@ -239,6 +240,13 @@ class ApplicationService:
             raise NotFoundError("应用不存在")
         if not graph.get("nodes"):
             raise ValidationError("graph 至少需要一个节点")
+
+        # A11: 保存前结构校验，error 级问题阻塞保存
+        issues = validate_raw_graph(graph)
+        errors = [i for i in issues if i.severity == "error"]
+        if errors:
+            detail = "; ".join(i.message for i in errors)
+            raise ValidationError(f"画布校验不通过：{detail}")
 
         runtime_mode = _infer_runtime_mode(graph)
         latest = self._repo.get_latest_graph_version(application_id)
