@@ -92,7 +92,7 @@ class NodeHandler(ABC):
 class ServiceRegistry:
     """服务注册表：节点通过 ctx.services 拿依赖，不直接 import 基础设施。
 
-    用 dict 持有具体服务实例，避免在 domain 层引用 engine/infrastructure 类型。
+    用 dict 持有具体服务实例，避免在 domain 层直接引用 infrastructure 类型。
     """
 
     def __init__(self, services: dict[str, Any] | None = None):

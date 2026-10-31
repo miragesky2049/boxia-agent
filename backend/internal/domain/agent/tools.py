@@ -145,7 +145,15 @@ class McpTool(Tool):
     async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
         if not self._server_url:
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 server_url")
+        # SSRF 防护：与 HttpTool 一致，拒绝 loopback / 云元数据 / link-local 等
+        from internal.domain.errors import ValidationError
+        from internal.infrastructure.security.ssrf_guard import validate_outbound_url
         from internal.domain.agent.mcp_client import call_tool
+
+        try:
+            validate_outbound_url(self._server_url)
+        except ValidationError as exc:
+            raise ToolExecutionError(f"MCP server 地址不安全：{exc.message}") from exc
 
         try:
             return await call_tool(self._server_url, self._tool_name, arguments)
