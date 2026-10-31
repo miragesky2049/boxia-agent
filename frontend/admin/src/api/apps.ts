@@ -412,6 +412,30 @@ export async function saveAppGraph(
   })
 }
 
+// ========== 版本历史（B9） ==========
+export interface GraphVersionItem {
+  id: string
+  version: number
+  runtime_mode: 'dag' | 'agent_loop'
+  changelog: string | null
+  created_by: string | null
+  created_at: string
+}
+
+export async function listGraphVersions(applicationId: string): Promise<GraphVersionItem[]> {
+  return request<GraphVersionItem[]>(`/admin/apps/${applicationId}/graph-versions`)
+}
+
+export async function rollbackGraph(
+  applicationId: string,
+  version: number,
+): Promise<{ ok: boolean; new_version?: number }> {
+  return request<{ ok: boolean; new_version?: number }>(`/admin/apps/${applicationId}/graph-rollback`, {
+    method: 'POST',
+    body: JSON.stringify({ version }),
+  })
+}
+
 // ========== 字段级版本 ==========
 export interface FieldVersion {
   field_path: string
@@ -554,12 +578,41 @@ export interface DebugNodeState {
 }
 
 export interface DebugStreamEvent {
-  event: 'node_start' | 'node_end' | 'result' | 'error'
+  event: 'node_start' | 'node_end' | 'result' | 'error' | 'interrupted'
   data: Record<string, unknown>
 }
 
+export interface ApprovalInterruptPayload {
+  type: string
+  node_id: string
+  node_title?: string
+  assignee_role?: string
+  instructions?: string
+  snapshot?: Record<string, unknown>
+}
+
+// ========== 结构校验（B10） ==========
+export interface GraphValidationIssue {
+  severity: 'error' | 'warning'
+  code: string
+  message: string
+  node_id: string
+}
+
+export interface GraphValidationResult {
+  valid: boolean
+  issues: GraphValidationIssue[]
+}
+
+export async function validateGraph(graph: Graph): Promise<GraphValidationResult> {
+  return request<GraphValidationResult>('/admin/apps/validate-graph', {
+    method: 'POST',
+    body: JSON.stringify({ graph }),
+  })
+}
+
 /**
- * 画布试运行：SSE 逐节点推送 node_start / node_end / result / error。
+ * 画布试运行：SSE 逐节点推送 node_start / node_end / result / error / interrupted。
  * 复用 workflows 的 fetch + ReadableStream 手写 SSE 解析。
  */
 export async function debugRunAppStream(
@@ -602,4 +655,61 @@ export async function debugRunAppStream(
       }
     }
   }
+}
+
+async function _postSse(
+  url: string,
+  body: unknown,
+  onEvent: (event: DebugStreamEvent) => void,
+): Promise<void> {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${getAccessToken() ?? ''}`,
+      ...(getTenantCode() ? { 'X-Tenant-Code': getTenantCode() } : {}),
+    },
+    body: JSON.stringify(body),
+  })
+  if (!response.ok || !response.body) {
+    throw new Error(`SSE 请求失败：${response.status}`)
+  }
+  const reader = response.body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buffer = ''
+  while (true) {
+    const { done, value } = await reader.read()
+    if (done) break
+    buffer += decoder.decode(value, { stream: true })
+    let idx: number
+    while ((idx = buffer.indexOf('\n\n')) >= 0) {
+      const frame = buffer.slice(0, idx)
+      buffer = buffer.slice(idx + 2)
+      const eventLine = frame.split('\n').find((line) => line.startsWith('event:'))
+      const dataLine = frame.split('\n').find((line) => line.startsWith('data:'))
+      if (!eventLine || !dataLine) continue
+      const event = eventLine.slice('event:'.length).trim()
+      const dataRaw = dataLine.slice('data:'.length).trim()
+      try {
+        onEvent({ event: event as DebugStreamEvent['event'], data: JSON.parse(dataRaw) })
+      } catch {
+        // 忽略无法解析的帧
+      }
+    }
+  }
+}
+
+/**
+ * 人审续跑：从 interrupt 点继续 SSE 流。
+ */
+export async function debugRunAppStreamResume(
+  payload: {
+    graph: Graph
+    thread_id: string
+    run_id?: string
+    approval: { approved: boolean; comment: string; approver: string }
+  },
+  onEvent: (event: DebugStreamEvent) => void,
+): Promise<void> {
+  return _postSse('/api/v1/admin/apps/debug/run/stream/resume', payload, onEvent)
 }

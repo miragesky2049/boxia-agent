@@ -15,6 +15,7 @@ from web.admin.routers.hr_dictionaries import router as hr_dictionaries_router
 from web.admin.routers.marketplace import router as marketplace_router
 from web.admin.routers.models import router as models_router
 from web.admin.routers.mgmt_units import router as mgmt_units_router
+from web.admin.routers.node_meta import router as node_meta_router
 from web.admin.routers.permissions import router as permissions_router
 from web.admin.routers.prompt_optimize import router as prompt_optimize_router
 from web.admin.routers.resources import admin_router as resource_admin_router
@@ -44,6 +45,7 @@ router.include_router(marketplace_router)
 router.include_router(applies_router)
 router.include_router(apps_admin_router)
 router.include_router(models_router)
+router.include_router(node_meta_router)
 router.include_router(prompt_optimize_router)
 router.include_router(resource_admin_router)
 router.include_router(resource_tenant_router)

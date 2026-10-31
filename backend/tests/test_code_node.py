@@ -20,6 +20,12 @@ def _make_env() -> RuntimeEnv:
     )
 
 
+def _run_sandbox(code: str, args: dict | None = None, timeout_s: float = 5.0):
+    """直接跑沙箱，返回 SandboxResult。"""
+    sandbox = PythonSandbox(timeout_s=timeout_s)
+    return asyncio.run(sandbox.run(code, args or {}))
+
+
 def test_code_node_stub():
     """未注入 sandbox 时走 stub。"""
     handler = CodeNodeHandler()
@@ -84,3 +90,85 @@ def main(args):
         assert False, "应该抛出 RuntimeError"
     except RuntimeError as exc:
         assert "超时" in str(exc)
+
+
+def test_sandbox_allows_whitelisted_modules():
+    """白名单内的模块（re/json/math）应能正常 import。"""
+    code = '''
+import re
+import json
+import math
+
+def main(args):
+    text = args.get("text", "")
+    digits = re.findall(r"\\d+", text)
+    return {
+        "digits": digits,
+        "pi_rounded": round(math.pi, 2),
+        "json_ok": json.dumps({"a": 1}),
+    }
+'''
+    result = _run_sandbox(code, {"text": "order 123 total 456"})
+    assert result.exit_code == 0
+    assert result.outputs["digits"] == ["123", "456"]
+    assert result.outputs["pi_rounded"] == 3.14
+    assert result.outputs["json_ok"] == '{"a": 1}'
+
+
+def test_sandbox_blocks_disallowed_os_import():
+    """import os 应被拒绝，__error__ 包含白名单提示。"""
+    code = '''
+import os
+
+def main(args):
+    return {"cwd": os.getcwd()}
+'''
+    result = _run_sandbox(code)
+    assert result.exit_code != 0
+    assert "__error__" in result.outputs
+    assert "os" in result.outputs["__error__"]
+    assert "白名单" in result.outputs["__error__"]
+
+
+def test_sandbox_blocks_subprocess_import():
+    """import subprocess 应被拒绝。"""
+    code = '''
+import subprocess
+
+def main(args):
+    return {"out": subprocess.check_output(["echo", "hi"])}
+'''
+    result = _run_sandbox(code)
+    assert result.exit_code != 0
+    assert "__error__" in result.outputs
+
+
+def test_sandbox_blocks_dynamic_importlib():
+    """importlib 动态加载也应被白名单拦截。"""
+    code = '''
+import importlib
+
+def main(args):
+    os = importlib.import_module("os")
+    return {"cwd": os.getcwd()}
+'''
+    result = _run_sandbox(code)
+    assert result.exit_code != 0
+    assert "__error__" in result.outputs
+
+
+def test_sandbox_custom_allowed_modules():
+    """构造时传入 allowed_modules 可扩展白名单。"""
+    from internal.infrastructure.sandbox.python_sandbox import PythonSandbox as SB
+
+    custom = SB(timeout_s=5.0, allowed_modules=frozenset({"json", "os"}))
+    code = '''
+import os
+
+def main(args):
+    return {"cwd_len": len(os.getcwd())}
+'''
+    result = asyncio.run(custom.run(code, {}))
+    # os.getcwd() 返回路径长度 > 0
+    assert result.exit_code == 0
+    assert result.outputs["cwd_len"] > 0

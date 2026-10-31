@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import time
+import uuid
 from typing import Any
 from uuid import UUID
 
@@ -16,14 +17,31 @@ from internal.application.errors import AppError, ValidationError
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
 from internal.domain.graph.node_base import ServiceRegistry
-from internal.engine.runtime import GraphRuntime
+from internal.engine.runtime import GraphRuntime, GraphInterrupted
 from internal.engine.services.http_service import HttpService
 from internal.engine.services.llm_adapter import LLMServiceAdapter, build_model_resolver
+from internal.engine.services.retrieval_services import register_retrieval_services
+from internal.engine.services.tool_executor import ToolExecutorService
+from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
+from internal.infrastructure.repository.apps.async_conversation_adapter import (
+    AsyncConversationRepository,
+    AsyncMessageRepository,
+)
+from internal.infrastructure.repository.apps.conversation_repository import (
+    ConversationRepository as SyncConversationRepository,
+)
+from internal.infrastructure.repository.apps.message_repository import (
+    MessageRepository as SyncMessageRepository,
+)
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.sse import SSE_HEADERS, sse_event
 
 logger = logging.getLogger(__name__)
+
+# 画布试运行属于临时调试上下文：用固定 debug 应用 ID 作为 conversation/message 行的 application_id，
+# 这样初始 run 与 resume 续跑能读到同一份会话历史。
+DEBUG_APPLICATION_ID = UUID("00000000-0000-0000-0000-000000000001")
 
 # 应用管理是产品级平台运营能力：租户子域名管理员无权调用
 router = APIRouter(
@@ -38,6 +56,70 @@ def get_app_service(uow: UowDep) -> ApplicationService:
 
 
 AppServiceDep = Depends(get_app_service)
+
+
+def _register_conversation_services(
+    services: ServiceRegistry,
+    uow: UowDep,
+    principal: PlatformAdminDep,
+    application_id: UUID,
+    run_id: UUID,
+) -> None:
+    """把会话/消息仓储注册进 ServiceRegistry，供 conversation 类节点使用。"""
+    tenant_id = principal.tenant_id or UUID("00000000-0000-0000-0000-000000000000")
+    conv_repo = AsyncConversationRepository(
+        SyncConversationRepository(uow.session),
+        tenant_id=tenant_id,
+        user_id=principal.user_id,
+        application_id=application_id,
+    )
+    msg_repo = AsyncMessageRepository(
+        SyncMessageRepository(uow.session),
+        tenant_id=tenant_id,
+        user_id=principal.user_id,
+        application_id=application_id,
+        run_id=run_id,
+    )
+    services.register("conversation_repo", conv_repo)
+    services.register("message_repo", msg_repo)
+    services.register(
+        "tool_executor",
+        ToolExecutorService(
+            uow.session,
+            tenant_id=tenant_id,
+            user_id=principal.user_id,
+            application_id=application_id,
+            run_id=run_id,
+        ),
+    )
+    register_retrieval_services(services)
+    services.register("sandbox", PythonSandbox())
+
+
+def _register_subgraph_loader(
+    services: ServiceRegistry,
+    uow: UowDep,
+    tenant_id: UUID,
+) -> None:
+    """把 subgraph_loader 注册进 ServiceRegistry，供 Subworkflow（type=9）节点调用。
+
+    debug 路由直接运行画布 JSON（未保存），但 Subworkflow 节点通过 workflowId
+    引用其他已保存的应用图——必须能按 tenant_id 加载其 runtime graph。
+    """
+    app_service = ApplicationService(uow)
+
+    async def _loader(child_app_id: str) -> dict:
+        try:
+            child_uuid = UUID(child_app_id)
+        except ValueError:
+            return {}
+        try:
+            return await app_service.get_runtime_graph(child_uuid, tenant_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("debug 路由加载子图失败: child_app_id=%s", child_app_id)
+            return {}
+
+    services.register("subgraph_loader", _loader)
 
 
 class AppCreatePayload(BaseModel):
@@ -104,6 +186,32 @@ def create_app(
         description=payload.description,
     )
     return {"application_id": app_id}
+
+
+class ValidateGraphPayload(BaseModel):
+    """试运行前的结构校验请求体。"""
+
+    graph: dict[str, Any]
+
+
+@router.post("/validate-graph")
+def validate_graph_endpoint(payload: ValidateGraphPayload) -> dict:
+    """不保存、不执行，只返回 graph 结构校验结果（error/warning 清单）。"""
+    from internal.domain.canvas.validate import validate_raw_graph
+
+    issues = validate_raw_graph(payload.graph)
+    return {
+        "valid": not any(i.severity == "error" for i in issues),
+        "issues": [
+            {
+                "severity": i.severity,
+                "code": i.code,
+                "message": i.message,
+                "node_id": i.node_id,
+            }
+            for i in issues
+        ],
+    }
 
 
 @router.get("/{application_id}")
@@ -190,6 +298,26 @@ def rollback_graph(
 ) -> dict:
     """回滚到指定历史版本：把该版本 graph 作为新版本再写一次。"""
     return service.rollback_graph(application_id, payload.version)
+
+
+@router.post("/{application_id}/publish")
+def publish_app_graph(
+    application_id: UUID,
+    service: ApplicationService = AppServiceDep,
+    principal: PlatformAdminDep = None,
+) -> dict:
+    """发布动作：把当前 draft（latest）整图版本快照为 live。
+
+    发布后 user chat 路由读 get_runtime_graph 时取 published_graph_version，
+    而不是未发布的最新 draft；未发布时回退到 latest，保证老应用向后兼容。
+    """
+    actor_id = getattr(principal, "user_id", None) if principal else None
+    actor_username = getattr(principal, "username", "") if principal else ""
+    return service.publish_graph(
+        application_id,
+        actor_id=actor_id,
+        actor_username=actor_username,
+    )
 
 
 class TenantConfigPayload(BaseModel):
@@ -302,6 +430,7 @@ async def debug_run_stream(
 
     不依赖已保存的应用，直接用画布 graph 跑（前端编辑中实时试运行）。
     仅平台管理员可用；节点数上限保护试运行不被滥用。
+    人审中断（human_approval 节点）会发 `interrupted` 事件，前端拿到 thread_id 后调 /debug/run/stream/resume 续跑。
     """
     nodes = payload.graph.get("nodes") or []
     if not isinstance(nodes, list) or len(nodes) > 50:
@@ -317,13 +446,21 @@ async def debug_run_stream(
     )
     services.register("http", HttpService())
 
+    run_id = uuid.uuid4()
+    _register_conversation_services(
+        services, uow, _principal,
+        application_id=DEBUG_APPLICATION_ID, run_id=run_id,
+    )
+    _register_subgraph_loader(services, uow, _principal.tenant_id)
+
     async def _push_node_event(etype: str, evt_payload: dict) -> None:
         await queue.put(sse_event(etype, evt_payload))
 
     runtime = GraphRuntime(
         canvas_json=payload.graph,
         services=services,
-        checkpointer=None,
+        run_id=run_id,
+        application_id=DEBUG_APPLICATION_ID,
         on_node_event=_push_node_event,
     )
 
@@ -331,10 +468,107 @@ async def debug_run_stream(
         try:
             output = await runtime.invoke(payload.inputs)
             await queue.put(sse_event("result", {"outputs": output}))
+        except GraphInterrupted as exc:
+            await queue.put(sse_event("interrupted", {
+                "approval": exc.interrupt_payload,
+                "thread_id": exc.thread_id,
+                "run_id": str(runtime.run_id),
+            }))
         except AppError as exc:
             await queue.put(sse_event("error", {"message": exc.message, "code": exc.status_code}))
         except Exception as exc:  # noqa: BLE001
             logger.exception("debug stream failed")
+            await queue.put(sse_event("error", {"message": str(exc), "code": 500}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(runner_task())
+
+    async def event_stream():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
+class DebugResumePayload(BaseModel):
+    """人审续跑请求体。"""
+
+    graph: dict[str, Any]
+    thread_id: str
+    run_id: str | None = None
+    approval: dict[str, Any]  # {"approved": bool, "comment": str, "approver": str}
+
+
+@router.post("/debug/run/stream/resume")
+async def debug_run_stream_resume(
+    payload: DebugResumePayload,
+    uow: UowDep,
+    _principal: PlatformAdminDep,
+) -> StreamingResponse:
+    """人审续跑：用 thread_id + Command(resume=...) 从 interrupt 点继续。"""
+    nodes = payload.graph.get("nodes") or []
+    if not isinstance(nodes, list) or len(nodes) > 50:
+        raise ValidationError("graph 节点数必须在 1-50 之间")
+
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    model_service = ModelService(uow.session)
+    services = ServiceRegistry()
+    services.register(
+        "llm",
+        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
+    )
+    services.register("http", HttpService())
+
+    run_id = uuid.UUID(payload.run_id) if payload.run_id else uuid.uuid4()
+    _register_conversation_services(
+        services, uow, _principal,
+        application_id=DEBUG_APPLICATION_ID, run_id=run_id,
+    )
+    _register_subgraph_loader(services, uow, _principal.tenant_id)
+
+    async def _push_node_event(etype: str, evt_payload: dict) -> None:
+        await queue.put(sse_event(etype, evt_payload))
+
+    runtime = GraphRuntime(
+        canvas_json=payload.graph,
+        services=services,
+        thread_id=payload.thread_id,
+        run_id=run_id,
+        application_id=DEBUG_APPLICATION_ID,
+        on_node_event=_push_node_event,
+    )
+
+    async def runner_task() -> None:
+        try:
+            output = await runtime.resume(payload.approval)
+            await queue.put(sse_event("result", {"outputs": output}))
+        except GraphInterrupted as exc:
+            await queue.put(sse_event("interrupted", {
+                "approval": exc.interrupt_payload,
+                "thread_id": exc.thread_id,
+                "run_id": str(runtime.run_id),
+            }))
+        except AppError as exc:
+            await queue.put(sse_event("error", {"message": exc.message, "code": exc.status_code}))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("debug resume stream failed")
             await queue.put(sse_event("error", {"message": str(exc), "code": 500}))
         finally:
             await queue.put(None)

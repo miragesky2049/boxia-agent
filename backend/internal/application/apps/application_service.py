@@ -20,6 +20,7 @@ from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.repository.protocols import UnitOfWork
+from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.cache.factory import get_kv_cache
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.postgres_audit_log_repository import PostgresAuditLogRepository
@@ -31,10 +32,11 @@ logger = logging.getLogger(__name__)
 def _infer_runtime_mode(graph: dict[str, Any]) -> str:
     """根据 coze 画布 JSON 推断运行模式：dag / agent_loop。
 
-    首版简化：含 LLM 节点（coze type=3）即视为 agent_loop，其余 dag。
+    A6：含显式 agent_loop 节点（type_code=100）即走 agent_loop；其余一律按 dag 执行。
+    不再用"含 LLM 节点即 agent_loop"的启发式——LLM 节点是 dag 内的普通节点。
     """
     for node in graph.get("nodes", []) or []:
-        if str(node.get("type")) == "3":
+        if str(node.get("type")) == "100":
             return "agent_loop"
     return "dag"
 
@@ -69,19 +71,58 @@ def values_equal(a: Any, b: Any) -> bool:
         return a == b
 
 
-def _parse_graph(raw: Any) -> dict[str, Any]:
+def _parse_graph(raw: Any, storage: ObjectStorage | None = None) -> dict[str, Any]:
+    """解析 graph JSON：若 DB 里存的是对象存储 URI 引用（A12），则从对象存储拉取真实 graph。"""
     if raw is None:
         return {}
     if isinstance(raw, str):
-        return json.loads(raw)
-    return raw
+        raw = json.loads(raw)
+    if not isinstance(raw, dict):
+        return raw
+    ref = raw.get("__graph_ref__")
+    if not ref or storage is None:
+        return raw
+    # A12：DB 里只存了 URI，真实 graph 在对象存储里
+    try:
+        data = asyncio_run(storage.get(ref))
+        return json.loads(data)
+    except Exception as exc:  # noqa: BLE001
+        logger.error("从对象存储拉取 graph 失败 ref=%s err=%s", ref, exc)
+        return {}
+
+
+def asyncio_run(coro: Any) -> Any:
+    """在同步上下文里跑 async 协程（对象存储 get 是 async）。"""
+    import asyncio as _asyncio
+
+    try:
+        loop = _asyncio.get_running_loop()
+    except RuntimeError:
+        return _asyncio.run(coro)
+    # 已有 running loop（如 async router 里）：用 nest_asyncio 或直接在新线程跑
+    import concurrent.futures
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+        return pool.submit(lambda: _asyncio.run(coro)).result()
 
 
 class ApplicationService:
-    def __init__(self, uow: UnitOfWork, cache: KvCache | None = None):
+    def __init__(
+        self,
+        uow: UnitOfWork,
+        cache: KvCache | None = None,
+        object_storage: ObjectStorage | None = None,
+    ):
         self._uow = uow
         self._repo = ApplicationRepository(uow.session)
         self._cache = cache or get_kv_cache()
+        # A12：对象存储（可选）；未注入时从全局 factory 拿，再没有就降级为 None
+        if object_storage is not None:
+            self._storage = object_storage
+        else:
+            from internal.infrastructure.storage.factory import get_object_storage
+
+            self._storage = get_object_storage()
 
     # ========== 缓存 key ==========
     @staticmethod
@@ -253,24 +294,41 @@ class ApplicationService:
         previous_version = latest["version"] if latest else 0
         next_version = previous_version + 1
 
-        # P2-8: 大 graph 预留对象存储 URI 接口（当前先内联写 JSONB）
+        # A12：大 graph 超过内联阈值时写入对象存储，DB 只存 URI 引用
         graph_size = len(json.dumps(graph, ensure_ascii=False))
-        if graph_size > GRAPH_INLINE_SIZE_THRESHOLD:
-            logger.info(
-                "graph 超过内联阈值 %d bytes，预留对象存储 URI: app=%s size=%d",
+        graph_to_persist: dict[str, Any] = graph
+        if graph_size > GRAPH_INLINE_SIZE_THRESHOLD and self._storage is not None:
+            key = f"graphs/{application_id}/v{next_version}.json"
+            try:
+                uri = asyncio_run(self._storage.put(
+                    key,
+                    json.dumps(graph, ensure_ascii=False).encode("utf-8"),
+                    content_type="application/json",
+                ))
+                graph_to_persist = {"__graph_ref__": uri}
+                logger.info(
+                    "graph 超过内联阈值，已写入对象存储: app=%s size=%d uri=%s",
+                    application_id, graph_size, uri,
+                )
+            except Exception as exc:  # noqa: BLE001
+                logger.exception("写入对象存储失败，降级为内联写 DB: %s", exc)
+                graph_to_persist = graph
+        elif graph_size > GRAPH_INLINE_SIZE_THRESHOLD:
+            logger.warning(
+                "graph 超过内联阈值 %d bytes 但对象存储未配置，降级为内联: app=%s size=%d",
                 GRAPH_INLINE_SIZE_THRESHOLD, application_id, graph_size,
             )
 
         self._repo.insert_graph_version(
             application_id=application_id,
             version=next_version,
-            graph=graph,
+            graph=graph_to_persist,
             runtime_mode=runtime_mode,
             changelog=changelog,
             created_by=actor_id,
         )
         # 同步更新 application_graph（兼容旧读取）
-        self._repo.update_graph(application_id, graph, runtime_mode)
+        self._repo.update_graph(application_id, graph_to_persist, runtime_mode)
 
         # P2-7: 写审计日志（平台级操作使用 PLATFORM_TENANT_ID，audit_logs.tenant_id 不允许 NULL）
         audit_repo = PostgresAuditLogRepository(self._uow.session)
@@ -302,7 +360,7 @@ class ApplicationService:
         latest = self._repo.get_latest_graph_version(application_id)
         if latest is None:
             return None
-        graph = _parse_graph(latest["graph"])
+        graph = _parse_graph(latest["graph"], self._storage)
         return {
             "graph": graph,
             "runtime_mode": latest.get("runtime_mode", "dag"),
@@ -319,7 +377,7 @@ class ApplicationService:
         record = self._repo.get_graph_version(application_id, version)
         if record is None:
             raise NotFoundError("指定 graph 版本不存在")
-        graph = _parse_graph(record["graph"])
+        graph = _parse_graph(record["graph"], self._storage)
         return self.save_graph(application_id, graph, changelog=f"回滚到版本 {version}")
 
     # ========== 运行时 graph（缓存 hot path） ==========
@@ -328,21 +386,32 @@ class ApplicationService:
         application_id: UUID,
         tenant_id: UUID | None = None,
     ) -> dict[str, Any]:
-        """运行时 graph：Redis 缓存命中即返回；miss 回 DB，应用租户 config 覆盖。"""
-        # 1. 读 latest version
+        """运行时 graph：Redis 缓存命中即返回；miss 回 DB，应用租户 config 覆盖。
+
+        版本选择顺序（T13）：
+        1. 租户 pinned_graph_version（最高优先级，运营兜底）
+        2. application.published_graph_version（用户端实际跑的 live 版本）
+        3. latest version（未发布时回退，向后兼容）
+        """
+        # 1. 读 latest version 兜底
         latest = self._repo.get_latest_graph_version(application_id)
         if latest is None:
             raise NotFoundError("graph 不存在")
         latest_version = latest["version"]
 
-        # 2. 解析租户是否 pin 了版本
-        pinned_version = latest_version
+        # 2. 应用 published_graph_version（未发布时为 None，回退 latest）
+        app = self._repo.get_application(application_id)
+        published_version = app.get("published_graph_version") if app else None
+        base_version = int(published_version) if published_version else latest_version
+
+        # 3. 租户 pin 覆盖
+        pinned_version = base_version
         if tenant_id is not None:
             inst = self._repo.get_instance(tenant_id, application_id)
             if inst and inst.get("pinned_graph_version"):
                 pinned_version = int(inst["pinned_graph_version"])
 
-        # 3. 查缓存（key 含 version，天然按版本隔离）
+        # 4. 查缓存（key 含 version，天然按版本隔离）
         cache_key = self._graph_cache_key(application_id, pinned_version)
         cached = await self._cache.get(cache_key)
         if cached is not None:
@@ -351,19 +420,67 @@ class ApplicationService:
             version_record = self._repo.get_graph_version(application_id, pinned_version)
             if version_record is None:
                 raise NotFoundError(f"graph 版本 {pinned_version} 不存在")
-            graph = _parse_graph(version_record["graph"])
+            graph = _parse_graph(version_record["graph"], self._storage)
             await self._cache.set(
                 cache_key,
                 {"graph": graph, "runtime_mode": version_record["runtime_mode"]},
                 ttl_seconds=GRAPH_CACHE_TTL_SECONDS,
             )
 
-        # 4. 应用租户 config 覆盖（一次性读，不再 N+1）
+        # 5. 应用租户 config 覆盖（一次性读，不再 N+1）
         if tenant_id is not None:
             tenant_config = self._repo.list_tenant_config(tenant_id, application_id)
             graph = self._apply_config_overrides(graph, tenant_config)
 
         return graph
+
+    # ========== 发布动作（draft → live 快照） ==========
+    def publish_graph(
+        self,
+        application_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        actor_username: str = "",
+    ) -> dict:
+        """把当前 latest 版本快照为 live：写 application.published_graph_version。
+
+        - 没有任何 graph 版本时抛 NotFoundError
+        - 重复发布同一版本号幂等
+        """
+        app = self._repo.get_application(application_id)
+        if app is None:
+            raise NotFoundError("应用不存在")
+        latest = self._repo.get_latest_graph_version(application_id)
+        if latest is None:
+            raise NotFoundError("graph 不存在，请先保存画布")
+
+        target_version = latest["version"]
+        previous_version = app.get("published_graph_version")
+
+        self._repo.set_published_graph_version(application_id, target_version)
+
+        audit_repo = PostgresAuditLogRepository(self._uow.session)
+        audit_repo.record({
+            "actor_id": actor_id,
+            "actor_username": actor_username,
+            "action": "GRAPH_PUBLISH",
+            "resource_type": "application",
+            "resource_id": str(application_id),
+            "tenant_id": PLATFORM_TENANT_ID,
+            "detail": {
+                "previous_published_version": previous_version,
+                "new_published_version": target_version,
+                "runtime_mode": latest.get("runtime_mode", "dag"),
+            },
+        })
+        self._uow.commit()
+        self._invalidate_graph_cache(application_id)
+
+        return {
+            "published_version": target_version,
+            "previous_published_version": previous_version,
+            "runtime_mode": latest.get("runtime_mode", "dag"),
+        }
 
     def build_effective_graph_sync(
         self,
@@ -386,7 +503,7 @@ class ApplicationService:
         version_record = self._repo.get_graph_version(application_id, pinned_version)
         if version_record is None:
             raise NotFoundError(f"graph 版本 {pinned_version} 不存在")
-        graph = _parse_graph(version_record["graph"])
+        graph = _parse_graph(version_record["graph"], self._storage)
 
         if tenant_id is not None:
             tenant_config = self._repo.list_tenant_config(tenant_id, application_id)
