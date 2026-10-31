@@ -1,5 +1,7 @@
 packages:
   - "admin"
   - "user"
-onlyBuiltDependencies:
-  - esbuild
+allowBuilds:
+  '@parcel/watcher': true
+  canvas: true
+  esbuild: true
