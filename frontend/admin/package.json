@@ -27,6 +27,7 @@
     "react": "^18.2.37",
     "react-dom": "^18.2.37",
     "react-router-dom": "^7.18.4",
+    "react-simple-code-editor": "^0.14.1",
     "reflect-metadata": "~0.2.2",
     "zustand": "^5.0.16"
   },

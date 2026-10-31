@@ -385,10 +385,14 @@ export async function getAppGraph(applicationId: string): Promise<{
   graph: Graph
   runtime_mode: 'dag' | 'agent_loop'
   graph_schema_version: number
+  published_graph_version: number | null
 }> {
-  return request<{ graph: Graph; runtime_mode: 'dag' | 'agent_loop'; graph_schema_version: number }>(
-    `/admin/apps/${applicationId}/graph`,
-  )
+  return request<{
+    graph: Graph
+    runtime_mode: 'dag' | 'agent_loop'
+    graph_schema_version: number
+    published_graph_version: number | null
+  }>(`/admin/apps/${applicationId}/graph`)
 }
 
 export async function saveAppGraph(
@@ -433,6 +437,14 @@ export async function rollbackGraph(
   return request<{ ok: boolean; new_version?: number }>(`/admin/apps/${applicationId}/graph-rollback`, {
     method: 'POST',
     body: JSON.stringify({ version }),
+  })
+}
+
+export async function publishGraph(
+  applicationId: string,
+): Promise<{ ok: boolean; published_version?: number }> {
+  return request<{ ok: boolean; published_version?: number }>(`/admin/apps/${applicationId}/publish`, {
+    method: 'POST',
   })
 }
 

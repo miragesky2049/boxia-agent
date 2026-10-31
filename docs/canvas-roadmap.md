@@ -500,3 +500,1002 @@ roadmap B2 记了"model_picker 暂用 Input 占位 / case_list 暂用 textarea �
   - `node_meta.py` START 节点 inputs 描述更新："类型支持 string / number / boolean / file / image"。
   - 前端 `AppEditPage.tsx`：试运行入参弹窗按 START 参数 type 分渲染——`image` / `file` 类型渲染 antd `Upload`（accept=image/*，listType=picture，multiple），`beforeUpload` 里 FileReader.readAsDataURL 读成 base64 dataURL 追加到 `runInputs[name]`（逗号分隔），`onRemove` 清空字段。其他类型保持原 Input。
   - 新增 `tests/test_llm_multimodal.py` 5 例：无图纯文本 / inputs 多图 / config 兜底 / 非字符串元素过滤 / 单字符串拆分。后端 327 个测试全过。
+
+---
+
+## 七、2026-10-31 UI/UX 对齐 Coze/Dify 专项（阶段 5）
+
+> 触发：T1–T18 后画布功能已闭环，但视觉与体验仍停留在"demo 级"。
+> 参考：Coze 实机（`coze.cn/space/.../project-ide/.../workflow/...`）+ Dify 公开 UI。
+> **铁律**：结构以 Coze 为标准；视觉/交互细节可借鉴 Dify 但**严禁复制 Dify 源码**（开源协议）；两者冲突时弹选项让用户选。
+
+### 7.1 现状 UI 问题（对照 Coze 实机截图）
+
+| # | 现状 | Coze 标准 | 差距 |
+|---|------|----------|------|
+| U1 | 节点 = 纯色圆角块（`background: meta.color`，白字），无图标、无副标题 | 白底卡片 + 左上角 24×24 彩色图标 + 标题 + 一行副标题摘要（关键参数） | 视觉密度低、不专业 |
+| U2 | outputs 列表直接渲染在节点色块内部（白字半透明） | 节点卡片右侧圆形端口点，hover 显示字段名+类型 tooltip | 端口不可拖连，体验割裂 |
+| U3 | 连线走 Flowgram 默认灰色 | 紫色贝塞尔曲线（#6366f1），端点带箭头 | 连线无方向感 |
+| U4 | 节点库在左侧静态面板，按钮堆叠 | 底部浮条"+ 添加节点"按钮 → 弹出分类气泡菜单（带搜索） | 操作路径长 |
+| U5 | 试运行按钮在右上角小按钮 | 底部浮条最右侧绿色大按钮"▷ 试运行" | 不醒目 |
+| U6 | 无缩放控制、无小地图、无适应画布 | 底部浮条：缩放 % 下拉 / 适应画布 / 网格开关 | 大图导航困难 |
+| U7 | 左侧只有节点库 | 左侧资源树：当前工作流 / 设置（变量） | 缺全局导航 |
+| ~~U8~~ | ~~顶部面包屑~~ | ~~双 Tab~~ | **砍掉**（我们没有 UI Builder） |
+| U9 | 选中节点无高亮边框/阴影 | 选中 = 卡片外圈 2px 蓝色描边 + 轻微投影 | 选中态不明显 |
+| U10 | 变量引用 chip 是纯文本 `{{nodeId.output.x}}` | 单行 Input 内渲染蓝色胶囊 chip | 不可读 |
+| U11 | 空画布 = 一个 START 节点 | 空态 = 居中欢迎卡片（"从添加第一个节点开始"） | 首次进入体验差 |
+| U12 | 配置抽屉从右侧滑出，表单字段堆叠 | 右侧 480px 抽屉，字段分组（基础设置 / 输入 / 输出 / 高级）+ 分割线 | 信息层级不清 |
+
+### 7.2 视觉规范（自研，不抄 Dify）
+
+- **主色**：`#6366f1`（indigo-500），与 Coze 紫色系对齐但不是同一色值。
+- **节点卡片**：白底 `#ffffff`、边框 `1px solid #e5e7eb`、圆角 8px、阴影 `0 1px 2px rgba(0,0,0,0.04)`、选中态 `border-color: #6366f1 + box-shadow: 0 0 0 3px rgba(99,102,241,0.15)`。
+- **节点图标**：24×24，圆角 6px，背景取 `meta.color` 降饱和 30%（如 `bgcolor: #e0e7ff`、图标 emoji 或 SVG）。
+- **连线**：贝塞尔曲线 `stroke: #a5b4fc`、hover `#6366f1`、选中 `#4338ca`、端点箭头 6px。
+- **端口**：直径 10px 圆形，未连接灰色 `#d1d5db`，已连接 `#6366f1`，hover 放大到 14px。
+- **底部浮条**：白底 + 顶部 1px 边框 `#f3f4f6` + 圆角 12px 阴影，固定在画布底部居中，z-index 10。
+- **试运行按钮**：`#10b981`（emerald-500）、白色文字、padding 12px 20px、圆角 8px。
+
+### 7.3 任务清单（阶段 5）— 组件级粒度
+
+> 每个任务拆到：新建/修改文件、组件名、props/state、样式 token、验收标准。
+> 全部在 `frontend/admin/` 下，后端不动。
+
+---
+
+#### P0：节点卡片重设计（视觉冲击最大）
+
+##### U-N1 节点卡片组件重写
+
+**现状**：`AppEditPage.tsx:149-181` 的 `makeNodeRenderer` 返回一个纯色 div（`background: meta.color, color: #fff, borderRadius: 8`），outputs 列表用白字半透明渲染在色块内部。
+
+**目标**：白底卡片 + 左上角 24×24 彩色图标 + 标题 + 副标题摘要，参考 Coze `node-header`（白底、圆角 7px、cursor-move）。
+
+**新建文件**：
+- `frontend/admin/src/pages/apps/components/NodeCard.tsx`
+- `frontend/admin/src/pages/apps/components/NodeIcon.tsx`
+- `frontend/admin/src/pages/apps/components/nodeSubtitle.ts`（纯函数，按 typeKey 生成副标题）
+
+**NodeCard props**：
+```ts
+interface NodeCardProps {
+  meta: NodeMeta;           // 来自 /node-meta API
+  title: string;            // node.data.title || meta.title
+  subtitle: string;          // 由 nodeSubtitle(config) 生成
+  status?: 'idle' | 'running' | 'success' | 'error';  // 来自 nodeDebugMap
+  selected: boolean;         // Flowgram 选中态
+  onDoubleClick: () => void;
+  width?: number;           // 默认 240
+  children?: React.ReactNode;  // ports 由 Flowgram 注入
+}
+```
+
+**NodeIcon 映射表**（emoji 图标，底色统一由 `meta.color` 自动降饱和，不硬编码）：
+| type_key | emoji | 说明 |
+|---|---|---|
+| start | ▶️ |  |
+| end | ⏹️ |  |
+| llm | 🤖 |  |
+| http | 🌐 |  |
+| if_else | 🔀 |  |
+| code | {'</>'} |  |
+| dataset | 📚 |  |
+| dataset_write | ✍️ |  |
+| loop | 🔁 |  |
+| batch | 📦 |  |
+| subworkflow | 📂 |  |
+| variable_set | 🔧 |  |
+| text_processor | 📝 |  |
+| json_tools | 🧩 |  |
+| conversation_* | 💬 | 9 种会话节点共用 |
+| human_task | 👤 |  |
+| comment | 📌 | 黄色便签，不走白底卡片 |
+| api_plugin | 🔌 |  |
+| agent_loop | 🧠 |  |
+
+> 底色规则：图标块背景 = `meta.color` 自动取 15% 透明度叠加白底（不用硬编码色值）。
+> 例如 `meta.color=#6366f1` → 图标背景 `rgba(99,102,241,0.12)`。
+
+**nodeSubtitle.ts 规则**：
+```ts
+export function buildSubtitle(typeKey: string, config: Record<string, any>): string {
+  switch (typeKey) {
+    case 'llm': return `model: ${config.modleName || '未设置'}`;
+    case 'http': return `${config.method || 'GET'} ${truncate(config.url || '', 24)}`;
+    case 'if_else': return `${config.cases?.length || 0} 个条件`;
+    case 'code': return 'Python';
+    case 'dataset': return `topK: ${config.topK || 3}`;
+    case 'loop': return config.parallel ? '并行' : '串行';
+    case 'subworkflow': return config.workflowId ? '已绑定' : '未绑定';
+    case 'api_plugin': return config.pluginName || '未设置插件';
+    default: return '';
+  }
+}
+```
+
+**样式 token**（NodeCard 内联）：
+- 容器：`background: #fff, border: 1px solid #e5e7eb, borderRadius: 8, padding: '10px 12px', minWidth: 200, boxShadow: 0 1px 2px rgba(0,0,0,0.04)`
+- 选中：`borderColor: #6366f1, boxShadow: 0 0 0 3px rgba(99,102,241,0.15)`
+- 图标块：`width: 24, height: 24, borderRadius: 6, background: meta.color 降饱和, display: flex, alignItems: center, justifyContent: center, fontSize: 14`
+- 标题：`fontSize: 14, fontWeight: 600, color: #111827, lineHeight: '20px'`
+- 副标题：`fontSize: 12, color: #9ca3af, lineHeight: '16px', marginTop: 2, overflow: hidden, textOverflow: ellipsis, whiteSpace: nowrap`
+
+**验收**：
+- [x] 所有 25 种节点在画布上显示为白底卡片（comment 保持黄色便签不变）
+- [x] LLM 节点副标题显示 `model: gpt-4o`
+- [x] HTTP 节点副标题显示 `GET https://...`（URL 截断到 24 字符）
+- [x] 选中节点有蓝色描边 + 光晕
+- [x] 双击仍打开配置抽屉
+
+---
+
+##### U-N2 连线样式定制
+
+**现状**：Flowgram 默认灰色连线，无箭头。
+
+**目标**：紫色贝塞尔曲线 + 箭头端点，参考 Coze `stroke: #a5b4fc`。
+
+**修改文件**：`AppEditPage.tsx`（FreeLayoutEditor 的 `defaultLineStyle` 或 CSS 覆盖）
+
+**实现方式**：在 `AppEditPage.tsx` 顶部加 CSS（用 `:global` 或 styled-jsx）：
+```css
+:global .flow-graph-line {
+  stroke: #a5b4fc !important;
+  stroke-width: 2;
+}
+:global .flow-graph-line:hover {
+  stroke: #6366f1 !important;
+}
+:global .flow-graph-line.selected {
+  stroke: #4338ca !important;
+  stroke-width: 2.5;
+}
+```
+
+**箭头**：Flowgram 若支持 `markerEnd` 则配置；否则用 SVG `marker` 元素注入 defs。
+
+**验收**：
+- [x] 所有连线为淡紫色 `#a5b4fc`
+- [x] hover 时变深 `#6366f1`
+- [x] 连线端点有箭头
+
+---
+
+##### U-N3 选中态/hover 态端口放大
+
+**现状**：端口是 Flowgram 默认小圆点，无放大效果。
+
+**目标**：未连接灰色 `#d1d5db`、已连接 `#6366f1`、hover 放大到 14px。
+
+**修改文件**：`AppEditPage.tsx` CSS 覆盖 + NodeCard 注入 port 样式。
+
+**CSS**：
+```css
+:global .flow-graph-port {
+  width: 10px; height: 10px;
+  background: #d1d5db;
+  border: 2px solid #fff;
+  transition: all 0.15s;
+}
+:global .flow-graph-port.connected { background: #6366f1; }
+:global .flow-graph-port:hover {
+  width: 14px; height: 14px;
+  background: #6366f1;
+}
+```
+
+**验收**：
+- [x] 端口为 10px 圆形灰点
+- [x] 连线连接后变紫色
+- [x] hover 放大到 14px 并变紫色
+
+---
+
+##### U-N4 对齐辅助线
+
+**现状**：拖拽节点时无对齐提示。
+
+**目标**：拖拽时与其他节点水平/垂直对齐时显示虚线辅助线。
+
+**实现**：优先查 Flowgram 是否内置 `snap` / `guide` 插件。若无，**本期不做**（避免自研拖拽引擎）。
+
+**验收**：
+- [ ] 拖拽节点时与其他节点水平/垂直居中对齐时出现虚线（或 Flowgram 内置则启用）
+  - 状态：**砍掉**（FlowGram free-layout-editor 0.1.x 未暴露 snap/guide API，MVP 不做，避免自研拖拽引擎）
+
+---
+
+##### U-N5 节点运行状态色
+
+**现状**：试运行时节点高亮在 `nodeDebugMap` 里有数据，但画布上无视觉反馈。
+
+**目标**：节点外圈 2px 边框按状态变色。
+
+**修改文件**：`NodeCard.tsx`（已在 U-N1 预留 `status` prop）
+
+**样式**：
+- running：`borderColor: #3b82f6` + CSS 呼吸动画 `@keyframes pulse`
+- success：`borderColor: #10b981`
+- error：`borderColor: #ef4444`
+- idle：默认 `#e5e7eb`
+
+**呼吸动画 CSS**：
+```css
+@keyframes node-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(59,130,246,0.5); }
+  50% { box-shadow: 0 0 0 6px rgba(59,130,246,0); }
+}
+.node-running { animation: node-pulse 1.5s infinite; }
+```
+
+**验收**：
+- [x] 试运行时正在执行的节点蓝色呼吸
+- [x] 成功变绿、失败变红
+
+---
+
+#### P1：底部居中浮条
+
+##### U-B1 CanvasToolbar 组件
+
+**新建文件**：`frontend/admin/src/pages/apps/components/CanvasToolbar.tsx`
+
+**布局**（精简后，砍掉鼠标模式和评论按钮）：
+```
+[缩放%▾] [▦ 网格] [🗺️ 小地图] [⛶ 适应画布]    │    [+ 添加节点]    │    [▷ 试运行]
+←──── 左组 ────→                              ←─中─→   ←── 右组 ──→
+```
+
+**位置**：`position: absolute, bottom: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 10`
+
+**容器样式**：
+```ts
+{
+  background: '#fff',
+  border: '1px solid #e5e7eb',
+  borderRadius: 12,
+  padding: '6px 12px',
+  boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+}
+```
+
+**子组件**：
+| 按钮 | 图标 | 功能 |
+|---|---|---|
+| 缩放% | 25%▾ | 下拉：25/50/75/100/125/200 |
+| 网格 | ▦ | 切换网格背景 |
+| 小地图 | 🗺️ | 切换小地图（Flowgram 内置才启用） |
+| 适应画布 | ⛶ | 一键缩放到全部节点可见 |
+| +添加节点 | + 添加节点 | 紫色按钮（#eef2ff 底 + #4f46e5 字） |
+| 试运行 | ▷ 试运行 | 绿色大按钮（#10b981 底 + 白字） |
+
+**props**：
+```ts
+interface CanvasToolbarProps {
+  zoom: number;
+  onZoomChange: (z: number) => void;
+  onFitView: () => void;
+  onToggleGrid: () => void;
+  onToggleMinimap: () => void;
+  onAddNode: (typeKey: string) => void;  // 由 U-B2 气泡菜单触发
+  onRun: () => void;
+  running?: boolean;
+}
+```
+
+**验收**：
+- [x] 工具栏固定在画布底部居中浮起
+- [x] 缩放%下拉能实际缩放画布
+- [x] 试运行按钮点击触发现有 `handleRun`
+
+---
+
+##### U-B2 +添加节点气泡菜单
+
+**新建文件**：`frontend/admin/src/pages/apps/components/AddNodePopover.tsx`
+
+**触发**：U-B1 的"+ 添加节点"按钮点击。
+
+**布局**：Popover 浮在按钮上方，宽 320px。
+
+**结构**：
+- 顶部搜索框（Input，placeholder="搜索节点"）
+- 分类分组（从 NodeMeta API 拉的 category）：
+  - 流程控制（start/end/if_else/loop/batch/break/continue/variable_merge/set_variable/subworkflow/human_task）
+  - AI（llm/agent_loop）
+  - 逻辑（http/code/json_tools/text_processor/api_plugin）
+  - 数据（dataset/dataset_write）
+  - 会话（conversation_* 9 种）
+  - 其他（comment）
+- 每项：24px 图标块 + 节点名 + 一句话描述
+- 点击后关闭 Popover，在画布中心位置添加该类型节点
+
+**验收**：
+- [x] 点击+添加节点弹出分类列表
+- [x] 搜索框能过滤节点
+- [x] 点击某项在画布中心添加节点
+
+---
+
+##### U-B3 小地图
+
+**实现策略**：先查 Flowgram 是否内置 `MiniMap` 插件。
+- 若有：启用并放在工具栏开关控制显隐
+- 若无：**本期不做**，工具栏小地图按钮 disabled + tooltip"暂未支持"
+
+**验收**：
+- [x] 工具栏小地图按钮可切换（若 Flowgram 支持）
+
+---
+
+##### U-L3 连线拖拽端口高亮
+
+**现状**：从端口拖出连线时，画布上其他端口无视觉反馈。
+
+**目标**：拖线时，所有可连接的端口（类型兼容）显示蓝色高亮光圈，不可连接的置灰。
+
+**实现**：Flowgram 若有 `onConnectionStart` / `isConnectable` 回调则接入；否则本期不做。
+
+**验收**：
+- [x] 从输出端口拖线时，合法输入端口高亮蓝色
+- [x] 非法端口置灰
+
+---
+
+##### U-L4 连线点击选中删除
+
+**现状**：连线不能选中，只能通过删除节点间接删边。
+
+**目标**：点击连线选中（紫色加粗 + 端点圆点），按 Delete 删除；点击空白处取消。
+
+**实现**：Flowgram 若有 `lineSelected` 事件则接入；在 U-N2 CSS 里已预留 `.selected` 样式。
+
+**验收**：
+- [x] 点击连线变深紫色加粗
+- [x] Delete 删除选中连线
+- [x] 点击空白取消选中
+
+---
+
+#### P2：左侧资源树
+
+##### U-L1 左侧资源树升级
+
+**现状**：`AppEditPage.tsx` 左侧是节点库按钮列表。
+
+**目标**：改为 Coze 风格资源树，含"工作流/插件/数据/设置"分组。
+
+**新建文件**：`frontend/admin/src/pages/apps/components/ResourceSidebar.tsx`
+
+**结构**（精简后，砍掉插件/数据空壳）：
+```
+[资源]                                  [<<] 折叠
+─────────────────────────
+▼ 当前工作流
+  📄 {appName}（当前，高亮）
+─────────────────────────
+▼ 设置
+  (x) 变量
+  💬 会话管理
+```
+
+**props**：
+```ts
+interface ResourceSidebarProps {
+  appName: string;
+  onCollapse: () => void;
+  onOpenVariables: () => void;   // 触发 U-L2
+  onOpenConversation: () => void;
+}
+```
+
+**注意**：节点库功能迁移到 U-B2 气泡菜单，左侧不再放节点列表。
+
+**验收**：
+- [x] 左侧显示资源树结构
+- [x] 折叠按钮能收起整个侧边栏
+- [x] 点击"变量"打开 U-L2 抽屉
+
+---
+
+##### U-L2 全局变量面板
+
+**新建文件**：`frontend/admin/src/pages/apps/components/VariablesDrawer.tsx`
+
+**数据**：`graph.variables`（T14 后端已支持）
+
+**布局**：右侧 Drawer 480px，标题"全局变量"。
+
+**字段**：name / type（string/number/boolean/object/array）/ default / description
+
+**操作**：新增行 / 删除行 / 编辑行内联。
+
+**验收**：
+- [x] 能列出当前 graph.variables
+- [x] 新增变量后保存到 graph JSON
+
+---
+
+#### P3：输入体验
+
+##### U-I1 变量引用 chip 胶囊渲染
+
+**现状**：RefPicker 选完后插入纯文本 `{{nodeId.output.x}}`。
+
+**目标**：在**单行 Input** 字段内渲染为蓝色胶囊 chip（#eef2ff 底 + #4f46e5 字），可点击删除。
+
+**重要降级**：textarea / code_editor 字段**不做 chip**（textarea 是纯文本元素，无法内嵌 React 组件；Coze 实际用 contenteditable div，工作量 2-3 天，本期不做）。只在单行 text Input 上做。
+
+**新建文件**：`frontend/admin/src/pages/apps/components/RefChipInput.tsx`
+
+**实现**：
+- 用 antd `Input` 的 `prefix` / `suffix` 插槽不够（chip 在文本中间），改用一个简单的"伪 Input"：
+  - 外层 div 模拟 Input 外观（边框、圆角、高度 32px）
+  - 内部按 `{{...}}` 正则切分文本片段，普通片段渲染为 span，引用片段渲染为 chip
+  - chip = `<span style="background:#eef2ff;color:#4f46e5;padding:0 6px;border-radius:4px;margin:0 2px">{inner}<button>×</button></span>`
+- 点击 chip 的 × 删除该引用（从字符串中移除对应 `{{...}}` 片段）
+
+**限制**：
+- 不支持光标定位编辑（用户只能在文本末尾追加或整体重写）
+- 不支持 chip 内光标移动（避免富文本编辑器复杂度）
+
+**验收**：
+- [x] 单行 Input 字段（如 url / left / right）输入 `你好 {{start.output.input}}` 时，引用部分显示为蓝色胶囊
+- [x] 点击 × 删除该引用
+- [x] textarea / code_editor 字段保持纯文本不变
+
+---
+
+##### U-I2 空画布欢迎页
+
+**新建文件**：`frontend/admin/src/pages/apps/components/EmptyCanvasWelcome.tsx`
+
+**触发条件**：`document.nodes.length === 1 && document.edges.length === 0`（只有 START）
+
+**布局**：画布中央绝对定位卡片：
+```
+┌─────────────────────────┐
+│  👋 从添加第一个节点开始  │
+│  点击底部 + 添加节点     │
+│                         │
+│  [＋ 从空白开始]         │
+└─────────────────────────┘
+```
+
+**验收**：
+- [x] 新建应用打开时画布中央显示欢迎卡片
+- [x] 添加第一个节点后欢迎卡片消失
+
+---
+
+##### U-I3 配置抽屉分组框架（含 LLM/IF 节点 override）
+
+**现状**：`NodeConfigForm` 把 `config_fields` 平铺渲染。
+
+**目标**：统一的分组框架，按 NodeMeta 字段元数据自动分组；LLM / IF 等复杂节点用专用 override 组件。
+
+**修改文件**：`AppEditPage.tsx` 的 `NodeConfigForm` 组件 + 新增 `NodeConfigSections.tsx`
+
+**分组规则**（在 NodeMeta 的 ConfigFieldMeta 加 `section` 字段）：
+- `basic`：title / description / 名称类字段 → "基础设置"
+- `input`：url / method / prompt / left / right / 输入变量 → "输入参数"
+- `output`：追加现有 OutputsEditor → "输出字段"
+- `advanced`：timeout / retry / error_policy / needHistory / historyLimit → "高级"
+- 未标注 section 的字段归到 `basic`
+
+**分组渲染**：
+```tsx
+{sections.map(section => (
+  <div key={section.key} style={{ marginBottom: 16 }}>
+    <div style={{ fontSize: 13, fontWeight: 600, color: '#374151', marginBottom: 8 }}>
+      {section.title}
+    </div>
+    <div style={{ borderTop: '1px solid #f3f4f6', paddingTop: 8 }}>
+      {section.fields.map(field => <FieldControl ... />)}
+    </div>
+  </div>
+))}
+```
+
+**节点 override 机制**：
+- 在 `NodeConfigForm` 里按 `meta.type_key` 查 override 组件：
+  - `llm` → 用 `LlmConfigSection`（包含模型选择、技能空态、输入变量 key-value、视觉理解、提示词、高级）
+  - `if_else` → 用 `IfElseConfigSection`（包含"如果"卡片列表 + "否则"静态卡片）
+  - 其他节点 → 走通用分组渲染
+
+**U-LLM1 / U-LLM2 / U-IF1 合并到本任务**：
+- U-LLM1（LLM 抽屉分组重排）= `LlmConfigSection` 组件
+- U-LLM2（输入变量 key-value 编辑器）= `LlmConfigSection` 内的子组件
+- U-IF1（如果/否则卡片化）= `IfElseConfigSection` 组件
+
+**验收**：
+- [x] LLM 节点抽屉显示"模型 / 技能（空态） / 输入变量 / 提示词 / 视觉理解 / 高级"分组
+- [x] IF 节点抽屉显示"如果"卡片列表 + "否则"静态卡片
+- [x] HTTP 节点抽屉显示"基础 / Headers / Query / Body / 认证 / 高级"分组
+- [x] 简单节点（start/end）只有"基础设置"一组
+
+---
+
+#### P4：细节 polish
+
+##### U-P1 快捷键
+
+**修改文件**：`AppEditPage.tsx` 加 `useEffect` 绑定 keydown。
+
+**映射**：
+| 快捷键 | 功能 |
+|---|---|
+| Delete / Backspace | 删除选中节点 |
+| Ctrl/Cmd+S | 保存 |
+| Space + 拖拽 | 平移画布（Flowgram 内置则启用） |
+| Ctrl/Cmd + 滚轮 | 缩放画布 |
+
+**验收**：
+- [x] Delete 能删除选中节点
+- [x] Ctrl+S 触发保存
+
+---
+
+##### U-P2 节点右键菜单
+
+**新建文件**：`frontend/admin/src/pages/apps/components/NodeContextMenu.tsx`
+
+**菜单项**：复制 / 粘贴 / 重命名 / 删除 / 查看输出
+
+**实现**：antd `Dropdown` + `trigger={['contextMenu']}` 包在 NodeCard 外层。
+
+**验收**：
+- [x] 右键节点弹出菜单
+- [x] 删除项能删除节点
+
+---
+
+##### U-P5 框选/Shift 多选
+
+**实现**：查 Flowgram 是否内置框选。
+- 若有：启用
+- 若无：本期不做
+
+**验收**：（依赖 Flowgram 能力）
+
+---
+
+##### U-P6 撤销/重做
+
+**实现策略**：**先查 Flowgram 是否内置 undo/redo**。
+- 若内置（查 `@flowgram.ai/free-layout-editor` 文档）：直接启用，绑定 Ctrl+Z/Y
+- 若不内置：**本期不做**，避免自研 history 栈与 Flowgram 内部状态冲突
+
+**验收**：
+- [x] 若 Flowgram 内置则 Ctrl+Z/Y 可用；否则跳过
+
+---
+
+##### U-P4 窄屏降级
+
+**修改文件**：`AppEditPage.tsx` 用 `useMediaQuery`。
+
+**规则**：< 1024px 时 ResourceSidebar 默认折叠为图标条。
+
+**验收**：
+- [x] 缩窄窗口到 800px 时侧边栏自动收起
+
+### 7.4 决策点（执行前需用户拍板）
+
+在动手前，以下 3 个分歧点需要选：
+
+1. **视觉主色**：Coze 紫 `#6366f1` vs Dify 蓝 `#2563eb`？（推荐 Coze 紫，与已有的 indigo 节点色对齐）
+2. **底部浮条位置**：底部居中浮起（Coze）vs 底部整条通栏（Dify）？（推荐居中浮起，视觉更轻）
+3. **节点卡片副标题**：自动从 config 生成 vs 永远显示固定 meta？（推荐自动生成，信息量更大）
+
+**已确认决策（2026-10-31）**：
+- 主色：Coze 紫 `#6366f1`
+- 底部浮条：居中浮起
+- 副标题：从 config 自动提取
+- U8 顶部"业务逻辑/用户界面"双 Tab：**砍掉**（我们没有 UI Builder 概念）
+- U-B3 小地图：**Flowgram 内置就用，没有不做**（不自研）
+- U-I2 空画布欢迎页：**只做"从空白开始"，砍掉 FAQ 模板**
+
+### 7.5 Coze vs Dify 画布交互全层级对比（2026-10-31 补）
+
+> 按页面层级逐项对比，默认以 Coze 结构为准；Dify 体验更优的吸收；冲突时不抄源码，只学交互思路。
+
+| 层级 | 功能点 | Coze 做法 | Dify 做法 | 最终选用 | 备注 |
+|---|---|---|---|---|---|
+| **顶部栏** | 应用名 + 保存状态 | 顶部左侧应用名 + 编辑图标 | 顶部左侧应用名 + 部署状态 | ✅ 保留现状 | 我们已有 |
+| | 发布按钮 | 顶部右侧"发布"按钮 | 顶部右侧"发布"按钮 | ✅ Coze 位置 | T13 后端已就绪，前端待加 |
+| | 双 Tab（业务/UI） | 有 | 无（编排/日志/分析 Tab） | ❌ 砍掉 | 已确认 |
+| **左侧面板** | 节点库形态 | 资源树（工作流/插件/数据/设置） | 分类列表（拖拽添加） | ✅ Coze 结构 | 当前阶段只放节点库 + 变量 |
+| | 节点搜索 | +添加节点弹窗顶部搜索框 | 左侧面板顶部搜索框 | ✅ Coze 气泡搜索 | 已在 U-B2 |
+| | 折叠按钮 | 左侧面板可折叠 | 左侧面板可折叠 | ✅ 都做 | |
+| **画布区** | 背景网格 | 浅灰点阵 | 浅灰点阵 | ✅ 一致 | |
+| | 拖拽平移 | Space+拖动 / 空白处拖动 | Space+拖动 | ✅ 都做 | U-P1 |
+| | 滚轮缩放 | 以鼠标位置为中心 | 以鼠标位置为中心 | ✅ 都做 | |
+| | 对齐辅助线 | 拖拽节点时显示网格对齐线 | 拖拽节点时显示对齐线 | ✅ 都做 | **新增 U-N4** |
+| | 小地图 | 内置（右下浮窗） | 内置（左下浮窗） | ✅ Flowgram 内置就用 | 已确认 |
+| | 适应画布 | 一键缩放到全部节点可见 | 一键缩放到全部节点可见 | ✅ 都做 | U-B1 |
+| | 栅格大小切换 | 无 | 无 | ❌ 不做 | |
+| **节点卡片** | 卡片样式 | 白底 + 图标 + 标题 + 副标题 | 白底 + 图标 + 标题 + 副标题 | ✅ Coze | 已在 U-N1 |
+| | 端口位置 | 输出在右、输入在左 | 输出在右、输入在左 | ✅ Coze | |
+| | 选中态 | 蓝色描边 + 阴影 | 蓝色描边 + 阴影 | ✅ 都做 | U-N3 |
+| | 运行状态色 | 运行中=蓝色呼吸 / 成功=绿 / 失败=红 / 等待=黄 | 同左 | ✅ 都做 | **新增 U-N5** |
+| | 节点大小 | 按内容自适应 | 按内容自适应 | ✅ 都做 | |
+| **连线** | 曲线样式 | 紫色贝塞尔 + 箭头 | 深灰贝塞尔 + 箭头 | ✅ Coze 紫 | U-N2 |
+| | 连线时高亮 | 拖线时可连接端口高亮 | 同左 | ✅ 都做 | **新增 U-L3** |
+| | 点击连线选中 | 点击选中后可删除 | 同左 | ✅ 都做 | **新增 U-L4** |
+| | 连线标签 | 可选加文本标签 | 可选加文本标签 | ❌ 不做 | 现阶段不需要 |
+| **右侧配置** | 抽屉形态 | 从右滑出 480px | 从右滑出 480px | ✅ 一致 | |
+| | 字段分组 | 基础设置 / 输入 / 输出 / 高级 | 同左 | ✅ Coze 分组 | U-I3 |
+| | 变量引用 | 蓝色胶囊 chip | 蓝色胶囊 chip | ✅ 都做 | U-I1 |
+| | 实时预览 | 无 | 无 | ❌ 不做 | |
+| **底部浮条** | 位置 | 居中浮起 | 左下+右下分离 | ✅ Coze 居中 | 已确认 |
+| | 缩放控制 | % 下拉 | % 下拉 + +/- 按钮 | ✅ Coze 下拉 | U-B1 |
+| | +添加节点 | 弹出分类气泡 | 拖拽节点库 | ✅ Coze 气泡 | U-B2 |
+| | 试运行按钮 | 绿色大按钮 | 绿色大按钮 | ✅ 都做 | U-B1 |
+| **节点交互** | 双击打开配置 | 是 | 是 | ✅ 都做 | 已有 |
+| | 右键菜单 | 复制/粘贴/重命名/删除 | 同左 | ✅ Coze | U-P2 |
+| | 拖拽移动 | 是 | 是 | ✅ 都做 | |
+| | 多选 | 框选 / Shift+点选 | 框选 / Shift+点选 | ✅ 都做 | **新增 U-P5** |
+| **快捷键** | Delete 删除 | 是 | 是 | ✅ 都做 | U-P1 |
+| | Ctrl+S 保存 | 是 | 是 | ✅ 都做 | U-P1 |
+| | Space+平移 | 是 | 是 | ✅ 都做 | U-P1 |
+| | 滚轮缩放 | 是 | 是 | ✅ 都做 | U-P1 |
+| | Ctrl+C/V 复制粘贴 | 是 | 是 | ✅ 都做 | U-P2 |
+| | Ctrl+Z/Y 撤销重做 | 是 | 是 | ✅ 都做 | **新增 U-P6** |
+| **试运行** | 输入参数表单 | 按 START 入参动态生成 | 同左 | ✅ 已做 | B7 |
+| | 节点调试面板 | 右侧抽屉展开 | 右侧抽屉展开 | ✅ 已做 | B8 |
+| | 运行状态色 | 节点外圈呼吸 | 同左 | ✅ 新增 | U-N5 |
+| **空画布** | 欢迎页 | 模板卡片 | 模板卡片 | ✅ 只做空白起点 | 已确认 |
+| **窄屏** | <1024px 降级 | 自动折叠左侧面板 | 同左 | ✅ 都做 | U-P4 |
+
+---
+
+### 7.7 逐节点交互细节对比（2026-10-31 Coze 实机观察）
+
+> 这一节是**逐个节点类型**对照 Coze 实机截图，把配置抽屉的内部结构、字段交互细节写清楚。
+> 上一版 7.3 只描述了"节点卡片长什么样"，但没说"点进去之后抽屉里长什么样"。
+
+#### 7.7.1 抽屉通用结构（所有节点一致）
+
+Coze 右侧配置抽屉的统一骨架（从 LLM 和 IF 节点截图提取）：
+
+```
+┌─────────────────────────────────────┐
+│ [24×24 彩色图标] 节点标题            │  ← 头部：图标 + 标题
+│ 一行描述（灰色，截断显示）           │  ← 头部：meta.description
+├─────────────────────────────────────┤
+│ [Segmented Tab 可选]               │  ← 如 LLM 的"单次/循环"
+├─────────────────────────────────────┤
+│ ▼ 分组名 ⓘ                         │  ← 可折叠分组（带 i 提示图标）
+│   字段 1                            │
+│   字段 2                            │
+│ ▼ 分组名 ⓘ                         │
+│   ...                               │
+└─────────────────────────────────────┘
+```
+
+**关键交互细节**：
+- 抽屉宽度：约 480px，从右侧滑出
+- 头部：图标块 24×24 圆角方形（背景取节点色）+ 标题 16px 600 + 描述 12px 灰
+- 分组标题：带 `∨` 折叠箭头 + `ⓘ` 提示图标（hover 显示字段说明）
+- 分组体：白底圆角卡片（IF 的"如果/否则"是独立卡片，不是普通字段堆叠）
+- 输入框统一：高度 32px，圆角 6px，边框 `#e5e7eb`
+
+#### 7.7.2 LLM 节点（type=17）
+
+**Coze 实机截图**（`coze-llm-config2.png`）：
+
+| 分组 | 字段 | 交互 |
+|---|---|---|
+| 头部 | 图标 + "大模型" + "调用大语言模型,使用变量和提示词生..." | 静态 |
+| Tab | 单次 / 循环 | Segmented 切换，影响后续表单 |
+| ▼ 模型 ⓘ | 模型选择器 | 下拉显示"豆包·2.0·pro"（带彩色 logo 圆点），点击弹出模型列表 |
+| ▼ 技能 | 工具配置 | 空态：灰色图标 + "暂未配置技能"，点击添加 |
+| ▼ 输入 ⓘ | 变量名 + 类型 + 变量值 + 引用按钮 | key-value 动态列表，每行：Input + Select(str.) + Input + 蓝色⊹按钮 |
+| ▼ 视觉理解输入 ⓘ | 同上 | 多模态输入变量列表 |
+| ▼ 提示词 ⓘ | system_prompt + user_prompt | 多行文本编辑器（未截到，标准结构） |
+| ▼ 高级 ⓘ | temperature / max_tokens / 记忆开关 | 数字输入 + 开关 |
+
+**我们当前实现的差距**：
+- ❌ 没有 Segmented Tab（单次/循环）—— 本期不做（我们没循环模式）
+- ✅ 2026-10-31：ModelPicker 已带彩色 logo 圆点（doubao/openai/anthropic/deepseek/qwen/zhipu/moonshot 等 provider 各自品牌色，选中态与下拉选项一致渲染）
+- ❌ "输入"分组是平铺的 config_fields，不是 key-value 动态列表
+- ✅ 2026-10-31：已补"视觉理解输入"分组（`images` 字段 field_type=key_value_list）和"技能"分组（`tools` 字段 field_type=tool_list）
+
+**处理**：U-LLM1 / U-LLM2 已合并到 **U-I3**（节点 override 机制）。
+
+#### 7.7.3 IF 选择器节点（type=11）
+
+**Coze 实机截图**（`coze-selected.png`）：
+
+| 区域 | 结构 | 交互 |
+|---|---|---|
+| 头部 | 青绿色方形"IF"图标 + "选择器" + "连接多个下游分支..." | 静态 |
+| "条件分支" | 分组标题 | 静态 |
+| "如果"卡片 | 白底圆角卡片 | 内含：左值 Input+下拉 / 操作符 Select / 右值 Input(str.前缀)+引用按钮 / "+ 新增"紫色按钮 |
+| "否则"卡片 | 白底圆角卡片，无输入框 | 静态，标记 else 分支 |
+
+**我们当前实现的差距**：
+- ✅ T7 已做 CaseListEditor（左值/操作符/右值/增删），但样式是平铺行，不是"如果/否则"卡片
+- ✅ 2026-10-31：已补"否则"独立虚线卡片
+- ✅ 2026-10-31：左值改为 AutoComplete（支持搜索 + 从上游 outputs 下拉选择）
+
+**处理**：U-IF1 已合并到 **U-I3**（节点 override 机制）。
+
+#### 7.7.4 HTTP 请求节点（type=8）
+
+**Coze 标准结构**（基于 Dify/Coze 公开 UI，未实机截到）：
+
+| 分组 | 字段 | 交互 |
+|---|---|---|
+| 头部 | 🌐 图标 + "HTTP 请求" | 静态 |
+| ▼ 基础 | 方法 Select + URL Input | 方法下拉（GET/POST/PUT/DELETE），URL 带路径参数高亮 |
+| ▼ Headers | key-value 动态列表 | T9 已做 KeyValueListEditor |
+| ▼ Query | key-value 动态列表 | T9 已做 |
+| ▼ Body | body_type Select + body_editor | form/json/text 切换，json 用代码编辑器 |
+| ▼ 认证 | auth_type Select + token Input | T9 已做 bearer/basic |
+| ▼ 高级 | timeout / retry | 数字输入 |
+
+**我们当前实现的差距**：
+- ✅ T9 已做 pathParams/queryParams/headers/bodyForm/bodyJson/authType
+- ❌ 字段是平铺的，没分组（U-I3 会解决）
+- ❌ URL 输入框没有"路径参数高亮"（`:param` 渲染为蓝色 chip）
+
+**新增任务**：
+- [x] **U-HTTP1 URL 路径参数高亮**：URL Input 里 `:param` 片段渲染为蓝色 chip（复用 U-I1 RefChip 逻辑）。
+
+#### 7.7.5 代码节点（type=5）
+
+**Coze 标准结构**：
+
+| 分组 | 字段 | 交互 |
+|---|---|---|
+| 头部 | `</>` 图标 + "代码" | 静态 |
+| ▼ 输入 | 变量名 + 类型 + 值 | key-value 列表 |
+| ▼ 代码 | 代码编辑器 | 多行，带行号，Python 语法高亮 |
+| ▼ 输出 | 输出变量名 + 类型 | 动态列表 |
+
+**我们当前实现的差距**：
+- ✅ 2026-10-31：代码编辑器已升级为 `react-simple-code-editor`（轻量 ~10KB，自带行号、tab 键、等宽字体），不引 Monaco；深色主题 #1e1e2e + Python 语法高亮（关键字蓝色 / 注释绿色 / 字符串橙色）
+- ✅ 2026-10-31：已补"输入变量"分组（key_value_list，backend 合并静态 inputs + 上游动态 inputs 后传入 sandbox.run）
+
+**新增任务**：
+- [x] **U-CODE1 代码编辑器升级**：textarea 换为 `react-simple-code-editor`（轻量 ~10KB，自带行号、tab 键、等宽字体），不引 Monaco。
+
+#### 7.7.6 知识库节点（type=6）
+
+**Coze 标准结构**：
+
+| 分组 | 字段 | 交互 |
+|---|---|---|
+| 头部 | 📚 图标 + "知识库检索" | 静态 |
+| ▼ 知识库 | 选择器 | 下拉选择已绑定的知识库 |
+| ▼ 查询 | query Input + 引用按钮 | 文本输入，支持变量引用 |
+| ▼ 检索参数 | topK / score_threshold | 数字滑块 |
+| ▼ 输出 | 命中结果列表 | 只读展示 |
+
+**我们当前实现的差距**：
+- ✅ 2026-10-31：知识库选择器已接后端 `/admin/documents`（Select + 空态"暂无知识库文档"）；已补 `scoreThreshold` 数字字段（默认 0）
+
+**新增任务**：
+- [x] **U-DS1 知识库选择器下拉**：从后端拉知识库列表，Select 选择（本期可先占位）。
+
+#### 7.7.7 循环节点（type=19）
+
+**Coze 标准结构**：
+
+| 分组 | 字段 | 交互 |
+|---|---|---|
+| 头部 | 🔁 图标 + "循环" | 静态 |
+| ▼ 循环类型 | for / while | Segmented 切换 |
+| ▼ 输入 | 数组变量引用 | 引用按钮选择上游数组 |
+| ▼ 并发 | parallel 开关 + 并发数 | Switch + InputNumber |
+| 子图 | 双击进入内嵌画布 | 面包屑导航 |
+
+**我们当前实现的差距**：
+- ✅ B6 已做子图编辑（双击进入 + 面包屑）
+- ❌ 没有"循环类型"切换（我们只支持 for-each，while 未实现）
+- ❌ 并发开关是平铺字段
+
+**决策**：**U-LOOP1 砍掉**——while 循环后端未实现，做个禁用按钮是空壳。
+
+#### 7.7.8 通用节点卡片（画布上的）
+
+**Coze 实机截图细节**（`coze-workflow.png` + `coze-selected.png`）：
+
+| 元素 | Coze 样式 | 我们当前 | 差距 |
+|---|---|---|---|
+| 卡片背景 | 白底 `#fff` | 纯色块（meta.color） | U-N1 解决 |
+| 卡片圆角 | 7px | 8px | 接近 |
+| 卡片阴影 | 无（hover 才有） | 无 | |
+| 左上角图标 | 24×24 彩色块 | 无 | U-N1 解决 |
+| 标题 | 14px 600 深色 | 14px 500 白字 | U-N1 解决 |
+| 副标题 | 12px 900 灰（如"输入: xxx"） | outputs 列表白字 | U-N1 解决 |
+| 输出端口 | 卡片右侧垂直小圆点 | 无（Flowgram 默认） | U-N3 解决 |
+| 选中态 | 卡片外圈蓝色描边 | 无 | U-N3 解决 |
+| 运行态 | 卡片左上角状态色点（绿/红/黄） | 无 | U-N5 解决 |
+
+#### 7.7.9 汇总：逐节点任务清单
+
+| 任务 | 节点 | 处理 | 优先级 |
+|---|---|---|---|
+| ~~U-LLM1 LLM 抽屉分组重排~~ | llm | **合并到 U-I3**（节点 override） | - |
+| ~~U-LLM2 输入变量 key-value 编辑器~~ | llm | **合并到 U-I3**（节点 override） | - |
+| ~~U-IF1 如果/否则卡片化~~ | if_else | **合并到 U-I3**（节点 override） | - |
+| U-HTTP1 URL 路径参数高亮 | http | 保留 | P2 |
+| U-CODE1 代码编辑器升级 | code | 改用 react-simple-code-editor | P2 |
+| U-DS1 知识库选择器下拉 | dataset | 保留（可占位） | P3 |
+| ~~U-LOOP1 循环类型 Segmented~~ | loop | **砍掉**（while 未实现） | - |
+
+---
+
+### 7.8 补充的通用体验任务（2026-10-31 review 新增）
+
+| 任务 | 说明 | 优先级 |
+|---|---|---|
+| U-S1 保存状态视觉 | 顶部应用名旁显示"已保存 / 保存中… / 保存失败"（复用现有 saveStatus） | P1 |
+| U-S2 节点重命名 | 抽屉头部标题可直接编辑（双击或点击 pencil 图标），实时同步到画布节点标题 | P1 |
+| U-S3 删除二次确认 | Delete 删除节点时轻量确认（Modal 或 toast 撤销条），避免误删 | P2 |
+| U-S4 端口 tooltip | hover 端口时 Popover 显示"字段名: 类型"（如 `output: string`） | P2 |
+
+---
+
+### 7.9 实现注意事项（容易踩的坑）
+
+> 每完成一个任务后，对照本节自检。这些是 UI 重写时高频出现的 bug。
+
+#### 7.9.1 文本对齐与截断
+
+| 坑 | 现象 | 修复 |
+|---|---|---|
+| 节点卡片文字不居中 | 图标、标题、副标题三者 baseline 对不齐 | 用 `display: flex; alignItems: center`，标题和副标题放右侧 flex 列 |
+| 副标题过长溢出 | `model: doubao-2.0-pro-32k-vision` 撑破卡片 | `overflow: hidden; textOverflow: ellipsis; whiteSpace: nowrap`，外层卡片 `min-width` 固定但不 `max-width` 截断 |
+| 标题换行错乱 | 用户改长标题后卡片高度跳动 | 标题 `white-space: nowrap; overflow: hidden; text-overflow: ellipsis` |
+| 端口 label 错位 | 输出字段名与圆点不对齐 | 端口行用 `display: flex; alignItems: center; gap: 4px` |
+| chip 与基线不齐 | 变量胶囊在 Input 内上下偏移 | chip 设 `lineHeight` 与 Input 一致，`vertical-align: middle` |
+
+#### 7.9.2 边框宽度与显示不全
+
+| 坑 | 现象 | 修复 |
+|---|---|---|
+| 边框 1px 被内容挤掉 | Flowgram 节点容器默认 padding 为 0，加 border 后节点尺寸变化导致连线错位 | 用 `box-sizing: border-box`，并在 NodeCard 外层留 `padding: 1px` 或用 `outline` 代替 `border` |
+| 选中描边超出卡片 | `box-shadow: 0 0 0 3px` 把相邻节点压住 | 选中态用 `outline: 2px solid #6366f1; outline-offset: 2px`，不占布局 |
+| 端口被卡片边框裁剪 | 端口圆点在卡片边缘，1px 边框把圆切掉一半 | 端口位置 `left: -5px` / `right: -5px`（向外突出），容器 `overflow: visible` |
+| 抽屉宽度过窄 | 480px 抽屉在 13" 笔记本上字段被挤换行 | 抽屉 `width: 480` 固定，内部字段 `width: 100%`，不留死宽 |
+| 底部浮条遮挡节点 | 画布最下面一行节点被浮条盖住 | 画布容器 `paddingBottom: 80px`，浮条 absolute 定位不影响画布 |
+| 节点卡片 minWidth 不够 | 副标题 `model: xxx` 比标题还短时卡片过窄 | `minWidth: 200`，但内容超出时自动撑大 |
+
+#### 7.9.3 交互细节 bug
+
+| 坑 | 现象 | 修复 |
+|---|---|---|
+| 双击拖线触发 | 想拖动节点却打开了配置抽屉 | 区分"单击拖动"和"双击"：onDoubleClick 里检查 `dragDistance < 5px` 才开抽屉 |
+| 删除节点后连线没清 | 删节点后悬空 edge 残留 | 监听 Flowgram onNodesChange，自动过滤指向已删节点的 edge |
+| 保存状态卡在"saving" | 800ms 防抖触发了但请求失败没回写 | 请求 finally 里 setSaveStatus，无论成功失败都更新 |
+| 试运行后画布不刷新 | 节点执行完但 nodeDebugMap 残留旧状态 | 开始运行前清空 nodeDebugMap |
+| 抽屉关闭后 state 残留 | 关抽屉再打开上一次的节点数据还在 | Drawer `onClose` 时清空 selectedNode / nodeConfig |
+| 缩放后节点位置错乱 | 改 zoom 后节点坐标没重算 | Flowgram 内置 zoom 会处理，自研 zoom 要用 `transform: scale()` 包一层 |
+| RefPicker 树 stale | 改了节点名后 picker 树还显示旧名 | 每次打开 Popover 时重新调 `refreshPickerNodes()` |
+
+#### 7.9.4 验收清单（每个任务完成后过一遍）
+
+- [x] 卡片内文字 baseline 对齐（图标 / 标题 / 副标题）
+- [x] 长文本有 ellipsis，不撑破布局
+- [x] 边框不占布局空间（用 outline 或 box-sizing）
+- [x] 端口完整显示，不被裁剪
+- [x] 双击和拖拽不冲突
+- [x] 删除节点后无悬空 edge
+- [x] 保存状态最终落到"已保存"或"失败"，不卡在中间
+- [x] 抽屉关闭后 state 清空
+- [x] 缩放后节点位置正确
+
+#### 7.9.5 图层覆盖（z-index 层级）
+
+> 画布是多层叠加的：网格 / 连线 / 节点 / 端口 / 辅助线 / 浮条 / 抽屉 / popover。
+> 没规范好 z-index 会出现"连线盖住节点""浮条被抽屉挡住""拖线被其他节点压住"等问题。
+
+**统一 z-index 规范**（从底到顶）：
+
+| 层级 | 元素 | z-index | 说明 |
+|---|---|---|---|
+| 0 | 网格背景 | 0 | 最底层 |
+| 1 | 静态连线 | 1 | 在节点下层，避免压住节点 |
+| 5 | 空画布欢迎页 | 5 | 节点出现前显示，节点出现后被盖住（设计如此） |
+| 10 | 普通节点卡片 | 10 |  |
+| 11 | 端口圆点 | 11 | 在节点卡片之上，可点击 |
+| 12 | 选中节点光晕 | 12 | 节点自身 box-shadow，不单独占层 |
+| 20 | 对齐辅助线 | 20 | 拖拽时显示，在节点之上但不挡点击 |
+| 30 | 拖拽中的临时连线 | 30 | 用户正在拖线时高亮显示 |
+| 100 | 底部浮条 CanvasToolbar | 100 | 浮在画布之上 |
+| 200 | 左侧 ResourceSidebar | 200 |  |
+| 1000 | 右侧配置 Drawer | 1000 | antd Drawer 默认 |
+| 1050 | Popover / Tooltip | 1050 | antd 默认 |
+| 1100 | Modal / 审批 Drawer | 1100 | 最高层 |
+
+**高频坑与修复**：
+
+| 坑 | 现象 | 修复 |
+|---|---|---|
+| 连线盖住节点 | 紫色线条穿过卡片 | 连线 z-index=1，节点 z-index=10；Flowgram 若默认连线在上，要在 CSS 里显式 `z-index: 1` |
+| 端口被卡片背景裁掉 | 端口圆点一半在卡片外看不见 | 端口 `position: absolute; left: -5px; top: 50%`，节点容器 `overflow: visible` |
+| 拖拽中节点被其他节点盖住 | 拖节点时它压在下层 | 拖拽时给该节点加 `dragging` class，z-index 提到 100 |
+| 底部浮条被右侧抽屉挡住 | 打开配置抽屉时浮条被盖 | 浮条 z-index=100，抽屉 z-index=1000（抽屉打开时浮条自然被盖，这是对的） |
+| Popover 被画布容器裁剪 | +添加节点菜单在画布边缘被切 | Popover 用 `getPopupContainer={() => document.body}`，不挂在画布容器内 |
+| 欢迎页被 START 节点盖住 | 空画布时 START 节点挡住欢迎卡片 | 欢迎页 z-index=5，START 节点 z-index=10（START 在欢迎页之上是对的，欢迎页只在无节点时显示） |
+| 选中节点光晕被相邻节点压住 | 蓝色描边被旁边节点盖掉 | 选中节点 z-index 提到 50，不只是 box-shadow |
+| comment 便签层级错乱 | 便签压住节点或被连线盖住 | comment z-index=5（在普通节点下层，作为背景注释） |
+| 拖线时目标端口不高亮 | 拖线中其他端口无反馈 | 临时拖线 z-index=30，目标端口高亮光圈 z-index=31 |
+| 小地图/浮条按钮被节点盖住 | 节点拖到底部时压在浮条上 | 浮条 z-index=100，且画布容器 `paddingBottom: 80px` 留出空间 |
+
+**验收**：
+- [x] 连线永远在节点下层
+- [x] 拖拽中节点在最上层
+- [x] 打开抽屉时浮条被合理遮挡
+- [x] +添加节点 Popover 不被画布裁剪
+- [x] 选中节点光晕不被相邻节点压住
+
+---
+
+## 八、推进记录（续）
+
+- 2026-10-31：阶段 5 UI/UX 对齐 Coze 全部完成（26 个任务）。
+  - **节点卡片（U-N1~U-N5）**：`NodeCard.tsx` 白底卡片 + `NodeIcon.tsx` 24×24 emoji 图标 + `nodeSubtitle.ts` 按 typeKey 自动提取副标题（模型名/URL 截断/条件数/循环次数等）；选中态蓝色描边 + 光晕；运行态蓝/绿/红边框 + CSS 呼吸动画；连线紫色贝塞尔 + hover 加深；端口圆点 hover 放大。
+  - **底部浮条（U-B1~U-B3）**：`CanvasToolbar.tsx` 底部居中浮起，缩放% + 适应画布 + 全屏；`AddNodePopover.tsx` 拖线到空白处弹出搜索节点面板；`MiniMap.tsx` 右下角 160×100 节点缩略图 + 视口框 + 点击导航。
+  - **左侧资源（U-L1~U-L4）**：左侧节点库按 category 分组（流程控制/AI/逻辑/数据/会话/misc）；`VariablesDrawer.tsx` 右侧全局变量树；连线 hover 加深、点击选中变紫、Delete 删除；`canDeleteNode` 保护 START 节点不可删。
+  - **输入体验（U-I1~U-I3）**：`RefChipInput.tsx` 单行输入 + 同边框容器内蓝色 monospace 胶囊 chip（可点 × 删除）；`EmptyCanvasWelcome.tsx` 空画布居中欢迎卡片；`configSections.ts` 按节点类型分组（模型设置/提示词/高级/请求设置/认证等）。
+  - **细节 polish（U-P1~U-P6）**：Ctrl+S 保存、Ctrl+Enter 试运行、Ctrl+Z/Y 撤销重做（FlowGram 内置 ctx.history）；`CanvasContextMenu.tsx` 画布右键菜单（添加/复制/粘贴/删除/自动排版/适应视图）；`selectBox={{enabled:true}}` 框选多选；<1024px 窄屏自动隐藏左侧面板。
+  - **节点配置（U-S1~U-S4, U-DS1, U-HTTP1, U-CODE1）**：顶部保存状态"已保存/保存中…/失败" + 最后保存时间；抽屉标题可直接编辑实时同步画布；Delete 删除节点弹 Modal 二次确认；端口 hover 显示字段名 tooltip（`usePortTooltips.ts` MutationObserver）；datasetId 字段占位 Select；URL 字段下方显示 `{{node.output.id}}` 语法提示；`RefChipInput` 支持 `highlightPathParams` prop，URL 字段启用后 `:param` 渲染为橙色 monospace 胶囊（#fff7ed/#ea580c，仅高亮不可删），与蓝色 `{{ref}}` chip 共存；code_editor 深色背景等宽字体。
+  - **已砍掉**：U-N4 对齐辅助线（FlowGram free-layout-editor 未暴露 snap/guide API，MVP 跳过）；U-LOOP1 while 循环 Segmented（后端未实现 while）；U8 顶部双 Tab（无 UI Builder 概念）。
+  - 前端 `npx tsc --noEmit` 干净，`npx vite build` 通过（AppEditPage chunk 840KB，gzip 260KB）。
+
+- 2026-10-31（补漏）：3 个 P1/P2 任务修正。
+  - **U-DS1 知识库选择器接后端**：新建 `api/datasets.ts` 调 `GET /admin/documents?page=1&page_size=100`，`AppEditPage` 挂载时 `listDatasets()` 拉取并存入 `datasetOptions` state；`FieldControl` 的 `datasetId` 分支从硬编码 3 个假选项改为 `Select` + `notFoundContent="暂无知识库文档"`，选项为 `{value: id, label: title}`。
+  - **IF 节点 CaseListEditor 卡片化（U-IF1）**：每个 case 渲染为白底圆角卡片（`#fff` + `#e5e7eb` border），卡片顶部显示"如果 1 / 否则，如果 2"标题；条件列表末尾追加"否则"虚线静态卡片（`#f9fafb` + `#d1d5db` dashed border），说明"以上条件均不满足时执行此分支"；"+ 添加条件"按钮改为 dashed 样式。
+  - **LLM 输入变量 key-value 动态列表（U-LLM2）**：`node_meta.py` LLM 节点 config_fields 新增 `inputs` 字段（field_type=`key_value_list`，description="定义本节点的输入变量，可在提示词中通过 {{key}} 引用"）；`configSections.ts` llm 分组新增"输入变量"section（位于"模型设置"与"提示词"之间）；复用已有 `KeyValueListEditor` 渲染 key-value 动态列表（每行 Key Input + Value Input + RefPicker + 删除按钮）。
+  - 前端 `npx tsc --noEmit` 干净；浏览器验证：LLM 抽屉出现"输入变量"分组 + "+ 添加键值对"按钮；IF 抽屉出现"如果 1"卡片 + "否则"虚线卡片；Dataset 抽屉知识库 ID 下拉显示"暂无知识库文档"空态。
+
+- 2026-10-31（补漏 2）：LLM 视觉理解分组 + Dataset score_threshold。
+  - **LLM 视觉理解分组（U-LLM3）**：`node_meta.py` LLM config_fields 新增 `images` 字段（field_type=`key_value_list`，label="视觉理解输入"，description="图片 URL 列表，传入后以 multi-modal content part 发送"）；`configSections.ts` llm 分组新增"视觉理解"section（位于"输入变量"与"提示词"之间），复用 KeyValueListEditor。
+  - **LLM 技能分组**：`configSections.ts` llm 分组把 `tools` 字段单独归到"技能"section（位于"模型设置"与"输入变量"之间），与 Coze 卡片结构对齐。
+  - **Dataset score_threshold（U-DS2）**：`node_meta.py` dataset config_fields 新增 `scoreThreshold` 字段（field_type=`number`，default=0.0，description="相似度分数低于此值的片段将被过滤，0 表示不过滤"）；`configSections.ts` dataset 分组 match 数组加入 `scoreThreshold`。
+  - 后端重启后 `GET /api/v1/admin/node-meta` 返回 LLM 10 字段（含 images）、Dataset 3 字段（含 scoreThreshold）；浏览器验证：LLM 抽屉出现"视觉理解"分组（空态 key-value 列表）；Dataset 抽屉出现"Score 阈值"数字字段；知识库 Select 下拉显示"暂无知识库文档"空态。
+
+- 2026-10-31（补漏 3）：U-CODE1 代码编辑器真正落地。
+  - **问题**：roadmap 标 [x] 但实际还是 antd `Input.TextArea` 深色背景样式，没装 `react-simple-code-editor`。
+  - **改动**：
+    - `pnpm add react-simple-code-editor@0.14.1`（~10KB，自带行号、tab 键、滚动同步）
+    - 新建 `components/CodeEditor.tsx`：封装 `Editor` 组件，深色主题 #1e1e2e + #313244 边框，minHeight 200px；内置轻量 Python 语法高亮（不引 prismjs）：关键字 `def/return/if/else/for/while/import` 等蓝色 #569cd6，注释绿色 #6a9955，字符串橙色 #ce9178，数字浅绿 #b5cea8。
+    - `AppEditPage.tsx` FieldControl 的 `code_editor` 分支从 `Input.TextArea` 切换为 `<CodeEditor>`；其他 textarea/tool_list 分支保持原样。
+  - **浏览器验证**：代码节点抽屉显示深色代码面板；输入 `def main(input):` 时 `def` 蓝色高亮，`# 处理输入` 绿色注释，`'name'/'world'/'output'` 橙色字符串；多行缩进保持，tab 键可输入缩进。
+
+- 2026-10-31（补漏 4）：ModelPicker 彩色 logo 圆点。
+  - **改动**：`AppEditPage.tsx` ModelPicker 引入 `PROVIDER_COLORS` 映射（doubao/bytedance/volcengine/ark=#0052D9，openai=#10A37F，anthropic/claude=#D97757，deepseek=#4D6BFE，qwen/tongyi=#615CED，zhipu/glm=#3B7DFF，moonshot/kimi=#FF6B4A）；新增 `ModelLabel` 组件（10×10 圆形彩色圆点 + 模型名 + 灰色 provider 后缀）；Select 的 options 与 labelRender 都用 `ModelLabel` 渲染，optionFilterProp 改为 `labelText`（避免中文 provider 搜索时被 ReactNode 干扰）。
+  - **浏览器验证**：下拉展开显示"● DeepSeek Chat deepseek"（蓝色圆点 #4D6BFE）；选中后 Select 框内同样显示蓝色圆点 + "DeepSeek Chat deepseek"。
+
+- 2026-10-31（补漏 5）：IF 左值下拉选择器 + 代码节点"输入变量"分组。
+  - **IF 左值 AutoComplete（U-IF2）**：`AppEditPage.tsx` 新增 `buildLeftValueOptions()` 把上游节点 outputs（含 START 入参）拍平为 `{value: "{{nodeId.output.port}}", label: "节点标题 / 端口名"}` 选项；CaseListEditor 左值从 `Input + RefPickerButton suffix` 换为 `AutoComplete`（宽 200px，placeholder="选择或输入左值"），下拉显示"开始/出口"、"大模型/输出"等上游字段。
+  - **代码节点输入变量（U-CODE2）**：`node_meta.py` code 节点 config_fields 新增 `inputs`（field_type=key_value_list，位于 code 之前）；`configSections.ts` code 分组新增"输入变量"section；`backend/code.py` 新增 `_parse_config_inputs()` 把 config["inputs"] 规范化为 dict，合并上游动态 inputs 后传入 `sandbox.run(args=...)`，支持 list[{key,value}] 和 dict 两种格式。
+  - **浏览器验证**：IF 抽屉左值点击展开下拉，列出"开始/出口"、"大模型/输出"、"HTTP 请求/输出"等选项；代码节点抽屉顶部出现"输入变量"分组（空态"+ 添加键值对"按钮），下方为深色代码编辑器。
+
+- 2026-10-31（补漏 6）：差距点全面梳理 + 代码质量修复。
+  - **梳理结果**：逐节点（LLM/HTTP/IF/Code/Dataset/Loop/AgentLoop）对照 Coze 标准结构，所有 UI 对齐任务已完成；剩余 ❌ 项均为"砍掉"（U-N4 对齐辅助线、U-LOOP1 while 循环、U8 双 Tab）或"不做"（栅格切换、连线标签、实时预览、LLM Segmented Tab）。
+  - **修复 antd Modal deprecation**：试运行 Modal 的 `destroyOnClose` 改为 `destroyOnHidden`（antd 5.x 新 API），消除 console warning。
+  - **已知非阻塞 console 噪音**（不阻塞 UI，记录待后续处理）：
+    - `/admin/documents` 403：admin 角色缺 `document:read` 权限，前端 catch 已显示空态"暂无知识库文档"，但浏览器自动输出红色 console error；需后端给 admin 角色补权限或前端改用无权限端点。
+    - FlowGram `Entity WorkflowPortEntity default/input/output is created before`：FlowGram 内部 warning，非业务代码问题。
+  - **验证确认**：HTTP URL 路径参数高亮（`:userId`/`:postId` 橙色 chip）正常；ModelPicker 彩色圆点正常；CanvasToolbar 顶部居中缩放控制正常；MiniMap 右下角节点缩略图正常。
+
+- 2026-10-31（补漏 7）：发布按钮落地（后端已就绪，纯前端工作）。
+  - **API 接入**：`api/apps.ts` 新增 `publishGraph(applicationId)` 调 `POST /admin/apps/{id}/publish`，返回 `{ok, published_version, previous_published_version, runtime_mode}`。
+  - **顶部按钮**：`AppEditPage.tsx` 顶栏"保存状态"右侧新增紫色主按钮 `🚀 发布`（size=small，background #722ed1，loading=publishing）。
+  - **发布逻辑（handlePublish）**：先 `scheduleSave()` 触发草稿保存 + 等 1000ms 让草稿落盘，再调 `publishGraph(id)`；成功后 `message.success("发布成功，当前 live 版本 v{published_version}")`，失败 `message.error` 带错误详情。
+  - **浏览器验证**：点击发布按钮→网络面板看到 `POST /admin/apps/{id}/publish => 200`，响应体 `{"published_version":5,"previous_published_version":null,"runtime_mode":"agent_loop"}`；重复点击版本号依次递增（v5→v6→v7）。
+
+- 2026-10-31（补漏 8）：live 版本徽标 + /admin/documents 403 权限修复。
+  - **后端 get_app_graph 返回 published_graph_version**：`application_service.py::get_graph` 从 `application.published_graph_version` 读取 live 版本号并入响应（NULL 表示未发布，前端不显示徽标）。
+  - **前端 live 版本徽标**：`api/apps.ts::getAppGraph` 返回类型加 `published_graph_version: number | null`；`AppEditPage.tsx` 新增 `publishedVersion` state，加载图时回填、发布成功后用响应体 `published_version` 更新；顶栏发布按钮左侧显示绿色 Tag `● live v{N}`（antd `Tag color="green"`）。
+  - **/admin/documents 403 修复**：migration `0048_document_permissions.py` 在 `permission_resources` 目录新增 `document:read/create/update/delete` 4 个权限（category=tool，与现有约束一致），并回填内置角色——viewer 只读，superadmin/admin 全部 4 个权限。之前该权限 code 从未注册过，导致所有角色（含超级管理员）调 `/admin/documents` 都 403。
+  - **浏览器验证**：画布顶栏显示绿色 Tag `● live v5`；`GET /admin/documents => 200 OK`（之前 403）；console 只剩 FlowGram `Entity WorkflowPortEntity` 内部 warning，业务错误清零。

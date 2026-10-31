@@ -361,10 +361,12 @@ class ApplicationService:
         if latest is None:
             return None
         graph = _parse_graph(latest["graph"], self._storage)
+        app = self._repo.get_application(application_id)
         return {
             "graph": graph,
             "runtime_mode": latest.get("runtime_mode", "dag"),
             "graph_schema_version": latest.get("version", 1),
+            "published_graph_version": app.get("published_graph_version") if app else None,
         }
 
     def list_graph_versions(self, application_id: UUID, limit: int = 50) -> list[dict]:

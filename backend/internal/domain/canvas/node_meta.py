@@ -113,12 +113,16 @@ _NODE_METAS: list[NodeMeta] = [
         outputs=[PortMeta(name="output", label="输出")],
         config_fields=[
             ConfigFieldMeta(name="modleName", label="模型", field_type="model_picker", required=True),
+            ConfigFieldMeta(name="tools", label="技能", field_type="tool_list",
+                            description="向 LLM 暴露的工具列表，触发 ReAct 循环"),
+            ConfigFieldMeta(name="inputs", label="输入变量", field_type="key_value_list",
+                            description="定义本节点的输入变量，可在提示词中通过 {{key}} 引用"),
+            ConfigFieldMeta(name="images", label="视觉理解输入", field_type="key_value_list",
+                            description="图片 URL 列表，传入后以 multi-modal content part 发送"),
             ConfigFieldMeta(name="systemPrompt", label="系统提示词", field_type="textarea"),
             ConfigFieldMeta(name="prompt", label="用户提示词", field_type="textarea", required=True),
             ConfigFieldMeta(name="temperature", label="Temperature", field_type="number", default=0.7),
             ConfigFieldMeta(name="maxTokens", label="Max Tokens", field_type="number", default=1024),
-            ConfigFieldMeta(name="tools", label="工具", field_type="tool_list",
-                            description="向 LLM 暴露的工具列表，触发 ReAct 循环"),
             ConfigFieldMeta(name="needHistory", label="启用多轮记忆", field_type="boolean",
                             default=False,
                             description="开启后从会话历史拉取最近 N 条 user/assistant 消息拼进 prompt"),
@@ -202,6 +206,8 @@ _NODE_METAS: list[NodeMeta] = [
         inputs=[PortMeta(name="input", label="输入")],
         outputs=[PortMeta(name="output", label="输出")],
         config_fields=[
+            ConfigFieldMeta(name="inputs", label="输入变量", field_type="key_value_list",
+                            description="定义本节点静态输入变量，合并进 sandbox.run 的 args 字典"),
             ConfigFieldMeta(name="code", label="Python 代码", field_type="code_editor", required=True,
                             placeholder="def main(input):\n    return {'output': input}"),
             ConfigFieldMeta(name="timeoutMs", label="超时（毫秒）", field_type="number", default=10000),
@@ -217,6 +223,8 @@ _NODE_METAS: list[NodeMeta] = [
         config_fields=[
             ConfigFieldMeta(name="datasetId", label="知识库 ID", field_type="text", required=True),
             ConfigFieldMeta(name="topK", label="Top K", field_type="number", default=5),
+            ConfigFieldMeta(name="scoreThreshold", label="Score 阈值", field_type="number", default=0.0,
+                            description="相似度分数低于此值的片段将被过滤，0 表示不过滤"),
         ],
     ),
     NodeMeta(

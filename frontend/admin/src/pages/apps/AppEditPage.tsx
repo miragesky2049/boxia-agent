@@ -10,13 +10,25 @@ import type {
 import '@flowgram.ai/free-layout-editor/index.css';
 import { useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Popover, Tree, Modal, Collapse, message, Upload } from 'antd';
+import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Popover, Tree, Modal, Collapse, message, Upload, AutoComplete } from 'antd';
 import type { UploadFile } from 'antd';
 import type { TreeProps } from 'antd';
-import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, validateGraph, listGraphVersions, rollbackGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload } from '../../api/apps';
+import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload } from '../../api/apps';
 import { ApiError } from '../../api/client';
 import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
 import { listAvailableModels, type ModelCatalogItem } from '../../api/models';
+import { listDatasets, type DatasetItem } from '../../api/datasets';
+import { NodeCard } from './components/NodeCard';
+import { CanvasToolbar } from './components/CanvasToolbar';
+import { EmptyCanvasWelcome } from './components/EmptyCanvasWelcome';
+import { groupConfigFields } from './components/configSections';
+import { VariablesDrawer } from './components/VariablesDrawer';
+import { usePortTooltips } from './components/usePortTooltips';
+import { CanvasContextMenu } from './components/CanvasContextMenu';
+import { AddNodePopover } from './components/AddNodePopover';
+import { MiniMap } from './components/MiniMap';
+import { RefChipInput } from './components/RefChipInput';
+import { CodeEditor } from './components/CodeEditor';
 
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
@@ -27,6 +39,7 @@ interface GraphNodeSummary {
   typeKey: string;
   title: string;
   config: Record<string, any>;
+  position?: { x: number; y: number };
 }
 
 function buildPickerTreeData(
@@ -58,6 +71,50 @@ function buildPickerTreeData(
         children: [...portOutputs, ...startInputs],
       };
     });
+}
+
+// 把上游节点 outputs 拍平为 AutoComplete options（用于 IF 左值 / 类似字段）
+function buildLeftValueOptions(
+  nodes: GraphNodeSummary[],
+  currentNodeId: string | null,
+  keyToMeta: Record<string, NodeMeta>,
+): { value: string; label: React.ReactNode }[] {
+  const options: { value: string; label: React.ReactNode }[] = [];
+  for (const node of nodes) {
+    if (node.id === currentNodeId) continue;
+    const meta = keyToMeta[node.typeKey];
+    const nodeTitle = node.title || meta?.title || node.id;
+    const portOutputs = meta?.outputs || [];
+    for (const p of portOutputs) {
+      const ref = `{{${node.id}.output.${p.name}}}`;
+      options.push({
+        value: ref,
+        label: (
+          <span>
+            <span style={{ color: '#6b7280' }}>{nodeTitle}</span>
+            <span style={{ color: '#9ca3af', margin: '0 4px' }}>/</span>
+            <span>{p.label || p.name}</span>
+          </span>
+        ),
+      });
+    }
+    if (node.typeKey === 'start' && Array.isArray(node.config?.inputs)) {
+      for (const inp of node.config.inputs as Array<{ name: string }>) {
+        const ref = `{{${node.id}.output.${inp.name}}}`;
+        options.push({
+          value: ref,
+          label: (
+            <span>
+              <span style={{ color: '#6b7280' }}>{nodeTitle}</span>
+              <span style={{ color: '#9ca3af', margin: '0 4px' }}>/</span>
+              <span>入参: {inp.name}</span>
+            </span>
+          ),
+        });
+      }
+    }
+  }
+  return options;
 }
 
 function RefPickerButton({
@@ -148,35 +205,13 @@ function makeNodeRenderer(
 
     return (
       <WorkflowNodeRenderer node={node}>
-        <div
+        <NodeCard
+          typeKey={meta.type_key}
+          color={meta.color}
+          title={title}
+          config={nodeData.config}
           onDoubleClick={() => onNodeDoubleClick(node)}
-          style={{
-            padding: '10px 16px',
-            background: meta.color,
-            color: '#fff',
-            borderRadius: 8,
-            fontSize: 14,
-            fontWeight: 500,
-            textAlign: 'center',
-            minWidth: 120,
-            cursor: 'pointer',
-            userSelect: 'none',
-          }}
-        >
-          {title}
-          {meta.outputs.length > 0 && (
-            <div style={{
-              marginTop: 6, paddingTop: 6, borderTop: '1px solid rgba(255,255,255,0.3)',
-              fontSize: 11, fontWeight: 400, opacity: 0.9, textAlign: 'left',
-            }}>
-              {meta.outputs.map((p) => (
-                <div key={p.name} style={{ lineHeight: '16px' }}>
-                  · {p.label || p.name}
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
+        />
       </WorkflowNodeRenderer>
     );
   };
@@ -203,6 +238,7 @@ function FieldControl({
   value,
   onChange,
   picker,
+  datasetOptions,
 }: {
   field: {
     name: string;
@@ -217,6 +253,7 @@ function FieldControl({
   value: any;
   onChange: (name: string, value: any) => void;
   picker?: React.ReactNode;
+  datasetOptions?: DatasetItem[];
 }) {
   const current = value ?? field.default ?? '';
 
@@ -247,15 +284,25 @@ function FieldControl({
           style={{ width: '100%' }}
         />
       );
-    case 'textarea':
     case 'code_editor':
+      return (
+        <Space direction="vertical" size={4} style={{ width: '100%' }}>
+          {picker}
+          <CodeEditor
+            value={String(current || '')}
+            onChange={(next) => onChange(field.name, next)}
+            placeholder={field.placeholder}
+          />
+        </Space>
+      )
+    case 'textarea':
     case 'tool_list':
     case 'parameter_list':
       return (
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
           {picker}
           <Input.TextArea
-            rows={field.field_type === 'code_editor' ? 12 : 4}
+            rows={4}
             value={String(current || '')}
             onChange={(e) => onChange(field.name, e.target.value)}
             placeholder={field.placeholder}
@@ -272,15 +319,38 @@ function FieldControl({
       // key_value_list 由 NodeConfigForm 外层用 KeyValueListEditor 渲染，FieldControl 不直接处理
       return <Input.TextArea rows={3} value={String(current || '')} disabled />;
     case 'text':
-    default:
+    default: {
+      const isUrl = field.name === 'url';
+      const isDatasetId = field.name === 'datasetId';
+      if (isDatasetId) {
+        return (
+          <Select
+            value={String(current || '') || undefined}
+            onChange={(v) => onChange(field.name, v)}
+            placeholder="选择知识库"
+            style={{ width: '100%' }}
+            options={(datasetOptions || []).map((d) => ({ value: d.id, label: d.title }))}
+            notFoundContent="暂无知识库文档"
+          />
+        );
+      }
       return (
-        <Input
-          value={String(current || '')}
-          onChange={(e) => onChange(field.name, e.target.value)}
-          placeholder={field.placeholder}
-          suffix={picker}
-        />
+        <Space direction="vertical" size={2} style={{ width: '100%' }}>
+          <RefChipInput
+            value={String(current || '')}
+            onChange={(v) => onChange(field.name, v)}
+            placeholder={field.placeholder}
+            picker={picker}
+            highlightPathParams={isUrl}
+          />
+          {isUrl && (
+            <div style={{ fontSize: 11, color: '#9ca3af' }}>
+              支持变量参数：https://api.example.com/users/<span style={{ color: '#6366f1' }}>{'{{node.output.id}}'}</span>
+            </div>
+          )}
+        </Space>
       );
+    }
   }
 }
 
@@ -339,6 +409,10 @@ function CaseListEditor({
   keyToMeta: Record<string, NodeMeta>;
 }) {
   const cases = useMemo(() => parseCasesValue(value), [value]);
+  const leftValueOptions = useMemo(
+    () => buildLeftValueOptions(nodes, currentNodeId, keyToMeta),
+    [nodes, currentNodeId, keyToMeta],
+  );
 
   const updateCase = (idx: number, patch: Partial<CaseItem>) => {
     const next = cases.map((c, i) => (i === idx ? { ...c, ...patch } : c));
@@ -363,66 +437,77 @@ function CaseListEditor({
         <div
           key={`${c.case_id}-${idx}`}
           style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            padding: 8,
-            background: '#fafafa',
-            borderRadius: 6,
-            border: '1px solid #f0f0f0',
+            padding: 10,
+            background: '#fff',
+            borderRadius: 8,
+            border: '1px solid #e5e7eb',
           }}
         >
-          <Input
-            size="small"
-            style={{ width: 140 }}
-            placeholder="左值 {{node.output}}"
-            value={c.left}
-            onChange={(e) => updateCase(idx, { left: e.target.value })}
-            suffix={
-              <RefPickerButton
-                nodes={nodes}
-                currentNodeId={currentNodeId}
-                keyToMeta={keyToMeta}
-                onPick={(ref) => updateCase(idx, { left: ref })}
-              />
-            }
-          />
-          <Select
-            size="small"
-            style={{ width: 110 }}
-            value={c.operator}
-            onChange={(v) => updateCase(idx, { operator: v })}
-            options={CASE_OPERATORS}
-          />
-          {c.operator !== 'is_empty' && c.operator !== 'is_not_empty' && (
-            <Input
+          <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 8 }}>
+            {idx === 0 ? '如果' : '否则，如果'} {idx + 1}
+          </div>
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <AutoComplete
               size="small"
-              style={{ width: 140 }}
-              placeholder="右值"
-              value={c.right}
-              onChange={(e) => updateCase(idx, { right: e.target.value })}
-              suffix={
-                <RefPickerButton
-                  nodes={nodes}
-                  currentNodeId={currentNodeId}
-                  keyToMeta={keyToMeta}
-                  onPick={(ref) => updateCase(idx, { right: ref })}
-                />
-              }
+              style={{ width: 200 }}
+              placeholder="选择或输入左值"
+              value={c.left}
+              options={leftValueOptions}
+              onChange={(text) => updateCase(idx, { left: text })}
+              onSelect={(value) => updateCase(idx, { left: value })}
+              allowClear
             />
-          )}
-          <Button
-            size="small"
-            type="text"
-            danger
-            onClick={() => removeCase(idx)}
-            aria-label="删除条件"
-          >
-            删除
-          </Button>
+            <Select
+              size="small"
+              style={{ width: 110 }}
+              value={c.operator}
+              onChange={(v) => updateCase(idx, { operator: v })}
+              options={CASE_OPERATORS}
+            />
+            {c.operator !== 'is_empty' && c.operator !== 'is_not_empty' && (
+              <Input
+                size="small"
+                style={{ width: 140 }}
+                placeholder="右值"
+                value={c.right}
+                onChange={(e) => updateCase(idx, { right: e.target.value })}
+                suffix={
+                  <RefPickerButton
+                    nodes={nodes}
+                    currentNodeId={currentNodeId}
+                    keyToMeta={keyToMeta}
+                    onPick={(ref) => updateCase(idx, { right: ref })}
+                  />
+                }
+              />
+            )}
+            <Button
+              size="small"
+              type="text"
+              danger
+              onClick={() => removeCase(idx)}
+              aria-label="删除条件"
+            >
+              删除
+            </Button>
+          </div>
         </div>
       ))}
-      <Button size="small" onClick={addCase} style={{ alignSelf: 'flex-start' }}>
+      {/* 否则静态卡片（U-IF1） */}
+      <div
+        style={{
+          padding: 10,
+          background: '#f9fafb',
+          borderRadius: 8,
+          border: '1px dashed #d1d5db',
+        }}
+      >
+        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>否则</div>
+        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
+          以上条件均不满足时执行此分支
+        </div>
+      </div>
+      <Button size="small" onClick={addCase} style={{ alignSelf: 'flex-start' }} type="dashed">
         + 添加条件
       </Button>
     </div>
@@ -430,6 +515,56 @@ function CaseListEditor({
 }
 
 // ========== 模型选择器（T8） ==========
+// 模型 provider 彩色 logo 圆点（对齐 Coze 模型选择器视觉）
+const PROVIDER_COLORS: Record<string, string> = {
+  doubao: '#0052D9',
+  bytedance: '#0052D9',
+  volcengine: '#0052D9',
+  ark: '#0052D9',
+  openai: '#10A37F',
+  anthropic: '#D97757',
+  claude: '#D97757',
+  deepseek: '#4D6BFE',
+  qwen: '#615CED',
+  tongyi: '#615CED',
+  zhipu: '#3B7DFF',
+  glm: '#3B7DFF',
+  moonshot: '#FF6B4A',
+  kimi: '#FF6B4A',
+};
+
+function providerColor(provider: string): string {
+  const key = (provider || '').toLowerCase().trim();
+  for (const k of Object.keys(PROVIDER_COLORS)) {
+    if (key.includes(k)) return PROVIDER_COLORS[k];
+  }
+  return '#6b7280';
+}
+
+function ModelLabel({ name, provider }: { name: string; provider: string }) {
+  const color = providerColor(provider);
+  return (
+    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+      <span
+        style={{
+          width: 10,
+          height: 10,
+          borderRadius: '50%',
+          background: color,
+          display: 'inline-block',
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {name}
+        <span style={{ color: '#9ca3af', marginLeft: 6, fontSize: 12 }}>
+          {provider || 'default'}
+        </span>
+      </span>
+    </span>
+  );
+}
+
 function ModelPicker({
   value,
   onChange,
@@ -458,6 +593,8 @@ function ModelPicker({
     };
   }, []);
 
+  const selectedModel = models.find((m) => m.model_id === value);
+
   return (
     <Select
       style={{ width: '100%' }}
@@ -465,10 +602,21 @@ function ModelPicker({
       loading={loading}
       value={value ? String(value) : undefined}
       showSearch
-      optionFilterProp="label"
+      optionFilterProp="labelText"
+      labelRender={
+        selectedModel
+          ? () => (
+              <ModelLabel
+                name={selectedModel.display_name || selectedModel.model_id}
+                provider={selectedModel.provider_name}
+              />
+            )
+          : undefined
+      }
       options={models.map((m) => ({
         value: m.model_id,
-        label: `${m.display_name || m.model_id}（${m.provider_name || 'default'}）`,
+        labelText: `${m.display_name || m.model_id} ${m.provider_name || ''}`,
+        label: <ModelLabel name={m.display_name || m.model_id} provider={m.provider_name} />,
         capabilities: m.capabilities,
       }))}
       onChange={(modelId, option) => {
@@ -761,6 +909,7 @@ function NodeConfigForm({
   keyToMeta,
   outputs,
   onOutputsChange,
+  datasetOptions,
 }: {
   nodeMeta: NodeMeta;
   values: NodeConfigValues;
@@ -770,6 +919,7 @@ function NodeConfigForm({
   keyToMeta: Record<string, NodeMeta>;
   outputs: OutputFieldItem[];
   onOutputsChange: (next: OutputFieldItem[]) => void;
+  datasetOptions?: DatasetItem[];
 }) {
   const handleFieldChange = (name: string, value: any) => {
     onChange({ [name]: value });
@@ -802,44 +952,57 @@ function NodeConfigForm({
         />
       </div>
 
-      {nodeMeta.config_fields.map((field) => (
-        <div key={field.name}>
-          <Typography.Text type="secondary">
-            {field.required && <span style={{ color: '#ff4d4f' }}>* </span>}
-            {field.label}
-          </Typography.Text>
-          {field.description && (
-            <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>{field.description}</div>
-          )}
-          {field.field_type === 'case_list' ? (
-            <CaseListEditor
-              value={values[field.name]}
-              onChange={(next) => handleFieldChange(field.name, next)}
-              nodes={pickerNodes}
-              currentNodeId={currentNodeId}
-              keyToMeta={keyToMeta}
-            />
-          ) : field.field_type === 'model_picker' ? (
-            <ModelPicker
-              value={values[field.name]}
-              onChange={onChange}
-            />
-          ) : field.field_type === 'key_value_list' ? (
-            <KeyValueListEditor
-              value={values[field.name]}
-              onChange={(next) => handleFieldChange(field.name, next)}
-              nodes={pickerNodes}
-              currentNodeId={currentNodeId}
-              keyToMeta={keyToMeta}
-            />
-          ) : (
-            <FieldControl
-              field={field}
-              value={values[field.name]}
-              onChange={handleFieldChange}
-              picker={buildPicker(field.name)}
-            />
-          )}
+      {groupConfigFields(nodeMeta.type_key, nodeMeta.config_fields).map((section) => (
+        <div key={section.title} style={{ marginTop: 4 }}>
+          <div style={{
+            fontSize: 12, fontWeight: 600, color: '#374151',
+            marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #f0f0f0',
+          }}>
+            {section.title}
+          </div>
+          <Space direction="vertical" style={{ width: '100%' }} size={12}>
+            {section.fields.map((field) => (
+              <div key={field.name}>
+                <Typography.Text type="secondary">
+                  {field.required && <span style={{ color: '#ff4d4f' }}>* </span>}
+                  {field.label}
+                </Typography.Text>
+                {field.description && (
+                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>{field.description}</div>
+                )}
+                {field.field_type === 'case_list' ? (
+                  <CaseListEditor
+                    value={values[field.name]}
+                    onChange={(next) => handleFieldChange(field.name, next)}
+                    nodes={pickerNodes}
+                    currentNodeId={currentNodeId}
+                    keyToMeta={keyToMeta}
+                  />
+                ) : field.field_type === 'model_picker' ? (
+                  <ModelPicker
+                    value={values[field.name]}
+                    onChange={onChange}
+                  />
+                ) : field.field_type === 'key_value_list' ? (
+                  <KeyValueListEditor
+                    value={values[field.name]}
+                    onChange={(next) => handleFieldChange(field.name, next)}
+                    nodes={pickerNodes}
+                    currentNodeId={currentNodeId}
+                    keyToMeta={keyToMeta}
+                  />
+                ) : (
+                  <FieldControl
+                    field={field}
+                    value={values[field.name]}
+                    onChange={handleFieldChange}
+                    picker={buildPicker(field.name)}
+                    datasetOptions={datasetOptions}
+                  />
+                )}
+              </div>
+            ))}
+          </Space>
         </div>
       ))}
 
@@ -862,11 +1025,14 @@ export default function AppEditPage() {
   const [initialData, setInitialData] = useState<WorkflowJSON | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
+  const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeMeta, setSelectedNodeMeta] = useState<NodeMeta | null>(null);
   const [configValues, setConfigValues] = useState<NodeConfigValues>({});
   const [nodeOutputs, setNodeOutputs] = useState<OutputFieldItem[]>([]);
   const [running, setRunning] = useState(false);
+  const [publishing, setPublishing] = useState(false);
+  const [publishedVersion, setPublishedVersion] = useState<number | null>(null);
   const [runLogs, setRunLogs] = useState<Array<{ time: string; text: string; level?: 'info' | 'error' }>>([]);
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [startParams, setStartParams] = useState<Array<{ name: string; type?: string }>>([]);
@@ -895,6 +1061,13 @@ export default function AppEditPage() {
   const [nodeMetas, setNodeMetas] = useState<NodeMeta[]>([]);
   const [nodeMetaCategories, setNodeMetaCategories] = useState<Record<string, NodeMeta[]>>({});
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
+  const [canvasZoom, setCanvasZoom] = useState(1);
+  const [nodeCount, setNodeCount] = useState(0);
+  const [deleteNodeOpen, setDeleteNodeOpen] = useState(false);
+  const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
+  const [addNodePopover, setAddNodePopover] = useState<{ x: number; y: number } | null>(null);
+  const [datasetOptions, setDatasetOptions] = useState<DatasetItem[]>([]);
+  usePortTooltips();
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const nodeCounterRef = useRef<Record<string, number>>({});
@@ -983,6 +1156,9 @@ export default function AppEditPage() {
         message.error('加载节点库失败');
       }
     })();
+    listDatasets()
+      .then((rows) => setDatasetOptions(rows))
+      .catch(() => setDatasetOptions([]));
   }, []);
 
   // ========== 构建 cozeType ↔ type_key 映射 ==========
@@ -1015,7 +1191,7 @@ export default function AppEditPage() {
         ],
         size: meta.type_key === 'comment'
           ? { width: 220, height: 100 }
-          : { width: 160, height: meta.outputs.length > 0 ? 40 + meta.outputs.length * 16 + 6 : 40 },
+          : { width: 220, height: 52 },
         renderKey: meta.type_key,
       },
     }));
@@ -1030,6 +1206,7 @@ export default function AppEditPage() {
         try {
           const resp = await getAppGraph(id);
           if (cancelled) return;
+          setPublishedVersion(resp.published_graph_version ?? null);
           const graph = fromCozeIR(resp.graph, cozeTypeToKey);
           rootGraphRef.current = graph;
           setSubgraphStack([]);
@@ -1118,11 +1295,31 @@ export default function AppEditPage() {
         const cozeIR = toCozeIR(flowgram, keyToCozeType);
         await saveAppGraph(id, cozeIR as never);
         setSaveStatus('saved');
+        setLastSavedAt(new Date());
       } catch {
         setSaveStatus('error');
       }
     }, 800);
   }, [id, keyToCozeType, doValidate, collectFullGraph]);
+
+  const handlePublish = useCallback(async () => {
+    if (!id) return;
+    // 发布前先同步保存一次 draft，确保快照是最新的
+    await new Promise<void>((resolve) => {
+      scheduleSave();
+      setTimeout(resolve, 1000);
+    });
+    setPublishing(true);
+    try {
+      const result = await publishGraph(id);
+      if (result.published_version != null) setPublishedVersion(result.published_version);
+      message.success(`发布成功，当前 live 版本 v${result.published_version ?? '?'}`);
+    } catch (e) {
+      message.error(`发布失败：${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPublishing(false);
+    }
+  }, [id, scheduleSave]);
 
   // ========== 添加节点 ==========
   const addNode = useCallback((typeKey: string) => {
@@ -1151,12 +1348,14 @@ export default function AppEditPage() {
     const json = ctx.document.toJSON() as unknown as WorkflowJSON;
     const nodes: GraphNodeSummary[] = (json.nodes || []).map((n) => {
       const data = (n.data || {}) as { title?: string; config?: Record<string, any> };
+      const meta = (n.meta || {}) as { position?: { x: number; y: number } };
       const typeKey = String(n.type || '');
       return {
         id: String(n.id),
         typeKey,
         title: data?.title || typeKey,
         config: data?.config || {},
+        position: meta.position,
       };
     });
     setPickerNodes(nodes);
@@ -1206,6 +1405,30 @@ export default function AppEditPage() {
     setNodeOutputs(parseOutputsValue(nodeData.outputs));
     refreshPickerNodes();
   }, [keyToMeta, refreshPickerNodes, enterSubgraph]);
+
+  // ========== 删除节点（U-S3） ==========
+  const confirmDeleteNode = useCallback(() => {
+    const ctx = ctxRef.current as any;
+    const nodeId = selectedNodeId;
+    if (!ctx || !nodeId) return;
+    try {
+      const node = ctx.document?.getNode?.(nodeId);
+      if (node && typeof node.remove === 'function') {
+        node.remove();
+      } else if (typeof ctx.document?.removeNode === 'function') {
+        ctx.document.removeNode(nodeId);
+      } else {
+        message.error('当前画布不支持删除节点');
+        return;
+      }
+      message.success('节点已删除');
+    } catch (err) {
+      message.error('删除节点失败');
+    }
+    setSelectedNodeId(null);
+    setDeleteNodeOpen(false);
+    scheduleSave();
+  }, [selectedNodeId, scheduleSave]);
 
   const renderNodes = useMemo(() => {
     return Object.fromEntries(
@@ -1272,9 +1495,9 @@ export default function AppEditPage() {
 
   // ========== 运行时高亮（直接操作 DOM，绕过 FlowGram 响应式） ==========
   const NODE_SHADOW: Record<RunNodeStatus, string> = {
-    running: '0 0 0 4px rgba(24,144,255,0.35)',
-    success: '0 0 0 4px rgba(82,196,26,0.35)',
-    error: '0 0 0 4px rgba(255,77,79,0.35)',
+    running: '0 0 0 3px rgba(139,92,246,0.35)',
+    success: '0 0 0 3px rgba(16,185,129,0.35)',
+    error: '0 0 0 3px rgba(239,68,68,0.35)',
   };
 
   const setNodeRunStatus = useCallback((nodeId: string, status: RunNodeStatus | undefined) => {
@@ -1476,6 +1699,46 @@ export default function AppEditPage() {
     }
   }, [id, running, extractStartParams, doRun]);
 
+  // ========== 键盘快捷键（U-P1 + U-P6 撤销重做） ==========
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      const inInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
+      // Ctrl/Cmd+S：保存
+      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+        e.preventDefault();
+        scheduleSave();
+        return;
+      }
+      // Ctrl/Cmd+Enter：试运行
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        handleRun();
+        return;
+      }
+      // Ctrl/Cmd+Z：撤销（非输入框时交给 FlowGram history）
+      if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !inInput) {
+        e.preventDefault();
+        const ctx = ctxRef.current as any;
+        if (e.shiftKey) {
+          ctx?.history?.redo?.();
+        } else {
+          ctx?.history?.undo?.();
+        }
+        return;
+      }
+      // Ctrl/Cmd+Y：重做
+      if ((e.ctrlKey || e.metaKey) && e.key === 'y' && !inInput) {
+        e.preventDefault();
+        const ctx = ctxRef.current as any;
+        ctx?.history?.redo?.();
+        return;
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [scheduleSave, handleRun]);
+
   // ========== 版本历史（B9） ==========
   const openVersionDrawer = useCallback(async () => {
     if (!id) return;
@@ -1518,7 +1781,7 @@ export default function AppEditPage() {
   return (
     <div style={{ display: 'flex', width: '100%', height: 'calc(100vh - 108px)' }}>
       {/* 左侧节点面板 */}
-      <div style={{
+      <div className="boxia-left-panel" style={{
         width: 200, padding: 12, background: '#fafafa',
         borderRight: '1px solid #f0f0f0',
         display: 'flex', flexDirection: 'column', gap: 8, overflowY: 'auto',
@@ -1564,6 +1827,13 @@ export default function AppEditPage() {
           </Button>
           <Button
             block
+            onClick={() => setVariablesDrawerOpen(true)}
+            style={{ marginBottom: 8 }}
+          >
+            {'{ }'} 变量引用
+          </Button>
+          <Button
+            block
             onClick={openVersionDrawer}
             style={{ marginBottom: 8 }}
           >
@@ -1590,29 +1860,148 @@ export default function AppEditPage() {
             height: 100% !important;
           }
           @keyframes boxia-pulse {
-            0%, 100% { box-shadow: 0 0 0 4px rgba(24,144,255,0.35); }
-            50% { box-shadow: 0 0 0 8px rgba(24,144,255,0.15); }
+            0%, 100% { box-shadow: 0 0 0 3px rgba(139,92,246,0.4); }
+            50% { box-shadow: 0 0 0 6px rgba(139,92,246,0.15); }
           }
           .boxia-node-running {
             animation: boxia-pulse 1.2s ease-in-out infinite;
           }
           .boxia-node-invalid {
-            box-shadow: 0 0 0 4px rgba(255,77,79,0.5) !important;
+            box-shadow: 0 0 0 3px rgba(239,68,68,0.5) !important;
             border-radius: 8px;
+          }
+          /* ========== 连线样式（与 Coze 对齐） ========== */
+          .gedit-flow-line,
+          [class*='flow-line'] path {
+            stroke: #c0c4cc !important;
+            stroke-width: 2 !important;
+            fill: none !important;
+            transition: stroke 0.15s, stroke-width 0.15s;
+          }
+          .gedit-flow-line:hover,
+          [class*='flow-line']:hover path {
+            stroke: #6366f1 !important;
+            stroke-width: 2.5 !important;
+          }
+          .gedit-flow-line.selected,
+          .gedit-flow-line.active,
+          [class*='flow-line'].selected path,
+          [class*='flow-line'].active path {
+            stroke: #6366f1 !important;
+            stroke-width: 2.5 !important;
+            filter: drop-shadow(0 0 3px rgba(99,102,241,0.4));
+          }
+          /* 端口圆点 */
+          .gedit-port,
+          [class*='port'] {
+            background: #fff !important;
+            border: 2px solid #c0c4cc !important;
+            transition: border-color 0.15s, transform 0.15s;
+          }
+          .gedit-port:hover,
+          [class*='port']:hover {
+            border-color: #6366f1 !important;
+            transform: scale(1.3);
+          }
+          /* 窄屏适配（U-P4）：< 1024px 隐藏左侧节点库 */
+          @media (max-width: 1024px) {
+            .boxia-left-panel { display: none !important; }
+          }
+          /* RefChipInput 聚焦态 */
+          .boxia-ref-chip-input:focus-within {
+            border-color: #6366f1 !important;
+            box-shadow: 0 0 0 2px rgba(99,102,241,0.1);
           }
         `}</style>
 
-        {/* 保存状态 */}
+        {/* 顶部悬浮工具栏 */}
+        <CanvasToolbar ctxRef={ctxRef} zoom={canvasZoom} />
+
+        {/* 画布右键菜单（U-P2） */}
+        <CanvasContextMenu
+          onAddNode={() => { /* 打开左侧节点库 */ }}
+          onAutoLayout={() => message.info('自动排版功能待 FlowGram 插件支持')}
+          onFitView={() => {
+            const ctx = ctxRef.current as any;
+            ctx?.viewport?.fitView?.();
+          }}
+          onDeleteSelected={() => {
+            if (selectedNodeId) setDeleteNodeOpen(true);
+            else message.info('请先选中一个节点');
+          }}
+          onCopyNode={() => message.info('复制节点功能待实现')}
+          onPasteNode={() => message.info('粘贴节点功能待实现')}
+        />
+
+        {/* 空白画布欢迎页 */}
+        <EmptyCanvasWelcome visible={nodeCount <= 1} />
+
+        {/* 连线端点弹出节点面板（U-B2） */}
+        {addNodePopover && (
+          <AddNodePopover
+            x={addNodePopover.x}
+            y={addNodePopover.y}
+            metas={nodeMetas}
+            onSelect={(typeKey) => {
+              addNode(typeKey);
+              setAddNodePopover(null);
+            }}
+            onClose={() => setAddNodePopover(null)}
+          />
+        )}
+
+        {/* 小地图（U-B3 简化版） */}
+        <MiniMap
+          nodes={pickerNodes
+            .filter((n) => n.position)
+            .map((n) => ({
+              id: n.id,
+              x: n.position!.x,
+              y: n.position!.y,
+              color: keyToMeta[n.typeKey]?.color,
+            }))}
+          onNavigate={(x, y) => {
+            const ctx = ctxRef.current as any;
+            ctx?.viewport?.scrollTo?.({ x, y });
+          }}
+        />
+
+        {/* 保存状态 + 发布按钮 */}
         <div style={{
           position: 'absolute', top: 8, right: 16, zIndex: 100,
+          display: 'flex', alignItems: 'center', gap: 8,
+        }}>
+          {publishedVersion != null && (
+            <Tag color="green" style={{ marginRight: 0, fontSize: 12 }}>
+              ● live v{publishedVersion}
+            </Tag>
+          )}
+          <Button
+            type="primary"
+            size="small"
+            loading={publishing}
+            onClick={handlePublish}
+            style={{ background: '#722ed1', borderColor: '#722ed1' }}
+          >
+            🚀 发布
+          </Button>
+        <div style={{
           padding: '4px 12px', borderRadius: 6, background: '#fff',
           boxShadow: '0 2px 8px rgba(0,0,0,0.08)', fontSize: 12,
-          color: saveStatus === 'error' ? '#d4380d' : '#52c41a',
+          color: saveStatus === 'error' ? '#d4380d' : saveStatus === 'saving' ? '#1677ff' : '#52c41a',
+          display: 'flex', alignItems: 'center', gap: 6,
         }}>
+          <span style={{
+            width: 6, height: 6, borderRadius: '50%',
+            background: saveStatus === 'error' ? '#ff4d4f' : saveStatus === 'saving' ? '#1677ff' : '#52c41a',
+            animation: saveStatus === 'saving' ? 'boxia-pulse 1.2s ease-in-out infinite' : undefined,
+          }} />
           {validating && '校验中…'}
           {!validating && saveStatus === 'saving' && '保存中…'}
-          {!validating && saveStatus === 'saved' && '已保存'}
-          {!validating && saveStatus === 'error' && '保存失败'}
+          {!validating && saveStatus === 'saved' && lastSavedAt && `已保存 ${lastSavedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
+          {!validating && saveStatus === 'saved' && !lastSavedAt && '已保存'}
+          {!validating && saveStatus === 'error' && <span style={{ cursor: 'pointer' }} onClick={() => scheduleSave()}>保存失败，点击重试</span>}
+        </div>
         </div>
 
         {/* 校验问题面板（B10） */}
@@ -1697,9 +2086,45 @@ export default function AppEditPage() {
           nodeRegistries={nodeRegistries}
           materials={{ renderNodes: renderNodes as any }}
           initialData={initialData}
-          onLoad={(ctx) => { ctxRef.current = ctx; }}
-          onContentChange={() => { scheduleSave(); }}
+          selectBox={{ enabled: true }}
+          onLoad={(ctx) => {
+            ctxRef.current = ctx;
+            const doc = ctx.document as any;
+            if (doc?.nodes) setNodeCount(doc.nodes.length || 0);
+            refreshPickerNodes();
+          }}
+          onContentChange={() => {
+            scheduleSave();
+            const ctx = ctxRef.current as any;
+            const doc = ctx?.document;
+            if (doc?.nodes) setNodeCount(doc.nodes.length || 0);
+            refreshPickerNodes();
+          }}
           canAddLine={canAddLine}
+          canDeleteLine={() => true}
+          canDeleteNode={(ctx, node) => {
+            // start 节点不允许删除
+            if (node.id.startsWith('start-')) {
+              message.warning('开始节点不允许删除');
+              return false;
+            }
+            return true;
+          }}
+          onDragLineEnd={async (ctx: any, params: any) => {
+            // 拖线到空白处（没有 toPort）时弹出节点选择面板
+            if (!params?.toPort && params?.startPosition) {
+              const pos = params.startPosition;
+              // 转换为屏幕坐标
+              const playground = document.querySelector('.gedit-playground-container');
+              if (playground) {
+                const rect = playground.getBoundingClientRect();
+                setAddNodePopover({
+                  x: rect.left + pos.x,
+                  y: rect.top + pos.y,
+                });
+              }
+            }
+          }}
         />
 
         {/* 右侧调试面板（B8） */}
@@ -1783,6 +2208,13 @@ export default function AppEditPage() {
         open={!!selectedNodeId}
         onClose={() => setSelectedNodeId(null)}
         width={420}
+        extra={
+          selectedNodeId && selectedNodeMeta?.type_key !== 'start' ? (
+            <Button danger size="small" onClick={() => setDeleteNodeOpen(true)}>
+              删除节点
+            </Button>
+          ) : undefined
+        }
       >
         {selectedNodeMeta && (
           <NodeConfigForm
@@ -1794,12 +2226,31 @@ export default function AppEditPage() {
             keyToMeta={keyToMeta}
             outputs={nodeOutputs}
             onOutputsChange={handleOutputsChange}
+            datasetOptions={datasetOptions}
           />
         )}
         <div style={{ marginTop: 16 }}>
           <Tag color="blue">节点 ID：{selectedNodeId}</Tag>
         </div>
       </Drawer>
+
+      {/* 删除节点确认弹窗（U-S3） */}
+      <Modal
+        title="删除节点"
+        open={deleteNodeOpen}
+        onOk={confirmDeleteNode}
+        onCancel={() => setDeleteNodeOpen(false)}
+        okText="删除"
+        okButtonProps={{ danger: true }}
+        cancelText="取消"
+      >
+        <div>
+          确定要删除节点 <Tag color="blue">{selectedNodeMeta?.title || selectedNodeId}</Tag> 吗？
+          <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
+            与该节点相连的所有连线将一并删除，此操作不可撤销。
+          </div>
+        </div>
+      </Modal>
 
       {/* 试运行入参弹窗（B7 + T18 多模态） */}
       <Modal
@@ -1812,7 +2263,7 @@ export default function AppEditPage() {
         }}
         okText="开始运行"
         cancelText="取消"
-        destroyOnClose
+        destroyOnHidden
       >
         <Space direction="vertical" style={{ width: '100%' }} size="middle">
           {startParams.map((p) => {
@@ -1876,6 +2327,14 @@ export default function AppEditPage() {
           })}
         </Space>
       </Modal>
+
+      {/* 变量引用抽屉（U-L2） */}
+      <VariablesDrawer
+        open={variablesDrawerOpen}
+        onClose={() => setVariablesDrawerOpen(false)}
+        nodes={pickerNodes}
+        keyToMeta={keyToMeta}
+      />
 
       {/* 版本历史抽屉（B9） */}
       <Drawer
