@@ -35,7 +35,7 @@ from typing import Any
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult
 from internal.domain.graph.nodes import register_node_handler
-from internal.engine.llm import LLMToolSpec
+from internal.domain.llm.client import LLMToolSpec
 
 logger = logging.getLogger(__name__)
 

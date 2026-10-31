@@ -18,9 +18,9 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from internal.engine.context import AgentRunContext
-from internal.engine.tool_gateway import ToolExecutionError
-from internal.engine.tools import EchoTool, Tool, build_tools
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.agent.tool_gateway import ToolExecutionError
+from internal.domain.agent.tools import EchoTool, Tool, build_tools
 from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresToolRepository,
 )

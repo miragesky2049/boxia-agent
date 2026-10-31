@@ -19,7 +19,7 @@ import threading
 from typing import Any
 
 from internal.domain.retrieval.vector_store import VectorStore
-from internal.engine.embedding import EmbeddingClient, OpenAICompatEmbeddingClient
+from internal.domain.retrieval.embedding import EmbeddingClient, OpenAICompatEmbeddingClient
 
 logger = logging.getLogger(__name__)
 

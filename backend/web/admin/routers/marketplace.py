@@ -12,7 +12,7 @@ from pydantic import BaseModel, Field
 
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.application.apps.application_service import ApplicationService
-from internal.engine.runtime import GraphInterrupted, GraphRuntime
+from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
 from internal.infrastructure.repository.apps.run_repository import RunRepository
 from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 from web.deps.auth import AdminAuthDep

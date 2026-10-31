@@ -16,9 +16,9 @@ from typing import Any
 
 import httpx
 
-from internal.application.errors import ValidationError
+from internal.domain.errors import ValidationError
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.engine.context import AgentRunContext
+from internal.domain.agent.run_context import AgentRunContext
 from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)

@@ -8,9 +8,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from internal.domain.entity.resource import Tool as ToolEntity
-from internal.engine.context import AgentRunContext
-from internal.engine.llm import LLMToolSpec
-from internal.engine.tool_gateway import (
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.llm.client import LLMToolSpec
+from internal.domain.agent.tool_gateway import (
     GatewayConfig,
     ToolExecutionError,
     get_tool_gateway,
@@ -94,7 +94,7 @@ class HttpTool(Tool):
     async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
         if not self._url_template:
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 url")
-        from internal.engine.prompt import render_template
+        from internal.domain.agent.prompt import render_template
 
         url = render_template(self._url_template, {**arguments, "tenant_id": str(context.tenant_id or "")})
         method = self._method
@@ -145,7 +145,7 @@ class McpTool(Tool):
     async def invoke(self, arguments: dict[str, Any], context: AgentRunContext) -> str:
         if not self._server_url:
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 server_url")
-        from internal.engine.mcp_client import call_tool
+        from internal.domain.agent.mcp_client import call_tool
 
         try:
             return await call_tool(self._server_url, self._tool_name, arguments)

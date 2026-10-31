@@ -22,7 +22,7 @@ from internal.domain.canvas.convert import convert_canvas
 from internal.domain.canvas.model import CanvasGraph
 from internal.domain.graph.compiler import Compiler
 from internal.domain.graph.node_base import RuntimeEnv, ServiceRegistry
-from internal.engine.checkpoint import get_checkpointer
+from internal.domain.graph.checkpoint import get_checkpointer
 
 logger = logging.getLogger(__name__)
 

@@ -7,7 +7,7 @@ from typing import Literal
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from internal.engine.llm import shutdown_llm_clients
+from internal.domain.llm.client import shutdown_llm_clients
 from internal.infrastructure.bootstrap import ensure_platform_admin, ensure_model_catalog
 from internal.infrastructure.config.settings import Settings, get_settings
 from internal.infrastructure.middleware.access_log import AccessLogMiddleware

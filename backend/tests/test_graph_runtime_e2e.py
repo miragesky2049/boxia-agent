@@ -13,7 +13,7 @@ from typing import Any
 from uuid import uuid4
 
 from internal.domain.graph.node_base import ServiceRegistry
-from internal.engine.runtime import GraphRuntime
+from internal.domain.graph.runtime import GraphRuntime
 
 FIXTURES = Path(__file__).parent / "fixtures" / "canvas"
 

@@ -11,9 +11,9 @@ from uuid import UUID
 from internal.domain.entity.document import DocumentChunk
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
-from internal.engine.embedding import EmbeddingClient
-from internal.engine.query_rewrite import QueryRewriter, QueryRewriteResult
-from internal.engine.rerank import RerankClient
+from internal.domain.retrieval.embedding import EmbeddingClient
+from internal.domain.retrieval.query_rewrite import QueryRewriter, QueryRewriteResult
+from internal.domain.retrieval.rerank import RerankClient
 
 logger = logging.getLogger(__name__)
 
@@ -241,7 +241,7 @@ class RetrievalService:
         """构造 embedding 客户端；测试可注入，生产从 settings 读取。"""
         if self._embedding_client is not None:
             return self._embedding_client
-        from internal.engine.embedding import OpenAICompatEmbeddingClient
+        from internal.domain.retrieval.embedding import OpenAICompatEmbeddingClient
         from internal.infrastructure.config.settings import get_settings
 
         settings = get_settings()

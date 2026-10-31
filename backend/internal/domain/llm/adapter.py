@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
-from internal.engine.llm import LLMClient, LLMResponse, LLMToolSpec
+from internal.domain.llm.client import LLMClient, LLMResponse, LLMToolSpec
 
 
 class LLMServiceAdapter:

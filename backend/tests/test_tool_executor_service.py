@@ -14,11 +14,11 @@ import asyncio
 from typing import Any
 from uuid import uuid4
 
-from internal.engine.context import AgentRunContext
-from internal.engine.llm import LLMToolSpec
-from internal.engine.tool_gateway import ToolExecutionError
-from internal.engine.services.tool_executor import ToolExecutorService
-from internal.engine.tools import Tool
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.llm.client import LLMToolSpec
+from internal.domain.agent.tool_gateway import ToolExecutionError
+from internal.domain.agent.tool_executor import ToolExecutorService
+from internal.domain.agent.tools import Tool
 
 
 class FakeTool(Tool):
@@ -123,7 +123,7 @@ def test_echo_tool_available_by_default(monkeypatch):
             return [], 0
 
     monkeypatch.setattr(
-        "internal.engine.services.tool_executor.PostgresToolRepository",
+        "internal.domain.agent.tool_executor.PostgresToolRepository",
         lambda *args, **kwargs: _EmptyRepo(),
     )
 

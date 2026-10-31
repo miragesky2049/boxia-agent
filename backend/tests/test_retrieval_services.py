@@ -17,8 +17,8 @@ import pytest
 
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.retrieval.vector_store import VectorStore
-from internal.engine.services import retrieval_services
-from internal.engine.services.retrieval_services import (
+from internal.domain.retrieval import services as retrieval_services
+from internal.domain.retrieval.services import (
     build_embedding_client,
     build_vector_store,
     get_retrieval_bundle,

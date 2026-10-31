@@ -22,9 +22,9 @@ from internal.application.tenant_service import TenantService
 from internal.application.user_admin_service import UserAdminService
 from internal.application.user_auth_service import UserAuthService
 from internal.domain.entity.resource import Tool
-from internal.engine.llm import OpenAICompatLLMClient
-from internal.engine.query_rewrite import LLMQueryRewriter, QueryRewriter
-from internal.engine.rerank import RerankClient, SiliconFlowRerankClient
+from internal.domain.llm.client import OpenAICompatLLMClient
+from internal.domain.retrieval.query_rewrite import LLMQueryRewriter, QueryRewriter
+from internal.domain.retrieval.rerank import RerankClient, SiliconFlowRerankClient
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from web.deps.db import UowDep

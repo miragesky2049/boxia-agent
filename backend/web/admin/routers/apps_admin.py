@@ -17,11 +17,11 @@ from internal.application.errors import AppError, ValidationError
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
 from internal.domain.graph.node_base import ServiceRegistry
-from internal.engine.runtime import GraphRuntime, GraphInterrupted
-from internal.engine.services.http_service import HttpService
-from internal.engine.services.llm_adapter import LLMServiceAdapter, build_model_resolver
-from internal.engine.services.retrieval_services import register_retrieval_services
-from internal.engine.services.tool_executor import ToolExecutorService
+from internal.domain.graph.runtime import GraphRuntime, GraphInterrupted
+from internal.domain.graph.http_service import HttpService
+from internal.domain.llm.adapter import LLMServiceAdapter, build_model_resolver
+from internal.domain.retrieval.services import register_retrieval_services
+from internal.domain.agent.tool_executor import ToolExecutorService
 from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from internal.infrastructure.repository.apps.async_conversation_adapter import (
     AsyncConversationRepository,

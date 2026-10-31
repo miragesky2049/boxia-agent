@@ -14,9 +14,9 @@ from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.application.document_service import DocumentService
 from internal.application.ingestion_service import IngestionService
 from internal.application.retrieval_service import RetrievalService
-from internal.engine.llm import OpenAICompatLLMClient
-from internal.engine.query_rewrite import LLMQueryRewriter
-from internal.engine.rerank import SiliconFlowRerankClient
+from internal.domain.llm.client import OpenAICompatLLMClient
+from internal.domain.retrieval.query_rewrite import LLMQueryRewriter
+from internal.domain.retrieval.rerank import SiliconFlowRerankClient
 
 
 # 4 份 markdown 格式测试文档（带 # 标题）

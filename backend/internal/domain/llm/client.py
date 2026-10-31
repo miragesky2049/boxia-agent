@@ -13,8 +13,8 @@ import httpx
 from pydantic import BaseModel, Field
 
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.engine.context import AgentRunContext
-from internal.engine.messages import AssistantMessage, ToolCall, ToolCallFunction
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.llm.messages import AssistantMessage, ToolCall, ToolCallFunction
 from internal.infrastructure.observability.metrics import LLM_DURATION, LLM_TOKENS
 
 logger = logging.getLogger(__name__)

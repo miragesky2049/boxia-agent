@@ -8,7 +8,7 @@ import re
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 
-from internal.engine.llm import LLMClient
+from internal.domain.llm.client import LLMClient
 
 logger = logging.getLogger(__name__)
 

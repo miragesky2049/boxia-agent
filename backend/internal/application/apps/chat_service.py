@@ -16,7 +16,7 @@ from internal.application.apps.model_service import ModelService
 from internal.application.apps.resource_service import AppResourceService
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.repository.protocols import UnitOfWork
-from internal.engine.llm import LLMToolSpec, LLMResponse
+from internal.domain.llm.client import LLMToolSpec, LLMResponse
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.repository.apps.conversation_repository import (
     ConversationRepository,
@@ -391,7 +391,7 @@ class ChatService:
             actor_username=getattr(self._principal, "username", None),
         )
 
-        from internal.engine.runtime import GraphInterrupted
+        from internal.domain.graph.runtime import GraphInterrupted
 
         try:
             output = await runner.invoke(inputs)

@@ -10,9 +10,9 @@ from pydantic import BaseModel, Field
 
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.engine.context import AgentRunContext
-from internal.engine.mcp_client import McpClientError, list_tools as mcp_list_tools
-from internal.engine.tools import ToolExecutionError, build_tools
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.agent.mcp_client import McpClientError, list_tools as mcp_list_tools
+from internal.domain.agent.tools import ToolExecutionError, build_tools
 from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.resource import ToolOut, ToolPayload

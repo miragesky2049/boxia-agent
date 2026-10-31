@@ -234,7 +234,7 @@ def test_set_variable_missing_name_returns_error():
 
 def test_runtime_initial_state_uses_default_globals():
     """通过 GraphRuntime._ensure_compiled + invoke 路径验证 default_globals 被合并进 initial_state。"""
-    from internal.engine.runtime import GraphRuntime
+    from internal.domain.graph.runtime import GraphRuntime
 
     # start → set_variable → end 的最小图，变量池声明了 greeting 默认值
     canvas_json = {

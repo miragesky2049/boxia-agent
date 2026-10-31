@@ -17,7 +17,7 @@ from uuid import uuid4
 import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
-from internal.engine.runtime import GraphRuntime, make_checkpoint_thread_id
+from internal.domain.graph.runtime import GraphRuntime, make_checkpoint_thread_id
 
 FIXTURES = Path(__file__).parent / "fixtures" / "canvas"
 

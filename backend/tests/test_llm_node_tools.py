@@ -8,7 +8,7 @@ from uuid import uuid4
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, RuntimeEnv, ServiceRegistry
 from internal.domain.graph.nodes.llm import LLMNodeHandler
-from internal.engine.llm import LLMToolSpec
+from internal.domain.llm.client import LLMToolSpec
 
 
 class _Usage:
