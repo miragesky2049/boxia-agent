@@ -54,6 +54,7 @@ export default function TenantDetailPage() {
               {tenant.is_active ? '启用' : '停用'}
             </Tag>
           )}
+          <Button onClick={() => navigate(`/tenants/${tenantId}/settings`)}>运行时配置</Button>
         </Space>
       </div>
 

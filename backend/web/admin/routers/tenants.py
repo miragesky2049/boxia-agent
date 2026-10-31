@@ -1,9 +1,12 @@
 """租户管理接口（仅产品级运营管理平台）。"""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from pydantic import BaseModel, Field
 
+from internal.application.apps.tenant_settings_service import TenantSettingsService
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import (
     TenantCreateRequest,
@@ -11,6 +14,7 @@ from web.admin.schemas.tenant import (
     TenantUpdateRequest,
 )
 from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
+from web.deps.db import UowDep
 from web.deps.services import TenantServiceDep
 
 router = APIRouter(
@@ -110,3 +114,41 @@ def update_tenant(
         user_agent=user_agent,
     )
     return TenantOut.model_validate(tenant)
+
+
+# ========== T16 租户运行时配置（默认模型 + 插件白名单）==========
+class TenantSettingsUpdateRequest(BaseModel):
+    default_model_catalog_id: UUID | None = Field(None, description="默认模型 catalog id；置空表示走平台默认")
+    allowed_catalog_ids: list[UUID] = Field(default_factory=list, description="允许该租户可见的模型白名单；空数组=全量可见")
+    plugin_whitelist: list[str] = Field(default_factory=list, description="允许调用的工具名白名单；空数组=全量可见")
+
+
+def _get_settings_service(uow: UowDep) -> TenantSettingsService:
+    return TenantSettingsService(uow.session)
+
+
+@router.get(
+    "/{tenant_id}/settings",
+    dependencies=[Depends(require_permission("page:tenants"))],
+)
+def get_tenant_settings(tenant_id: UUID, uow: UowDep) -> dict[str, Any]:
+    """读取租户运行时配置。"""
+    return _get_settings_service(uow).get(tenant_id)
+
+
+@router.put(
+    "/{tenant_id}/settings",
+    dependencies=[Depends(require_permission("button:tenant:update"))],
+)
+def update_tenant_settings(
+    tenant_id: UUID,
+    payload: TenantSettingsUpdateRequest,
+    uow: UowDep,
+) -> dict[str, Any]:
+    """upsert 租户运行时配置（覆盖式写入）。"""
+    return _get_settings_service(uow).update(
+        tenant_id,
+        default_model_catalog_id=payload.default_model_catalog_id,
+        allowed_catalog_ids=payload.allowed_catalog_ids,
+        plugin_whitelist=payload.plugin_whitelist,
+    )
