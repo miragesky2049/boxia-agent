@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
@@ -21,9 +21,22 @@ from internal.engine.services.llm_adapter import (
     LLMServiceAdapter,
     build_model_resolver,
 )
+from internal.engine.services.retrieval_services import register_retrieval_services
+from internal.engine.services.tool_executor import ToolExecutorService
+from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from internal.infrastructure.repository.apps.run_repository import RunRepository
 from internal.infrastructure.repository.apps.usage_repository import UsageRepository
 from internal.infrastructure.repository.apps.webhook_repository import WebhookRepository
+from internal.infrastructure.repository.apps.async_conversation_adapter import (
+    AsyncConversationRepository,
+    AsyncMessageRepository,
+)
+from internal.infrastructure.repository.apps.conversation_repository import (
+    ConversationRepository as SyncConversationRepository,
+)
+from internal.infrastructure.repository.apps.message_repository import (
+    MessageRepository as SyncMessageRepository,
+)
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
@@ -65,6 +78,38 @@ async def build_runner(
         LLMServiceAdapter(build_model_resolver(model_service, tenant_id)),
     )
     services.register("http", HttpService())
+    services.register(
+        "tool_executor",
+        ToolExecutorService(
+            uow.session,
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            application_id=application_id,
+            run_id=run_id or uuid4(),
+        ),
+    )
+    register_retrieval_services(services)
+    services.register("sandbox", PythonSandbox())
+
+    # conversation / message 节点（38/39/51-57）依赖的异步仓储。
+    # user 端 current_user_id 必传；admin debug 路由走 _register_conversation_services 单独绑定。
+    effective_run_id = run_id or uuid4()
+    if current_user_id is not None:
+        async_conv_repo = AsyncConversationRepository(
+            SyncConversationRepository(uow.session),
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            application_id=application_id,
+        )
+        async_msg_repo = AsyncMessageRepository(
+            SyncMessageRepository(uow.session),
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            application_id=application_id,
+            run_id=effective_run_id,
+        )
+        services.register("conversation_repo", async_conv_repo)
+        services.register("message_repo", async_msg_repo)
 
     async def subgraph_loader(child_app_id: str) -> dict:
         try:

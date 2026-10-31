@@ -78,3 +78,26 @@ class MessageRepository:
         items = [dict(r._mapping) for r in rows]
         items.reverse()
         return items
+
+    def get_message(self, message_id: UUID) -> dict | None:
+        """按消息 ID 查行（用于跨租户删除前的归属校验）。"""
+        row = self._session.execute(
+            text(
+                "SELECT id, conversation_id, tenant_id, user_id, application_id "
+                "FROM message WHERE id = :id"
+            ),
+            {"id": message_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def delete_message(self, message_id: UUID) -> None:
+        self._session.execute(
+            text("DELETE FROM message WHERE id = :id"),
+            {"id": message_id},
+        )
+
+    def clear_messages(self, conversation_id: UUID) -> None:
+        self._session.execute(
+            text("DELETE FROM message WHERE conversation_id = :cid"),
+            {"cid": conversation_id},
+        )

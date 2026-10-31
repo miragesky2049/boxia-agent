@@ -158,3 +158,31 @@ async def run_workflow(
         inputs=payload.inputs,
         thread_id=payload.thread_id,
     )
+
+
+@router.get("/{application_id}/conversations")
+async def list_conversations(
+    application_id: UUID,
+    service: ChatServiceDep,
+    limit: int = 20,
+    offset: int = 0,
+) -> list[dict]:
+    """列出当前用户在指定应用下的会话列表（按 updated_at 倒序）。"""
+    return await service.list_conversations(
+        application_id=application_id, limit=limit, offset=offset,
+    )
+
+
+@router.get("/{application_id}/conversations/{conversation_id}/messages")
+async def list_conversation_messages(
+    application_id: UUID,
+    conversation_id: UUID,
+    service: ChatServiceDep,
+    limit: int = 100,
+) -> list[dict]:
+    """拉取某会话的历史消息（升序），用于前端恢复聊天上下文。"""
+    return await service.list_messages(
+        application_id=application_id,
+        conversation_id=conversation_id,
+        limit=limit,
+    )

@@ -136,97 +136,135 @@ class ChatService:
                 "tools": [t.name for t in tool_specs],
             }
 
-            for i in range(max_rounds):
-                iterations = i + 1
+            # 无 tools 时直接走流式：逐 token yield llm_token 事件，前端打字机渲染
+            if not tool_specs:
+                iterations = 1
                 yield "llm_start", {
                     "iteration": iterations,
                     "messages": messages,
-                    "tools": [t.to_openai() for t in tool_specs],
+                    "tools": [],
                 }
 
-                resp: LLMResponse = await client.chat(
-                    messages=messages,
-                    tools=tool_specs or None,
-                )
+                chunks: list[str] = []
+                async for chunk in client.chat_stream(messages=messages):
+                    delta = chunk.content or ""
+                    if delta:
+                        chunks.append(delta)
+                        yield "llm_token", {
+                            "delta": delta,
+                        }
+                    if chunk.usage.prompt_tokens:
+                        usage_total["prompt_tokens"] = chunk.usage.prompt_tokens
+                        usage_total["completion_tokens"] = chunk.usage.completion_tokens
+                        usage_total["total_tokens"] = chunk.usage.total_tokens
+                    if chunk.finish_reason:
+                        last_finish_reason = chunk.finish_reason
 
-                usage_total["prompt_tokens"] += resp.usage.prompt_tokens
-                usage_total["completion_tokens"] += resp.usage.completion_tokens
-                usage_total["total_tokens"] += resp.usage.total_tokens
-                last_finish_reason = resp.finish_reason
-
-                tc_out = [
-                    {
-                        "id": tc.id,
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    }
-                    for tc in resp.tool_calls
-                ]
-                assistant_tool_calls = tc_out
+                final_content = "".join(chunks)
+                messages.append({"role": "assistant", "content": final_content})
 
                 yield "llm_end", {
                     "iteration": iterations,
-                    "content": resp.content,
-                    "tool_calls": tc_out,
-                    "usage": resp.usage.model_dump(),
+                    "content": final_content,
+                    "tool_calls": [],
+                    "usage": {
+                        "prompt_tokens": usage_total["prompt_tokens"],
+                        "completion_tokens": usage_total["completion_tokens"],
+                        "total_tokens": usage_total["total_tokens"],
+                    },
                 }
-
-                if not resp.tool_calls:
-                    final_content = resp.content
-                    messages.append({"role": "assistant", "content": resp.content})
-                    break
-
-                # 有 tool_calls：先把 assistant 消息回灌，再逐个执行 tool
-                messages.append(
-                    {
-                        "role": "assistant",
-                        "content": resp.content,
-                        "tool_calls": [tc.model_dump() for tc in resp.tool_calls],
-                    }
-                )
-
-                for tc in resp.tool_calls:
-                    raw_args = tc.function.arguments or "{}"
-                    try:
-                        args_obj: dict[str, Any] = json.loads(raw_args)
-                    except json.JSONDecodeError:
-                        args_obj = {}
-
-                    yield "tool_start", {
-                        "tool_call_id": tc.id,
-                        "name": tc.function.name,
-                        "arguments": args_obj,
+            else:
+                for i in range(max_rounds):
+                    iterations = i + 1
+                    yield "llm_start", {
+                        "iteration": iterations,
+                        "messages": messages,
+                        "tools": [t.to_openai() for t in tool_specs],
                     }
 
-                    try:
-                        observation = await self._execute_tool(
-                            tool_executors, tc.function.name, args_obj
-                        )
-                        is_error = False
-                    except Exception as exc:  # noqa: BLE001
-                        logger.exception("tool 执行失败 tool=%s", tc.function.name)
-                        observation = f"工具执行失败：{exc}"
-                        is_error = True
+                    resp: LLMResponse = await client.chat(
+                        messages=messages,
+                        tools=tool_specs or None,
+                    )
 
-                    tool_traces.append(
+                    usage_total["prompt_tokens"] += resp.usage.prompt_tokens
+                    usage_total["completion_tokens"] += resp.usage.completion_tokens
+                    usage_total["total_tokens"] += resp.usage.total_tokens
+                    last_finish_reason = resp.finish_reason
+
+                    tc_out = [
                         {
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        }
+                        for tc in resp.tool_calls
+                    ]
+                    assistant_tool_calls = tc_out
+
+                    yield "llm_end", {
+                        "iteration": iterations,
+                        "content": resp.content,
+                        "tool_calls": tc_out,
+                        "usage": resp.usage.model_dump(),
+                    }
+
+                    if not resp.tool_calls:
+                        final_content = resp.content
+                        messages.append({"role": "assistant", "content": resp.content})
+                        break
+
+                    # 有 tool_calls：先把 assistant 消息回灌，再逐个执行 tool
+                    messages.append(
+                        {
+                            "role": "assistant",
+                            "content": resp.content,
+                            "tool_calls": [tc.model_dump() for tc in resp.tool_calls],
+                        }
+                    )
+
+                    for tc in resp.tool_calls:
+                        raw_args = tc.function.arguments or "{}"
+                        try:
+                            args_obj: dict[str, Any] = json.loads(raw_args)
+                        except json.JSONDecodeError:
+                            args_obj = {}
+
+                        yield "tool_start", {
+                            "tool_call_id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": args_obj,
+                        }
+
+                        try:
+                            observation = await self._execute_tool(
+                                tool_executors, tc.function.name, args_obj
+                            )
+                            is_error = False
+                        except Exception as exc:  # noqa: BLE001
+                            logger.exception("tool 执行失败 tool=%s", tc.function.name)
+                            observation = f"工具执行失败：{exc}"
+                            is_error = True
+
+                        tool_traces.append(
+                            {
+                                "tool_call_id": tc.id,
+                                "name": tc.function.name,
+                                "observation": observation,
+                                "is_error": is_error,
+                            }
+                        )
+                        yield "tool_end", {
                             "tool_call_id": tc.id,
                             "name": tc.function.name,
                             "observation": observation,
                             "is_error": is_error,
                         }
-                    )
-                    yield "tool_end", {
-                        "tool_call_id": tc.id,
-                        "name": tc.function.name,
-                        "observation": observation,
-                        "is_error": is_error,
-                    }
-                    messages.append(
-                        {"role": "tool", "tool_call_id": tc.id, "content": observation}
-                    )
-            else:
-                final_content = "已达到最大工具调用轮数，请简化问题后重试。"
+                        messages.append(
+                            {"role": "tool", "tool_call_id": tc.id, "content": observation}
+                        )
+                else:
+                    final_content = "已达到最大工具调用轮数，请简化问题后重试。"
 
             # 8. 落库 assistant 消息(chat 场景不走 run 表,run_id 置空)
             self._msg_repo.append_message(
@@ -258,6 +296,75 @@ class ChatService:
             yield "error", {"message": str(exc), "code": "chat_failed"}
         finally:
             yield "final", {}
+
+    # ========== 会话历史读取 ==========
+    async def list_conversations(
+        self,
+        application_id: UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict[str, Any]]:
+        """列出当前用户在指定应用下的会话列表（按 updated_at 倒序）。"""
+        self._app_service.assert_user_can_view(
+            application_id, self._tenant_id, self._user_id
+        )
+        rows = self._conv_repo.list_conversations_by_user(
+            tenant_id=self._tenant_id,
+            user_id=self._user_id,
+            application_id=application_id,
+            limit=limit,
+            offset=offset,
+        )
+        return [
+            {
+                "conversation_id": str(r["id"]),
+                "title": r.get("title") or "",
+                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+                "updated_at": r["updated_at"].isoformat() if r.get("updated_at") else None,
+            }
+            for r in rows
+        ]
+
+    async def list_messages(
+        self,
+        application_id: UUID,
+        conversation_id: UUID,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        """拉取某个会话的历史消息（升序），用于前端恢复聊天上下文。"""
+        self._app_service.assert_user_can_view(
+            application_id, self._tenant_id, self._user_id
+        )
+        conv = self._conv_repo.get_conversation(conversation_id)
+        if (
+            conv is None
+            or conv["user_id"] != self._user_id
+            or conv["application_id"] != application_id
+            or conv["tenant_id"] != self._tenant_id
+        ):
+            raise NotFoundError("会话不存在或无权访问")
+
+        rows = self._msg_repo.list_messages_by_conversation(
+            conversation_id, limit=limit,
+        )
+        result: list[dict[str, Any]] = []
+        for r in rows:
+            if r.get("role") not in ("user", "assistant"):
+                continue
+            tool_calls = r.get("tool_calls")
+            if isinstance(tool_calls, str):
+                try:
+                    tool_calls = json.loads(tool_calls or "[]")
+                except json.JSONDecodeError:
+                    tool_calls = []
+            result.append({
+                "message_id": str(r["id"]),
+                "role": r["role"],
+                "content": r.get("content") or "",
+                "tool_calls": tool_calls or [],
+                "created_at": r["created_at"].isoformat() if r.get("created_at") else None,
+            })
+        return result
 
     # ========== workflow 非流式运行 ==========
     async def run_workflow(

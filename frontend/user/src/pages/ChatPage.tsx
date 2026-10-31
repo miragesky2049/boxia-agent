@@ -2,7 +2,10 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   ClearOutlined,
+  HistoryOutlined,
   LoadingOutlined,
+  MessageOutlined,
+  PlusOutlined,
   SendOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
@@ -14,6 +17,11 @@ import remarkGfm from 'remark-gfm'
 import { getAgent } from '../api/agents'
 import { runAgentStream } from '../api/agentRun'
 import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
+import {
+  listConversationMessages,
+  listConversations,
+} from '../api/conversations'
+import type { ConversationSummary } from '../api/conversations'
 import type { UserAgentDetail } from '../api/types'
 
 interface Message {
@@ -77,8 +85,60 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState('')
 
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [conversationsLoading, setConversationsLoading] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const refreshConversations = async (cid?: string) => {
+    if (!agentId) return
+    setConversationsLoading(true)
+    try {
+      const list = await listConversations(agentId, { limit: 50 })
+      setConversations(list)
+      if (cid && list.length > 0) {
+        setConversationId(cid)
+      }
+    } catch (err) {
+      console.error('加载会话列表失败', err)
+    } finally {
+      setConversationsLoading(false)
+    }
+  }
+
+  const handleSelectConversation = async (cid: string) => {
+    if (!agentId || cid === conversationId) {
+      setSidebarOpen(false)
+      return
+    }
+    try {
+      setConversationsLoading(true)
+      const history = await listConversationMessages(agentId, cid)
+      const restored: Message[] = history
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          id: m.message_id,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        }))
+      setMessages(restored)
+      setConversationId(cid)
+      setSidebarOpen(false)
+    } catch (err) {
+      console.error('加载历史消息失败', err)
+    } finally {
+      setConversationsLoading(false)
+    }
+  }
+
+  const handleNewConversation = () => {
+    setMessages([])
+    setConversationId('')
+    setInput('')
+    setSidebarOpen(false)
+  }
 
   useEffect(() => {
     if (!agentId) {
@@ -102,6 +162,12 @@ export default function ChatPage() {
     return () => {
       active = false
     }
+  }, [agentId])
+
+  useEffect(() => {
+    if (!agentId) return
+    void refreshConversations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId])
 
   useEffect(() => {
@@ -153,10 +219,25 @@ export default function ChatPage() {
         },
         (evt: AgentStreamEvent) => {
           switch (evt.event) {
+            case 'llm_token':
+              // 流式增量：逐 token 追加到 assistant 气泡，实现打字机效果
+              if (evt.data.delta) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsg.id
+                      ? { ...m, loading: false, content: m.content + evt.data.delta }
+                      : m,
+                  ),
+                )
+              }
+              break
             case 'llm_end':
               // 每轮 LLM 返回的 content 是该轮完整输出；多轮时以最后一轮为准
-              if (evt.data.content) {
+              // 流式场景下 content 已通过 llm_token 累积，这里仅在非流式回退时覆盖
+              if (evt.data.content && !evt.data.usage_streamed) {
                 patchAssistant({ loading: false, content: evt.data.content })
+              } else {
+                patchAssistant({ loading: false })
               }
               break
             case 'tool_start':
@@ -193,7 +274,12 @@ export default function ChatPage() {
               break
             }
             case 'result':
-              if (!conversationId) setConversationId(evt.data.conversation_id)
+              if (!conversationId) {
+                setConversationId(evt.data.conversation_id)
+                void refreshConversations(evt.data.conversation_id)
+              } else {
+                void refreshConversations()
+              }
               patchAssistant({
                 loading: false,
                 content: evt.data.content,
@@ -223,12 +309,6 @@ export default function ChatPage() {
       e.preventDefault()
       void handleSend()
     }
-  }
-
-  const handleReset = () => {
-    setMessages([])
-    setConversationId('')
-    setInput('')
   }
 
   const renderToolTraces = (traces: ToolCallTrace[]) => {
@@ -296,11 +376,74 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
+      <aside className={`chat-sidebar ${sidebarOpen ? 'chat-sidebar--open' : ''}`}>
+        <div className="chat-sidebar__header">
+          <span className="chat-sidebar__title">
+            <HistoryOutlined /> 历史会话
+          </span>
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={handleNewConversation}
+            disabled={sending}
+          >
+            新会话
+          </Button>
+        </div>
+        <div className="chat-sidebar__list">
+          {conversationsLoading && conversations.length === 0 ? (
+            <div className="chat-sidebar__empty">
+              <Spin size="small" />
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="chat-sidebar__empty">
+              <MessageOutlined />
+              <span>暂无历史会话</span>
+            </div>
+          ) : (
+            conversations.map((c) => (
+              <button
+                key={c.conversation_id}
+                type="button"
+                className={`chat-sidebar__item ${
+                  c.conversation_id === conversationId ? 'chat-sidebar__item--active' : ''
+                }`}
+                onClick={() => void handleSelectConversation(c.conversation_id)}
+                disabled={sending}
+              >
+                <div className="chat-sidebar__item-title">
+                  {c.title || '未命名会话'}
+                </div>
+                {c.updated_at && (
+                  <div className="chat-sidebar__item-time">
+                    {new Date(c.updated_at).toLocaleString()}
+                  </div>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+      {sidebarOpen && (
+        <div
+          className="chat-sidebar__mask"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       <header className="chat-header">
         <Link to="/" className="chat-header__back">
           <ArrowLeftOutlined />
           <span>返回</span>
         </Link>
+        <Button
+          type="text"
+          icon={<HistoryOutlined />}
+          onClick={() => setSidebarOpen((v) => !v)}
+        >
+          会话
+        </Button>
         {agent && (
           <div className="chat-header__agent">
             <AgentAvatar agent={agent} size={36} />
@@ -318,7 +461,7 @@ export default function ChatPage() {
             <Button
               type="text"
               icon={<ClearOutlined />}
-              onClick={handleReset}
+              onClick={handleNewConversation}
               disabled={messages.length === 0 || sending}
             >
               新会话
