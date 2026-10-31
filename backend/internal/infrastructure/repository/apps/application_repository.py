@@ -167,12 +167,23 @@ class ApplicationRepository:
         row = self._session.execute(
             text(
                 "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-                "is_listed_in_market, visibility_mode, created_by, created_at, updated_at "
+                "is_listed_in_market, visibility_mode, published_graph_version, "
+                "created_by, created_at, updated_at "
                 "FROM application WHERE id = :aid"
             ),
             {"aid": application_id},
         ).first()
         return dict(row._mapping) if row else None
+
+    def set_published_graph_version(self, application_id: UUID, version: int) -> None:
+        """把 application.published_graph_version 指向指定版本号（NULL → 未发布，回退 latest）。"""
+        self._session.execute(
+            text(
+                "UPDATE application SET published_graph_version = :ver, updated_at = NOW() "
+                "WHERE id = :aid"
+            ),
+            {"aid": application_id, "ver": version},
+        )
 
     def list_applications(
         self,

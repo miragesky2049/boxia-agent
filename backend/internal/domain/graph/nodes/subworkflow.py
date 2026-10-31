@@ -41,9 +41,11 @@ class SubworkflowNodeHandler(NodeHandler):
                 "inputArr": [],
             })
 
-        # 加载子图画布 JSON
+        # 加载子图画布 JSON（loader 可能是 sync 或 async，统一 await 处理）
         loader = ctx.services.get("subgraph_loader")
         canvas_json = loader(workflow_id)
+        if hasattr(canvas_json, "__await__"):
+            canvas_json = await canvas_json
         if not canvas_json:
             return NodeResult(outputs={"error": f"子 workflow 不存在或无权访问: {workflow_id}"})
 

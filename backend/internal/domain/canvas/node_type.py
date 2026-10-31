@@ -55,6 +55,10 @@ class NodeType(str, Enum):
     JSON_PARSER = "59"
     HUMAN_APPROVAL = "60"  # 人审节点（本次 stub，后续补 interrupt + resume）
 
+    # A6：Agent 循环节点（coze 标准没有数字编码，本项目自定义 100）
+    # 走 plan/execute/reflect 三阶段协议，非 DAG 执行
+    AGENT_LOOP = "100"
+
 
 # 本项目当前阶段不实现的节点类型（convert 时显式报错）
 # 数据库类已决策砍掉，用 HTTP 节点调自己的 API 替代。

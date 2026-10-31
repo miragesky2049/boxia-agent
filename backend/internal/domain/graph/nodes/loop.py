@@ -112,20 +112,54 @@ class LoopNodeHandler(NodeHandler):
         items: list[Any],
         total: int,
     ) -> list[Any]:
-        """并发执行：用 asyncio.gather，最多 MAX_PARALLELISM 并发。
+        """并发执行：手动 create_task + as_completed，支持 break/continue 语义。
 
-        注意：并发模式下 break/continue 不生效（所有迭代都已启动）。
-        单个迭代失败会抛异常，导致整个 Loop 失败（可由 ErrorPolicy 降级）。
+        - break：任一迭代产出 __break__ 后，取消其余尚未启动/正在运行的任务；
+          触发 break 的那次迭代本身不写入结果（与串行一致）。
+        - continue：产出 __continue__ 的迭代跳过输出，其余迭代不受影响。
+        - 结果按原数组下标排序，保证输出顺序与输入顺序对齐。
         """
         semaphore = asyncio.Semaphore(MAX_PARALLELISM)
+        results: dict[int, Any] = {}
+        break_received = False
 
-        async def _guarded(item: Any, index: int) -> Any:
+        async def _guarded(item: Any, index: int) -> tuple[int, dict[str, Any] | None, bool, bool]:
             async with semaphore:
-                iter_output = await self._invoke_once(ctx, compiled, item, index, total)
-                return iter_output.get("output", {})
+                if break_received:
+                    return index, None, False, False
+                try:
+                    iter_output = await self._invoke_once(ctx, compiled, item, index, total)
+                except asyncio.CancelledError:
+                    raise
+                node_outputs = iter_output.get("node_outputs", {})
+                is_break = self._has_break(node_outputs)
+                is_continue = self._has_continue(node_outputs)
+                return index, iter_output.get("output", {}), is_break, is_continue
 
-        tasks = [_guarded(item, i) for i, item in enumerate(items)]
-        return await asyncio.gather(*tasks)
+        tasks = [asyncio.create_task(_guarded(item, i)) for i, item in enumerate(items)]
+        try:
+            for fut in asyncio.as_completed(tasks):
+                try:
+                    index, output, is_break, is_continue = await fut
+                except asyncio.CancelledError:
+                    continue
+                if is_break:
+                    break_received = True
+                    for t in tasks:
+                        if not t.done():
+                            t.cancel()
+                    continue
+                if is_continue:
+                    continue
+                if output is not None:
+                    results[index] = output
+        finally:
+            for t in tasks:
+                if not t.done():
+                    t.cancel()
+            await asyncio.gather(*tasks, return_exceptions=True)
+
+        return [results[i] for i in sorted(results)]
 
     async def _invoke_once(
         self,
@@ -135,7 +169,13 @@ class LoopNodeHandler(NodeHandler):
         index: int,
         total: int,
     ) -> dict[str, Any]:
-        """执行单次迭代。"""
+        """执行单次迭代。
+
+        A13：子迭代 checkpointer thread_id 必须带租户前缀，避免与主图 checkpoint key 错位。
+        业务裸 thread_id = `{父thread_id}:loop:{index}`；checkpoint key = `{tenant}:{业务裸thread_id}`。
+        """
+        sub_thread_id = f"{ctx.env.thread_id}:loop:{index}"
+        checkpoint_thread_id = f"{ctx.env.tenant_id}:{sub_thread_id}"
         initial_state = {
             "input": {"item": item, "index": index, "total": total},
             "node_outputs": {},
@@ -144,14 +184,14 @@ class LoopNodeHandler(NodeHandler):
                 "tenant_id": str(ctx.env.tenant_id),
                 "user_id": str(ctx.env.user_id) if ctx.env.user_id else None,
                 "run_id": str(ctx.env.run_id),
-                "thread_id": f"{ctx.env.thread_id}:loop:{index}",
+                "thread_id": sub_thread_id,
             },
             "output": {},
             "errors": {},
         }
         return await compiled.ainvoke(
             initial_state,
-            config={"configurable": {"thread_id": f"{ctx.env.thread_id}:loop:{index}"}},
+            config={"configurable": {"thread_id": checkpoint_thread_id}},
         )
 
     def _has_break(self, node_outputs: dict[str, dict[str, Any]]) -> bool:

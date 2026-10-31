@@ -1,10 +1,12 @@
-"""Conversation / Message 工作流节点（coze type=39/51/52/53/54/55/56/57/37/38）。
+"""Conversation / Message 工作流节点（coze type=39/51/52/53/54/55/56/57/38）。
 
 这些节点让 workflow 能读写会话历史，作为 Agent 应用编排的基础积木。
 
 依赖服务（通过 ctx.services 注入）：
 - conversation_repo: ConversationRepository
 - message_repo: MessageRepository
+
+输入/输出端口命名与 node_meta.py 保持一致（snake_case）。
 """
 
 from __future__ import annotations
@@ -32,6 +34,16 @@ def _parse_uuid(value: Any) -> UUID | None:
         return None
 
 
+def _pick(ctx: NodeContext, key: str, default: Any = None) -> Any:
+    """优先取上游连线 input，再退到节点 config 表单值。"""
+    value = ctx.inputs.get(key)
+    if value in (None, ""):
+        value = ctx.config.get(key)
+    if value in (None, ""):
+        return default
+    return value
+
+
 class CreateConversationNodeHandler(NodeHandler):
     """type=39: 创建会话。"""
 
@@ -39,18 +51,18 @@ class CreateConversationNodeHandler(NodeHandler):
 
     async def run(self, ctx: NodeContext) -> NodeResult:
         if not ctx.services.has("conversation_repo"):
-            return NodeResult(outputs={"conversationId": "stub_conv_id"})
+            return NodeResult(outputs={"conversation_id": "stub_conv_id"})
 
         repo = ctx.services.get("conversation_repo")
         conv = Conversation(
             tenant_id=ctx.env.tenant_id,
             user_id=ctx.env.user_id,
-            app_id=_parse_uuid(ctx.inputs.get("appId")),
-            title=str(ctx.inputs.get("title") or ""),
-            metadata=dict(ctx.inputs.get("metadata") or {}),
+            app_id=_parse_uuid(_pick(ctx, "app_id")),
+            title=str(_pick(ctx, "title", "")),
+            metadata=dict(_pick(ctx, "metadata", {}) or {}),
         )
         saved = await repo.create(conv)
-        return NodeResult(outputs={"conversationId": str(saved.conversation_id)})
+        return NodeResult(outputs={"conversation_id": str(saved.conversation_id)})
 
 
 class UpdateConversationNodeHandler(NodeHandler):
@@ -59,10 +71,10 @@ class UpdateConversationNodeHandler(NodeHandler):
     type_name = NodeType.UPDATE_CONVERSATION.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        conv_id = _parse_uuid(ctx.inputs.get("conversationId"))
-        title = str(ctx.inputs.get("title") or "")
+        conv_id = _parse_uuid(_pick(ctx, "conversation_id"))
+        title = str(_pick(ctx, "title", ""))
         if not conv_id:
-            return NodeResult(outputs={"error": "缺少 conversationId"})
+            return NodeResult(outputs={"error": "缺少 conversation_id"})
 
         if ctx.services.has("conversation_repo"):
             await ctx.services.get("conversation_repo").update_title(conv_id, title)
@@ -75,9 +87,9 @@ class DeleteConversationNodeHandler(NodeHandler):
     type_name = NodeType.DELETE_CONVERSATION.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        conv_id = _parse_uuid(ctx.inputs.get("conversationId"))
+        conv_id = _parse_uuid(_pick(ctx, "conversation_id"))
         if not conv_id:
-            return NodeResult(outputs={"error": "缺少 conversationId"})
+            return NodeResult(outputs={"error": "缺少 conversation_id"})
 
         if ctx.services.has("conversation_repo"):
             await ctx.services.get("conversation_repo").delete(conv_id)
@@ -97,8 +109,8 @@ class QueryConversationListNodeHandler(NodeHandler):
         convs = await repo.list_by_user(
             tenant_id=ctx.env.tenant_id,
             user_id=ctx.env.user_id,
-            app_id=_parse_uuid(ctx.inputs.get("appId")),
-            limit=int(ctx.inputs.get("limit") or 20),
+            app_id=_parse_uuid(_pick(ctx, "app_id")),
+            limit=int(_pick(ctx, "limit", 20) or 20),
         )
         return NodeResult(outputs={
             "conversations": [
@@ -114,7 +126,7 @@ class QueryConversationHistoryNodeHandler(NodeHandler):
     type_name = NodeType.QUERY_CONVERSATION_HISTORY.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        conv_id = _parse_uuid(ctx.inputs.get("conversationId"))
+        conv_id = _parse_uuid(_pick(ctx, "conversation_id"))
         if not conv_id:
             return NodeResult(outputs={"messages": []})
 
@@ -122,7 +134,7 @@ class QueryConversationHistoryNodeHandler(NodeHandler):
             return NodeResult(outputs={"messages": []})
 
         messages = await ctx.services.get("message_repo").list_by_conversation(
-            conv_id, limit=int(ctx.inputs.get("limit") or 100),
+            conv_id, limit=int(_pick(ctx, "limit", 100) or 100),
         )
         return NodeResult(outputs={
             "messages": [
@@ -138,28 +150,28 @@ class CreateMessageNodeHandler(NodeHandler):
     type_name = NodeType.CREATE_MESSAGE.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        conv_id = _parse_uuid(ctx.inputs.get("conversationId"))
-        role = str(ctx.inputs.get("role") or "user")
-        content = str(ctx.inputs.get("content") or "")
+        conv_id = _parse_uuid(_pick(ctx, "conversation_id"))
+        role = str(_pick(ctx, "role", "user"))
+        content = str(_pick(ctx, "content", ""))
         if not conv_id:
-            return NodeResult(outputs={"error": "缺少 conversationId"})
+            return NodeResult(outputs={"error": "缺少 conversation_id"})
 
         if not ctx.services.has("message_repo"):
-            return NodeResult(outputs={"messageId": "stub_msg_id"})
+            return NodeResult(outputs={"message_id": "stub_msg_id"})
 
         msg = Message(conversation_id=conv_id, role=role, content=content)
         saved = await ctx.services.get("message_repo").append(msg)
-        return NodeResult(outputs={"messageId": str(saved.message_id)})
+        return NodeResult(outputs={"message_id": str(saved.message_id)})
 
 
 class UpdateMessageNodeHandler(NodeHandler):
-    """type=56: 更新消息内容（简化版：delete + append 新消息）。"""
+    """type=56: 更新消息内容（简化版：delete + 由调用方重新 append）。"""
 
     type_name = NodeType.UPDATE_MESSAGE.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        msg_id = _parse_uuid(ctx.inputs.get("messageId"))
-        content = str(ctx.inputs.get("content") or "")
+        msg_id = _parse_uuid(_pick(ctx, "message_id"))
+        content = str(_pick(ctx, "content", ""))
         if not msg_id or not ctx.services.has("message_repo"):
             return NodeResult(outputs={"success": False})
 
@@ -174,7 +186,7 @@ class DeleteMessageNodeHandler(NodeHandler):
     type_name = NodeType.DELETE_MESSAGE.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        msg_id = _parse_uuid(ctx.inputs.get("messageId"))
+        msg_id = _parse_uuid(_pick(ctx, "message_id"))
         if msg_id and ctx.services.has("message_repo"):
             await ctx.services.get("message_repo").delete(msg_id)
         return NodeResult(outputs={"success": True})
@@ -186,7 +198,7 @@ class ClearContextNodeHandler(NodeHandler):
     type_name = NodeType.CLEAR_CONTEXT.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        conv_id = _parse_uuid(ctx.inputs.get("conversationId"))
+        conv_id = _parse_uuid(_pick(ctx, "conversation_id"))
         if conv_id and ctx.services.has("message_repo"):
             await ctx.services.get("message_repo").clear(conv_id)
         return NodeResult(outputs={"success": True})

@@ -12,12 +12,18 @@ DDD 分层约定：
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import UUID
 
 from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
 from internal.domain.canvas.model import CanvasGraph
+
+
+# 节点内 emit 事件的回调签名：(event_type, payload) -> None
+# 例如 LLM 节点在收到流式 token 时调用 emit_event("llm_token", {"node_id": ..., "delta": "你"})
+NodeEventEmitter = Callable[[str, dict[str, Any]], Awaitable[None]]
 
 
 @dataclass(frozen=True)
@@ -42,6 +48,7 @@ class NodeContext:
     subgraph: Loop/Batch 等内嵌子图节点时携带的循环体 IR，普通节点为 None。
     eval_context: 求值上下文（含 node_outputs/globals/env），由 Compiler 逐节点构造。
     evaluator: 表达式求值领域服务，handler 用它对 config 里的动态字段求值。
+    emit_event: 节点内流式 / 中间事件回调（如 llm_token）；None 表示无 SSE 通道。
     """
 
     node_id: str
@@ -53,6 +60,7 @@ class NodeContext:
     subgraph: CanvasGraph | None = None
     eval_context: EvalContext | None = None
     evaluator: ExpressionEvaluator | None = None
+    emit_event: NodeEventEmitter | None = None
 
 
 @dataclass(frozen=True)

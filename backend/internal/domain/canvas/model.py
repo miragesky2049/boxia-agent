@@ -79,6 +79,20 @@ class CanvasEdge:
 
 
 @dataclass(frozen=True)
+class VariableDef:
+    """A8：类型化变量池定义。
+
+    type: string / number / boolean / object / array
+    default: 初始值（graph 启动时写入 state.globals）
+    """
+
+    name: str
+    type: str = "string"
+    default: Any = None
+    description: str = ""
+
+
+@dataclass(frozen=True)
 class CanvasGraph:
     """画布图 IR。"""
 
@@ -86,6 +100,8 @@ class CanvasGraph:
     edges: list[CanvasEdge]
     # 顶层版本号，对应 coze versions.loop（用于兼容不同 loop 协议版本）
     versions: dict[str, str] = field(default_factory=dict)
+    # A8：类型化变量池（graph 级全局变量声明）
+    variables: list[VariableDef] = field(default_factory=list)
 
     @property
     def start_node(self) -> CanvasNode:

@@ -53,4 +53,7 @@ from internal.domain.graph.nodes import (  # noqa: E402,F401
     json_tools,
     conversation_nodes,
     human_task,
+    agent_loop,
+    api_plugin,
+    comment,
 )

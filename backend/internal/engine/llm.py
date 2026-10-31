@@ -3,10 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import time
 from abc import ABC, abstractmethod
-from typing import Any
+from typing import Any, AsyncIterator
 
 import httpx
 from pydantic import BaseModel, Field
@@ -147,6 +148,39 @@ class LLMClient(ABC):
         top_p / presence_penalty / frequency_penalty: OpenAI Chat Completions 标准采样参数，
                         None 时不传，由网关默认值决定。
         """
+
+    async def chat_stream(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        context: AgentRunContext | None = None,
+        response_format: dict[str, Any] | None = None,
+        top_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+    ) -> AsyncIterator[LLMResponse]:
+        """流式 chat：逐 chunk yield LLMResponse（content 为当次增量）。
+
+        默认实现退化为一次性 chat：调用方可以基于 chat 实现兼容旧客户端。
+        最后一个 chunk 的 content 为完整聚合文本；其他 chunk 为增量 delta。
+        约定：
+          - 每个 yield 的 content 是当次增量（非累积）；
+          - 结束时再 yield 一个 content="" 且 usage 填好的收尾 chunk（可选）。
+        """
+        resp = await self.chat(
+            messages=messages,
+            tools=None,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            context=context,
+            response_format=response_format,
+            top_p=top_p,
+            presence_penalty=presence_penalty,
+            frequency_penalty=frequency_penalty,
+        )
+        yield resp
 
 
 class OpenAICompatLLMClient(LLMClient):
@@ -324,6 +358,127 @@ class OpenAICompatLLMClient(LLMClient):
             usage=usage,
             model=data.get("model", ""),
         )
+
+    async def chat_stream(
+        self,
+        *,
+        messages: list[dict[str, Any]],
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        context: AgentRunContext | None = None,
+        response_format: dict[str, Any] | None = None,
+        top_p: float | None = None,
+        presence_penalty: float | None = None,
+        frequency_penalty: float | None = None,
+    ) -> AsyncIterator[LLMResponse]:
+        """OpenAI 兼容 SSE 流式调用：逐 chunk yield LLMResponse（content 为增量）。
+
+        约定：
+          - 每个 yield 的 content 是当次增量 delta；
+          - 不支持 tools（流式 + tool_calls 在 SSE 中需要聚合 partial tool_calls，
+            由非流式 chat 路径处理）；
+          - 流结束时 yield 一个 finish_reason="stop" 的收尾 chunk（content 可能为空）。
+        """
+        payload: dict[str, Any] = {
+            "model": self._model,
+            "messages": messages,
+            "temperature": self._default_temperature if temperature is None else temperature,
+            "max_tokens": self._default_max_tokens if max_tokens is None else max_tokens,
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if response_format is not None:
+            payload["response_format"] = response_format
+        if top_p is not None:
+            payload["top_p"] = top_p
+        if presence_penalty is not None:
+            payload["presence_penalty"] = presence_penalty
+        if frequency_penalty is not None:
+            payload["frequency_penalty"] = frequency_penalty
+
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+        }
+        if context is not None:
+            headers.update(context.llm_headers())
+
+        url = f"{self._base_url}/chat/completions"
+        client = _get_shared_client(self._base_url, self._timeout)
+
+        started = time.perf_counter()
+        tenant = _tenant_label(context)
+        status = "success"
+        finish_reason = "stop"
+        usage = LLMUsage()
+        model = self._model
+        try:
+            async with client.stream("POST", url, json=payload, headers=headers) as response:
+                if response.status_code in _RETRYABLE_STATUSES:
+                    # 流开启后再收到可重试状态码，直接抛；调用方决定要不要退化为 chat。
+                    status = f"http_{response.status_code}"
+                    await response.aread()
+                    raise httpx.HTTPStatusError(
+                        f"llm stream status={response.status_code}",
+                        request=response.request,
+                        response=response,
+                    )
+                response.raise_for_status()
+
+                async for line in response.aiter_lines():
+                    if not line or not line.strip():
+                        continue
+                    if not line.startswith("data:"):
+                        continue
+                    raw = line[len("data:"):].strip()
+                    if raw == "[DONE]":
+                        break
+                    try:
+                        data = json.loads(raw)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if "model" in data:
+                        model = data["model"] or model
+                    usage_raw = data.get("usage")
+                    if isinstance(usage_raw, dict) and usage_raw:
+                        usage = LLMUsage(
+                            prompt_tokens=int(usage_raw.get("prompt_tokens") or 0),
+                            completion_tokens=int(usage_raw.get("completion_tokens") or 0),
+                            total_tokens=int(usage_raw.get("total_tokens") or 0),
+                        )
+
+                    choices = data.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    delta = (choice.get("delta") or {}).get("content") or ""
+                    reason = choice.get("finish_reason")
+                    if reason:
+                        finish_reason = reason
+                    if delta:
+                        yield LLMResponse(
+                            content=delta,
+                            finish_reason=finish_reason,
+                            model=model,
+                        )
+
+            yield LLMResponse(content="", finish_reason=finish_reason, usage=usage, model=model)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            duration = time.perf_counter() - started
+            LLM_DURATION.labels(tenant=tenant, model=self._model, status=status).observe(duration)
+            if usage.prompt_tokens:
+                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="prompt").inc(
+                    usage.prompt_tokens
+                )
+            if usage.completion_tokens:
+                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="completion").inc(
+                    usage.completion_tokens
+                )
 
 
 def assistant_message_from_response(response: LLMResponse) -> AssistantMessage:

@@ -39,6 +39,7 @@ from internal.domain.canvas.model import (
     ErrorPolicy,
     NodeMeta,
     PortSpec,
+    VariableDef,
 )
 from internal.domain.canvas.node_type import NodeType, UNSUPPORTED_TYPES
 
@@ -54,10 +55,26 @@ def convert_canvas(raw: dict[str, Any]) -> CanvasGraph:
     nodes_raw = raw.get("nodes") or []
     edges_raw = raw.get("edges") or []
     versions = raw.get("versions") or {}
+    variables_raw = raw.get("variables") or raw.get("globalVariables") or []
 
     nodes = [_convert_node(n) for n in nodes_raw]
     edges = [_convert_edge(e) for e in edges_raw]
-    return CanvasGraph(nodes=nodes, edges=edges, versions=dict(versions))
+    variables = [_convert_variable(v) for v in variables_raw]
+    return CanvasGraph(nodes=nodes, edges=edges, versions=dict(versions), variables=variables)
+
+
+def _convert_variable(raw: dict[str, Any]) -> VariableDef:
+    """把 coze 变量声明转成 VariableDef。
+
+    兼容两种格式：
+    - 简化格式：{name, type, default, description}
+    - coze 格式：{variableName, variableType, defaultValue, description}
+    """
+    name = str(raw.get("name") or raw.get("variableName") or "")
+    type_name = str(raw.get("type") or raw.get("variableType") or "string")
+    default = raw.get("default", raw.get("defaultValue"))
+    description = str(raw.get("description") or "")
+    return VariableDef(name=name, type=type_name, default=default, description=description)
 
 
 def _convert_node(raw: dict[str, Any]) -> CanvasNode:

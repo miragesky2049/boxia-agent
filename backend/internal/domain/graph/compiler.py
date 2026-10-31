@@ -19,7 +19,14 @@ from langgraph.graph import END, StateGraph
 from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
 from internal.domain.canvas.model import CanvasGraph, CanvasNode, ErrorPolicy
 from internal.domain.canvas.node_type import NodeType
-from internal.domain.graph.node_base import NodeContext, NodeHandler, RuntimeEnv, ServiceRegistry
+from internal.domain.canvas.variable_types import coerce as coerce_var
+from internal.domain.graph.node_base import (
+    NodeContext,
+    NodeEventEmitter,
+    NodeHandler,
+    RuntimeEnv,
+    ServiceRegistry,
+)
 from internal.domain.graph.nodes import get_node_handler
 from internal.domain.graph.state import WorkflowState, merge_dict
 
@@ -41,9 +48,29 @@ logger = logging.getLogger(__name__)
 class Compiler:
     """把 CanvasGraph 编译成 langgraph 可执行图。"""
 
-    def __init__(self, services: ServiceRegistry | None = None):
+    def __init__(
+        self,
+        services: ServiceRegistry | None = None,
+        event_emitter: NodeEventEmitter | None = None,
+    ):
         self._services = services or ServiceRegistry()
         self._evaluator = ExpressionEvaluator()
+        self._graph: CanvasGraph | None = None
+        self._event_emitter = event_emitter
+
+    def default_globals(self) -> dict[str, Any]:
+        """A8：根据 graph.variables 声明的默认值，生成初始 globals。
+
+        每个变量按声明类型做类型强制转换，保证 state.globals 里的值类型正确。
+        """
+        if self._graph is None:
+            return {}
+        result: dict[str, Any] = {}
+        for var in self._graph.variables:
+            if not var.name:
+                continue
+            result[var.name] = coerce_var(var.default, var.type)
+        return result
 
     def compile(
         self,
@@ -61,6 +88,7 @@ class Compiler:
         Returns:
             langgraph CompiledStateGraph
         """
+        self._graph = graph
         state_schema = _build_state_schema()
         sg = StateGraph(state_schema)
 
@@ -115,6 +143,16 @@ class Compiler:
         node_type = canvas_node.type
         error_policy = canvas_node.on_error
 
+        # 给节点绑定 emit_event：自动带上 node_id，handler 只关心 event_type / payload
+        outer_emitter = self._event_emitter
+
+        async def _emit(event_type: str, payload: dict[str, Any]) -> None:
+            if outer_emitter is None:
+                return
+            merged = dict(payload)
+            merged.setdefault("node_id", node_id)
+            await outer_emitter(event_type, merged)
+
         async def node_fn(state: dict) -> dict:
             # 构造求值上下文
             ctx_eval = EvalContext(
@@ -142,6 +180,7 @@ class Compiler:
                 subgraph=canvas_node.subgraph,
                 eval_context=ctx_eval,
                 evaluator=self._evaluator,
+                emit_event=_emit if outer_emitter is not None else None,
             )
 
             # 应用 ErrorPolicy 执行 handler

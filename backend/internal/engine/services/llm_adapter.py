@@ -10,10 +10,10 @@ domain/graph/nodes/llm.py 期望：
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any, AsyncIterator, Callable
 from uuid import UUID
 
-from internal.engine.llm import LLMClient, LLMToolSpec
+from internal.engine.llm import LLMClient, LLMResponse, LLMToolSpec
 
 
 class LLMServiceAdapter:
@@ -41,6 +41,28 @@ class LLMServiceAdapter:
             max_tokens=max_tokens,
             response_format=response_format,
         )
+
+    async def chat_stream(
+        self,
+        *,
+        messages: list[dict[str, str]],
+        model: str,
+        temperature: float | None = None,
+        max_tokens: int | None = None,
+        response_format: dict[str, Any] | None = None,
+    ) -> AsyncIterator[LLMResponse]:
+        """流式 chat：逐 chunk yield LLMResponse（content 为增量 delta）。
+
+        流式路径不支持 tools（tool_calls 由非流式 chat 路径处理）。
+        """
+        client = self._resolver(model)
+        async for chunk in client.chat_stream(
+            messages=messages,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            response_format=response_format,
+        ):
+            yield chunk
 
 
 def build_model_resolver(

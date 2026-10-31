@@ -39,6 +39,15 @@ class GraphInterrupted(Exception):
         self.thread_id = thread_id
 
 
+def make_checkpoint_thread_id(tenant_id: UUID, thread_id: str) -> str:
+    """把业务 thread_id 包装成 checkpointer key：`<tenant_id>:<thread_id>`。
+
+    A13：跨租户隔离。同一业务 thread_id 在不同租户下落到不同 checkpoint 行，
+    避免恶意或误操作跨租户读取对方的中断状态。
+    """
+    return f"{tenant_id}:{thread_id}"
+
+
 class GraphRuntime:
     """工作流运行时：编译画布 JSON 并执行。"""
 
@@ -69,7 +78,9 @@ class GraphRuntime:
         self.user_id = user_id
         self.application_id = application_id or uuid.uuid4()
         self.run_id = run_id or uuid.uuid4()
-        self.thread_id = thread_id or str(uuid.uuid4())
+        # A13：业务裸 thread_id（前端传、run 表存、SSE 返回）；checkpoint 用带租户前缀的 key
+        raw_thread_id = thread_id or str(uuid.uuid4())
+        self.thread_id = self._strip_tenant_prefix(raw_thread_id)
         self.actor_username = actor_username
         # checkpointer 默认 _UNSET 走 get_checkpointer；显式传 None 表示不挂 checkpointer
         self._checkpointer_override = checkpointer
@@ -99,14 +110,37 @@ class GraphRuntime:
             checkpointer = await get_checkpointer()
         else:
             checkpointer = self._checkpointer_override
-        compiler = Compiler(services=self.services)
+        compiler = Compiler(
+            services=self.services,
+            event_emitter=self._on_node_event,
+        )
         self._compiled = compiler.compile(self._canvas, env, checkpointer=checkpointer)
+        self._compiler_instance = compiler
 
     def _config(self) -> dict[str, Any]:
         # checkpointer=None 时不传 thread_id，否则 langgraph 报 "No checkpointer set"
         if self._checkpointer_override is None:
             return {}
-        return {"configurable": {"thread_id": f"{self.tenant_id}:{self.thread_id}"}}
+        return {"configurable": {"thread_id": make_checkpoint_thread_id(self.tenant_id, self.thread_id)}}
+
+    def _strip_tenant_prefix(self, raw: str) -> str:
+        """如果传入的 thread_id 已经带当前租户前缀（例如从 SSE 原样回传），剥掉前缀得到业务裸 ID。
+
+        若带的是别的租户前缀，直接拒绝——A13 跨租户隔离。
+        """
+        if ":" not in raw:
+            return raw
+        prefix, _, rest = raw.partition(":")
+        try:
+            prefix_uuid = uuid.UUID(prefix)
+        except (ValueError, TypeError):
+            # 不是 UUID 前缀，按业务 thread_id 本身包含冒号处理
+            return raw
+        if prefix_uuid != self.tenant_id:
+            raise RuntimeError(
+                f"thread_id 租户不匹配：传入前缀 {prefix_uuid} 与当前租户 {self.tenant_id} 不一致"
+            )
+        return rest
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行工作流，返回最终 output。人审中断本次不触发。"""
@@ -126,10 +160,18 @@ class GraphRuntime:
             except Exception:  # noqa: BLE001
                 logger.exception("写 run 记录失败")
 
+        # A8：从编译器取 graph 级变量池默认值，合并到初始 globals
+        default_globals: dict[str, Any] = {}
+        if getattr(self, "_compiler_instance", None) is not None:
+            try:
+                default_globals = self._compiler_instance.default_globals()
+            except Exception:  # noqa: BLE001
+                logger.exception("计算 graph 级变量默认值失败，按空池继续")
+
         initial_state = {
             "input": input_data,
             "node_outputs": {},
-            "globals": {},
+            "globals": default_globals,
             "env": {
                 "tenant_id": str(self.tenant_id),
                 "user_id": str(self.user_id) if self.user_id else None,
@@ -307,6 +349,32 @@ class GraphRuntime:
                     logger.exception("更新 run 错误状态失败")
             raise
 
+    async def list_state_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        """A13：列出当前 thread 的 checkpoint 历史（按时间倒序），用于历史重放 / 审计。
+
+        返回每个 checkpoint 的：checkpoint_id / next 节点 / 是否有待处理 interrupt /
+        output 摘要。无 checkpointer 时返回空列表。
+        """
+        if self._checkpointer_override is None:
+            return []
+        await self._ensure_compiled()
+        result: list[dict[str, Any]] = []
+        # langgraph get_state_history 返回同步 generator（非 async）
+        for snapshot in self._compiled.get_state_history(self._config(), limit=limit):
+            interrupts: list[dict[str, Any]] = []
+            for task in getattr(snapshot, "tasks", []) or []:
+                for it in getattr(task, "interrupts", []) or []:
+                    interrupts.append({"value": getattr(it, "value", None)})
+            values = getattr(snapshot, "values", {}) or {}
+            result.append({
+                "checkpoint_id": str(getattr(snapshot.config, "configurable", {}).get("checkpoint_id", "")),
+                "next": list(getattr(snapshot, "next", []) or []),
+                "interrupts": interrupts,
+                "output": values.get("output", {}),
+                "node_outputs_keys": list((values.get("node_outputs") or {}).keys()),
+            })
+        return result
+
     async def _stream_and_record(self, initial_state: dict[str, Any] | Command) -> dict[str, Any]:
         """用 astream_events 逐节点捕获 start/end，写 run_node_execution + usage ledger。
 
@@ -335,8 +403,10 @@ class GraphRuntime:
                 node_started_at[name] = time.perf_counter()
                 if self._on_node_event:
                     node_type = self._node_types.get(name, "")
+                    data = event.get("data") or {}
                     await self._on_node_event("node_start", {
                         "node_id": name, "node_type": node_type,
+                        "inputs": data.get("input"),
                     })
             elif kind == "on_chain_end":
                 started = node_started_at.pop(name, time.perf_counter())
@@ -352,15 +422,17 @@ class GraphRuntime:
                         error=None,
                     )
                 else:
+                    node_out = output if isinstance(output, dict) else {"raw": str(output)[:8192]}
                     self._record_node_execution(
                         node_id=name,
-                        output=output if isinstance(output, dict) else {"raw": str(output)[:8192]},
+                        output=node_out,
                         duration_ms=duration_ms,
                         error=None,
                     )
                 if self._on_node_event:
                     await self._on_node_event("node_end", {
                         "node_id": name, "status": "success",
+                        "outputs": node_out, "duration_ms": duration_ms,
                     })
             elif kind == "on_chain_error":
                 started = node_started_at.pop(name, time.perf_counter())
@@ -375,6 +447,7 @@ class GraphRuntime:
                 if self._on_node_event:
                     await self._on_node_event("node_end", {
                         "node_id": name, "status": "error",
+                        "error": str(err), "duration_ms": duration_ms,
                     })
 
         return final_state or {}

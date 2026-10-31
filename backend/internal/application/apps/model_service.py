@@ -28,8 +28,38 @@ class ModelService:
 
     # ========== 运行时解析 ==========
     def list_catalog(self) -> list[dict]:
-        """列出所有已启用的模型（供前端下拉选择）。"""
-        return self._repo.list_catalog()
+        """列出所有已启用的模型（供前端下拉选择）。
+
+        返回字段：model_id / display_name / provider_name / capabilities。
+        capabilities 统一补 default_temperature / default_max_tokens 兜底，
+        前端选中模型后可直接回填 temperature/maxTokens 字段。
+        若表为空（开发态），回退到 settings.llm_model_id + llm_temperature/llm_max_tokens。
+        """
+        rows = self._repo.list_catalog()
+        if not rows:
+            settings = get_settings()
+            return [{
+                "model_id": settings.llm_model_id,
+                "display_name": settings.llm_model_id,
+                "provider_name": "settings",
+                "capabilities": {
+                    "default_temperature": settings.llm_temperature,
+                    "default_max_tokens": settings.llm_max_tokens,
+                },
+            }]
+        normalized: list[dict] = []
+        for row in rows:
+            caps = dict(row.get("capabilities") or {})
+            settings = get_settings()
+            caps.setdefault("default_temperature", settings.llm_temperature)
+            caps.setdefault("default_max_tokens", settings.llm_max_tokens)
+            normalized.append({
+                "model_id": row["model_id"],
+                "display_name": row.get("display_name") or row["model_id"],
+                "provider_name": row.get("provider_name") or "",
+                "capabilities": caps,
+            })
+        return normalized
 
     def get_client(self, model_id: str) -> LLMClient:
         """根据 model_id 解析 provider 并构造 LLMClient。
