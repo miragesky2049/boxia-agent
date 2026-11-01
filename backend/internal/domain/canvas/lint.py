@@ -14,7 +14,7 @@ import ast
 import re
 from typing import Any
 
-from internal.domain.canvas.expression import TemplatedString
+from internal.domain.canvas.expression import TemplatedString, rewrite_template_refs
 from internal.domain.canvas.model import CanvasEdge, CanvasGraph, CanvasNode, PortSpec
 from internal.domain.canvas.node_meta import get_node_meta_by_type_code
 from internal.domain.canvas.validate import ValidationIssue
@@ -40,8 +40,11 @@ def lint_graph(graph: CanvasGraph) -> list[ValidationIssue]:
     """对 CanvasGraph IR 跑语义级 lint，返回所有 issue。"""
     issues: list[ValidationIssue] = []
 
+    # 供表达式校验重写节点引用（节点 ID 可能含连字符）使用
+    ref_names = [n.id for n in graph.nodes] + [v.name for v in graph.variables]
+
     for node in graph.nodes:
-        issues.extend(_lint_node_config(node))
+        issues.extend(_lint_node_config(node, ref_names))
         issues.extend(_lint_required_config(node))
 
     issues.extend(_lint_port_types(graph))
@@ -49,41 +52,50 @@ def lint_graph(graph: CanvasGraph) -> list[ValidationIssue]:
 
 
 # ---------- 1. 表达式语法 ----------
-def _lint_node_config(node: CanvasNode) -> list[ValidationIssue]:
+def _lint_node_config(node: CanvasNode, ref_names: list[str]) -> list[ValidationIssue]:
     """递归遍历 node.config，对每个 {{...}} 模板体做 ast.parse 校验。"""
     issues: list[ValidationIssue] = []
-    _walk_value(node.config, node.id, issues)
+    _walk_value(node.config, node.id, issues, ref_names)
     # inputs 里的 TemplatedString 也走一遍
     for expr in node.inputs.values():
         if isinstance(expr, TemplatedString):
-            issues.extend(_check_template(node.id, expr.template))
+            issues.extend(_check_template(node.id, expr.template, ref_names))
     return issues
 
 
-def _walk_value(value: Any, node_id: str, issues: list[ValidationIssue]) -> None:
+def _walk_value(
+    value: Any,
+    node_id: str,
+    issues: list[ValidationIssue],
+    ref_names: list[str],
+) -> None:
     """递归遍历 config，找出字符串模板 / TemplatedString。"""
     if isinstance(value, TemplatedString):
-        issues.extend(_check_template(node_id, value.template))
+        issues.extend(_check_template(node_id, value.template, ref_names))
         return
     if isinstance(value, str):
         if "{{" in value:
-            issues.extend(_check_template(node_id, value))
+            issues.extend(_check_template(node_id, value, ref_names))
         return
     if isinstance(value, list):
         for item in value:
-            _walk_value(item, node_id, issues)
+            _walk_value(item, node_id, issues, ref_names)
         return
     if isinstance(value, dict):
         # 特殊：if_else 节点的 cases[].expression 是裸表达式字符串
         for key, item in value.items():
             if key == "expression" and isinstance(item, str):
-                issues.extend(_check_bare_expression(node_id, item))
+                issues.extend(_check_bare_expression(node_id, item, ref_names))
                 continue
-            _walk_value(item, node_id, issues)
+            _walk_value(item, node_id, issues, ref_names)
         return
 
 
-def _check_template(node_id: str, template: str) -> list[ValidationIssue]:
+def _check_template(
+    node_id: str,
+    template: str,
+    ref_names: list[str],
+) -> list[ValidationIssue]:
     """模板字符串：每个 {{...}} 内的表达式都要能解析。"""
     issues: list[ValidationIssue] = []
     for m in _TEMPLATE_RE.finditer(template):
@@ -95,7 +107,7 @@ def _check_template(node_id: str, template: str) -> list[ValidationIssue]:
                 node_id,
             ))
             continue
-        problem = _parse_expression(body)
+        problem = _parse_expression(body, ref_names)
         if problem:
             issues.append(ValidationIssue(
                 "error", "expression_syntax",
@@ -105,7 +117,11 @@ def _check_template(node_id: str, template: str) -> list[ValidationIssue]:
     return issues
 
 
-def _check_bare_expression(node_id: str, expression: str) -> list[ValidationIssue]:
+def _check_bare_expression(
+    node_id: str,
+    expression: str,
+    ref_names: list[str],
+) -> list[ValidationIssue]:
     """if case 等场景：整字段就是一个表达式，没有 {{...}} 包裹。"""
     expr = expression.strip()
     if not expr:
@@ -114,7 +130,7 @@ def _check_bare_expression(node_id: str, expression: str) -> list[ValidationIssu
             f"节点 {node_id} 的 case 表达式为空",
             node_id,
         )]
-    problem = _parse_expression(expr)
+    problem = _parse_expression(expr, ref_names)
     if problem:
         return [ValidationIssue(
             "error", "expression_syntax",
@@ -124,10 +140,11 @@ def _check_bare_expression(node_id: str, expression: str) -> list[ValidationIssu
     return []
 
 
-def _parse_expression(body: str) -> str | None:
-    """尝试 ast.parse(body, mode="eval")；返回 None 表示通过，否则返回错误描述。"""
+def _parse_expression(body: str, ref_names: list[str]) -> str | None:
+    """尝试 ast.parse；节点引用先重写成安全别名（节点 ID 可能含连字符）。"""
+    source, _ = rewrite_template_refs(body, node_ids=ref_names)
     try:
-        ast.parse(body, mode="eval")
+        ast.parse(source, mode="eval")
         return None
     except SyntaxError as exc:
         return f"SyntaxError: {exc.msg}"

@@ -75,14 +75,13 @@ class LLMNodeHandler(NodeHandler):
         prompt_text = prompt_template.replace("{{input}}", str(user_input or ""))
         system_prompt = system_prompt_template.replace("{{input}}", str(user_input or ""))
 
-        # 第二步：用 evaluator 求值 {{node.output.field}} 这类模板引用
+        # 第二步：用 evaluator 对 {{node.output.field}} 这类模板引用做插值
+        # prompt 来自前端简化格式时是纯字符串，resolve_config 对字符串是空操作，
+        # 必须走 eval_template 才会替换 {{...}}。
         if ctx.evaluator is not None and ctx.eval_context is not None:
-            prompt_text = str(
-                ctx.evaluator.resolve_config(prompt_text, ctx.eval_context) or ""
-            )
-            system_prompt = str(
-                ctx.evaluator.resolve_config(system_prompt, ctx.eval_context) or ""
-            )
+            template = ctx.evaluator.template
+            prompt_text = template.eval_template(prompt_text, ctx.eval_context)
+            system_prompt = template.eval_template(system_prompt, ctx.eval_context)
 
         # 未注入 llm 服务时返回 stub，保持开发态可跑
         if not ctx.services.has("llm"):

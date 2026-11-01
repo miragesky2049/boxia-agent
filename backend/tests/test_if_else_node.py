@@ -26,8 +26,8 @@ def _make_ctx(
 ) -> NodeContext:
     """构造 IF 节点测试上下文。
 
-    start_output 会被包装成 node_outputs["start"]["output"]，对应表达式
-    `{{start.output.<key>}}` 的求值路径。
+    START 节点输出是平铺的 {字段: 值}，表达式 `{{start.output.<key>}}` 中的
+    `.output` 是固定关键字，实际取 node_outputs["start"]["<key>"]。
     """
     env = RuntimeEnv(
         tenant_id=uuid4(),
@@ -37,7 +37,7 @@ def _make_ctx(
         application_id=uuid4(),
     )
     node_outputs = {
-        "start": {"output": start_output or {}},
+        "start": dict(start_output or {}),
     }
     eval_ctx = EvalContext(
         input=start_output or {},

@@ -59,11 +59,12 @@ export function toCozeIR(
   });
 
   const edges = (flowgram.edges || []).map((e) => {
+    // FlowGram 的边 JSON 字段就是 sourceNodeID/targetNodeID（见 WorkflowEdgeJSON）
     const edge = e as unknown as Record<string, unknown>;
     return {
       id: (edge.id as string) || `edge-${Math.random().toString(36).slice(2, 8)}`,
-      sourceNodeID: edge.source,
-      targetNodeID: edge.target,
+      sourceNodeID: edge.sourceNodeID,
+      targetNodeID: edge.targetNodeID,
       sourcePortID: edge.sourcePortID,
       targetPortID: edge.targetPortID,
     };
@@ -109,10 +110,11 @@ export function fromCozeIR(
     return out;
   });
 
+  // 回填给 FlowGram 时必须用 sourceNodeID/targetNodeID，否则编辑器识别不到连线
   const edges = (raw.edges || []).map((e) => ({
     id: String(e.id ?? `edge-${Math.random().toString(36).slice(2, 8)}`),
-    source: e.sourceNodeID,
-    target: e.targetNodeID,
+    sourceNodeID: e.sourceNodeID,
+    targetNodeID: e.targetNodeID,
     sourcePortID: e.sourcePortID,
     targetPortID: e.targetPortID,
   })) as unknown as WorkflowJSON['edges'];

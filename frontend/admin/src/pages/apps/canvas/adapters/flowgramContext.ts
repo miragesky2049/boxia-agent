@@ -213,7 +213,7 @@ export function getNode(ctx: FlowContext, nodeId: string): any {
 }
 
 // 实体上的 type 可能是 FlowNodeEntity，节点类型优先取 flowNodeType
-export function getNodeTypeKey(node: { id?: string; type?: string; flowNodeType?: string } | null | undefined): string {
+export function getNodeTypeKey(node: { id?: string; type?: string; flowNodeType?: string | number } | null | undefined): string {
   if (!node) return '';
   const flowNodeType = String(node.flowNodeType || '');
   if (flowNodeType) return flowNodeType;

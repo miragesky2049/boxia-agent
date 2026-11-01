@@ -152,7 +152,6 @@ export default function AppEditPage() {
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalApprover, setApprovalApprover] = useState('');
   const [nodeMetas, setNodeMetas] = useState<NodeMeta[]>([]);
-  const [nodeMetaCategories, setNodeMetaCategories] = useState<Record<string, NodeMeta[]>>({});
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
   const [canvasZoom, setCanvasZoom] = useState(1);
   // 画布可视区域（画布坐标系），用于小地图相机框与缩放百分比
@@ -359,7 +358,6 @@ export default function AppEditPage() {
       try {
         const resp = await getNodeMeta();
         setNodeMetas(resp.items);
-        setNodeMetaCategories(resp.categories);
       } catch {
         message.error('加载节点库失败');
       } finally {
@@ -610,7 +608,7 @@ export default function AppEditPage() {
 
     // 从当前文档 JSON 读取节点位置（toJSON 的 meta.position 即真实 TransformData 位置）
     const docJson = toWorkflowJSON(ctx);
-    const allNodes = (docJson.nodes || []) as Array<{ id: string; meta?: { position?: { x: number; y: number } } }>;
+    const allNodes = (docJson.nodes || []) as Array<{ id: string; type?: string; meta?: { position?: { x: number; y: number } } }>;
 
     let posX = 400;
     let posY = 300;
@@ -862,11 +860,12 @@ export default function AppEditPage() {
 
     // 抽屉「输入」区：按入边反查上游可引用字段
     const json = toWorkflowJSON(ctxRef.current);
-    const edges = ((json?.edges || []) as unknown as Array<{ source?: string; target?: string }>);
+    // document.toJSON 的边字段是 sourceNodeID/targetNodeID
+    const edges = ((json?.edges || []) as unknown as Array<{ sourceNodeID?: string; targetNodeID?: string }>);
     const groups: UpstreamInputGroup[] = [];
     for (const edge of edges) {
-      if (String(edge.target) !== node.id) continue;
-      const srcId = String(edge.source || '');
+      if (String(edge.targetNodeID) !== node.id) continue;
+      const srcId = String(edge.sourceNodeID || '');
       const src = (json?.nodes || []).find((n) => String(n.id) === srcId);
       if (!src) continue;
       const srcData = (src.data || {}) as Record<string, any>;
@@ -994,7 +993,7 @@ export default function AppEditPage() {
     fromPort: WorkflowPortEntity,
     toPort: WorkflowPortEntity,
     _lines: WorkflowLinesManager,
-    silent?: boolean,
+    _silent?: boolean,
   ) => {
     // 不做端口方向校验（FlowGram 拖线本身只能从 output 发起）。
     // 端口 id 仅为端口名（如 "default"/"true"/"false"），不是全局唯一，
@@ -1384,14 +1383,6 @@ export default function AppEditPage() {
   // nodeMetas 未就绪时不要挂载编辑器：节点类型未注册会导致节点 0 尺寸、画布空白
   if (!initialData || !nodeMetaReady) return <div style={{ padding: 24 }}>加载中…</div>;
 
-  const categoryLabels: Record<string, string> = {
-    control: '流程控制',
-    ai: 'AI',
-    logic: '逻辑',
-    data: '数据',
-    conversation: '会话',
-  };
-
   return (
     <div style={{ display: 'flex', width: '100%', height: 'calc(100vh - 108px)' }}>
       {/* 左侧资源树（V4）：节点库已迁移到底部 +添加节点气泡 */}
@@ -1588,12 +1579,14 @@ export default function AppEditPage() {
           materials={{ renderNodes: renderNodes as any }}
           initialData={initialData}
           // T9-07：对齐 Coze —— 普通左键拖拽平移（下方自绘），Shift+拖拽才框选
-          selectBox={{ enabled: true, canSelect: (e) => e.shiftKey }}
+          selectBox={{ enable: true, canSelect: (e) => e.shiftKey }}
           // T9-07：撤销/重做依赖 history 插件，未开启时 ctx.history 取值会抛异常
-          history={{ enable: true, limit: 100 }}
+          history={{ enable: true }}
           onLoad={(ctx) => {
             ctxRef.current = ctx;
             (window as any).__flowCtx = ctx;
+            // history 选项类型只暴露 enable/onApply，limit 需在运行时设置
+            ctx.history.limit(100);
             setNodeCount(getNodeCount(ctx));
             refreshPickerNodes();
 

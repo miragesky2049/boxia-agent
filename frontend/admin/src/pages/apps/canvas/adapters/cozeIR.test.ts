@@ -27,7 +27,7 @@ const flowgram: WorkflowJSON = {
     },
   ],
   edges: [
-    { id: 'e1', source: 'start-1', target: 'llm-1', sourcePortID: 'default', targetPortID: 'input' },
+    { id: 'e1', sourceNodeID: 'start-1', targetNodeID: 'llm-1', sourcePortID: 'default', targetPortID: 'input' },
   ],
 } as unknown as WorkflowJSON;
 
@@ -78,7 +78,12 @@ describe('cozeIR adapter', () => {
       meta: { position: { x: 1, y: 2 } },
       data: { title: 'LLM', config: { model: 'x' }, outputs: [{ name: 'text' }] },
     });
-    expect(result.edges[0]).toMatchObject({ id: 'e1', source: 'n1', target: 'n2', sourcePortID: 'true' });
+    expect(result.edges[0]).toMatchObject({
+      id: 'e1',
+      sourceNodeID: 'n1',
+      targetNodeID: 'n2',
+      sourcePortID: 'true',
+    });
     expect(readSchemaVersion(coze)).toBe(5);
   });
 

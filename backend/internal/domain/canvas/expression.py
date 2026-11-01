@@ -94,6 +94,71 @@ _BUILTIN_FUNCS: dict[str, Callable[..., Any]] = {
 # 模板插值正则：{{ ... }}（非贪婪）
 _TEMPLATE_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 
+# 合法的 Python 标识符（可用作 ast 的 Name）
+_IDENTIFIER_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def rewrite_template_refs(
+    expr: str,
+    node_ids: list[str],
+    name_keys: list[str] | None = None,
+) -> tuple[str, dict[str, str]]:
+    """把模板表达式里的节点引用重写成可被 ast 解析的安全别名。
+
+    FlowGram/coze 的节点 ID 形如 `llm-mvxuv1f2-1`（含连字符），直接作为 Python
+    表达式会报 `invalid decimal literal`。另外变量引用约定是
+    `<nodeId>.output.<field>`，其中 `.output` 是固定关键字，实际取值应是
+    `node_outputs[nodeId][field]`。
+
+    这里把 `<nodeId>.output` 换成 `_ref_N`（丢掉固定关键字），使
+    `llm-mvxuv1f2-1.output.output` → `_ref_0.output`；全局变量/入参名若含非法
+    标识符字符，也做同样替换。
+
+    Args:
+        expr: 待解析的表达式文本（已去掉外层 {{ }}）。
+        node_ids: 画布中可引用的节点 ID 列表（可含连字符）。
+        name_keys: 全局变量 / 入参名等基名列表，可选。
+
+    Returns:
+        (重写后的表达式, {别名: 原始节点ID或变量名})。调用方用别名映射还原取值。
+    """
+    aliases: dict[str, str] = {}
+    result = expr
+    next_index = 0
+
+    # 1) 节点引用：优先吃掉固定的 `.output` 关键字，再兜底裸节点 ID
+    for node_id in sorted({n for n in node_ids if n}, key=lambda s: (-len(s), s)):
+        alias = f"_ref_{next_index}"
+        head = r"(?<![A-Za-z0-9_.\-])" + re.escape(node_id)
+        with_output = re.compile(head + r"\.output(?![A-Za-z0-9_\-])")
+        bare = re.compile(head + r"(?![A-Za-z0-9_\-])")
+        changed = False
+        if with_output.search(result):
+            result = with_output.sub(alias, result)
+            changed = True
+        if bare.search(result):
+            result = bare.sub(alias, result)
+            changed = True
+        if changed:
+            aliases[alias] = node_id
+            next_index += 1
+
+    # 2) 全局变量 / 入参名：仅处理含非法标识符字符的基名
+    for key in sorted(
+        {k for k in (name_keys or []) if k and not _IDENTIFIER_RE.match(k)},
+        key=lambda s: (-len(s), s),
+    ):
+        alias = f"_ref_{next_index}"
+        pattern = re.compile(
+            r"(?<![A-Za-z0-9_.\-])" + re.escape(key) + r"(?![A-Za-z0-9_\-])"
+        )
+        if pattern.search(result):
+            result = pattern.sub(alias, result)
+            aliases[alias] = key
+            next_index += 1
+
+    return result, aliases
+
 
 class TemplateEvaluator:
     """mini 表达式求值器：处理 {{...}} 插值和单个表达式求值。
@@ -126,59 +191,74 @@ class TemplateEvaluator:
         expr = expr.strip()
         if not expr:
             return None
+        source, aliases = rewrite_template_refs(
+            expr,
+            node_ids=list(ctx.node_outputs),
+            name_keys=[*ctx.globals, *ctx.input],
+        )
         try:
-            tree = ast.parse(expr, mode="eval")
+            tree = ast.parse(source, mode="eval")
         except SyntaxError:
             # 语法错误原样返回，让 handler 拿到原始字符串
             return expr
         try:
-            return self._eval_node(tree.body, ctx)
+            return self._eval_node(tree.body, ctx, aliases)
         except (_ExpressionError, KeyError, AttributeError):
             return None
 
-    def _eval_node(self, node: ast.AST, ctx: EvalContext) -> Any:
+    def _eval_node(self, node: ast.AST, ctx: EvalContext, aliases: dict[str, str]) -> Any:
         if isinstance(node, ast.Constant):
             return node.value
         if isinstance(node, ast.Name):
-            return self._resolve_name(node.id, ctx)
+            return self._resolve_name(node.id, ctx, aliases)
         if isinstance(node, ast.Attribute):
-            obj = self._eval_node(node.value, ctx)
+            obj = self._eval_node(node.value, ctx, aliases)
             if obj is None:
                 return None
             if isinstance(obj, dict):
                 return obj.get(node.attr)
             return getattr(obj, node.attr, None)
         if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
-            left = self._eval_node(node.left, ctx)
-            right = self._eval_node(node.right, ctx)
+            left = self._eval_node(node.left, ctx, aliases)
+            right = self._eval_node(node.right, ctx, aliases)
             if isinstance(left, str) or isinstance(right, str):
                 return str(left or "") + str(right or "")
             return (left or 0) + (right or 0)
         if isinstance(node, ast.Compare):
-            left = self._eval_node(node.left, ctx)
+            left = self._eval_node(node.left, ctx, aliases)
             for op, comparator in zip(node.ops, node.comparators):
-                right = self._eval_node(comparator, ctx)
+                right = self._eval_node(comparator, ctx, aliases)
                 if not _compare(left, op, right):
                     return False
                 left = right
             return True
         if isinstance(node, ast.BoolOp):
-            values = [self._eval_node(v, ctx) for v in node.values]
+            values = [self._eval_node(v, ctx, aliases) for v in node.values]
             if isinstance(node.op, ast.And):
                 return all(values)
             if isinstance(node.op, ast.Or):
                 return any(values)
         if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
-            return not self._eval_node(node.operand, ctx)
+            return not self._eval_node(node.operand, ctx, aliases)
         if isinstance(node, ast.Call):
-            func = self._eval_node(node.func, ctx)
-            args = [self._eval_node(a, ctx) for a in node.args]
+            func = self._eval_node(node.func, ctx, aliases)
+            args = [self._eval_node(a, ctx, aliases) for a in node.args]
             if callable(func):
                 return func(*args)
             raise _ExpressionError(f"不可调用: {ast.dump(node.func)}")
         raise _ExpressionError(f"不支持的表达式节点: {ast.dump(node)}")
 
-    def _resolve_name(self, name: str, ctx: EvalContext) -> Any:
+    def _resolve_name(self, name: str, ctx: EvalContext, aliases: dict[str, str]) -> Any:
+        # 别名映射：还原成原始节点 ID / 变量名后按输出表查找
+        if name in aliases:
+            key = aliases[name]
+            if key in ctx.node_outputs:
+                return ctx.node_outputs[key]
+            if key in ctx.globals:
+                return ctx.globals[key]
+            if key in ctx.input:
+                return ctx.input[key]
+            return None
         if name in _BUILTIN_FUNCS:
             return _BUILTIN_FUNCS[name]
         if name in ("true", "True"):
