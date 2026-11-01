@@ -711,6 +711,98 @@ async function _postSse(
   }
 }
 
+// ========== 单节点试运行（B-N9-03） ==========
+export interface NodeDebugRunResult {
+  node_id: string
+  node_type: string
+  status: 'success' | 'error'
+  outputs: Record<string, unknown>
+  error: string | null
+  duration_ms: number
+}
+
+/** 只执行指定节点，不写 run 记录、不影响全图试运行状态。 */
+export async function debugRunNode(payload: {
+  graph: Graph
+  node_id: string
+  inputs: Record<string, unknown>
+}): Promise<NodeDebugRunResult> {
+  return request<NodeDebugRunResult>('/admin/apps/debug/run/node', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+// ========== 应用会话管理（B-N9-05） ==========
+export interface AppConversation {
+  conversation_id: string
+  application_id: string
+  user_id: string
+  username: string
+  display_name: string
+  title: string
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface AppConversationMessage {
+  message_id: string
+  conversation_id: string
+  role: 'user' | 'assistant' | 'tool' | 'system'
+  content: string
+  tool_calls: unknown
+  tool_call_id: string | null
+  tool_name: string | null
+  run_id: string | null
+  metadata: Record<string, unknown>
+  created_at: string | null
+}
+
+function withTenantQuery(tenantId?: string): string {
+  return tenantId ? `&tenant_id=${encodeURIComponent(tenantId)}` : ''
+}
+
+export async function listAppConversations(
+  applicationId: string,
+  options: { tenantId?: string; limit?: number; offset?: number } = {},
+): Promise<AppConversation[]> {
+  const limit = options.limit ?? 20
+  const offset = options.offset ?? 0
+  return request<AppConversation[]>(
+    `/admin/apps/${applicationId}/conversations?limit=${limit}&offset=${offset}${withTenantQuery(options.tenantId)}`,
+  )
+}
+
+export async function listAppConversationMessages(
+  conversationId: string,
+  options: { tenantId?: string; limit?: number } = {},
+): Promise<AppConversationMessage[]> {
+  const limit = options.limit ?? 100
+  return request<AppConversationMessage[]>(
+    `/admin/apps/conversations/${conversationId}/messages?limit=${limit}${withTenantQuery(options.tenantId)}`,
+  )
+}
+
+export async function deleteAppConversation(
+  conversationId: string,
+  tenantId?: string,
+): Promise<void> {
+  return request<void>(`/admin/apps/conversations/${conversationId}${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`, {
+    method: 'DELETE',
+  })
+}
+
+export async function deleteAppConversationMessage(
+  conversationId: string,
+  messageId: string,
+  tenantId?: string,
+): Promise<void> {
+  return request<void>(
+    `/admin/apps/conversations/${conversationId}/messages/${messageId}${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`,
+    { method: 'DELETE' },
+  )
+}
+
 /**
  * 人审续跑：从 interrupt 点继续 SSE 流。
  */

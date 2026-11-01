@@ -76,7 +76,7 @@ export function ResourceSidebar({
       <div style={{ fontSize: 11, color: '#9ca3af', padding: '12px 4px 2px' }}>设置</div>
       <SidebarItem icon="(x)" label="变量" onClick={onOpenVariables} />
       <SidebarItem icon="🕘" label="版本历史" onClick={onOpenVersions} />
-      <SidebarItem icon="💬" label="会话管理（开发中）" onClick={onOpenConversation} disabled />
+      <SidebarItem icon="💬" label="会话管理" onClick={onOpenConversation} />
     </div>
   );
 }

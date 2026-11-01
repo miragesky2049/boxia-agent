@@ -1,4 +1,4 @@
-import { FreeLayoutEditor, WorkflowNodeRenderer } from '@flowgram.ai/free-layout-editor';
+import { FreeLayoutEditor } from '@flowgram.ai/free-layout-editor';
 import type {
   WorkflowNodeRegistry,
   WorkflowNodeEntity,
@@ -10,33 +10,40 @@ import type {
 import '@flowgram.ai/free-layout-editor/index.css';
 import { useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Popover, Tree, Modal, Collapse, message, Upload, AutoComplete, Tooltip } from 'antd';
-import type { UploadFile } from 'antd';
-import type { TreeProps } from 'antd';
-import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload } from '../../api/apps';
+import { Button, message } from 'antd';
+import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, debugRunNode, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload, type NodeDebugRunResult } from '../../api/apps';
 import { ApiError } from '../../api/client';
 import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
-import { listAvailableModels, type ModelCatalogItem } from '../../api/models';
 import { listDatasets, type DatasetItem } from '../../api/datasets';
-import { NodeCard, type NodeCardAction } from './components/NodeCard';
-import { NodeIcon } from './components/NodeIcon';
+import { makeNodeRenderer, type NodeCardActions } from './components/nodeRenderer';
 import { CanvasToolbar } from './components/CanvasToolbar';
 import { ResourceSidebar } from './components/ResourceSidebar';
 import { EmptyCanvasWelcome } from './components/EmptyCanvasWelcome';
-import { groupConfigFields } from './components/configSections';
 import { VariablesDrawer } from './components/VariablesDrawer';
 import { usePortTooltips } from './components/usePortTooltips';
 import { CanvasContextMenu } from './components/CanvasContextMenu';
-import { RunHistoryPanel } from './components/RunHistoryPanel';
+import { ConversationDrawer } from './components/ConversationDrawer';
 import { AddNodePopover } from './components/AddNodePopover';
 import { MiniMap } from './components/MiniMap';
-import { RefChipInput } from './components/RefChipInput';
-import { CodeEditor } from './components/CodeEditor';
-import { getNextRecommendations } from './components/nodeNextRecommendations';
-import { canCopy, canDelete, hasOutputs, hasSubgraph, resolveCapabilities } from './canvas/metadata/capabilities';
+import { canCopy, canDelete, hasSubgraph } from './canvas/metadata/capabilities';
 import { AlignGuides } from './components/AlignGuides';
-import { ParameterListEditor } from './components/ParameterListEditor';
-import { ToolListEditor } from './components/ToolListEditor';
+import { CanvasStyles } from './components/CanvasStyles';
+import { BottomStatusPanel } from './components/BottomStatusPanel';
+import { NodeDebugPanel } from './components/NodeDebugPanel';
+import { NodeConfigDrawer } from './components/NodeConfigDrawer';
+import { RenameNodeModal, DeleteNodeModal } from './components/NodeActionModals';
+import { RunInputsModal } from './components/RunInputsModal';
+import { VersionHistoryDrawer } from './components/VersionHistoryDrawer';
+import { ApprovalDrawer } from './components/ApprovalDrawer';
+import { SaveStatusBar, PublishBar, type SaveStatus } from './components/CanvasHeaderStatus';
+import { SubgraphBreadcrumb } from './components/SubgraphBreadcrumb';
+import {
+  parseOutputsValue,
+  type NodeConfigValues,
+  type GraphNodeSummary,
+  type UpstreamInputGroup,
+  type OutputFieldItem,
+} from './components/NodeConfigForm';
 import { CANVAS_TOKENS } from './canvas/tokens';
 import {
   clearSelection,
@@ -79,1326 +86,28 @@ import {
   toCozeIR,
 } from './canvas/adapters/cozeIR';
 import { downloadBlob, exportElementAsPng } from './canvas/exportImage';
+import { setupCanvasPan } from './canvas/adapters/canvasPan';
 
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
 
-// ========== 变量引用选择器（B3） ==========
-interface GraphNodeSummary {
-  id: string;
-  typeKey: string;
-  title: string;
-  config: Record<string, any>;
-  position?: { x: number; y: number };
-}
 
-// 抽屉「输入」区：按入边反查上游节点可引用字段
-interface UpstreamInputGroup {
-  nodeId: string;
-  nodeTitle: string;
-  fields: Array<{ name: string; label: string }>;
-}
 
-function buildPickerTreeData(
-  nodes: GraphNodeSummary[],
-  currentNodeId: string | null,
-  keyToMeta: Record<string, NodeMeta>,
-): NonNullable<TreeProps['treeData']> {
-  return nodes
-    .filter((n) => n.id !== currentNodeId)
-    .map((node) => {
-      const meta = keyToMeta[node.typeKey];
-      const portOutputs = (meta?.outputs || []).map((p) => ({
-        key: `${node.id}.output.${p.name}`,
-        title: p.label || p.name,
-        isLeaf: true,
-      }));
-      // START 节点的 inputParameters 作为虚拟输出
-      const startInputs =
-        node.typeKey === 'start' && Array.isArray(node.config?.inputs)
-          ? (node.config.inputs as Array<{ name: string }>).map((inp) => ({
-              key: `${node.id}.output.${inp.name}`,
-              title: `入参: ${inp.name}`,
-              isLeaf: true,
-            }))
-          : [];
-      return {
-        key: node.id,
-        title: node.title || meta?.title || node.id,
-        children: [...portOutputs, ...startInputs],
-      };
-    });
-}
-
-// 把上游节点 outputs 拍平为 AutoComplete options（用于 IF 左值 / 类似字段）
-function buildLeftValueOptions(
-  nodes: GraphNodeSummary[],
-  currentNodeId: string | null,
-  keyToMeta: Record<string, NodeMeta>,
-): { value: string; label: React.ReactNode }[] {
-  const options: { value: string; label: React.ReactNode }[] = [];
-  for (const node of nodes) {
-    if (node.id === currentNodeId) continue;
-    const meta = keyToMeta[node.typeKey];
-    const nodeTitle = node.title || meta?.title || node.id;
-    const portOutputs = meta?.outputs || [];
-    for (const p of portOutputs) {
-      const ref = `{{${node.id}.output.${p.name}}}`;
-      options.push({
-        value: ref,
-        label: (
-          <span>
-            <span style={{ color: '#6b7280' }}>{nodeTitle}</span>
-            <span style={{ color: '#9ca3af', margin: '0 4px' }}>/</span>
-            <span>{p.label || p.name}</span>
-          </span>
-        ),
-      });
-    }
-    if (node.typeKey === 'start' && Array.isArray(node.config?.inputs)) {
-      for (const inp of node.config.inputs as Array<{ name: string }>) {
-        const ref = `{{${node.id}.output.${inp.name}}}`;
-        options.push({
-          value: ref,
-          label: (
-            <span>
-              <span style={{ color: '#6b7280' }}>{nodeTitle}</span>
-              <span style={{ color: '#9ca3af', margin: '0 4px' }}>/</span>
-              <span>入参: {inp.name}</span>
-            </span>
-          ),
-        });
-      }
-    }
+// 单节点试运行只带字面量入参；引用值等由后端按空上游求值，不阻断运行
+function collectDebugInputs(config: Record<string, any>): Record<string, unknown> {
+  const params = Array.isArray(config?.inputParameters) ? config.inputParameters : [];
+  const result: Record<string, unknown> = {};
+  for (const param of params) {
+    if (!param || typeof param !== 'object' || !param.name) continue;
+    const value = param.input?.value;
+    if (value?.type === 'literal') result[param.name] = value.content;
   }
-  return options;
+  return result;
 }
 
-function RefPickerButton({
-  nodes,
-  currentNodeId,
-  keyToMeta,
-  onPick,
-}: {
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  onPick: (ref: string) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const treeData = useMemo(
-    () => buildPickerTreeData(nodes, currentNodeId, keyToMeta),
-    [nodes, currentNodeId, keyToMeta],
-  );
-  return (
-    <Popover
-      open={open}
-      onOpenChange={setOpen}
-      trigger="click"
-      placement="bottomLeft"
-      content={
-        <div style={{ width: 300, maxHeight: 360, overflowY: 'auto' }}>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>选择要引用的字段</div>
-          <Tree
-            treeData={treeData}
-            defaultExpandAll
-            onSelect={(keys) => {
-              const key = keys[0];
-              if (typeof key === 'string' && key.includes('.output.')) {
-                onPick(`{{${key}}}`);
-                setOpen(false);
-              }
-            }}
-          />
-        </div>
-      }
-    >
-      <Button size="small" type="text" style={{ fontSize: 12, padding: '0 4px' }}>
-        {'{ }'} 引用
-      </Button>
-    </Popover>
-  );
-}
 
-// 卡片「⋯」菜单回调：按节点粒度操作，不依赖画布当前选中态
-interface NodeCardActions {
-  onRename: (node: WorkflowNodeEntity) => void;
-  onCopy: (node: WorkflowNodeEntity) => void;
-  onDelete: (node: WorkflowNodeEntity) => void;
-}
-
-// ========== 节点渲染组件（双击打开配置） ==========
-function makeNodeRenderer(
-  meta: NodeMeta,
-  _ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>,
-  onNodeDoubleClick: (node: WorkflowNodeEntity) => void,
-  onAddNextToNode?: (node: WorkflowNodeEntity) => void,
-  cardActions?: NodeCardActions,
-) {
-  return function NodeRenderer({ node }: { node: WorkflowNodeEntity }) {
-    // FlowGram 把节点 data 存在 extInfo 里（node.data 是空对象），且需订阅变更才能重渲染
-    const readExtInfo = useCallback(() => {
-      const entity = node as unknown as { getExtInfo?: () => Record<string, any> | undefined };
-      return entity.getExtInfo?.() || {};
-    }, [node]);
-    const [nodeData, setNodeData] = useState<Record<string, any>>(readExtInfo);
-    useEffect(() => {
-      const event = (node as unknown as { onExtInfoChange?: unknown }).onExtInfoChange as
-        | ((fn: (e: { newInfo?: Record<string, any> }) => void) => { dispose?: () => void })
-        | undefined;
-      if (!event) return;
-      const disposable = event((e) => setNodeData(e?.newInfo || readExtInfo()));
-      return () => disposable?.dispose?.();
-    }, [node, readExtInfo]);
-    const title = nodeData.title || meta.title;
-
-    // Comment / Note 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
-    if (meta.type_key === 'comment' || meta.type_key === 'note') {
-      const content = String(nodeData.config?.content || nodeData.content || title || '双击编辑便签');
-      return (
-        <WorkflowNodeRenderer node={node}>
-          <div
-            onDoubleClick={() => onNodeDoubleClick(node)}
-            style={{
-              padding: '12px 14px',
-              background: '#fff9c4',
-              color: '#5d4037',
-              borderRadius: 2,
-              fontSize: 13,
-              lineHeight: 1.5,
-              width: 200,
-              minHeight: 80,
-              cursor: 'pointer',
-              userSelect: 'none',
-              boxShadow: '2px 2px 6px rgba(0,0,0,0.15)',
-              borderLeft: '3px solid #fbc02d',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
-            }}
-          >
-            {content}
-          </div>
-        </WorkflowNodeRenderer>
-      );
-    }
-
-    // 菜单项按能力声明裁剪，后端新增节点无需在此改判断
-    const capabilities = resolveCapabilities(meta, meta.type_key);
-    const actions: NodeCardAction[] = [];
-    if (cardActions?.onRename) {
-      actions.push({ key: 'rename', label: '重命名', onClick: () => cardActions.onRename(node) });
-    }
-    if (cardActions?.onCopy && capabilities.copyable) {
-      actions.push({ key: 'copy', label: '复制节点', onClick: () => cardActions.onCopy(node) });
-    }
-    if (cardActions?.onDelete && capabilities.deletable) {
-      actions.push({ key: 'delete', label: '删除', danger: true, onClick: () => cardActions.onDelete(node) });
-    }
-
-    return (
-      <WorkflowNodeRenderer node={node}>
-        <NodeCard
-          typeKey={meta.type_key}
-          color={meta.color}
-          icon={meta.icon}
-          title={title}
-          config={nodeData.config}
-          subtitleHint={meta.subtitle_hint}
-          onDoubleClick={() => onNodeDoubleClick(node)}
-          onAddNext={onAddNextToNode ? () => onAddNextToNode(node) : undefined}
-          actions={actions}
-        />
-      </WorkflowNodeRenderer>
-    );
-  };
-}
-
-// ========== 节点配置表单 ==========
-type NodeConfigValues = Record<string, any>;
-
-function FieldControl({
-  field,
-  value,
-  onChange,
-  picker,
-  datasetOptions,
-}: {
-  field: {
-    name: string;
-    label: string;
-    field_type: string;
-    options: Array<{ value: string; label?: string }>;
-    default: any;
-    required: boolean;
-    placeholder: string;
-    description: string;
-  };
-  value: any;
-  onChange: (name: string, value: any) => void;
-  picker?: React.ReactNode;
-  datasetOptions?: DatasetItem[];
-}) {
-  const current = value ?? field.default ?? '';
-
-  switch (field.field_type) {
-    case 'number':
-      return (
-        <InputNumber
-          value={typeof current === 'number' ? current : Number(current) || 0}
-          onChange={(v) => onChange(field.name, v ?? 0)}
-          style={{ width: '100%' }}
-        />
-      );
-    case 'select':
-      return (
-        <Select
-          value={String(current || field.default || '')}
-          onChange={(v) => onChange(field.name, v)}
-          options={field.options.map((o) => ({ value: o.value, label: o.label || o.value }))}
-          style={{ width: '100%' }}
-        />
-      );
-    case 'boolean':
-      return (
-        <Select
-          value={current ? 'true' : 'false'}
-          onChange={(v) => onChange(field.name, v === 'true')}
-          options={[{ value: 'true', label: '是' }, { value: 'false', label: '否' }]}
-          style={{ width: '100%' }}
-        />
-      );
-    case 'code_editor':
-      return (
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          {picker}
-          <CodeEditor
-            value={String(current || '')}
-            onChange={(next) => onChange(field.name, next)}
-            placeholder={field.placeholder}
-          />
-        </Space>
-      )
-    case 'parameter_list':
-      return (
-        <ParameterListEditor
-          value={current}
-          onChange={(next) => onChange(field.name, next)}
-        />
-      )
-    case 'tool_list':
-      // tool_list 由 NodeConfigForm 外层用 ToolListEditor 渲染，FieldControl 不直接处理
-      return <Input.TextArea rows={3} value={String(current || '')} disabled />;
-    case 'textarea':
-      return (
-        <Space direction="vertical" size={4} style={{ width: '100%' }}>
-          {picker}
-          <Input.TextArea
-            rows={4}
-            value={String(current || '')}
-            onChange={(e) => onChange(field.name, e.target.value)}
-            placeholder={field.placeholder}
-          />
-        </Space>
-      )
-    case 'case_list':
-      // case_list 由 NodeConfigForm 外层用 CaseListEditor 渲染，FieldControl 不直接处理
-      return <Input.TextArea rows={4} value={String(current || '')} disabled />;
-    case 'model_picker':
-      // model_picker 由 NodeConfigForm 外层用 ModelPicker 渲染，FieldControl 不直接处理
-      return <Input value={String(current || '')} disabled />;
-    case 'key_value_list':
-      // key_value_list 由 NodeConfigForm 外层用 KeyValueListEditor 渲染，FieldControl 不直接处理
-      return <Input.TextArea rows={3} value={String(current || '')} disabled />;
-    case 'text':
-    default: {
-      const isUrl = field.name === 'url';
-      const isDatasetId = field.name === 'datasetId';
-      if (isDatasetId) {
-        return (
-          <Select
-            value={String(current || '') || undefined}
-            onChange={(v) => onChange(field.name, v)}
-            placeholder="选择知识库"
-            style={{ width: '100%' }}
-            options={(datasetOptions || []).map((d) => ({ value: d.id, label: d.title }))}
-            notFoundContent="暂无知识库文档"
-          />
-        );
-      }
-      return (
-        <Space direction="vertical" size={2} style={{ width: '100%' }}>
-          <RefChipInput
-            value={String(current || '')}
-            onChange={(v) => onChange(field.name, v)}
-            placeholder={field.placeholder}
-            picker={picker}
-            highlightPathParams={isUrl}
-          />
-          {isUrl && (
-            <div style={{ fontSize: 11, color: '#9ca3af' }}>
-              支持变量参数：https://api.example.com/users/<span style={{ color: CANVAS_TOKENS.accent }}>{'{{node.output.id}}'}</span>
-            </div>
-          )}
-        </Space>
-      );
-    }
-  }
-}
-
-// ========== IF case 可视化编辑器（T7） ==========
-interface CaseItem {
-  case_id: string;
-  left: string;
-  operator: string;
-  right: string;
-}
-
-const CASE_OPERATORS: Array<{ value: string; label: string }> = [
-  { value: 'eq', label: '等于 ==' },
-  { value: 'ne', label: '不等于 !=' },
-  { value: 'gt', label: '大于 >' },
-  { value: 'gte', label: '大于等于 >=' },
-  { value: 'lt', label: '小于 <' },
-  { value: 'lte', label: '小于等于 <=' },
-  { value: 'contains', label: '包含' },
-  { value: 'not_contains', label: '不包含' },
-  { value: 'is_empty', label: '为空' },
-  { value: 'is_not_empty', label: '不为空' },
-];
-
-function parseCasesValue(raw: any): CaseItem[] {
-  if (Array.isArray(raw)) {
-    return raw.map((c, idx) => ({
-      case_id: String(c?.case_id || c?.id || `case_${idx + 1}`),
-      left: String(c?.left ?? ''),
-      operator: String(c?.operator || 'eq'),
-      right: String(c?.right ?? ''),
-    }));
-  }
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parseCasesValue(parsed);
-    } catch {
-      // ignore
-    }
-  }
-  return [];
-}
-
-function CaseListEditor({
-  value,
-  onChange,
-  nodes,
-  currentNodeId,
-  keyToMeta,
-}: {
-  value: any;
-  onChange: (next: CaseItem[]) => void;
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-}) {
-  const cases = useMemo(() => parseCasesValue(value), [value]);
-  const leftValueOptions = useMemo(
-    () => buildLeftValueOptions(nodes, currentNodeId, keyToMeta),
-    [nodes, currentNodeId, keyToMeta],
-  );
-
-  const updateCase = (idx: number, patch: Partial<CaseItem>) => {
-    const next = cases.map((c, i) => (i === idx ? { ...c, ...patch } : c));
-    onChange(next);
-  };
-
-  const removeCase = (idx: number) => {
-    onChange(cases.filter((_, i) => i !== idx));
-  };
-
-  const addCase = () => {
-    const nextId = `case_${cases.length + 1}`;
-    onChange([...cases, { case_id: nextId, left: '', operator: 'eq', right: '' }]);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {cases.length === 0 && (
-        <div style={{ fontSize: 12, color: '#999' }}>暂无条件，点击下方按钮添加</div>
-      )}
-      {cases.map((c, idx) => (
-        <div
-          key={`${c.case_id}-${idx}`}
-          style={{
-            padding: 10,
-            background: '#fff',
-            borderRadius: 8,
-            border: '1px solid #e5e7eb',
-          }}
-        >
-          <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280', marginBottom: 8 }}>
-            {idx === 0 ? '如果' : '否则，如果'} {idx + 1}
-          </div>
-          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-            <AutoComplete
-              size="small"
-              style={{ width: 200 }}
-              placeholder="选择或输入左值"
-              value={c.left}
-              options={leftValueOptions}
-              onChange={(text) => updateCase(idx, { left: text })}
-              onSelect={(value) => updateCase(idx, { left: value })}
-              allowClear
-            />
-            <Select
-              size="small"
-              style={{ width: 110 }}
-              value={c.operator}
-              onChange={(v) => updateCase(idx, { operator: v })}
-              options={CASE_OPERATORS}
-            />
-            {c.operator !== 'is_empty' && c.operator !== 'is_not_empty' && (
-              <Input
-                size="small"
-                style={{ width: 140 }}
-                placeholder="右值"
-                value={c.right}
-                onChange={(e) => updateCase(idx, { right: e.target.value })}
-                suffix={
-                  <RefPickerButton
-                    nodes={nodes}
-                    currentNodeId={currentNodeId}
-                    keyToMeta={keyToMeta}
-                    onPick={(ref) => updateCase(idx, { right: ref })}
-                  />
-                }
-              />
-            )}
-            <Button
-              size="small"
-              type="text"
-              danger
-              onClick={() => removeCase(idx)}
-              aria-label="删除条件"
-            >
-              删除
-            </Button>
-          </div>
-        </div>
-      ))}
-      {/* 否则静态卡片（U-IF1） */}
-      <div
-        style={{
-          padding: 10,
-          background: '#f9fafb',
-          borderRadius: 8,
-          border: '1px dashed #d1d5db',
-        }}
-      >
-        <div style={{ fontSize: 12, fontWeight: 600, color: '#6b7280' }}>否则</div>
-        <div style={{ fontSize: 12, color: '#9ca3af', marginTop: 4 }}>
-          以上条件均不满足时执行此分支
-        </div>
-      </div>
-      <Button size="small" onClick={addCase} style={{ alignSelf: 'flex-start' }} type="dashed">
-        + 添加条件
-      </Button>
-    </div>
-  );
-}
-
-// ========== 模型选择器（T8） ==========
-// 模型 provider 彩色 logo 圆点（对齐 Coze 模型选择器视觉）
-const PROVIDER_COLORS: Record<string, string> = {
-  doubao: '#0052D9',
-  bytedance: '#0052D9',
-  volcengine: '#0052D9',
-  ark: '#0052D9',
-  openai: '#10A37F',
-  anthropic: '#D97757',
-  claude: '#D97757',
-  deepseek: '#4D6BFE',
-  qwen: '#615CED',
-  tongyi: '#615CED',
-  zhipu: '#3B7DFF',
-  glm: '#3B7DFF',
-  moonshot: '#FF6B4A',
-  kimi: '#FF6B4A',
-};
-
-function providerColor(provider: string): string {
-  const key = (provider || '').toLowerCase().trim();
-  for (const k of Object.keys(PROVIDER_COLORS)) {
-    if (key.includes(k)) return PROVIDER_COLORS[k];
-  }
-  return '#6b7280';
-}
-
-function ModelLabel({ name, provider }: { name: string; provider: string }) {
-  const color = providerColor(provider);
-  return (
-    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-      <span
-        style={{
-          width: 10,
-          height: 10,
-          borderRadius: '50%',
-          background: color,
-          display: 'inline-block',
-          flexShrink: 0,
-        }}
-      />
-      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-        {name}
-        <span style={{ color: '#9ca3af', marginLeft: 6, fontSize: 12 }}>
-          {provider || 'default'}
-        </span>
-      </span>
-    </span>
-  );
-}
-
-function ModelPicker({
-  value,
-  onChange,
-}: {
-  value: any;
-  onChange: (patch: Partial<NodeConfigValues>) => void;
-}) {
-  const [models, setModels] = useState<ModelCatalogItem[]>([]);
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
-    listAvailableModels()
-      .then((rows) => {
-        if (!cancelled) setModels(rows);
-      })
-      .catch(() => {
-        if (!cancelled) setModels([]);
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const selectedModel = models.find((m) => m.model_id === value);
-
-  return (
-    <Select
-      style={{ width: '100%' }}
-      placeholder={loading ? '加载模型中...' : '选择模型'}
-      loading={loading}
-      value={value ? String(value) : undefined}
-      showSearch
-      optionFilterProp="labelText"
-      labelRender={
-        selectedModel
-          ? () => (
-              <ModelLabel
-                name={selectedModel.display_name || selectedModel.model_id}
-                provider={selectedModel.provider_name}
-              />
-            )
-          : undefined
-      }
-      options={models.map((m) => ({
-        value: m.model_id,
-        labelText: `${m.display_name || m.model_id} ${m.provider_name || ''}`,
-        label: <ModelLabel name={m.display_name || m.model_id} provider={m.provider_name} />,
-        capabilities: m.capabilities,
-      }))}
-      onChange={(modelId, option) => {
-        const patch: Partial<NodeConfigValues> = { modleName: modelId };
-        const caps = (option as { capabilities?: ModelCatalogItem['capabilities'] }).capabilities;
-        if (caps?.default_temperature !== undefined) {
-          patch.temperature = caps.default_temperature;
-        }
-        if (caps?.default_max_tokens !== undefined) {
-          patch.maxTokens = caps.default_max_tokens;
-        }
-        onChange(patch);
-      }}
-      notFoundContent={loading ? '加载中...' : '暂无可用模型'}
-    />
-  );
-}
-
-// ========== 动态 key-value 列表编辑器（T9：HTTP headers/query/form） ==========
-interface KeyValueItem {
-  key: string;
-  value: string;
-}
-
-function parseKvValue(raw: any): KeyValueItem[] {
-  if (Array.isArray(raw)) {
-    return raw
-      .filter((r) => r && typeof r === 'object')
-      .map((r) => ({ key: String(r.key ?? r.name ?? ''), value: String(r.value ?? '') }));
-  }
-  if (raw && typeof raw === 'object') {
-    return Object.entries(raw as Record<string, any>).map(([k, v]) => ({ key: k, value: String(v ?? '') }));
-  }
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parseKvValue(parsed);
-      if (parsed && typeof parsed === 'object') return parseKvValue(parsed);
-    } catch {
-      // fall through
-    }
-  }
-  return [];
-}
-
-function KeyValueListEditor({
-  value,
-  onChange,
-  nodes,
-  currentNodeId,
-  keyToMeta,
-}: {
-  value: any;
-  onChange: (next: KeyValueItem[]) => void;
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-}) {
-  const items = useMemo(() => parseKvValue(value), [value]);
-
-  const updateItem = (idx: number, patch: Partial<KeyValueItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
-
-  const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
-
-  const addItem = () => {
-    onChange([...items, { key: '', value: '' }]);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.length === 0 && (
-        <div style={{ fontSize: 12, color: '#999' }}>暂无键值对，点击下方按钮添加</div>
-      )}
-      {items.map((it, idx) => (
-        <div
-          key={idx}
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            padding: 6,
-            background: '#fafafa',
-            borderRadius: 6,
-            border: '1px solid #f0f0f0',
-          }}
-        >
-          <Input
-            size="small"
-            style={{ width: 160 }}
-            placeholder="Key"
-            value={it.key}
-            onChange={(e) => updateItem(idx, { key: e.target.value })}
-          />
-          <Input
-            size="small"
-            style={{ flex: 1 }}
-            placeholder="Value {{node.output}}"
-            value={it.value}
-            onChange={(e) => updateItem(idx, { value: e.target.value })}
-            suffix={
-              <RefPickerButton
-                nodes={nodes}
-                currentNodeId={currentNodeId}
-                keyToMeta={keyToMeta}
-                onPick={(ref) => updateItem(idx, { value: it.value ? `${it.value} ${ref}` : ref })}
-              />
-            }
-          />
-          <Button
-            size="small"
-            type="text"
-            danger
-            onClick={() => removeItem(idx)}
-            aria-label="删除"
-          >
-            删除
-          </Button>
-        </div>
-      ))}
-      <Button size="small" onClick={addItem} style={{ alignSelf: 'flex-start' }}>
-        + 添加键值对
-      </Button>
-    </div>
-  );
-}
-
-// ========== T15：运行 trace 面板条目 ==========
-function TraceEntry({ entry }: { entry: { type: string; payload: Record<string, any> } }) {
-  const { type, payload } = entry;
-  const phase = payload.phase ? `[${payload.phase}${payload.reflect_round != null ? `#${payload.reflect_round}` : ''}${payload.tool_round != null ? `.${payload.tool_round}` : ''}]` : '';
-  if (type === 'prompt_text') {
-    if (Array.isArray(payload.messages)) {
-      return (
-        <div style={{ marginBottom: 6 }}>
-          <Tag color="blue" style={{ fontSize: 10 }}>prompt {phase}</Tag>
-          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f5f5f5', padding: 4, borderRadius: 4 }}>
-            {payload.messages.map((m: any, i: number) =>
-              `#${i} [${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}\n`
-            ).join('')}
-          </pre>
-        </div>
-      );
-    }
-    return (
-      <div style={{ marginBottom: 6 }}>
-        <Tag color="geekblue" style={{ fontSize: 10 }}>assistant {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f5f5f5', padding: 4, borderRadius: 4 }}>
-          {String(payload.content || '')}
-          {Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0 && (
-            '\n→ tool_calls: ' + payload.tool_calls.map((tc: any) => tc.name).join(', ')
-          )}
-        </pre>
-      </div>
-    );
-  }
-  if (type === 'tool_call_start') {
-    return (
-      <div style={{ marginBottom: 6 }}>
-        <Tag color="orange" style={{ fontSize: 10 }}>tool_call_start {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#fff7e6', padding: 4, borderRadius: 4 }}>
-          {payload.name}({String(payload.arguments || '')})
-        </pre>
-      </div>
-    );
-  }
-  if (type === 'tool_call_end') {
-    return (
-      <div style={{ marginBottom: 6 }}>
-        <Tag color="green" style={{ fontSize: 10 }}>tool_call_end {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f6ffed', padding: 4, borderRadius: 4 }}>
-          {String(payload.observation || '')}
-        </pre>
-      </div>
-    );
-  }
-  return null;
-}
-
-// ========== T14：节点 outputs 自定义编辑器 ==========
-type OutputFieldItem = {
-  name: string;
-  type: string;
-  description?: string;
-};
-
-const OUTPUT_TYPE_OPTIONS = [
-  'string', 'number', 'boolean', 'object', 'array',
-  'array[string]', 'array[number]', 'array[object]',
-];
-
-function parseOutputsValue(raw: any): OutputFieldItem[] {
-  if (!Array.isArray(raw)) return [];
-  return raw
-    .filter((r) => r && typeof r === 'object')
-    .map((r) => ({
-      name: String(r.name ?? ''),
-      type: String(r.type ?? 'string'),
-      description: r.description ? String(r.description) : '',
-    }));
-}
-
-function OutputsEditor({
-  value,
-  onChange,
-}: {
-  value: any;
-  onChange: (next: OutputFieldItem[]) => void;
-}) {
-  const items = useMemo(() => parseOutputsValue(value), [value]);
-
-  const updateItem = (idx: number, patch: Partial<OutputFieldItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
-
-  const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
-
-  const addItem = () => {
-    onChange([...items, { name: '', type: 'string', description: '' }]);
-  };
-
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-      {items.length === 0 && (
-        <div style={{ fontSize: 12, color: '#999' }}>暂未定义输出字段，点击下方按钮添加</div>
-      )}
-      {items.map((it, idx) => (
-        <div
-          key={idx}
-          style={{
-            display: 'flex',
-            gap: 6,
-            alignItems: 'center',
-            padding: 6,
-            background: '#fafafa',
-            borderRadius: 6,
-            border: '1px solid #f0f0f0',
-          }}
-        >
-          <Input
-            size="small"
-            style={{ width: 140 }}
-            placeholder="字段名"
-            value={it.name}
-            onChange={(e) => updateItem(idx, { name: e.target.value })}
-          />
-          <Select
-            size="small"
-            style={{ width: 140 }}
-            value={it.type}
-            onChange={(v) => updateItem(idx, { type: v })}
-            options={OUTPUT_TYPE_OPTIONS.map((t) => ({ value: t, label: t }))}
-          />
-          <Input
-            size="small"
-            style={{ flex: 1 }}
-            placeholder="描述（可选）"
-            value={it.description || ''}
-            onChange={(e) => updateItem(idx, { description: e.target.value })}
-          />
-          <Button
-            size="small"
-            type="text"
-            danger
-            onClick={() => removeItem(idx)}
-            aria-label="删除"
-          >
-            删除
-          </Button>
-        </div>
-      ))}
-      <Button size="small" onClick={addItem} style={{ alignSelf: 'flex-start' }}>
-        + 添加输出字段
-      </Button>
-    </div>
-  );
-}
-
-// V1/V2：右下角面板的 Tab 切换小标签
-function TabSwitch({
-  active, label, onClick,
-}: { active: boolean; label: string; onClick: () => void }) {
-  return (
-    <span
-      onClick={onClick}
-      style={{
-        fontSize: 13, cursor: 'pointer', padding: '4px 8px',
-        color: active ? '#4f46e5' : '#6b7280',
-        borderBottom: active ? '2px solid #4f46e5' : '2px solid transparent',
-        fontWeight: active ? 600 : 400,
-      }}
-    >
-      {label}
-    </span>
-  );
-}
-
-// 配置分组折叠容器：折叠状态按节点类型持久化到 localStorage
-function ConfigSectionBox({
-  typeKey,
-  title,
-  defaultOpen,
-  children,
-}: {
-  typeKey: string;
-  title: string;
-  defaultOpen: boolean;
-  children: React.ReactNode;
-}) {
-  const storageKey = `boxia_cfg_sections_${typeKey}`;
-  const [open, setOpen] = useState<boolean>(() => {
-    try {
-      const raw = localStorage.getItem(storageKey);
-      if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, boolean>;
-        if (typeof parsed[title] === 'boolean') return parsed[title];
-      }
-    } catch {
-      // 本地缓存损坏时回落到默认展开状态
-    }
-    return defaultOpen;
-  });
-
-  const toggle = () => {
-    setOpen((prev) => {
-      const next = !prev;
-      try {
-        const raw = localStorage.getItem(storageKey);
-        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-        parsed[title] = next;
-        localStorage.setItem(storageKey, JSON.stringify(parsed));
-      } catch {
-        // 缓存写入失败不影响折叠交互
-      }
-      return next;
-    });
-  };
-
-  return (
-    <div style={{ marginTop: 4 }}>
-      <div
-        onClick={toggle}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
-          padding: '4px 0',
-          marginBottom: open ? 8 : 0,
-          borderBottom: open ? '1px solid #f0f0f0' : 'none',
-        }}
-      >
-        <span style={{
-          fontSize: 9, color: '#9ca3af',
-          display: 'inline-block',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 0.15s',
-        }}>
-          ▶
-        </span>
-        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{title}</span>
-      </div>
-      {open && children}
-    </div>
-  );
-}
-
-function NodeConfigForm({
-  nodeMeta,
-  values,
-  onChange,
-  pickerNodes,
-  currentNodeId,
-  keyToMeta,
-  outputs,
-  onOutputsChange,
-  datasetOptions,
-  upstreamInputs,
-  onAddNext,
-}: {
-  nodeMeta: NodeMeta;
-  values: NodeConfigValues;
-  onChange: (patch: Partial<NodeConfigValues>) => void;
-  pickerNodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  outputs: OutputFieldItem[];
-  onOutputsChange: (next: OutputFieldItem[]) => void;
-  datasetOptions?: DatasetItem[];
-  upstreamInputs?: UpstreamInputGroup[];
-  onAddNext?: (typeKey: string) => void;
-}) {
-  const handleFieldChange = (name: string, value: any) => {
-    onChange({ [name]: value });
-  };
-
-  const buildPicker = (fieldName: string): React.ReactNode => {
-    // 只有文本类字段才挂变量引用选择器
-    return (
-      <RefPickerButton
-        nodes={pickerNodes}
-        currentNodeId={currentNodeId}
-        keyToMeta={keyToMeta}
-        onPick={(ref) => {
-          const prev = String(values[fieldName] ?? '');
-          const next = prev ? `${prev}${prev.endsWith(' ') ? '' : ' '}${ref}` : ref;
-          handleFieldChange(fieldName, next);
-        }}
-      />
-    );
-  };
-
-  return (
-    <Space direction="vertical" style={{ width: '100%' }} size={12}>
-      <div>
-        <Typography.Text type="secondary">节点标题</Typography.Text>
-        <Input
-          value={values.title}
-          onChange={(e) => onChange({ title: e.target.value })}
-          placeholder="节点显示名"
-        />
-      </div>
-
-      <div>
-        <Typography.Text type="secondary">输入（来自上游）</Typography.Text>
-        <div style={{ marginTop: 6 }}>
-          {(upstreamInputs || []).length === 0 ? (
-            <div style={{
-              padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
-              fontSize: 12, color: '#9ca3af',
-            }}>
-              无上游输入，请先连接上游节点
-            </div>
-          ) : (
-            <Space direction="vertical" size={6} style={{ width: '100%' }}>
-              {(upstreamInputs || []).map((group) => (
-                <div key={group.nodeId} style={{
-                  padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
-                }}>
-                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
-                    {group.nodeTitle}
-                  </div>
-                  <Space size={[4, 4]} wrap>
-                    {group.fields.map((f) => (
-                      <Tag key={f.name} style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}>
-                        {`{{${group.nodeId}.output.${f.name}}}`}
-                      </Tag>
-                    ))}
-                  </Space>
-                </div>
-              ))}
-            </Space>
-          )}
-        </div>
-      </div>
-
-      {nodeMeta.config_fields.length === 0 && (
-        <div style={{
-          padding: '10px 12px', background: '#f9fafb', borderRadius: 6,
-          fontSize: 12, color: '#6b7280', lineHeight: 1.6,
-        }}>
-          该节点无需额外配置：输入来自上游连线，输出字段见下方列表。
-        </div>
-      )}
-
-      {groupConfigFields(nodeMeta.type_key, nodeMeta.config_fields).map((section) => (
-        <ConfigSectionBox
-          key={section.title}
-          typeKey={nodeMeta.type_key}
-          title={section.title}
-          defaultOpen={section.title !== '高级'}
-        >
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            {section.fields.map((field) => (
-              <div key={field.name}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-                  <Typography.Text type="secondary">
-                    {field.required && <span style={{ color: '#ff4d4f' }}>* </span>}
-                    {field.label}
-                  </Typography.Text>
-                  {field.description && (
-                    <Tooltip title={field.description}>
-                      <span style={{ fontSize: 12, color: '#9ca3af', cursor: 'help' }}>ⓘ</span>
-                    </Tooltip>
-                  )}
-                </div>
-                {field.field_type === 'case_list' ? (
-                  <CaseListEditor
-                    value={values[field.name]}
-                    onChange={(next) => handleFieldChange(field.name, next)}
-                    nodes={pickerNodes}
-                    currentNodeId={currentNodeId}
-                    keyToMeta={keyToMeta}
-                  />
-                ) : field.field_type === 'model_picker' ? (
-                  <ModelPicker
-                    value={values[field.name]}
-                    onChange={onChange}
-                  />
-                ) : field.field_type === 'key_value_list' ? (
-                  <KeyValueListEditor
-                    value={values[field.name]}
-                    onChange={(next) => handleFieldChange(field.name, next)}
-                    nodes={pickerNodes}
-                    currentNodeId={currentNodeId}
-                    keyToMeta={keyToMeta}
-                  />
-                ) : field.field_type === 'tool_list' ? (
-                  <ToolListEditor
-                    value={values[field.name]}
-                    onChange={(next) => handleFieldChange(field.name, next)}
-                  />
-                ) : (
-                  <FieldControl
-                    field={field}
-                    value={values[field.name]}
-                    onChange={handleFieldChange}
-                    picker={buildPicker(field.name)}
-                    datasetOptions={datasetOptions}
-                  />
-                )}
-              </div>
-            ))}
-          </Space>
-        </ConfigSectionBox>
-      ))}
-
-      {hasOutputs(nodeMeta) && (
-        <div>
-          <Typography.Text type="secondary">输出字段（outputs）</Typography.Text>
-          <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
-            自定义本节点产出的字段列表，保存后写入 node.data.outputs
-          </div>
-          <OutputsEditor value={outputs} onChange={onOutputsChange} />
-        </div>
-      )}
-
-      {/* V10：下一步推荐 */}
-      {onAddNext && getNextRecommendations(nodeMeta.type_key, keyToMeta).length > 0 && (
-        <div style={{
-          marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0',
-        }}>
-          <div style={{
-            fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8,
-          }}>
-            下一步
-          </div>
-          <Space direction="vertical" style={{ width: '100%' }} size={6}>
-            {getNextRecommendations(nodeMeta.type_key, keyToMeta).map((rec) => {
-              const meta = keyToMeta[rec.typeKey];
-              return (
-                <div
-                  key={rec.typeKey}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 8px', borderRadius: 6, cursor: 'pointer',
-                    background: '#f9fafb',
-                  }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2ff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
-                  onClick={() => onAddNext(rec.typeKey)}
-                >
-                  <span style={{
-                    width: 10, height: 10, borderRadius: '50%',
-                    background: meta?.color || '#9ca3af',
-                  }} />
-                  <span style={{ flex: 1, fontSize: 13, color: '#374151' }}>{rec.label}</span>
-                  <Button size="small" type="link">添加</Button>
-                </div>
-              );
-            })}
-          </Space>
-        </div>
-      )}
-    </Space>
-  );
-}
-
-// T9-07：对齐 Coze —— 空白处普通左键拖拽平移（Shift+拖拽由 selectBox 负责框选）。
-// FlowGram 的选区插件在 canSelect 返回 false 时不会开始框选，也不会平移，需要自绘。
-function setupCanvasPan(ctx: FlowContext): () => void {
-  if (!ctx) return () => undefined;
-
-  // 命中这些元素时不启动平移，避免抢走节点/端口/连线/浮层的既有交互
-  const interactiveSelector = [
-    '[data-node-id]',
-    '[data-port-entity-id]',
-    '.gedit-flow-activity-edge',
-    '.boxia-minimap',
-    '.ant-popover',
-    '.ant-drawer',
-    '.ant-dropdown',
-    'button',
-    'input',
-    'textarea',
-    'select',
-    'a',
-  ].join(',');
-
-  // 空格按住时进入平移模式：指针落在节点上也平移，而不是拖动节点（N9-04）
-  const overlaySelector = '.boxia-minimap, .ant-popover, .ant-dropdown, .ant-drawer, .ant-modal';
-  const typingSelector = 'input, textarea, select, button, [contenteditable="true"]';
-
-  let panning = false;
-  let spaceDown = false;
-  let startX = 0;
-  let startY = 0;
-  let originScrollX = 0;
-  let originScrollY = 0;
-
-  const onKeyDown = (e: KeyboardEvent) => {
-    if (e.code !== 'Space' || spaceDown) return;
-    const target = e.target as HTMLElement | null;
-    if (!target || target.closest(typingSelector)) return;
-    if (!document.querySelector('.gedit-playground-container')) return;
-    spaceDown = true;
-    document.body.style.cursor = 'grab';
-    // 阻止空格默认的页面滚动
-    e.preventDefault();
-  };
-
-  const onKeyUp = (e: KeyboardEvent) => {
-    if (e.code !== 'Space') return;
-    spaceDown = false;
-    if (!panning) document.body.style.cursor = '';
-  };
-
-  const onWindowBlur = () => {
-    spaceDown = false;
-    if (!panning) document.body.style.cursor = '';
-  };
-
-  // 用捕获阶段挂在 document 上：FlowGram 的拖拽层会 stopPropagation，冒泡阶段收不到
-  const onPointerDown = (e: PointerEvent) => {
-    if (e.button !== 0 || e.shiftKey) return;
-    const target = e.target as HTMLElement | null;
-    if (!target || !target.closest('.gedit-playground-container')) return;
-    if (target.closest(overlaySelector)) return;
-    if (spaceDown) {
-      // 截断 FlowGram 的节点拖拽，本次指针序列只用于平移
-      e.preventDefault();
-      e.stopPropagation();
-    } else if (target.closest(interactiveSelector)) {
-      return;
-    }
-    panning = true;
-    startX = e.clientX;
-    startY = e.clientY;
-    const origin = getScroll(ctx);
-    originScrollX = origin.x;
-    originScrollY = origin.y;
-    document.body.style.cursor = 'grabbing';
-  };
-
-  const onPointerMove = (e: PointerEvent) => {
-    if (!panning) return;
-    const dx = e.clientX - startX;
-    const dy = e.clientY - startY;
-    // scrollX/Y 是画布层的屏幕平移量，与鼠标位移 1:1
-    setScroll(ctx, originScrollX + dx, originScrollY + dy);
-  };
-
-  const onPointerUp = () => {
-    if (!panning) return;
-    panning = false;
-    document.body.style.cursor = spaceDown ? 'grab' : '';
-  };
-
-  document.addEventListener('pointerdown', onPointerDown, true);
-  document.addEventListener('pointermove', onPointerMove, true);
-  document.addEventListener('pointerup', onPointerUp, true);
-  document.addEventListener('keydown', onKeyDown, true);
-  document.addEventListener('keyup', onKeyUp, true);
-  window.addEventListener('blur', onWindowBlur);
-  return () => {
-    panning = false;
-    spaceDown = false;
-    document.body.style.cursor = '';
-    document.removeEventListener('pointerdown', onPointerDown, true);
-    document.removeEventListener('pointermove', onPointerMove, true);
-    document.removeEventListener('pointerup', onPointerUp, true);
-    document.removeEventListener('keydown', onKeyDown, true);
-    document.removeEventListener('keyup', onKeyUp, true);
-    window.removeEventListener('blur', onWindowBlur);
-  };
-}
 
 // ========== 页面组件 ==========
-type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
 export default function AppEditPage() {
   const { id } = useParams<{ id: string }>();
@@ -1410,6 +119,8 @@ export default function AppEditPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNodeMeta, setSelectedNodeMeta] = useState<NodeMeta | null>(null);
   const [configValues, setConfigValues] = useState<NodeConfigValues>({});
+  const [nodeDebugRunning, setNodeDebugRunning] = useState(false);
+  const [nodeDebugResult, setNodeDebugResult] = useState<NodeDebugRunResult | null>(null);
   const [nodeOutputs, setNodeOutputs] = useState<OutputFieldItem[]>([]);
   const [upstreamInputs, setUpstreamInputs] = useState<UpstreamInputGroup[]>([]);
   const [running, setRunning] = useState(false);
@@ -1460,6 +171,7 @@ export default function AppEditPage() {
   // 当前抽屉承载的节点，用于选择切换时判断是否需要关闭
   const drawerNodeIdRef = useRef<string | null>(null);
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
+  const [conversationDrawerOpen, setConversationDrawerOpen] = useState(false);
   const [addNodePopover, setAddNodePopover] = useState<{ x: number; y: number; fromNodeId?: string } | null>(null);
   const [datasetOptions, setDatasetOptions] = useState<DatasetItem[]>([]);
   // V4：左侧资源树折叠状态
@@ -2137,6 +849,7 @@ export default function AppEditPage() {
     setSelectedNodeId(node.id);
     drawerNodeIdRef.current = node.id;
     setConfigDrawerOpen(true);
+    setNodeDebugResult(null);
     const meta = keyToMeta[nodeTypeKey];
     if (meta) {
       setSelectedNodeMeta(meta);
@@ -2503,6 +1216,29 @@ export default function AppEditPage() {
     }
   }, [id, running, extractStartParams, doRun]);
 
+  // 单节点试运行（N9-03）：只跑当前节点，不写运行历史、不改变画布状态
+  const handleDebugNode = useCallback(async () => {
+    const ctx = ctxRef.current;
+    if (!ctx || !selectedNodeId || nodeDebugRunning) return;
+    const flowgram = toWorkflowJSON(ctx);
+    const graph = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
+    setNodeDebugRunning(true);
+    setNodeDebugResult(null);
+    try {
+      const result = await debugRunNode({
+        graph: graph as never,
+        node_id: selectedNodeId,
+        inputs: collectDebugInputs(configValues),
+      });
+      setNodeDebugResult(result);
+      if (result.status === 'error') message.error(result.error || '节点试运行失败');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '节点试运行失败');
+    } finally {
+      setNodeDebugRunning(false);
+    }
+  }, [selectedNodeId, nodeDebugRunning, keyToCozeType, configValues]);
+
   // 删除连线：line.dispose 会触发 linesManager 的 DELETE_LINE，从而走 onContentChange 自动保存
   const deleteLines = useCallback((lineIds: string[]) => {
     const removed = disposeLinesByIds(ctxRef.current, lineIds);
@@ -2560,7 +1296,8 @@ export default function AppEditPage() {
       // Esc：优先关闭浮层，其次清空画布选中（N9-09）
       if (e.key === 'Escape' && !inInput) {
         // 弹窗 / 抽屉的 Esc 交给 antd 处理，避免连带清空选中
-        if (renameTarget || deleteNodeOpen || versionDrawerOpen || variablesDrawerOpen || approvalState.open) {
+        if (renameTarget || deleteNodeOpen || versionDrawerOpen || variablesDrawerOpen
+          || conversationDrawerOpen || approvalState.open) {
           return;
         }
         if (addNodePopover) {
@@ -2610,7 +1347,8 @@ export default function AppEditPage() {
   }, [
     scheduleSave, handleRun, copyNode, pasteNode, deleteLines,
     selectedNodeId, selectedNodeIds, addNodePopover, configDrawerOpen,
-    renameTarget, deleteNodeOpen, versionDrawerOpen, variablesDrawerOpen, approvalState.open,
+    renameTarget, deleteNodeOpen, versionDrawerOpen, variablesDrawerOpen,
+    conversationDrawerOpen, approvalState.open,
   ]);
 
   // ========== 版本历史（B9） ==========
@@ -2670,140 +1408,12 @@ export default function AppEditPage() {
         }
         onOpenVariables={() => setVariablesDrawerOpen(true)}
         onOpenVersions={openVersionDrawer}
-        onOpenConversation={() => message.info('会话管理模块开发中')}
+        onOpenConversation={() => setConversationDrawerOpen(true)}
       />
 
       {/* 画布区域 */}
       <div style={{ flex: 1, position: 'relative' }}>
-        <style>{`
-          .gedit-playground-container {
-            position: relative !important;
-            width: 100% !important;
-            height: 100% !important;
-          }
-          @keyframes boxia-pulse {
-            0%, 100% { box-shadow: 0 0 0 3px rgba(139,92,246,0.4); }
-            50% { box-shadow: 0 0 0 6px rgba(139,92,246,0.15); }
-          }
-          .boxia-node-running {
-            animation: boxia-pulse 1.2s ease-in-out infinite;
-          }
-          .boxia-node-invalid {
-            box-shadow: 0 0 0 3px rgba(239,68,68,0.5) !important;
-            border-radius: 8px;
-          }
-          /* ========== 连线样式（V6 对齐 Coze：主色 #5044fc，选中亮青） ==========
-             FlowGram 每条连线渲染两个 path：曲线 + 箭头（V 形折线），二者共用同一套样式。
-             选中态由 FlowGram 用 path 的 stroke-width 属性区分（2 → 3），
-             因此这里不能再给 stroke-width 加 !important，否则选中态被抹平。 */
-          .gedit-flow-activity-edge path {
-            stroke: ${CANVAS_TOKENS.line} !important;
-            fill: none !important;
-            transition: stroke 0.15s, stroke-width 0.15s, filter 0.15s;
-          }
-          .gedit-flow-activity-edge:hover path {
-            stroke: ${CANVAS_TOKENS.lineHover} !important;
-          }
-          .gedit-flow-activity-edge path[stroke-width='3'],
-          .gedit-flow-activity-edge:hover path[stroke-width='3'] {
-            stroke: ${CANVAS_TOKENS.lineActive} !important;
-            filter: drop-shadow(0 0 4px ${CANVAS_TOKENS.lineActiveGlow});
-          }
-          /* ========== 端口圆点（对齐 Coze 实机） ==========
-             FlowGram 端口 DOM：
-             <div data-port-entity-id class="WorkflowPointStyle-xxx">  ← 外层 20x20 命中区
-               <div class="bg-circle workflow-bg-circle"/>             ← 白色底圈
-               <div class="bg workflow-port-bg workflow-point-bg">    ← 紫色圆点
-               <div class="focus-circle"/>
-             问题：.bg 默认是 position: relative 的流式元素，旧样式把它缩到 12x12 后
-                   仍贴在命中区左上角，圆心与白圈圆心差 4px（用户反馈的"端点未居中"）。
-             修复：改成绝对定位 + 50%/负 margin 居中，缩放不会破坏圆心位置。 */
-          [data-port-entity-id] {
-            width: 20px !important;
-            height: 20px !important;
-            margin-top: -10px !important;
-            margin-left: -10px !important;
-            background: transparent !important;
-            border: none !important;
-          }
-          [data-port-entity-id] > .bg-circle,
-          [data-port-entity-id] > .workflow-bg-circle {
-            width: 20px !important;
-            height: 20px !important;
-            left: 0 !important;
-            top: 0 !important;
-            background: #fff !important;
-            transform: scale(1) !important;
-          }
-          [data-port-entity-id] > .bg,
-          [data-port-entity-id] > .workflow-port-bg,
-          [data-port-entity-id] > .workflow-point-bg {
-            position: absolute !important;
-            left: 50% !important;
-            top: 50% !important;
-            width: 12px !important;
-            height: 12px !important;
-            margin: -6px 0 0 -6px !important;
-            background: ${CANVAS_TOKENS.port} !important;
-            transform: scale(1) !important;
-            border: 2px solid ${CANVAS_TOKENS.white} !important;
-            box-shadow: 0 0 0 1px ${CANVAS_TOKENS.port} !important;
-            cursor: crosshair !important;
-          }
-          [data-port-entity-id]:hover > .bg,
-          [data-port-entity-id]:hover > .workflow-port-bg,
-          [data-port-entity-id].hovered > .bg,
-          [data-port-entity-id].hovered > .workflow-port-bg {
-            background: ${CANVAS_TOKENS.portHover} !important;
-            transform: scale(1.15) !important;
-          }
-          [data-port-entity-id].linked > .bg,
-          [data-port-entity-id].linked > .workflow-port-bg {
-            background: ${CANVAS_TOKENS.portLinked} !important;
-          }
-          /* 输出端口 hover：对齐 Coze 的紫色「+」拖拽提示（输入端口保持圆点） */
-          [data-port-entity-id][data-port-entity-type='output']:hover > .bg,
-          [data-port-entity-id][data-port-entity-type='output'].hovered > .bg {
-            width: 18px !important;
-            height: 18px !important;
-            margin: -9px 0 0 -9px !important;
-            background: ${CANVAS_TOKENS.port} !important;
-            transform: scale(1) !important;
-            box-shadow: 0 0 0 1px ${CANVAS_TOKENS.port}, 0 0 0 5px ${CANVAS_TOKENS.portRing} !important;
-          }
-          [data-port-entity-id][data-port-entity-type='output']:hover > .bg::after,
-          [data-port-entity-id][data-port-entity-type='output'].hovered > .bg::after {
-            content: '+';
-            position: absolute;
-            inset: 0;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            color: #fff;
-            font-size: 14px;
-            font-weight: 400;
-            line-height: 1;
-          }
-          [data-port-entity-id] > .bg > .cross-hair,
-          [data-port-entity-id] .focus-circle {
-            display: none !important;
-          }
-          /* 拖线时命中的可落点输入端口（JS 打标，拖拽中 :hover 不可靠） */
-          [data-port-entity-id].boxia-port-drop-target > .bg,
-          [data-port-entity-id].boxia-port-drop-target > .workflow-port-bg {
-            background: ${CANVAS_TOKENS.portDrop} !important;
-            transform: scale(1.35) !important;
-          }
-          [data-port-entity-id].boxia-port-drop-target {
-            border-radius: 50% !important;
-            box-shadow: 0 0 0 5px ${CANVAS_TOKENS.portDropRing} !important;
-          }
-          /* RefChipInput 聚焦态 */
-          .boxia-ref-chip-input:focus-within {
-            border-color: ${CANVAS_TOKENS.accent} !important;
-            box-shadow: 0 0 0 2px ${CANVAS_TOKENS.portRingSoft};
-          }
-        `}</style>
+        <CanvasStyles />
 
         {/* 底部居中浮条（V3）：缩放 + 适应 + 全屏 | +添加节点 | 试运行 */}
         <CanvasToolbar
@@ -2931,186 +1541,46 @@ export default function AppEditPage() {
           }}
         />
 
-        {/* V6：保存状态（顶部左侧小字） */}
-        <div style={{
-          position: 'absolute', top: 12, left: 16, zIndex: 100,
-          fontSize: 12,
-          color: saveStatus === 'error' ? CANVAS_TOKENS.dangerDeep : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,
-          display: 'flex', alignItems: 'center', gap: 6,
-        }}>
-          <span style={{
-            width: 6, height: 6, borderRadius: '50%',
-            background: saveStatus === 'error' ? CANVAS_TOKENS.dangerDot : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,
-            animation: saveStatus === 'saving' ? 'boxia-pulse 1.2s ease-in-out infinite' : undefined,
-          }} />
-          {validating && '校验中…'}
-          {!validating && saveStatus === 'saving' && '保存中…'}
-          {!validating && saveStatus === 'saved' && lastSavedAt && `已保存 ${lastSavedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
-          {!validating && saveStatus === 'saved' && !lastSavedAt && '已保存'}
-          {!validating && saveStatus === 'error' && <span style={{ cursor: 'pointer' }} onClick={() => scheduleSave()}>保存失败，点击重试</span>}
-          <span
-            style={{
-              cursor: 'pointer',
-              color: validationIssues.some((i) => i.severity === 'error') ? CANVAS_TOKENS.danger : '#6b7280',
-            }}
-            onClick={async () => {
-              await doValidate();
+        <SaveStatusBar
+          saveStatus={saveStatus}
+          lastSavedAt={lastSavedAt}
+          validating={validating}
+          validationIssues={validationIssues}
+          onRetry={() => scheduleSave()}
+          onOpenValidation={() => {
+            void doValidate().then(() => {
               setPanelTab('validation');
               setPanelOpen(true);
-            }}
-          >
-            · 校验{validationIssues.length > 0 ? ` ${validationIssues.length}` : ''}
-          </span>
-          <span
-            style={{ cursor: 'pointer', color: '#6b7280' }}
-            onClick={() => {
-              setPanelTab('history');
-              setPanelOpen(true);
-            }}
-          >
-            · 历史
-          </span>
-        </div>
+            });
+          }}
+          onOpenHistory={() => {
+            setPanelTab('history');
+            setPanelOpen(true);
+          }}
+        />
 
-        {/* 发布按钮（顶部右侧，V5 配色 #7c3aed） */}
-        <div style={{
-          position: 'absolute', top: 8, right: 16, zIndex: 100,
-          display: 'flex', alignItems: 'center', gap: 8,
-        }}>
-          {publishedVersion != null && (
-            <Tag color="green" style={{ marginRight: 0, fontSize: 12 }}>
-              ● live v{publishedVersion}
-            </Tag>
-          )}
-          <Button
-            type="primary"
-            size="small"
-            loading={publishing}
-            onClick={handlePublish}
-            style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
-          >
-            🚀 发布
-          </Button>
-        </div>
+        <PublishBar
+          publishedVersion={publishedVersion}
+          publishing={publishing}
+          onPublish={handlePublish}
+        />
 
         {/* 校验问题 + 运行日志 合并面板（V1/V2）：右下角可折叠 Tab 抽屉 */}
-        {panelOpen && (
-          <div style={{
-            position: 'absolute', bottom: 80, right: 16, zIndex: 100,
-            width: 400, maxHeight: 360, display: 'flex', flexDirection: 'column',
-            background: '#fff', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            overflow: 'hidden',
-          }}>
-            <div style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '8px 12px', borderBottom: '1px solid #f0f0f0',
-            }}>
-              <TabSwitch
-                active={panelTab === 'validation'}
-                label={`校验${validationIssues.length > 0 ? ` (${validationIssues.length})` : ''}`}
-                onClick={() => setPanelTab('validation')}
-              />
-              <TabSwitch
-                active={panelTab === 'logs'}
-                label={`日志${runLogs.length > 0 ? ` (${runLogs.length})` : ''}`}
-                onClick={() => setPanelTab('logs')}
-              />
-              <TabSwitch
-                active={panelTab === 'history'}
-                label="历史"
-                onClick={() => setPanelTab('history')}
-              />
-              <span style={{ marginLeft: 'auto', cursor: 'pointer', color: '#999' }} onClick={() => setPanelOpen(false)}>✕</span>
-            </div>
-            <div style={{ flex: 1, overflowY: 'auto', padding: 12 }}>
-              {panelTab === 'validation' && (
-                validationIssues.length === 0 ? (
-                  <div style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center', padding: 16 }}>
-                    暂无校验问题
-                  </div>
-                ) : (
-                  validationIssues.map((issue, idx) => (
-                    <div key={idx} style={{
-                      fontSize: 12, padding: '6px 0',
-                      color: issue.severity === 'error' ? CANVAS_TOKENS.danger : CANVAS_TOKENS.warning,
-                      display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer',
-                      borderBottom: '1px dashed #f3f4f6',
-                    }}
-                      onClick={() => {
-                        if (!issue.node_id) return;
-                        const el = document.getElementById(issue.node_id);
-                        el?.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'center' });
-                      }}
-                    >
-                      <span>{issue.severity === 'error' ? '●' : '▲'}</span>
-                      <span style={{ flex: 1 }}>{issue.message}</span>
-                      {issue.node_id && (
-                        <Tag style={{ fontSize: 11, marginRight: 0 }}>{issue.node_id}</Tag>
-                      )}
-                    </div>
-                  ))
-                )
-              )}
-              {panelTab === 'logs' && (
-                runLogs.length === 0 ? (
-                  <div style={{ color: '#9ca3af', fontSize: 12, textAlign: 'center', padding: 16 }}>
-                    暂无运行日志
-                  </div>
-                ) : (
-                  <div style={{
-                    background: 'rgba(0,0,0,0.85)', color: '#d9d9d9',
-                    borderRadius: 6, padding: 12, fontFamily: 'monospace', fontSize: 12,
-                    maxHeight: 280, overflowY: 'auto',
-                  }}>
-                    {runLogs.map((log, i) => (
-                      <div key={i} style={{ color: log.level === 'error' ? CANVAS_TOKENS.dangerDot : '#d9d9d9' }}>
-                        <span style={{ color: '#666' }}>[{log.time}]</span> {log.text}
-                      </div>
-                    ))}
-                  </div>
-                )
-              )}
-              {panelTab === 'history' && (
-                <RunHistoryPanel applicationId={id} active={panelOpen && panelTab === 'history'} />
-              )}
-            </div>
-          </div>
-        )}
+        <BottomStatusPanel
+          applicationId={id}
+          open={panelOpen}
+          tab={panelTab}
+          validationIssues={validationIssues}
+          runLogs={runLogs}
+          onTabChange={setPanelTab}
+          onClose={() => setPanelOpen(false)}
+        />
 
-        {/* 子图面包屑（B6） */}
-        {subgraphStack.length > 0 && (
-          <div style={{
-            position: 'absolute', top: 48, left: 16, zIndex: 100,
-            display: 'flex', alignItems: 'center', gap: 8,
-            background: '#fff', borderRadius: 8, padding: '6px 12px',
-            boxShadow: '0 2px 8px rgba(0,0,0,0.1)', fontSize: 13,
-          }}>
-            <Button
-              type="link"
-              size="small"
-              onClick={() => exitSubgraph(subgraphStack.length)}
-            >
-              返回根图
-            </Button>
-            <span style={{ color: '#ccc' }}>/</span>
-            {subgraphBreadcrumb.map((item, idx) => (
-              <span key={item.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                {idx > 0 && <span style={{ color: '#ccc' }}>/</span>}
-                {idx === subgraphBreadcrumb.length - 1 ? (
-                  <strong>{item.title}</strong>
-                ) : (
-                  <Button
-                    type="link"
-                    size="small"
-                    onClick={() => exitSubgraph(subgraphStack.length - idx - 1)}
-                  >
-                    {item.title}
-                  </Button>
-                )}
-              </span>
-            ))}
-          </div>
-        )}
+        <SubgraphBreadcrumb
+          stackDepth={subgraphStack.length}
+          breadcrumb={subgraphBreadcrumb}
+          onExit={exitSubgraph}
+        />
 
         <FreeLayoutEditor
           key={editorKey}
@@ -3210,268 +1680,65 @@ export default function AppEditPage() {
         <AlignGuides ctxRef={ctxRef} />
 
         {/* 右侧调试面板（B8） */}
-        {Object.keys(nodeDebugMap).length > 0 && (
-          <div style={{
-            position: 'absolute', top: 48, right: 16, zIndex: 100,
-            width: 320, maxHeight: 'calc(100% - 120px)', overflowY: 'auto',
-            background: '#fff', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-            padding: 12,
-          }}>
-            <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-              节点调试
-            </div>
-            <Collapse
-              size="small"
-              items={Object.entries(nodeDebugMap).map(([nodeId, info]) => {
-                const statusColor = info.status === 'error' ? '#ff4d4f' : info.status === 'success' ? '#52c41a' : '#1677ff';
-                return {
-                  key: nodeId,
-                  label: (
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
-                      <span style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor }} />
-                      <span style={{ fontFamily: 'monospace' }}>{nodeId}</span>
-                      {info.duration_ms != null && (
-                        <span style={{ color: '#999', marginLeft: 'auto' }}>{info.duration_ms}ms</span>
-                      )}
-                    </div>
-                  ),
-                  children: (
-                    <div style={{ fontSize: 11, fontFamily: 'monospace' }}>
-                      {info.inputs != null && (
-                        <div style={{ marginBottom: 6 }}>
-                          <div style={{ color: '#999' }}>输入：</div>
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                            {JSON.stringify(info.inputs, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                      {info.streamingText != null && info.streamingText !== '' && (
-                        <div style={{ marginBottom: 6 }}>
-                          <div style={{ color: '#1677ff' }}>流式输出：</div>
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                            {info.streamingText}
-                          </pre>
-                        </div>
-                      )}
-                      {info.outputs != null && (
-                        <div style={{ marginBottom: 6 }}>
-                          <div style={{ color: '#999' }}>输出：</div>
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
-                            {JSON.stringify(info.outputs, null, 2)}
-                          </pre>
-                        </div>
-                      )}
-                      {info.error && (
-                        <div style={{ color: '#ff4d4f' }}>
-                          <div>错误：</div>
-                          <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{info.error}</pre>
-                        </div>
-                      )}
-                      {info.trace && info.trace.length > 0 && (
-                        <div style={{ marginTop: 6, borderTop: '1px dashed #eee', paddingTop: 6 }}>
-                          <div style={{ color: '#999', marginBottom: 4 }}>运行 trace（{info.trace.length} 条）：</div>
-                          {info.trace.map((t, idx) => (
-                            <TraceEntry key={idx} entry={t} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ),
-                };
-              })}
-            />
-          </div>
-        )}
+        <NodeDebugPanel debugMap={nodeDebugMap} />
       </div>
 
-      {/* 节点配置抽屉 */}
-      <Drawer
-        title={selectedNodeMeta ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <NodeIcon
-              typeKey={selectedNodeMeta.type_key}
-              color={selectedNodeMeta.color}
-              icon={selectedNodeMeta.icon}
-              size={28}
-            />
-            <div style={{ minWidth: 0 }}>
-              <div style={{ fontSize: 15, fontWeight: 600, lineHeight: '20px' }}>
-                {selectedNodeMeta.title}
-              </div>
-              {selectedNodeMeta.description && (
-                <div style={{
-                  fontSize: 12, color: '#6b7280', fontWeight: 400, lineHeight: '16px',
-                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                }}>
-                  {selectedNodeMeta.description}
-                </div>
-              )}
-            </div>
-          </div>
-        ) : ''}
-        open={configDrawerOpen && !!selectedNodeId}
+      <NodeConfigDrawer
+        open={configDrawerOpen}
+        nodeId={selectedNodeId}
+        meta={selectedNodeMeta}
+        values={configValues}
+        onChange={handleConfigChange}
+        pickerNodes={pickerNodes}
+        keyToMeta={keyToMeta}
+        outputs={nodeOutputs}
+        onOutputsChange={handleOutputsChange}
+        datasetOptions={datasetOptions}
+        upstreamInputs={upstreamInputs}
+        onAddNext={(typeKey) => {
+          // V10：配置抽屉里点"下一步"，以当前选中节点为 source 自动连线
+          const fromNodeId = selectedNodeId ?? undefined;
+          setSelectedNodeId(null);
+          setConfigDrawerOpen(false);
+          addNode(typeKey, { fromNodeId });
+        }}
         onClose={() => setConfigDrawerOpen(false)}
-        width="min(480px, 92vw)"
-        extra={
-          selectedNodeId && selectedNodeMeta && canDelete(selectedNodeMeta) ? (
-            <Button danger size="small" onClick={() => {
-              setDeleteTargetIds(selectedNodeId ? [selectedNodeId] : []);
-              setDeleteNodeOpen(true);
-            }}>
-              删除节点
-            </Button>
-          ) : undefined
-        }
-      >
-        {selectedNodeMeta && (
-          <NodeConfigForm
-            nodeMeta={selectedNodeMeta}
-            values={configValues}
-            onChange={handleConfigChange}
-            pickerNodes={pickerNodes}
-            currentNodeId={selectedNodeId}
-            keyToMeta={keyToMeta}
-            outputs={nodeOutputs}
-            onOutputsChange={handleOutputsChange}
-            datasetOptions={datasetOptions}
-            upstreamInputs={upstreamInputs}
-            onAddNext={(typeKey) => {
-              // V10：配置抽屉里点"下一步"，以当前选中节点为 source 自动连线
-              const fromNodeId = selectedNodeId;
-              setSelectedNodeId(null);
-              setConfigDrawerOpen(false);
-              addNode(typeKey, { fromNodeId });
-            }}
-          />
-        )}
-        <div style={{ marginTop: 16 }}>
-          <Tag color="blue">节点 ID：{selectedNodeId}</Tag>
-        </div>
-      </Drawer>
+        onRequestDelete={() => {
+          setDeleteTargetIds(selectedNodeId ? [selectedNodeId] : []);
+          setDeleteNodeOpen(true);
+        }}
+        debugRunning={nodeDebugRunning}
+        debugResult={nodeDebugResult}
+        onDebug={() => void handleDebugNode()}
+      />
 
-      {/* 卡片「⋯」重命名弹窗（N9-07） */}
-      <Modal
-        title="重命名节点"
-        open={Boolean(renameTarget)}
-        onOk={confirmCardRename}
+      <RenameNodeModal
+        target={renameTarget}
+        onChange={(value) => setRenameTarget((prev) => (prev ? { ...prev, value } : prev))}
+        onConfirm={confirmCardRename}
         onCancel={() => setRenameTarget(null)}
-        okText="保存"
-        cancelText="取消"
-      >
-        <Input
-          autoFocus
-          maxLength={60}
-          placeholder="节点名称"
-          value={renameTarget?.value ?? ''}
-          onChange={(e) => {
-            const next = e.target.value;
-            setRenameTarget((prev) => (prev ? { ...prev, value: next } : prev));
-          }}
-          onPressEnter={confirmCardRename}
-        />
-      </Modal>
+      />
 
-      {/* 删除节点确认弹窗（U-S3） */}
-      <Modal
-        title={deleteTargetIds.length > 1 ? '批量删除节点' : '删除节点'}
+      <DeleteNodeModal
         open={deleteNodeOpen}
-        onOk={confirmDeleteNode}
+        targetIds={deleteTargetIds}
+        selectedNodeId={selectedNodeId}
+        selectedNodeTitle={selectedNodeMeta?.title}
+        onConfirm={confirmDeleteNode}
         onCancel={() => { setDeleteNodeOpen(false); setDeleteTargetIds([]); }}
-        okText="删除"
-        okButtonProps={{ danger: true }}
-        cancelText="取消"
-      >
-        <div>
-          {deleteTargetIds.length > 1 ? (
-            <span>
-              确定要删除选中的 <Tag color="blue">{deleteTargetIds.length}</Tag> 个节点吗？
-            </span>
-          ) : (
-            <span>
-              确定要删除节点 <Tag color="blue">{selectedNodeMeta?.title || deleteTargetIds[0] || selectedNodeId}</Tag> 吗？
-            </span>
-          )}
-          <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
-            与该节点相连的所有连线将一并删除，此操作不可撤销。
-          </div>
-        </div>
-      </Modal>
+      />
 
-      {/* 试运行入参弹窗（B7 + T18 多模态） */}
-      <Modal
-        title="试运行入参"
+      <RunInputsModal
         open={runModalOpen}
+        params={startParams}
+        values={runInputs}
+        onChange={(patch) => setRunInputs((prev) => ({ ...prev, ...patch }))}
         onCancel={() => setRunModalOpen(false)}
         onOk={() => {
           setRunModalOpen(false);
           doRun(runInputs);
         }}
-        okText="开始运行"
-        cancelText="取消"
-        destroyOnHidden
-      >
-        <Space direction="vertical" style={{ width: '100%' }} size="middle">
-          {startParams.map((p) => {
-            const type = (p.type || 'string').toLowerCase();
-            const isImageOrFile = type === 'image' || type === 'file';
-            if (!isImageOrFile) {
-              return (
-                <div key={p.name}>
-                  <Typography.Text type="secondary">{p.name}</Typography.Text>
-                  <Input
-                    value={runInputs[p.name] ?? ''}
-                    onChange={(e) => setRunInputs((prev) => ({ ...prev, [p.name]: e.target.value }))}
-                    placeholder={p.type || 'string'}
-                  />
-                </div>
-              );
-            }
-            // T18：image/file 类型 → 上传组件，文件读为 dataURL，多图用逗号分隔
-            const currentValue = (runInputs[p.name] as string) || '';
-            const currentUrls = currentValue ? currentValue.split(',').filter(Boolean) : [];
-            return (
-              <div key={p.name}>
-                <Typography.Text type="secondary">
-                  {p.name}
-                  <Tag color="purple" style={{ marginLeft: 8 }}>{p.type}</Tag>
-                </Typography.Text>
-                <Upload
-                  accept={type === 'image' ? 'image/*' : undefined}
-                  listType="picture"
-                  multiple
-                  beforeUpload={(file) => {
-                    const reader = new FileReader();
-                    reader.onload = () => {
-                      const dataUrl = String(reader.result || '');
-                      setRunInputs((prev) => {
-                        const prevVal = (prev[p.name] as string) || '';
-                        const urls = prevVal ? prevVal.split(',').filter(Boolean) : [];
-                        urls.push(dataUrl);
-                        return { ...prev, [p.name]: urls.join(',') };
-                      });
-                    };
-                    reader.readAsDataURL(file);
-                    return false; // 阻止自动上传
-                  }}
-                  onRemove={(file) => {
-                    // 简化：onRemove 无法精确匹配 dataURL，这里改为清空当前字段让用户重选
-                    setRunInputs((prev) => ({ ...prev, [p.name]: '' }));
-                    return true;
-                  }}
-                  fileList={currentUrls.map((url, idx) => ({
-                    uid: String(idx),
-                    name: `upload-${idx + 1}`,
-                    status: 'done' as const,
-                    url,
-                  })) as UploadFile[]}
-                >
-                  <Button>上传{type === 'image' ? '图片' : '文件'}</Button>
-                </Upload>
-              </div>
-            );
-          })}
-        </Space>
-      </Modal>
+      />
 
       {/* 变量引用抽屉（U-L2） */}
       <VariablesDrawer
@@ -3481,120 +1748,30 @@ export default function AppEditPage() {
         keyToMeta={keyToMeta}
       />
 
-      {/* 版本历史抽屉（B9） */}
-      <Drawer
-        title="版本历史"
-        open={versionDrawerOpen}
-        onClose={() => setVersionDrawerOpen(false)}
-        width="min(480px, 92vw)"
-      >
-        {versions.length === 0 ? (
-          <Typography.Text type="secondary">暂无历史版本</Typography.Text>
-        ) : (
-          <Space direction="vertical" style={{ width: '100%' }} size={12}>
-            {versions.map((v, idx) => (
-              <div
-                key={v.id}
-                style={{
-                  padding: 12, border: '1px solid #f0f0f0', borderRadius: 8,
-                  background: idx === 0 ? '#f6ffed' : '#fff',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-                  <Tag color={idx === 0 ? 'green' : 'default'}>v{v.version}</Tag>
-                  {idx === 0 && <Tag color="blue">当前</Tag>}
-                  <Typography.Text type="secondary" style={{ fontSize: 12, marginLeft: 'auto' }}>
-                    {new Date(v.created_at).toLocaleString()}
-                  </Typography.Text>
-                </div>
-                {v.changelog && (
-                  <div style={{ fontSize: 12, color: '#666', marginBottom: 4 }}>{v.changelog}</div>
-                )}
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                  {v.created_by && (
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      by {v.created_by}
-                    </Typography.Text>
-                  )}
-                  {idx !== 0 && (
-                    <Button
-                      size="small"
-                      danger
-                      style={{ marginLeft: 'auto' }}
-                      onClick={() => handleRollback(v.version)}
-                    >
-                      回滚到此版本
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </Space>
-        )}
-      </Drawer>
+      {/* 会话管理抽屉（N9-05） */}
+      <ConversationDrawer
+        open={conversationDrawerOpen}
+        applicationId={id}
+        onClose={() => setConversationDrawerOpen(false)}
+      />
 
-      {/* 人审审批抽屉（B11） */}
-      <Drawer
-        title={approvalState.payload ? `审批：${approvalState.payload.node_title || approvalState.payload.node_id}` : '审批'}
+      <VersionHistoryDrawer
+        open={versionDrawerOpen}
+        versions={versions}
+        onClose={() => setVersionDrawerOpen(false)}
+        onRollback={handleRollback}
+      />
+
+      <ApprovalDrawer
         open={approvalState.open}
+        payload={approvalState.payload}
+        approver={approvalApprover}
+        comment={approvalComment}
+        onApproverChange={setApprovalApprover}
+        onCommentChange={setApprovalComment}
         onClose={() => setApprovalState((prev) => ({ ...prev, open: false }))}
-        width="min(480px, 92vw)"
-      >
-        {approvalState.payload && (
-          <Space direction="vertical" style={{ width: '100%' }} size="middle">
-            {approvalState.payload.assignee_role && (
-              <div>
-                <Typography.Text type="secondary">审批人角色</Typography.Text>
-                <div><Tag color="orange">{approvalState.payload.assignee_role}</Tag></div>
-              </div>
-            )}
-            {approvalState.payload.instructions && (
-              <div>
-                <Typography.Text type="secondary">审批说明</Typography.Text>
-                <div style={{ padding: 8, background: '#fafafa', borderRadius: 6, fontSize: 13 }}>
-                  {approvalState.payload.instructions}
-                </div>
-              </div>
-            )}
-            {approvalState.payload.snapshot && (
-              <div>
-                <Typography.Text type="secondary">节点输入快照</Typography.Text>
-                <pre style={{
-                  margin: 0, padding: 8, background: '#fafafa', borderRadius: 6,
-                  fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap',
-                }}>
-                  {JSON.stringify(approvalState.payload.snapshot, null, 2)}
-                </pre>
-              </div>
-            )}
-            <div>
-              <Typography.Text type="secondary">审批人</Typography.Text>
-              <Input
-                value={approvalApprover}
-                onChange={(e) => setApprovalApprover(e.target.value)}
-                placeholder="你的名字（默认 admin）"
-              />
-            </div>
-            <div>
-              <Typography.Text type="secondary">审批意见</Typography.Text>
-              <Input.TextArea
-                rows={3}
-                value={approvalComment}
-                onChange={(e) => setApprovalComment(e.target.value)}
-                placeholder="通过 / 拒绝的原因"
-              />
-            </div>
-            <Space style={{ width: '100%', justifyContent: 'flex-end' }}>
-              <Button danger onClick={() => handleApprovalSubmit(false)}>
-                拒绝
-              </Button>
-              <Button type="primary" onClick={() => handleApprovalSubmit(true)}>
-                通过
-              </Button>
-            </Space>
-          </Space>
-        )}
-      </Drawer>
+        onSubmit={(approved) => handleApprovalSubmit(approved)}
+      />
     </div>
   );
 }
