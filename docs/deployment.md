@@ -106,6 +106,19 @@ EMBEDDING_TIMEOUT_SECONDS=30
 # RAG 行为开关（一般保持默认；无 rerank 客户端时自动降级为向量余弦过滤）
 RAG_RERANK_ENABLED=true
 RAG_QUERY_REWRITE_ENABLED=true
+# 向量库：memory 仅用于开发（重启丢数据）；生产必须用 pgvector 或 milvus
+VECTOR_STORE_PROVIDER=pgvector
+# 可选：Milvus（VECTOR_STORE_PROVIDER=milvus 时填写）
+# MILVUS_URI=http://milvus:19530
+# MILVUS_TOKEN=
+
+# ===== 可选：大图对象存储（MinIO / S3 兼容）=====
+# 单个 graph JSON 超过阈值时写入对象存储，留空则内联写库
+# OBJECT_STORAGE_ENDPOINT=minio:9000
+# OBJECT_STORAGE_ACCESS_KEY=
+# OBJECT_STORAGE_SECRET_KEY=
+# OBJECT_STORAGE_BUCKET=boxia-graphs
+# OBJECT_STORAGE_SECURE=false
 
 # ===== 可选 =====
 LOG_LEVEL=INFO
@@ -204,6 +217,7 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 生产建议：
 
 - PostgreSQL 用 `pgvector/pgvector:pg17` 镜像（已内置扩展）；自建外部库时 DBA 需预装 `vector` 扩展。
+- 生产把 `VECTOR_STORE_PROVIDER` 设为 `pgvector`（复用业务库）或 `milvus`；`memory` 只用于开发，重启后向量数据会丢失。
 - Redis 用 `redis:7-alpine`，3 个 DB 通过逻辑隔离即可，无需起 3 个实例；AOF 开启，maxmemory 设 256mb + `allkeys-lru`。
 - LLM / Embedding / Rerank 推荐走云托管（SiliconFlow / DeepSeek / 内部 LLM 代理）；API Key 写入 `ops/.env.prod`，权限 600，不进 Git。
 - Celery worker 内存上限建议 512m（embedding 单次批处理 ≤ 20 条时够用）；如批量文档 ingest 频繁，可单独 scale 多个 worker。
@@ -356,14 +370,15 @@ docker compose -f ops/docker-compose.yml logs migrate
 - [ ] 通过 HTTPS 打开 `https://adminsystem.<根域名>`，使用首个管理员登录并完成改密
 - [ ] 在「租户管理」创建一个租户，确认租户子域名可正常打开
 - [ ] 用该租户管理员登录租户子域名，确认看不到「租户管理」入口
-- [ ] 在平台侧创建一个产品级智能体，确认未授权时租户列表不可见；授权给租户角色后可见但只读
-- [ ] 在租户内创建一条技能并归属本租户智能体，确认另一个租户看不到
-- [ ] 在租户内创建自定义角色与最终用户，绑定角色后用用户端登录，确认只看到已授权且启用的智能体
+- [ ] 在平台侧创建一个产品级应用并发布版本，确认未开通时租户市场不可见；在「应用市场」开通给租户后，租户可看到实例但只能用自己的配置
+- [ ] 在平台侧创建一个资源（工具 / 提示词 / 技能 / 知识），确认未授权给租户时租户不可见；授权后租户可见，且另一个租户看不到
+- [ ] 在租户内创建自定义角色与最终用户，绑定角色后用用户端登录，确认只看到已开通且启用的应用
+- [ ] 在租户内打开应用对话，确认 SSE 增量输出、工具调用轨迹和运行历史可用
 - [ ] 用 viewer 账号验证写接口返回 403
 - [ ] 用 superadmin 查看审计日志，确认租户审计只在租户内可见，授权变更留有 `grant.updated` 记录
 - [ ] 确认 `/docs` 在生产不可访问（`DOCS_ENABLED=false`）
 - [ ] 确认 `/metrics` 从外部不可访问
-- [ ] 打开用户端站点（`USER_HTTP_PORT`，示例 8081），用最终用户账号登录，确认智能体列表与详情可用；未登录调用 `/api/v1/user/me` 返回 401
+- [ ] 打开用户端站点（`USER_HTTP_PORT`，示例 8081），用最终用户账号登录，确认应用列表与详情可用；未登录调用 `/api/v1/user/me` 返回 401
 - [ ] 路由隔离：管理端站点访问 `/api/v1/user/me` 返回 404；用户端站点访问 `/api/v1/admin/*`、`/api/v1/public/*` 返回 404
 
 ### 14.9 升级与回滚

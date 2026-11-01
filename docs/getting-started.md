@@ -4,7 +4,7 @@
 
 ### 1.1 一句话定位
 
-**一个面向企业内部的 AI 智能体配置与运营平台。** 管理员不用写代码，就能在后台组合模型、提示词、技能、工具和知识库，快速发布一个可用的 AI 助手。
+**一个面向企业内部的 AI 应用编排与运营平台。** 管理员不用写代码，就能在可视化画布上组合模型、提示词、工具与知识库，编排成应用后发布到市场，按租户与角色授权给最终用户使用。
 
 ### 1.2 系统组成
 
@@ -13,9 +13,9 @@
 ```text
 你的浏览器
 │
-├── 管理端  http://localhost:5173    ← 运营/管理员使用（React）
+├── 管理端  http://localhost:5173    ← 平台/租户管理员使用（React）
 │           http://*.localhost:5173  ← 本地验证平台/租户子域名
-├── 用户端  http://localhost:5174    ← 最终用户使用（登录后浏览已授权智能体）
+├── 用户端  http://localhost:5174    ← 最终用户使用（登录后浏览已授权应用）
 │
 ├──────────────┬────────────────────
 ▼              ▼
@@ -30,31 +30,34 @@
 ```
 
 - **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
-- **管理端**：React 19 + TypeScript + Ant Design，负责智能体、资源、租户、管理员和审计管理。
-- **用户端**：React + TypeScript，最终用户登录后浏览可见智能体及其技能、工具、组件与提示词。
-- **数据库**：PostgreSQL 17。开发时用 Docker 启动，不需要单独安装。
+- **管理端**：React 19 + TypeScript + Ant Design + ReactFlow，负责应用画布、市场、资源、工具、授权、租户与审计管理。
+- **用户端**：React + TypeScript，最终用户登录后浏览可见应用并直接对话。
+- **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（记忆 / Celery）+ Celery（知识库异步 ingest）。
 
 ### 1.3 核心能力
 
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
-| 智能体管理   | 新建、编辑、启用/停用、删除；配置模型、提示词、记忆、欢迎语、FAQ、发布渠道、工具、技能、知识库 |
-| RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入 pgvector；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed`；智能体与 Workflow LLM 节点共用同一份 `apply_rag_to_prompt()` 增强逻辑 |
-| 工作流编排   | 可视化画布（ReactFlow）拖拽编排 Start→LLM→Tool→End 四节点 DAG；节点配置抽屉、模板市场一键复制、试运行节点实时高亮（黄/绿/红）、图拓扑校验（环检测/多 start/模板语法）；LLM 节点支持开关 RAG 并多选知识库文档 |
-| 工具治理网关 | 所有跨网 HTTP 工具调用统一经过 `tool_gateway`：超时三档（连接 5s/读 30s/整体 45s）、可重试错误指数退避（0.5s→1s）、按 (租户, 工具) 熔断（连续 5 次失败打开 30s）、按租户每秒 20 次限流、按 base_url 共享 httpx 连接池（HTTP/2 + keep-alive）、响应超 8KB 自动裁剪；熔断/限流/连接失败时返回中文降级文本回灌 LLM，不中断主循环 |
+| 应用编排     | 可视化画布（ReactFlow，节点 / 连线 / 小地图 / 缩放）；节点覆盖 Start、End、LLM、HTTP、API 插件、Code、Dataset 检索、IF、Loop、Sub-workflow、Set Variable、Variable Merge、Text、JSON、Batch、Conversation、Agent Loop、Human Approval 等（节点类型与 coze 数字编码对齐，未实现类型在转换阶段显式报错） |
+| 图执行引擎   | LangGraph 运行时：DAG 编译、拓扑校验（环检测 / 多 Start / 变量类型）、节点级状态机、checkpoint 断点续跑、调试运行（整图 / 单节点 / 流式 SSE）、运行记录与节点耗时用量 |
+| 应用发布     | 草稿图与不可变发布版本分离；发布生成 graph version，可回滚；租户可钉住发布版本；上架市场、上下架、启用/停用 |
+| 应用市场     | 平台应用上架后，租户可浏览、申请/订阅、试用；租户开通生成 `tenant_application_instance`（授权方式、配额、有效期、钉住版本） |
+| RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入向量库；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed`；向量库抽象支持 pgvector / Milvus |
+| 工具治理网关 | 所有跨网 HTTP 工具调用统一经过 `tool_gateway`：超时三档、可重试错误指数退避、按 (租户, 工具) 熔断、按租户限流、按 base_url 共享 httpx 连接池（HTTP/2 + keep-alive）、响应超 8KB 自动裁剪；熔断/限流/连接失败时返回中文降级文本回灌 LLM，不中断主循环 |
 | 工具接入向导 | admin 工具页 4 Tab（基础信息/服务连接/高级治理/试运行）；粘贴 curl 自动解析 method/url/headers/body；输入 MCP server URL 自动 `list_tools` 拉取工具列表勾选批量入库；高级配置滑块调超时/重试/熔断/限流 |
 | SSRF 防护    | 所有出站 URL 强制校验：拒绝 loopback（127.0.0.0/8）、链路本地（169.254.0.0/16，含云元数据 169.254.169.254）、组播、保留、未指定地址；允许 RFC1918 私网（10.x / 172.16-31.x / 192.168.x）——租户内网 MCP 是合法部署形态 |
-| 资源管理     | 技能、工具、组件、提示词归属智能体，在智能体详情内增删改查、搜索、分页、启用/停用；跨智能体复用通过克隆副本；工具已独立成菜单，支持 HTTP / MCP 两种类型 |
-| 租户授权     | 产品级智能体必须显式授权给租户后才可见；通过独立「授权管理」菜单按租户/角色集中配置                 |
-| 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，产品级智能体授权后租户只读使用               |
+| 资源管理     | 工具、提示词、技能、知识四类资源统一存 `resource` 表，按平台 / 租户归属；资源可通过 `resource_grant` 开放给租户，租户内再按角色收窄 |
+| 模型管理     | 平台维护模型供应商（`model_provider`：base_url / api_key）与模型目录（`model_catalog`：模型 ID、显示名、能力标签）；租户可在平台允许范围内选择模型 |
+| 租户授权     | 平台应用必须显式开通/授权给租户后才可见；租户可在开通实例上按角色放行；资源授权与角色功能权限分开管理 |
+| 多租户       | 按二级域名区分产品级平台与租户；租户数据行级隔离，平台资源授权后租户只读使用               |
 | 角色管理     | 平台与租户各自维护角色体系；角色通过权限资源目录授权功能权限，新建角色默认无权限；产品级入口创建的角色为系统角色；平台角色可授权平台级资源 |
-| 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的智能体 |
-| 用户端会话   | 登录后浏览智能体列表 → 查看详情（技能/工具/组件/提示词 Tabs）→ 进入聊天；多轮对话携带 `conversation_id`，回复内联展示工具调用轨迹（工具名、入参、返回、是否出错）并支持折叠，Markdown + GFM 渲染，内置建议提示词与清空会话 |
-| 组织架构     | 部门树（物化路径、最多 10 级）、用户任职记录（单一主任职 + 调岗归档 + 历史可查）、智能体归属部门；为后续部门数据权限预留接入点 |
+| 用户管理     | 租户管理员与普通用户统一为 `users` 账号体系，通过角色赋权；用户端仅能看到被授权且已启用的应用 |
+| 用户端会话   | 登录后浏览应用列表 → 进入对话；多轮对话保存到 `conversation` / `message`，回复内联展示工具调用轨迹（工具名、入参、返回、是否出错）并支持折叠，Markdown + GFM 渲染，可查看历史会话 |
+| 组织架构     | 部门树（物化路径、最多 10 级）、用户任职记录（单一主任职 + 调岗归档 + 历史可查）、管理单元（跨部门/人员的数据范围）、人力资源字典 |
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
 | 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
 | 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
-| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标                         |
+| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标、租户 token 用量账本     |
 | 工程化交付   | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本                         |
 
 ### 1.4 名词解释
@@ -63,37 +66,39 @@
 
 | 名词              | 用大白话解释                                                                         |
 |-------------------|--------------------------------------------------------------------------------------|
-| 智能体（Agent）   | 一个配置好的 AI 助手。比如“陪练剧本生成助手”，它有自己的人设、模型、欢迎语和可用能力 |
-| 工作流（Workflow） | 一条预先编排好的多步骤业务流水线。比如"Start 收 query → LLM 改写 → Tool 查数据库 → End 返回答案"，在画布上拖拽节点连线即可生成 |
-| 节点（Node）       | 工作流里的一个步骤。MVP 只支持 4 种：Start（开始）、LLM（调大模型）、Tool（调外部接口）、End（结束） |
-| 技能（Skill）     | 智能体会的一项本领，比如"根据业务信息生成剧本"                                       |
-| 工具（Tool）      | 智能体可以调用的外部接口，比如"查询天气""创建工单"。支持 HTTP 直连和 MCP 协议两种 |
+| 应用（Application）| 一个配置好的 AI 应用，本质是一张画布（DAG 或 Agent Loop），有自己的模型、提示词、工具与知识库 |
+| 画布（Canvas）    | 可视化编排界面。拖节点、连线，就得到一条可执行流程 |
+| 节点（Node）      | 画布里的一个步骤。Start 收输入、LLM 调模型、HTTP/API 调接口、Dataset 查知识库、IF 做分支、End 输出结果 |
+| 图版本（Graph Version） | 发布时冻结的图快照。改草稿不影响线上运行，可回滚，租户可钉住某个版本 |
+| 运行（Run）       | 一次执行记录，保存输入、输出、节点级耗时与用量，可用于排障与回放 |
+| 工具（Tool）      | 应用可以调用的外部接口，比如"查询天气""创建工单"。支持 HTTP 直连和 MCP 协议两种 |
 | MCP               | Model Context Protocol，一种标准的工具协议。租户跑一个 MCP Server，平台连上去自动发现它提供哪些工具，不用手写 JSON Schema |
-| 组件（Component） | 对话页面上的展示模块，比如欢迎语卡片、常见问题列表                                   |
+| 资源（Resource）  | 工具、提示词、技能、知识四类可复用能力的统一抽象，平台维护后可授权给租户 |
 | 提示词（Prompt）  | 写给 AI 模型的指令模板，决定它怎么理解和回答；支持 `{{变量}}` / `{{节点名.字段}}` 模板插值 |
-| 熔断（Circuit Breaker） | 保险丝。某个工具连续失败 5 次，自动"跳闸"30 秒不调它，直接返回"稍后重试"，避免压垮对方 |
-| 限流（Rate Limit） | 每个租户每秒最多调 20 次工具，超出直接返回"请稍后再试"，防止一个租户刷爆平台 |
+| 熔断（Circuit Breaker） | 保险丝。某个工具连续失败达到阈值后自动"跳闸"，一段时间内不调它，直接返回"稍后重试"，避免压垮对方 |
+| 限流（Rate Limit） | 每个租户每秒最多调固定次数工具，超出直接返回"请稍后再试"，防止一个租户刷爆平台 |
 | SSRF              | 服务端请求伪造。防止 AI 被 prompt 注入后让平台去访问云元数据（169.254.169.254）、本机（127.0.0.1）等危险地址 |
-| 模板市场          | 产品管理员做好的工作流样板，租户一键复制到自己名下再改，不用从空白画布开始 |
+| 应用市场          | 平台管理员上架应用，租户浏览、订阅/试用后在自己租户内使用 |
 | 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步                             |
 | Token             | 登录成功后服务器发的"通行证"。之后每次请求都带上它，服务器才知道你是谁               |
 | RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
-| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级智能体与资源并按租户/角色授权；产品级资源统一用全零 UUID（`00000000-0000-0000-0000-000000000000`）标识 |
-| 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，只能维护本租户自己的智能体与资源                    |
+| 产品级平台        | 通过 `adminsystem.<根域名>` 访问，跨租户运营，维护产品级应用、资源、模型与租户授权；产品级资源统一用全零 UUID（`00000000-0000-0000-0000-000000000000`）标识 |
+| 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，从市场开通应用，维护本租户自己的资源、角色与用户    |
 | 部门（Department）| 租户内的组织单元，支持树形层级（最多 10 级），用物化路径 `path=/<root>/.../<self>/` 存储以高效查询子树 |
 | 任职（Employment）| 用户在某个部门的任职记录；同一用户同一时刻仅一条 `is_current=TRUE`（部分唯一索引约束），调岗自动归档旧记录并写入新记录，保留完整历史 |
+| 管理单元（Mgmt Unit）| 跨部门 / 跨人员的业务管理范围，可把若干部门与人员组合成一个数据范围，用于授权与统计 |
 
 ### 1.5 角色与权限
 
-系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）、按钮（`button:*`）以及智能体/技能/工具/组件/提示词的增删改查（如 `agent:read`、`agent:update`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
+系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）、按钮（`button:*`）以及工具与文档的读写（如 `tool:read`、`document:update`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
 
 | 权限类别 | 作用                         | 示例                                                         |
 |----------|------------------------------|--------------------------------------------------------------|
 | `system` | 管理端入口与全量数据范围     | `system:console:access`、`system:data:all`                   |
-| `menu`   | 左侧菜单可见性               | `menu:roles`                                                 |
-| `page`   | 页面与对应接口访问           | `page:roles`                                                 |
-| `button` | 页面操作按钮                 | `button:role:grant`                                          |
-| 资源     | 资源读写                     | `agent:create` / `agent:read` / `agent:update` / `agent:delete` |
+| `menu`   | 左侧菜单可见性               | `menu:roles`、`menu:apps`、`menu:marketplace`                |
+| `page`   | 页面与对应接口访问           | `page:roles`、`page:tools`、`page:resources`                 |
+| `button` | 页面操作按钮                 | `button:role:grant`、`button:app:create`、`button:tool:create` |
+| `tool`   | 工具与知识库文档读写         | `tool:create` / `tool:read` / `tool:update` / `tool:delete`；`document:create` / `document:read` / `document:update` / `document:delete` |
 
 - 产品级平台与每个租户各自拥有 `superadmin` / `admin` / `viewer` 三个内置系统角色，不可删除、不可停用；平台与租户角色数据完全隔离。
 - `superadmin` 默认拥有所属作用域全部权限（含 `system:data:all`），其功能权限与数据授权在角色详情中只读。
@@ -112,12 +117,12 @@
 |----------|------------------------------------------------------------------------------|
 | 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17（pgvector HNSW）、Alembic、PyJWT + bcrypt |
 | 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2），用于文档 ingest      |
-| RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写） |
+| RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写）；向量库支持 pgvector / Milvus |
 | 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5、@xyflow/react（画布）、zustand（画布状态） |
 | 用户端   | React 19、TypeScript、Vite                                                   |
-| 工作流引擎 | 自研 DAG 拓扑分层调度（asyncio.gather 同层并行）、节点状态机（pending/running/success/error） |
+| 图执行引擎 | LangGraph 运行时（checkpoint 断点续跑）、节点编译与拓扑校验、SSE 流式调试 |
 | 工具协议 | MCP（Model Context Protocol）Streamable HTTP/SSE；HTTP 工具走统一治理网关 |
-| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标                       |
+| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标、租户用量账本         |
 | 测试     | pytest + httpx、Vitest + Testing Library、Playwright                         |
 | 代码质量 | ruff、mypy、oxlint、Prettier、pre-commit                                     |
 | 部署     | Docker Compose、Nginx、GitHub Actions                                        |
@@ -442,8 +447,8 @@ pnpm run stop          # 停止两个前端
 - [ ] `http://127.0.0.1:8000/health/ready` 返回 `ok`
 - [ ] `http://127.0.0.1:8000/docs` 能打开
 - [ ] `http://localhost:5173` 能用 `admin` 登录
-- [ ] 登录后能看到”智能体列表”页面
-- [ ] 能进入任一资源页面（如”技能”），成功新建一条记录
+- [ ] 登录后能看到「应用管理」页面
+- [ ] 能进入「资源管理」页面，成功新建一条记录
 - [ ] `http://adminsystem.localhost:5173` 能打开产品级登录页
 - [ ] 创建租户后，`http://<租户编码>.localhost:5173` 能打开对应租户的登录页
 
@@ -451,8 +456,8 @@ pnpm run stop          # 停止两个前端
 
 - [ ] `http://127.0.0.1:8001/health/live` 能返回
 - [ ] `http://<租户编码>.localhost:5174`（或 `http://localhost:5174?tenant=<租户编码>`）能用普通用户账号登录
-- [ ] 登录后看到智能体卡片列表，进入详情 Tabs 能看到技能/工具/组件/提示词
-- [ ] 进入聊天页能发送一条消息并收到回复；若智能体挂了工具，回复下方能看到可折叠的工具调用轨迹
+- [ ] 登录后看到应用卡片列表，能进入对话页
+- [ ] 进入对话页能发送一条消息并收到回复；若应用挂了工具，回复下方能看到可折叠的工具调用轨迹
 
 全部通过，说明本地环境已经可用。
 
@@ -472,16 +477,28 @@ pnpm run dev     # http://localhost:5174
 
 登录后路由与页面能力：
 
+> 前端页面路径暂沿用 `/agents/:appId`（历史路径），语义上就是「应用」。
+
 | 路径                          | 页面           | 能力                                                                                                          |
 |-------------------------------|----------------|---------------------------------------------------------------------------------------------------------------|
 | `/login`                      | 登录页         | 用户名/密码 + 租户编码（仅本地回环展示）；`next` 参数仅限站内相对路径，防开放重定向                             |
-| `/`                           | 智能体列表     | 卡片展示当前租户下被授权且已启用的智能体（头像、名称、简介、入口按钮）                                          |
-| `/agents/:agentId`           | 智能体详情     | Tabs 查看技能 / 工具 / 组件 / 提示词（按资源数量自动隐藏空 Tab），可直接进入聊天                                |
-| `/agents/:agentId/chat`      | 聊天页         | 多轮对话（携带 `conversation_id`）、建议提示词、Markdown + GFM 渲染、清空会话、工具调用轨迹折叠（名称/入参/返回/是否出错） |
+| `/`                           | 应用列表       | 卡片展示当前租户下可见且已启用的应用（头像、名称、简介、入口按钮）                                              |
+| `/agents/:appId`              | 应用详情       | 展示应用元信息与可用工具/提示词（资源 Tab 按数量自动隐藏空 Tab），可直接进入对话                                |
+| `/agents/:appId/chat`         | 对话页         | 多轮对话（携带 `conversation_id`）、建议提示词、Markdown + GFM 渲染、清空会话、工具调用轨迹折叠（名称/入参/返回/是否出错） |
 
-聊天接口为 `POST /user/agents/:agentId/run`（同步返回），响应体包含 `content`、`tool_traces[]`、`iterations`、`usage`、`finish_reason`。
+用户端接口（前缀 `/api/v1/user`）：
 
-> 设计稿参考：仓库根目录的 `chat-progressive-disclosure.png`，聊天页按"渐进式披露"原则默认折叠工具调用细节，只在用户主动展开时展示入参与返回。
+| 方法 | 路径 | 说明 |
+| --- | --- | --- |
+| GET | `/user/agents` | 分页返回当前用户可见应用卡片 |
+| GET | `/user/agents/{appId}` | 应用详情（模型、提示词、工具等运行前元信息） |
+| POST | `/user/agents/{appId}/run/stream` | SSE 流式对话，推送 `run_start / llm_start / llm_end / tool_start / tool_end / result / error / final` |
+| POST | `/user/agents/{appId}/run` | 非流式对话（同步返回 `content`、`tool_traces[]`、`iterations`、`usage`、`finish_reason`） |
+| POST | `/user/agents/{appId}/workflow/run` | 按 DAG 模式非流式运行 |
+| GET | `/user/agents/{appId}/conversations` | 会话列表 |
+| GET | `/user/agents/{appId}/conversations/{conversationId}/messages` | 会话消息历史 |
+
+> 对话页按「渐进式披露」原则默认折叠工具调用细节，只在用户主动展开时展示入参与返回。
 
 ### 3.6 懒人版一键启动
 

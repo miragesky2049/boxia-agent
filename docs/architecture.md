@@ -63,10 +63,10 @@ application/auth_service.py
 前端：access 放内存，refresh 放 localStorage
 ```
 
-### 12.4 一次资源查询/写入的旅程
+### 12.4 一次应用查询/写入的旅程
 
 ```text
-GET/POST /api/v1/admin/agents
+GET/POST /api/v1/admin/apps
   ▼
 web/admin/router.py（统一管理员鉴权）
   ▼
@@ -76,25 +76,64 @@ web/deps/auth.py
   ├─ 校验令牌作用域与当前域名一致（跨作用域 401）
   ├─ 查询数据库中的账号、角色与功能权限编码
   ├─ 构建 AdminPrincipal + AccessScope（tenant_id、role_id、是否平台）
-  └─ 接口再按 page:*/button:*/资源读写权限校验（不满足返回 403）
+  └─ 接口再按 page:*/button:*/tool:* 权限校验（不满足返回 403）
   ▼
-web/admin/routers/agents.py（请求/响应模型）
+web/admin/routers/apps_admin.py（require_platform_admin，仅产品级平台可写）
   ▼
 Scoped UnitOfWork：在同一 Session 上重建仓储并应用作用域
   ▼
-application/agent_service.py（业务规则、默认值、归属校验、克隆与授权）
+internal/application/apps/application_service.py（业务规则、默认值、归属校验）
   ▼
-infrastructure/repository/postgres_agent_repository.py
-  ├─ tenant_id 过滤（平台只看产品级，租户看本租户 + 被授权产品级）
-  ├─ resource_grants EXISTS 子查询按角色收窄，不产生行膨胀
-  └─ 未授权详情统一返回 404
+internal/infrastructure/repository/apps/application_repository.py
+  ├─ 草稿图写 application_graph，发布写不可变 application_graph_version
+  ├─ tenant_id 过滤（平台看 tenant_id IS NULL，租户看本租户）
+  └─ 未授权 / 不可见统一返回 404
   ▼
 UnitOfWork.commit()
-  ├─ 业务数据（资源、授权、审计同一事务）
+  ├─ 业务数据（应用、图版本、可见范围、审计同一事务）
   └─ 审计日志
 ```
 
-### 12.5 刷新令牌的轮换流程
+资源（工具 / 提示词 / 技能 / 知识）走同一套鉴权与作用域，只是换成 `web/admin/routers/resources.py` + `internal/application/apps/resource_service.py`。租户侧的「已开通应用」由 `tenant_application_instance` 承载（钉住图版本、配额、有效期），资源侧由 `resource_grant` 按租户开放。
+
+### 12.5 一次应用运行的旅程
+
+应用有两种运行形态，入口相同、执行器不同：
+
+| 形态 | 执行器 | 适用 |
+| --- | --- | --- |
+| 对话 / agent_loop | `ChatService` 的 ReAct 循环（`LLMClient` + 工具执行） | 用户端对话、工具调用轨迹 |
+| DAG / workflow | `GraphRuntime`（LangGraph 编译画布） | 节点编排、单节点调试、断点续跑 |
+
+```text
+用户端 POST /api/v1/user/agents/{appId}/run/stream（SSE）
+  ▼
+web/user/deps/auth.py（最终用户令牌，tid 绑定当前租户）
+  ▼
+web/user/routers/agents.py 解析 application_id
+  ▼
+校验可见性：租户实例 / 授权 / 可见部门与用户
+  ▼
+internal/application/apps/chat_service.py
+  ├─ 读取会话与历史消息（conversation / message）
+  ├─ chat：拼系统提示 + 历史 + 工具 → ReAct 循环
+  └─ workflow：web/deps/graph.py:build_runner() 构造 GraphRuntime
+  ▼
+internal/domain/graph/runtime.py（GraphRuntime）
+  ├─ 按 application_id 取运行时图（Redis 缓存 + 租户 pin / config 覆盖）
+  ├─ 节点执行：llm / http / api_plugin / code / dataset / loop / ...
+  ├─ RAG 节点：RetrievalService 召回 → rerank → 注入 prompt
+  ├─ 工具节点：ToolExecutorService → ToolGateway（SSRF → 熔断 → 限流 → 重试 → 连接池 → 8KB 截断）
+  └─ checkpoint 落库（tenant 隔离），支持断点续跑 / 单节点调试
+  ▼
+SSE 事件流：节点开始 / 增量 token / 工具调用轨迹 / 节点结束 / 运行结束
+  ▼
+写 run / run_node_execution / message，更新 usage ledger
+```
+
+发布链路则是：`application_graph`（草稿）→ 发布生成 `application_graph_version`（不可变）→ 市场开通生成 `tenant_application_instance` 并钉住版本 → 回滚 = 切换实例指向的版本。
+
+### 12.6 刷新令牌的轮换流程
 
 ```text
 前端发现 Access Token 过期（401）
@@ -113,7 +152,7 @@ UnitOfWork.commit()
 
 多个标签页同时刷新时，前端使用 Web Locks 保证只有一个标签页真正发起刷新，其他标签页等待结果。
 
-### 12.6 数据库迁移流程
+### 12.7 数据库迁移流程
 
 ```text
 修改 ORM 模型

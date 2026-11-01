@@ -18,7 +18,21 @@ uv run alembic check                # 迁移漂移检查
 
 测试会自动创建独立数据库 `boxia_agent_test`，每次会话重建并执行全部迁移，每个用例前清理数据，互不影响。测试默认连接 `postgres:postgres@127.0.0.1:5432`，且账号需要有建库权限；如果你的本地配置不同，需要修改 `backend/tests/conftest.py` 顶部的连接配置。
 
-覆盖范围包括：登录/刷新/撤销/锁定、RBAC、审计、四类资源 CRUD、智能体配置、多租户作用域隔离（子域名识别、跨作用域令牌拒绝、租户账号与审计隔离）、角色与用户管理、管理员账号、授权汇总/批量授权/租户作用域与可见性矩阵、资源克隆、用户门户（`tests/test_roles.py`、`test_users.py`、`test_admin_users.py`、`test_grants.py`、`test_resource_clone.py`、`test_user_portal.py`）、admin/user 站点路由隔离（`tests/test_site_isolation.py`）、错误模型、健康检查等。
+覆盖范围按模块分组：
+
+| 领域 | 代表性测试文件 | 覆盖内容 |
+| --- | --- | --- |
+| 认证与安全 | `test_auth.py`、`test_auth_service.py`、`test_site_isolation.py` | 登录 / 刷新 / 撤销 / 锁定、admin 与 user 站点路由隔离、错误模型 |
+| 权限与租户 | `test_roles.py`、`test_role_permissions.py`、`test_platform_roles.py`、`test_tenants.py`、`test_tenant_settings.py` | RBAC 权限目录、平台内置角色、租户作用域、租户配置 |
+| 用户与组织 | `test_users.py`、`test_admin_users.py`、`test_departments.py`、`test_employments.py`、`test_employment_hr_fields.py` | 用户、管理员账号、部门 / 任职 / 管理单元 |
+| 授权与可见性 | `test_grants.py`（`test_role_grants.py`、`test_user_grant_save.py`）、`test_visibility.py`、`test_marketplace_workbench.py` | 角色授权、资源授权、应用可见范围、市场开通工作台 |
+| 资源与工具 | `test_resources.py`、`test_tool_gateway.py`、`test_tool_executor_service.py`、`test_ssrf_guard.py` | 四类资源 CRUD、工具网关（熔断 / 限流 / 重试 / SSRF） |
+| 画布与运行时 | `test_canvas_convert.py`、`test_compiler_runtime.py`、`test_node_meta_contract.py`、`test_variable_system.py`、`test_template_refs.py` | 画布 DSL 转换、节点元数据契约、变量系统 |
+| 节点实现 | `test_llm_*.py`、`test_http_node.py`、`test_code_node.py`、`test_if_else_node.py`、`test_loop_*.py`、`test_dataset_node.py`、`test_api_plugin_node.py`、`test_subworkflow_node.py`、`test_agent_loop*.py`、`test_comment_node.py` | 各节点类型行为、流式输出、多模态、工具调用、循环与分支 |
+| 图生命周期 | `test_publish_graph.py`、`test_single_node_debug.py`、`test_graph_runtime_e2e.py`、`test_graph_object_storage.py`、`test_checkpointer_tenant_isolation.py` | 发布 / 版本、单节点调试、断点续跑、检查点多租户隔离 |
+| 会话与多租户运行 | `test_app_conversations.py`、`test_async_message_adapter_tenant_scope.py` | 应用会话历史、异步消息适配器租户隔离 |
+| RAG 与模型 | `test_retrieval_services.py`、`test_vector_store_factory.py`、`test_model_service_catalog.py`、`test_llm_node_tools.py` | 召回 / 精排、向量库抽象、模型目录 |
+| 运维 | `test_ops.py` | 健康检查、运维接口 |
 
 ### 11.2 管理端
 
@@ -83,9 +97,11 @@ APP_ENV=local ROOT_DOMAIN=localhost ALLOW_TENANT_HEADER=true \
   uv run uvicorn web.app_admin:app --host 127.0.0.1 --port 8000
 ```
 
-覆盖场景：登录失败、会话恢复、登出跳转、智能体内技能 CRUD、智能体保存回显、404、首登改密、viewer 只读（无写入口、越权页面 404）。
+覆盖场景（`e2e/admin.spec.ts`）：登录失败、会话恢复、登出跳转、技能 CRUD、智能体保存回显、404、首登改密、viewer 只读（无写入口、越权页面 404）。
 
-多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、平台智能体授权后才在租户可见、租户管理员管理角色与用户。
+> 注意：E2E 用例目前仍走历史路径 `/agents`（含 `/agents/new`、`/agents/:id/edit`）与历史文案「智能体」，与后端「应用」模型是同一份数据，只是尚未改名。若你改动了这些路由或页面结构，需要同步修改 `e2e/*.spec.ts`。
+
+多租户用例（`e2e/tenant.spec.ts`）会通过平台 API 创建测试租户并切换作用域：本地 `localhost` 上使用登录页下拉框或 `?tenant=`（请求头模式），同时覆盖直接访问 `http://<租户编码>.localhost:5173` 的真实子域名解析。因此 `E2E_USERNAME` 必须是**产品级 superadmin**（默认 `admin`），后端需以 `APP_ENV=local`、`ROOT_DOMAIN=localhost`、`ALLOW_TENANT_HEADER=true` 启动（CI 已配置）。用例覆盖：平台租户管理（含编辑租户名称）、作用域切换限制、租户子域名访问、租户管理员作用域限制、平台应用授权后才在租户可见、租户管理员管理角色与用户。
 
 ### 11.4 CI 与提交前检查
 
