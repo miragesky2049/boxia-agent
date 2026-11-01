@@ -16,6 +16,15 @@ export interface ConfigFieldMeta {
   required: boolean
   placeholder: string
   description: string
+  group: string
+}
+
+export interface NodeCapabilities {
+  runnable: boolean
+  copyable: boolean
+  deletable: boolean
+  has_subgraph: boolean
+  has_outputs: boolean
 }
 
 export interface NodeMeta {
@@ -25,6 +34,10 @@ export interface NodeMeta {
   color: string
   category: string
   description: string
+  icon: string
+  subtitle_hint: string
+  next_recommendations: string[]
+  capabilities: NodeCapabilities
   inputs: PortMeta[]
   outputs: PortMeta[]
   config_fields: ConfigFieldMeta[]
