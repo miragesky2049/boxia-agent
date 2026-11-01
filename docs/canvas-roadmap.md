@@ -1448,7 +1448,7 @@ Coze 右侧配置抽屉的统一骨架（从 LLM 和 IF 节点截图提取）：
   - **输入体验（U-I1~U-I3）**：`RefChipInput.tsx` 单行输入 + 同边框容器内蓝色 monospace 胶囊 chip（可点 × 删除）；`EmptyCanvasWelcome.tsx` 空画布居中欢迎卡片；`configSections.ts` 按节点类型分组（模型设置/提示词/高级/请求设置/认证等）。
   - **细节 polish（U-P1~U-P6）**：Ctrl+S 保存、Ctrl+Enter 试运行、Ctrl+Z/Y 撤销重做（FlowGram 内置 ctx.history）；`CanvasContextMenu.tsx` 画布右键菜单（添加/复制/粘贴/删除/自动排版/适应视图）；`selectBox={{enabled:true}}` 框选多选；<1024px 窄屏自动隐藏左侧面板。
   - **节点配置（U-S1~U-S4, U-DS1, U-HTTP1, U-CODE1）**：顶部保存状态"已保存/保存中…/失败" + 最后保存时间；抽屉标题可直接编辑实时同步画布；Delete 删除节点弹 Modal 二次确认；端口 hover 显示字段名 tooltip（`usePortTooltips.ts` MutationObserver）；datasetId 字段占位 Select；URL 字段下方显示 `{{node.output.id}}` 语法提示；`RefChipInput` 支持 `highlightPathParams` prop，URL 字段启用后 `:param` 渲染为橙色 monospace 胶囊（#fff7ed/#ea580c，仅高亮不可删），与蓝色 `{{ref}}` chip 共存；code_editor 深色背景等宽字体。
-  - **已砍掉**：U-N4 对齐辅助线（FlowGram free-layout-editor 未暴露 snap/guide API，MVP 跳过）；U-LOOP1 while 循环 Segmented（后端未实现 while）；U8 顶部双 Tab（无 UI Builder 概念）。
+  - **已砍掉**：U-N4 对齐辅助线（FlowGram free-layout-editor 未暴露 snap/guide API，MVP 跳过；2026-11-01 改为「只显示不吸附」折中方案，见 N9-12）；U-LOOP1 while 循环 Segmented（后端未实现 while）；U8 顶部双 Tab（无 UI Builder 概念）。
   - 前端 `npx tsc --noEmit` 干净，`npx vite build` 通过（AppEditPage chunk 840KB，gzip 260KB）。
 
 - 2026-10-31（补漏）：3 个 P1/P2 任务修正。
@@ -1481,7 +1481,7 @@ Coze 右侧配置抽屉的统一骨架（从 LLM 和 IF 节点截图提取）：
   - **浏览器验证**：IF 抽屉左值点击展开下拉，列出"开始/出口"、"大模型/输出"、"HTTP 请求/输出"等选项；代码节点抽屉顶部出现"输入变量"分组（空态"+ 添加键值对"按钮），下方为深色代码编辑器。
 
 - 2026-10-31（补漏 6）：差距点全面梳理 + 代码质量修复。
-  - **梳理结果**：逐节点（LLM/HTTP/IF/Code/Dataset/Loop/AgentLoop）对照 Coze 标准结构，所有 UI 对齐任务已完成；剩余 ❌ 项均为"砍掉"（U-N4 对齐辅助线、U-LOOP1 while 循环、U8 双 Tab）或"不做"（栅格切换、连线标签、实时预览、LLM Segmented Tab）。
+  - **梳理结果**：逐节点（LLM/HTTP/IF/Code/Dataset/Loop/AgentLoop）对照 Coze 标准结构，所有 UI 对齐任务已完成；剩余 ❌ 项均为"砍掉"（U-N4 对齐辅助线〔2026-11-01 已改为折中实现，见 N9-12〕、U-LOOP1 while 循环、U8 双 Tab）或"不做"（栅格切换、连线标签、实时预览、LLM Segmented Tab）。
   - **修复 antd Modal deprecation**：试运行 Modal 的 `destroyOnClose` 改为 `destroyOnHidden`（antd 5.x 新 API），消除 console warning。
   - **已知非阻塞 console 噪音**（不阻塞 UI，记录待后续处理）：
     - `/admin/documents` 403：admin 角色缺 `document:read` 权限，前端 catch 已显示空态"暂无知识库文档"，但浏览器自动输出红色 console error；需后端给 admin 角色补权限或前端改用无权限端点。
@@ -1872,7 +1872,7 @@ if (delta < 5) {
 - ❌ 插件/数据分组 —— 已从 V4 砍掉（我们没这两个概念，空态会让用户困惑）
 - ❌ Dify 左侧应用导航 / 右侧固定面板 / 灰色连线 —— 结构以 Coze 为标准
 - ❌ Dify 源码参考 —— 仅借鉴交互思路（V9/V10），不抄任何组件代码
-- ❌ 对齐辅助线 —— FlowGram 未暴露 API（维持原砍掉决策）
+- ~~❌ 对齐辅助线~~ —— 2026-11-01 评估后改为**折中实现：只显示参考线、不吸附**（FlowGram 未暴露对齐/吸附 API，但 DOM 层可覆盖核心提示价值），见 N9-12
 - ❌ Dify 输入字段 chip 化（B3）—— 本期已通过 RefChipInput 覆盖单行场景，START 节点字段平铺保持原样
 
 ---
@@ -2109,3 +2109,641 @@ T8-01（tool_list）→ T8-02（复制粘贴）→ T8-03（重命名）→ T8-04
 - **关键修复（FlowGram 数据载体）**：节点数据存放在 `node.getExtInfo()` / `node.updateExtInfo()`，`node.data` 恒为空对象；此前的 `node.data = {...}` 写入全部无效，导致重命名、输出字段、子图初始化不生效。渲染器改为订阅 `node.onExtInfoChange` 后读取 extInfo，`handleConfigChange` / `handleOutputsChange` / 复制粘贴全部改走 `updateExtInfo`。
 - **顺带修复**：右键「适应视图」仍走已废弃的 `ctx.viewport`，改为 `ctx.document.fitView(true)`；`config` 不再混入 `title`；配置抽屉开关与选中态分离（关闭抽屉后仍可右键复制/删除）。
 - **验证**：`tsc --noEmit` EXIT:0；`vite build` 18.4s 通过（AppEditPage 863.83 kB / gzip 265.64 kB）；Playwright E2E 13/13 通过（添加/分组/上游输入/空配置提示/ToolList/重命名/复制粘贴），控制台 0 error。
+- **拖线到空白弹节点面板（用户选中片段修复）**：原实现读取不存在的 `params.startPosition`，导致该交互永不触发；改用 FlowGram 官方 `params.mousePos`（画布世界坐标）+ `ctx.playground.config.toFixedPos()` 转屏幕坐标，并按视口钳制弹层位置，`fromPort.node.id` 作为源节点自动连线。Playwright 验证 10/10：弹层出现、位置贴近鼠标释放点、底部空白处按视口高度钳制、选择「文本处理」后节点数 +1 且自动生成连线，控制台 0 error。
+
+---
+
+## 十三、2026-11-01 阶段 9：Coze/Dify 实机对照与交互优化
+
+### 13.1 目标与约束
+
+- **结构标准**：以 Coze 为准（布局、入口位置、信息层级、交互路径）。
+- **展示形式**：可借鉴 Dify 更优的呈现方式（如端口「+」、下一步推荐），但只学交互思路，**禁止复制 Dify 源码**。
+- **冲突处理**：Coze 与 Dify 在同一交互点上做法不一致时，**必须先提示用户选择**，不得自行裁决；决策结果记录到 13.5。
+- **本阶段边界**：只做前端交互/UI 与必要的元数据补全，不改执行器语义。
+
+### 13.2 实机对照现状与阻塞（重要）
+
+| 站点 | 网络 | 当前结果 | 恢复条件 |
+|---|---|---|---|
+| Coze `coze.cn/space/.../project-ide/7701916545001963558` | 直连 200 | ✅ 已登录并完成截图（CDP 9222，profile `C:/Users/Lenovo/.claude/cache/boxia-pw-coze`） | 已完成 |
+| Dify `cloud.dify.ai/app/a4854dd1.../workflow` | 需系统代理 `127.0.0.1:7890` | ✅ 已登录并完成截图（CDP 9223，profile `C:/Users/Lenovo/.claude/cache/boxia-pw-dify`） | 已完成 |
+
+- 截图清单（`docs/canvas-refs/`）：
+  - Coze：`coze-01-canvas` 画布整体（30% 自适应）、`coze-02-node-selected`、`coze-03-config-panel`（右侧浮层 + 输入/代码/输出分组）、`coze-04-port-hover`（输出端口紫色「+」特写）、`coze-05-dragging`、`coze-06-add-node-panel`（拖到空白弹出的搜索 + 双列分组卡片）、`coze-07-line-selected`（选中连线亮青色）、`coze-08-box-select`（Shift 框选，含「已选中 10 个节点」）、`coze-09-multi-selected`。
+  - Dify：`dify-01-canvas`（25% 全览）、`dify-02-node-selected`（选中蓝框 + 节点上方 ▶/⋯ + 端口蓝色「+」特写）、`dify-03-config-panel`（右侧常驻面板：设置/上次运行 Tab）、`dify-04-port-hover`、`dify-05-dragging`（虚线拖拽引导）、`dify-06-add-node-panel`（点击「+」弹出：节点/工具/开始/Snippets Tab + 搜索 + 分类）、`dify-07-line-selected`（连线变蓝 + 中点「+」）、`dify-08-box-select`（普通左键拖拽框选）、`dify-09-multi-selected`。
+- **实测差异补充**：①Coze 适配视图藏在缩放下拉「自适应」；Dify 无 fit 入口，仅缩放 +/- 与小地图。②Coze 框选需 Shift+拖拽，普通拖拽=平移；Dify 普通左键拖拽=框选。③Dify 左侧另有竖排工具栏（添加节点/注释/指针/手/整理节点/导出图片），Coze 无。④Dify 节点 hover 在节点上方浮出 ▶/⋯；Coze 在节点卡片右上角。
+- **不阻塞项**：13.3 的 T9-02~T9-06 基于既有差距清单（7.5 / 7.7 / 7.8 / 9.7）即可先做，无需等待登录。
+
+### 13.3 任务清单
+
+#### T9-01（P0，人工 0.5h）实机登录与基准截图
+
+- **动作**：用户在有头浏览器分别登录 Coze / Dify → 打开两个工作流 → 按 13.2 的 4 类基准截图保存到 `docs/canvas-refs/`（coze-*.png / dify-*.png）。
+- **产出**：截图 + 13.5 冲突裁决表首轮填写。
+- **验收**：截图可读取；每个差异点在 13.5 有"采用 Coze / 采用 Dify / 两者融合"结论。
+- **阻塞时**：T9-01 挂起，继续执行 T9-02 起的任务，不得以未对照为由停工。
+
+#### T9-02（P0，3h）节点快捷键复制 / 粘贴
+
+- **问题**：目前只能通过画布右键菜单复制/粘贴，Coze 支持 `Ctrl/Cmd+C`、`Ctrl/Cmd+V`。
+- **修改文件**：`frontend/admin/src/pages/apps/AppEditPage.tsx`（现有 `onKeyDown`）。
+- **实现**：
+  - 焦点在 `input/textarea/[contenteditable]` 时保持浏览器默认行为，不拦截。
+  - `Ctrl/Cmd+C` 且 `selectedNodeId` 存在 → `copyNode()`；`Ctrl/Cmd+V` → `pasteNode()`。
+  - 与 FlowGram 自带的文本复制不冲突：仅当画布区域获得焦点且当前无文本选区时触发。
+  - 复用现有 `nodeClipboardRef` + `localStorage(boxia_node_clipboard)`，不新增剪贴板通道。
+- **验收**：选中节点后 `Ctrl+C` → `Ctrl+V` 生成偏移副本，配置/标题/输出一致；输入框内复制粘贴不受影响；无选中时不报错。
+
+#### T9-03（P0，4h）多选与批量删除（U-P5）
+
+- **前置 Spike（1h，已完成）**：FlowGram `selectBox` 插件默认启用，框选与 Shift+点选均为原生能力（`useNodeRender` 的 mousedown 已处理 `e.shiftKey` → `toggleSelect`）；无需自绘选框。缺的是 React 状态同步与批量删除入口。
+- **补充发现**：FlowGram 内置 Delete 快捷键会绕过确认弹窗直接删除选中节点，必须在 window 捕获阶段拦截。
+- **修改文件**：`AppEditPage.tsx`、`components/NodeCard.tsx`。
+- **实现**：
+  - Shift+点击节点切换多选；空白处拖拽画选框，命中节点加入选集。
+  - 多选时按 Delete 弹一次确认，批量删除；START 节点不可删，提示后跳过。
+  - 多选时配置抽屉不自动打开；单击空白清除选集。
+- **验收**：框选 2 个节点后 Delete 二次确认 → 全部删除；选中态样式与单选一致且可区分；删除 START 被拦截。
+
+#### T9-04（P1，3h）配置抽屉分组折叠 + 说明（对齐 Coze 7.7.1）
+
+- **问题**：`NodeConfigForm` 的分组是普通 `div` 平铺，Coze 为可折叠分组 + `ⓘ` 说明。
+- **修改文件**：`AppEditPage.tsx`（NodeConfigForm 分组渲染）。
+- **实现**：
+  - 分组标题改为可点击折叠行（箭头旋转），默认展开，「高级」默认折叠。
+  - 字段说明从 `field.description` 收进 `ⓘ` Tooltip，减少正文噪音。
+  - 折叠状态按 `type_key` 记忆到 `localStorage`，刷新保持。
+- **验收**：LLM / HTTP / 代码节点抽屉分组可展开折叠；「高级」默认收起；刷新后状态保持。
+
+#### T9-05（P1，2h）窄屏自动折叠左侧栏（U-P4）
+
+- **问题**：`sidebarCollapsed` 只有手动切换，窄屏不自动降级。
+- **修改文件**：`AppEditPage.tsx`。
+- **实现**：`matchMedia('(max-width: 1100px)')` 变化时自动折叠；用户手动展开后本次会话不再强制覆盖。
+- **验收**：视口缩到 1000px 左侧栏自动收起；放大恢复；手动展开不被反复覆盖。
+
+#### T9-06（P1，2h）连线选中与删除
+
+- **问题**：FlowGram 允许删除连线，但选中态与删除入口未验证/未显式暴露。
+- **修改文件**：`AppEditPage.tsx`、全局画布样式。
+- **实现**：点击连线高亮（加粗/变色）→ 按 Delete 删除；右键菜单增加「删除连线」；拖线时合法端口高亮。
+- **验收**：点击连线有明确选中态；Delete 可删除；删除后自动保存；拖线时目标端口高亮。
+
+#### T9-07（P2，3h）实机差异修补
+
+- **依赖**：T9-01 完成。
+- **动作**：按 13.5 决议逐项落地实机对照发现的新差异，单条差异单独提交，不与 T9-02~T9-06 混改。
+
+### 13.4 执行顺序
+
+```
+T9-01（人工，可与后续并行）
+  └─ T9-02（快捷键）→ T9-03（多选）→ T9-04（分组折叠）→ T9-05（窄屏）→ T9-06（连线）
+       └─ T9-07（实机差异修补，依赖 T9-01 截图）
+```
+
+- 每个任务完成即跑 `tsc --noEmit`；T9-03 / T9-06 额外跑 Playwright 交互断言。
+- T9-01 未完成时不得跳过 13.5 决议直接做 T9-07。
+
+### 13.5 冲突裁决记录表
+
+> 规则：Coze 与 Dify 做法冲突时先问用户，确认后回填本表。未确认的行不得进入编码。
+
+| # | 交互点 | Coze 做法（实机） | Dify 做法（实机） | 裁决 | 确认人/时间 |
+|---|---|---|---|---|---|
+| 1 | 配置面板形态 | 右侧约 390px 浮层抽屉覆盖画布，单击节点即打开；内含输入/代码/输出分组与 ⓘ 说明 | 右侧常驻面板挤压画布，顶部有关闭按钮；内含「设置 / 上次运行」Tab | **采用 Coze 浮层抽屉**（保持 antd Drawer，不挤压画布） | 郑海明 / 2026-11-01 |
+| 2 | 底部工具条 | 居中浮条：鼠标模式、缩放下拉（含「自适应」）、±、导出菜单、小地图、+ 添加节点、试运行 | 左下撤销组 + 中左变量检查 + 右下缩放/小地图；左侧另有竖排工具栏（添加节点/注释/指针/手/整理节点/导出图片） | **采用 Coze 居中浮条** | 郑海明 / 2026-11-01 |
+| 3 | 节点输出端口 | hover 输出端口显示紫色「+」；从端口拖拽，拖到空白释放才弹出节点面板并自动连线 | hover 显示蓝色「+」；点击「+」立即弹出节点选择面板（节点/工具/开始/Snippets Tab） | **采用 Coze：拖到空白弹面板** | 郑海明 / 2026-11-01 |
+| 4 | 连线样式 | 紫色/靛蓝贝塞尔 + 箭头；hover 加深；选中变亮青色并加粗 | 浅灰细贝塞尔无箭头；选中变蓝并在中点显示「+」 | **采用 Coze：紫色 + 箭头 + 选中加粗** | 郑海明 / 2026-11-01 |
+| 5 | 撤销/重做入口 | 底部浮条未见按钮，主要靠快捷键 | 左下角「撤销 / 重做 / 变更历史」按钮 + 快捷键 | **采用 Dify：按钮 + 快捷键** | 郑海明 / 2026-11-01 |
+| 6 | 多选交互 | Shift+拖拽框选；普通左键拖拽为平移画布 | 普通左键拖拽即框选（无需 Shift）；Shift+点击加选 | **采用 Coze：Shift 框选，普通拖拽平移** | 郑海明 / 2026-11-01 |
+
+### 13.6 验证清单（阶段 9 已完成）
+
+- [x] T9-02：Ctrl+C / Ctrl+V 在画布焦点下生效，输入框内不拦截
+- [x] T9-03：框选 + 批量删除二次确认，START 不可删
+- [x] T9-04：分组折叠状态按节点类型持久化
+- [x] T9-05：<1100px 自动折叠左侧栏，手动展开不被覆盖
+- [x] T9-06：连线选中态 + Delete 删除 + 拖线端口高亮
+- [x] 每任务后 `tsc --noEmit` EXIT:0
+- [x] 阶段收口 `vite build` 通过、控制台 0 error
+- [x] 13.5 冲突表无「待确认」行（T9-07 前置）
+- [x] T9-07：空白左键拖拽平移（位移与鼠标 1:1）、Shift+拖拽框选
+- [x] T9-07：底部浮条撤销/重做按钮可用态随 history 同步，点击生效
+- [x] T9-07：输出端口 hover 紫色「+」；拖线到空白弹出节点面板
+- [x] T9-07：连线主色 #5044fc + 箭头，选中 3px 亮青 #22c1e8
+- [x] T9-07：`tsc --noEmit` EXIT:0、`vite build` 通过、控制台 0 error
+
+### 13.7 落地记录（2026-11-01，阶段 9 已收口）
+
+- **T9-02 节点快捷键复制/粘贴**：`onKeyDown` 增加 `Ctrl/Cmd+C`、`Ctrl/Cmd+V`；输入框聚焦或存在文本选区时放行浏览器默认行为；复用 `copyNode` / `pasteNode` 与既有 localStorage 剪贴板。顺带修复：节点单击原本不更新 React 选中态（仅双击更新），改为订阅 `ctx.selection.onSelectionChanged` 统一同步单击/多选状态。
+- **T9-03 多选与批量删除**：
+  - 框选与 Shift+点选为 FlowGram 原生能力（`selectBox.enabled` + `useNodeRender.toggleSelect`），无需自绘。
+  - 新增 `selectedNodeIds` 状态，订阅选中事件后驱动批量删除入口；关闭抽屉与选中态解耦：多选/清空/切到其他节点时自动收起抽屉，重复选中同一节点不误关。
+  - `Delete` / `Backspace` 弹一次确认；批量删除自动跳过 START 并提示；删除后清理 FlowGram 选中集合，避免残留已删除节点导致后续点击不再触发选中同步。
+  - **关键修复**：FlowGram 内置 Delete 会直接删除节点，抢在确认弹窗前执行。键盘监听改为 window **捕获阶段**并在 Delete 分支 `stopPropagation + stopImmediatePropagation`，确保所有删除都走二次确认。
+- **T9-04 配置分组折叠 + 字段说明**：新增 `ConfigSectionBox`，分组标题可点击折叠，状态按 `type_key + 标题` 写入 `localStorage`（key `boxia_cfg_sections_{typeKey}`），刷新后保持；`高级` 默认折叠，其余默认展开。字段 `description` 渲染为 `ⓘ` + antd Tooltip。
+- **T9-05 窄屏自动折叠左侧栏**：`matchMedia('(max-width: 1100px)')` 监听，窄屏自动 `sidebarCollapsed=true`；手动展开通过 `manualSidebarExpandRef` 标记，宽屏恢复时不强制覆盖，再次变窄仍强制折叠。
+  - 顺带修复两处布局问题：① 移除旧的 `@media (max-width: 1280px) { .boxia-left-panel { display:none } }` 规则（与新折叠逻辑冲突，导致面板宽 0）；② `ResourceSidebar` 两个分支补 `flexShrink: 0`，避免画布 `flex:1` 把侧栏压成 0 宽。
+- **T9-06 连线选中与删除**：
+  - 点击连线由 FlowGram 原生写入 selection（`WorkflowLineEntity`），选中态通过 path 的 `stroke-width` 2→3 区分；原 CSS 的 `stroke-width: 2 !important` 把选中态抹平，改为只覆盖 stroke 颜色，并用 `path[stroke-width='3']` 加粗变色 + 投影。
+  - window 捕获阶段 Delete：无节点选中但 selection 含连线时，直接 `line.dispose()` 删除（不走二次确认），触发 `DELETE_LINE` → `onContentChange` 自动保存。
+  - 右键连线：`getCloseInLineFromMousePos` 命中后菜单只展示「删除连线」。
+  - 拖线时用 `getPortFromMousePos` 命中输入端口并打标 `.boxia-port-drop-target`（FlowGram 绘制态不做 hover），端口放大 + 光圈。
+  - **顺带修复**：点击/拖动已有连线会被 FlowGram 回调 `onDragLineEnd`（`originLine` 非空、落点在线上），导致误弹「添加节点」面板并抢走焦点，使 Delete 失效；`onDragLineEnd` 增加 originLine / 端口 / 连线 / 节点落点判断。
+- **验证**：`tsc --noEmit` EXIT:0；Playwright 快捷键 3/3、多选/批量删除 9/9、分组折叠 14/14、窄屏折叠 6/6、连线交互 11/11，控制台 0 error。
+- **T9-01 实机对照完成（2026-11-01）**：
+  - Coze / Dify 均通过持久化有头浏览器登录，CDP 9222 / 9223 接管完成 4 类基准截图（共 19 张，见 13.2 清单）。
+  - Coze 适配视图入口确认：缩放下拉中的「自适应」；Dify 无 fit 入口，使用 25% 缩放 + 中键平移。
+  - 13.5 六项冲突已逐项经用户裁决（4 项采用 Coze、1 项采用 Dify、1 项采用 Coze），无「待确认」行，T9-07 可进入。
+  - 额外发现（未列入 13.5，作为 T9-07 参考）：Dify 左侧竖排工具栏含「整理节点/导出图片」，Coze 无此入口；Dify 节点 hover 浮出 ▶/⋯，Coze 显示在卡片右上角；Dify 连线拖拽为虚线引导。
+- **T9-07 实机差异修补完成（2026-11-01）**：
+  - **多选交互（13.5 #6）**：`FreeLayoutEditor` 增加 `selectBox={{ enabled: true, canSelect: (e) => e.shiftKey }}`，Shift+拖拽框选、普通左键拖拽平移。FlowGram 选区插件在 `canSelect` 返回 false 时既不框选也不平移，因此新增 `setupCanvasPan`：document 捕获阶段监听 pointerdown（避免被拖拽层 stopPropagation 吞掉），命中空白画布且非 Shift 时按 `config.scroll({scrollX, scrollY}, false)` 1:1 跟随鼠标；排除节点/端口/连线/小地图/表单控件/浮层，拖拽中 `cursor: grabbing`。
+  - **撤销/重做入口（13.5 #5）**：开启 `history={{ enable: true, limit: 100 }}`（此前 `ctx.history` 取值会抛 `No matching bindings found for serviceIdentifier: HistoryService`）；`CanvasToolbar` 左侧新增撤销/重做按钮，可用态由 `history.onApply` 驱动。**注意**：`onApply` 在撤销栈入栈之前触发，直接同步会读到过期 `canUndo`，需 `setTimeout(0)` 再同步一次。
+  - **输出端口（13.5 #3）**：输出端口 hover 时圆点放大到 18px 并显示白色「+」（输入端口保持圆点）；拖线到空白弹面板沿用既有实现。
+  - **连线样式（13.5 #4）**：对齐 Coze 采样色，主色 `#a5b4fc → #5044fc`、hover `#3f33e0`、选中 3px `#22c1e8` + 青色投影；FlowGram 每条连线渲染「曲线 + V 形箭头」两个 path，现有 CSS 同时着色，箭头可见。
+  - **顺带修复**：拖线到空白时 `getCloseInLineFromMousePos` 命中的是拖拽中的临时连线自身，导致原有的「邻近连线」门禁把面板永久拦住；改为按 `params.line.id` 排除自身后，空白释放可正常弹出节点面板。
+  - **验证**：Playwright 实测平移 Δ(90,45) 与鼠标一致、撤销/重做按钮可用态与节点位置双向正确、Shift 框选 2/2、端口 hover `::after=\"+\"` 18px、连线 2 path 均 `rgb(80,68,252)` 且选中 `3px / rgb(34,193,232)`、空白拖拽弹出面板且不产生连线；`tsc --noEmit` EXIT:0、`vite build` 通过、控制台 0 error。
+  - **遗留**：应用为临时验证 fixture（2 节点 0 连线），验证过程中的节点位置漂移已随自动保存落盘，不影响功能。
+
+---
+
+### 13.8 Coze × Dify 画布交互全量清单（2026-11-01 复盘）
+
+> 本节把 7.5 / 7.7 / 7.8 / 9.5–9.7 / 12.2 / 13.5 分散记录的交互点合并去重，按页面层级重排，并**逐条核对当前代码实现**。
+> 状态图例：✅ 已完成且有验证；🟨 已实现未验收；🟧 部分实现；⬜ 未实现；⛔ 已裁决不做。
+> 「Coze」「Dify」两列只记录实机观察到的做法，作为差异依据；冲突项以 13.5 裁决为准。
+
+#### A. 页面级（顶栏 / 进入 / 发布）
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| A1 | 应用名展示 | 顶部左侧 + 编辑图标 | 顶部左侧 + 部署状态 | 左上角应用名 | ✅ | V6 |
+| A2 | 保存状态 | 顶部保存提示 | 顶部部署状态 | 左上角「保存中…/已保存 HH:mm:ss/保存失败，点击重试」 | ✅ | U-S1、V6 |
+| A3 | 发布按钮 | 右上角「发布」 | 右上角「发布」 | 右上角紫色发布按钮，发布前全量 error 拦截 | ✅ | T13 |
+| A4 | live 版本徽标 | 有 | 有 | 发布按钮旁 live 徽标 | ✅ | 阶段 9 前 |
+| A5 | 双 Tab（业务逻辑/用户界面） | 有 | 无 | 无 | ⛔ | 7.4 已裁决 |
+| A6 | 返回应用列表 | 面包屑 | 面包屑 | 左栏「工作流」替代 | ✅ | V4 |
+
+#### B. 左侧栏
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| B1 | 资源树形态 | 工作流 / 插件 / 数据 / 设置 | 分类节点列表 | 工作流 + 设置（变量/版本/会话） | ✅ | V4 |
+| B2 | 插件 / 数据分组 | 有 | 有 | 无 | ⛔ | 9.7 |
+| B3 | 折叠 / 展开 | 有 | 有 | 280px ↔ 40px 图标条 | ✅ | V4 |
+| B4 | 窄屏自动折叠 | 有 | 有 | `matchMedia(max-width:1100px)` 自动折叠，手动展开不被覆盖 | ✅ | T9-05 / U-P4 |
+| B5 | 节点搜索 | 添加面板内搜索 | 左栏顶部搜索 | 添加面板内搜索 | ✅ | C8 / U-B2 |
+| B6 | 变量入口 | 设置分组 | 变量检查面板（底部） | 左栏「变量」→ VariablesDrawer | ✅ | L6 |
+| B7 | 版本历史 | 发布下拉 | 无 | 左栏「版本历史」→ 抽屉 + 回滚 | ✅ | B9 |
+| B8 | 会话管理 | 有 | 无 | 左栏入口存在但 disabled（开发中） | ⬜ | N9-05 |
+| B9 | Dify 左侧竖排工具栏（指针/手/注释/整理/导出） | 无 | 有 | 无 | ⛔ | 13.7 额外发现 |
+
+#### C. 画布区（视图 / 平移 / 多选 / 辅助）
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| C1 | 点阵背景 | 浅灰点阵 | 浅灰点阵 | 点阵网格 | ✅ | 7.5 |
+| C2 | 滚轮缩放（以鼠标为中心） | 有 | 有 | FlowGram 原生 | ✅ | U-P1 |
+| C3 | 空白左键拖拽平移 | 有 | 无（拖拽=框选） | `setupCanvasPan` 捕获阶段监听，1:1 跟随 | ✅ | 13.5 #6 / T9-07 |
+| C4 | Space+拖拽平移 | 有 | 有 | 未实现（空白拖拽已覆盖大部分场景；指针落在节点上时无法平移） | 🟧 | N9-04 |
+| C5 | Shift+拖拽框选 | 有 | 无（普通拖拽框选） | `selectBox.canSelect = e.shiftKey` | ✅ | 13.5 #6 / T9-07 |
+| C6 | Shift+点击加选 | 有 | 有 | FlowGram 原生 `toggleSelect` | ✅ | T9-03 |
+| C7 | 框选数量提示 | 「已选中 N 个节点」 | 有 | 无独立提示浮条 | ⬜ | N9-02 |
+| C8 | 多选整体拖拽 | 有 | 有 | 未验证 | 🟨 | N9-10 |
+| C9 | 点空白清除选中 | 有 | 有 | 有；且会关闭配置抽屉 | ✅ | T9-03 |
+| C10 | 对齐辅助线 | 拖拽时显示 | 拖拽时显示 | `AlignGuides` 监听 DOM rect ±4px 画红线（可显示，但需重构：缩放阈值/缓存/令牌） | 🟧 | U-N4 / N9-12 |
+| C11 | 小地图 + 点击导航 | 右下浮窗 | 右下浮窗 | `MiniMap` 绝对定位 right:16 bottom:16，点击改 scroll | ✅ | C2 |
+| C12 | 适应视图 | 缩放下拉「自适应」 | 无 | 浮条「适应视图」图标按钮 | ✅ | C3 |
+| C13 | 缩放 ± 与百分比 | 百分比下拉 | ± 按钮 | ± 按钮 + 百分比下拉（50% / 75% / 100% / 150% / 200% / 自适应） | ✅ | N9-01 |
+| C14 | 全屏 | 无 | 无 | 浮条「全屏」按钮 | ✅ | T9-07 前 |
+| C15 | 自动排版 | 右键「整理画布」 | 竖排工具栏「整理节点」 | 画布右键「自动排版」 | ✅ | CanvasContextMenu |
+| C16 | 导出图片 / 导出 JSON | 浮条导出菜单 | 竖排工具栏「导出图片」 | 无 | ⬜ | N9-06 |
+| C17 | 空画布欢迎页 | 模板卡片 | 模板卡片 | 仅「从空白开始」，无模板 | ✅ | 7.4 已裁决 |
+| C18 | 画布右键菜单 | 添加节点/整理/适应 | 无 | 添加节点、复制、粘贴、删除、自动排版、适应视图 | ✅ | U-P2 |
+| C19 | 最小缩放 / 最大缩放钳制 | 有 | 有 | 浮条按钮 0.25–2.0 | ✅ | CanvasToolbar |
+
+#### D. 添加节点（入口 × 5）
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| D1 | 浮条「+ 添加节点」 | 有 | 无 | 底部居中浮条淡紫按钮，画布中心弹出 | ✅ | V3 / C8 |
+| D2 | 节点卡片 hover「+」 | 卡片右上角 | 节点上方浮出 | `NodeCard` 右上角 + 按钮，选完自动连线 | ✅ | V9 |
+| D3 | 输出端口 hover 紫色「+」 | 有 | 蓝色「+」 | 输出端口 hover 放大 18px + 白色「+」 | ✅ | 13.5 #3 / T9-07 |
+| D4 | 点击端口「+」直接弹面板 | 无 | 有 | 无 | ⛔ | 13.5 #3 采用 Coze |
+| D5 | 端口拖线到空白释放弹面板 | 有 | 无 | `onDragLineEnd` → AddNodePopover，选完自动连线 | ✅ | L2 / T9-07 |
+| D6 | 添加面板：分类 + 图标 + 描述 + 搜索 | 双列卡片 + 搜索 | Tab + 搜索 + 分类 | 6 分组 30 节点 + 搜索 | ✅ | C8 |
+| D7 | 添加后自动连线 | 有 | 有 | `linesManager.createLine` 首个 output → 首个 input | ✅ | V9/V10 |
+| D8 | 配置抽屉「下一步」推荐 | 无 | 有 | `nodeNextRecommendations` 硬编码映射 + 自动连线 | ✅ | V10 |
+| D9 | 从左侧节点库拖拽到画布 | 无 | 有 | 无（点击添加） | ⛔ | 结构以 Coze 为准 |
+
+#### E. 节点卡片
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| E1 | 图标 + 标题 + 副标题 | 有 | 有 | `NodeIcon` 覆盖 30 type_key；`nodeSubtitle` 31 类 | ✅ | C4 / C5 |
+| E2 | 选中态 | 蓝色描边 + 阴影 | 蓝色描边 | 选中描边（outline 不占布局） | ✅ | U-N3 |
+| E3 | hover 态 | 阴影 | 阴影 | 有 | ✅ | U-N1 |
+| E4 | 运行状态色 | 蓝呼吸/绿/红/黄 | 同左 | SSE 事件驱动节点着色 | ✅ | U-N5 / V2 |
+| E5 | 节点重命名 | 有 | 有 | 抽屉「节点标题」可编辑，卡片实时同步 | ✅ | T8-03 / U-S2 |
+| E6 | 卡片 hover「⋯」菜单 | 右上角操作 | 节点上方 ▶/⋯ | 仅有「+」 | 🟧 | N9-07 |
+| E7 | 单节点试运行 | 抽屉底部试运行 | 节点上方 ▶ | 无（只有全图试运行） | ⬜ | N9-03 |
+| E8 | 双击打开配置 | 有 | 有 | 有，且区分拖拽（dragDistance 判定） | ✅ | B2 |
+| E9 | 删除节点二次确认 | 有 | 有 | Delete/Backspace → Modal 确认；START 不可删 | ✅ | T9-03 / U-S3 |
+| E10 | 右键菜单 | 复制/粘贴/重命名/删除 | 同左 | 复制、粘贴、删除（名称修改走抽屉） | 🟧 | U-P2 / N9-07 |
+| E11 | 拖拽移动 | 有 | 有 | FlowGram 原生 | ✅ | 7.5 |
+| E12 | 端口位置（输出右/输入左）与蓝点居中 | 有 | 有 | CSS 重排端口，几何验证圆心一致 | ✅ | C1 |
+| E13 | 端口 tooltip | 有 | 有 | 选择器改为 `[data-port-entity-id]`，title 显示「输入/输出端口: 端口名」 | ✅ | U-S4 / N9-14 |
+| E14 | 子图双击进入 | 有 | 有 | loop/batch/subworkflow 嵌套子图 | ✅ | B6 |
+| E15 | 便签节点（Comment） | 有 | 有 | 黄色便签块，无执行语义 | ✅ | T10 |
+| E16 | Note 节点（type=7） | 有 | 有 | 后端 type=7 元数据 + no-op handler + 前端便签渲染（E1 试点） | ✅ | N9-13 |
+
+#### F. 连线
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| F1 | 曲线 + 箭头 | 紫色贝塞尔 + V 形箭头 | 浅灰无箭头 | `#5044fc` 曲线 + 箭头 | ✅ | 13.5 #4 / T9-07 |
+| F2 | hover 加深 | 有 | 有 | `#3f33e0` | ✅ | T9-07 |
+| F3 | 选中态 | 亮青加粗 | 变蓝 + 中点「+」 | `path[stroke-width='3']` → 3px `#22c1e8` + 投影 | ✅ | T9-06 / T9-07 |
+| F4 | 点击选中 + Delete 删除 | 有 | 有 | FlowGram selection → `line.dispose()`，自动保存 | ✅ | T9-06 / U-L4 |
+| F5 | 右键删除连线 | 有 | 有 | 右键命中连线时菜单只显示「删除连线」 | ✅ | T9-06 |
+| F6 | 拖线时可连接端口高亮 | 有 | 有 | `.boxia-port-drop-target` 放大 + 光圈 | ✅ | U-L3 / T9-06 |
+| F7 | 拖拽中虚线引导 | 实线 | 虚线 | FlowGram 默认实线 | 🟨 | 差异未列任务，默认可不改 |
+| F8 | 连线中点「+」 | 无 | 有 | 无 | ⛔ | 13.5 #4 采用 Coze |
+| F9 | 连线文本标签 | 有 | 有 | 无 | ⛔ | 7.5 已裁决 |
+| F10 | 连线合法性校验（output→input） | 有 | 有 | FlowGram 端口类型校验 | ✅ | B4 |
+
+#### G. 配置抽屉
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| G1 | 右侧浮层抽屉（不挤压画布） | ~390px 浮层 | 常驻面板挤压 | antd Drawer `width=480` | ✅ | 13.5 #1 |
+| G2 | 分组可折叠 + ⓘ 说明 | 有 | 有 | `ConfigSectionBox`，折叠态按 type_key 持久化 | ✅ | T9-04 |
+| G3 | 顶部「输入」区展示上游变量 | 有 | 有 | 入边反查上游 outputs，渲染 `{{nodeId.output.field}}` | ✅ | T8-04 |
+| G4 | 变量引用 chip | 蓝色胶囊 | 蓝色胶囊 | `RefChipInput` 回显 chip + 弹选择树 | ✅ | B3 / U-I1 |
+| G5 | 输出字段自定义 | 有 | 有 | `OutputsEditor` → extInfo.outputs | ✅ | T14 / B5 |
+| G6 | LLM 模型下拉 | 有 | 有 | `/models/catalog/available` 下拉，回填 temperature/maxTokens | ✅ | T8 |
+| G7 | LLM 工具列表（tool_list） | 有 | 有 | `ToolListEditor` 表格增删（名称 + 描述） | ✅ | T8-01 |
+| G8 | IF case 可视化编辑器 | 有 | 有 | 左值 + 操作符 + 右值，可增删 | ✅ | T7 / B2 |
+| G9 | HTTP headers/query/body/auth | 有 | 有 | 动态 key-value 编辑器 + 认证下拉 + 路径参数提取 | ✅ | T9 |
+| G10 | URL 路径参数高亮 | 有 | 有 | `RefChipInput highlightPathParams` + 提示行 | ✅ | U-HTTP1 |
+| G11 | 代码编辑器 | 有 | 有 | `CodeEditor`（react-simple-code-editor + Python 高亮） | ✅ | U-CODE1 |
+| G12 | 知识库选择器下拉 | 有 | 有 | `datasetId` 字段 → Select（listDatasets） | ✅ | U-DS1 |
+| G13 | START 入参表格 | 有 | 有 | ParameterListEditor（B4） | ✅ | B4 |
+| G14 | 关闭抽屉保留选中态 | 有 | 有 | 抽屉开关与选中态解耦 | ✅ | T8 落地记录 |
+| G15 | 抽屉底部节点试运行 + 输出预览 | 有 | 有 | 无 | ⬜ | N9-03 |
+| G16 | 窄屏抽屉宽度 | 自适应 | 自适应 | 固定 480px | 🟧 | N9-11 |
+
+#### H. 快捷键
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| H1 | Ctrl/Cmd+S 保存 | 有 | 有 | 有（拦截默认） | ✅ | U-P1 |
+| H2 | Ctrl/Cmd+Enter 试运行 | 有 | 有 | 有 | ✅ | 阶段 9 前 |
+| H3 | Delete / Backspace 删除 | 有 | 有 | 有，捕获阶段拦截 FlowGram 内置删除，走二次确认 | ✅ | T9-03 |
+| H4 | Ctrl/Cmd+C / V | 有 | 有 | 有，输入框与文本选区放行 | ✅ | T9-02 / U-P2 |
+| H5 | Ctrl/Cmd+Z / Shift+Z / Y | 有 | 有 | 有（浮条按钮同步可用态） | ✅ | U-P6 / T9-07 |
+| H6 | Space 平移 | 有 | 有 | 无 | 🟧 | N9-04 |
+| H7 | Esc 清选中 / 关浮层 | 有 | 有 | Drawer 关闭由 antd 处理；画布选中未清 | 🟧 | N9-09 |
+| H8 | Ctrl/Cmd+A 全选节点 | 有 | 有 | 无 | ⬜ | N9-09 |
+
+#### I. 试运行与调试
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| I1 | 入参表单（按 START 动态生成） | 有 | 有 | 试运行弹窗按 `config.inputs` 生成，支持 image/file | ✅ | B7 / T18 |
+| I2 | SSE 流式节点状态 | 有 | 有 | 节点着色 + 日志追加 | ✅ | V2 |
+| I3 | 日志 Tab | 有 | 有 | 右下角 Tab 抽屉（校验 / 日志） | ✅ | V1/V2 |
+| I4 | 校验 Tab + 点击 issue 聚焦节点 | 有 | 有 | 有 | ✅ | V1 |
+| I5 | 节点调试面板（inputs/outputs/token/耗时） | 有 | 有 | 右侧调试面板 | ✅ | B8 |
+| I6 | ReAct trace（prompt 原文 / tool 入参出参） | 有 | 有 | `tool_call_start/end` + `prompt_text` | ✅ | T15 |
+| I7 | 人工审批中断 → 抽屉批准 → resume | 有 | 有 | ApprovalInterruptPayload + resume API | ✅ | B11 / A5 |
+| I8 | 单节点试运行 | 有 | 有 | 无 | ⬜ | N9-03 |
+| I9 | 试运行历史列表 | 有 | 有 | 无 | ⬜ | N9-08 |
+
+#### J. 保存 / 校验 / 发布 / 打开
+
+| # | 交互项 | Coze | Dify | 本项目实现 | 状态 | 任务/依据 |
+|---|---|---|---|---|---|---|
+| J1 | 800ms 防抖自动保存 | 有 | 有 | `scheduleSave` → `PUT /apps/{id}/graph` | ✅ | L5 |
+| J2 | 草稿宽松 / 发布严格 | 有 | 有 | 草稿仅拦致命结构错误 | ✅ | 12.5 |
+| J3 | 手动校验 | 有 | 有 | 浮条外入口（校验 Tab 触发） | ✅ | V1 |
+| J4 | 发布前 error 拦截 | 有 | 有 | `POST /apps/{id}/publish` 前跑全量 validate | ✅ | T13 |
+| J5 | 版本回滚 | 有 | 有 | 版本抽屉 + `rollbackGraph` | ✅ | B9 |
+| J6 | 进入画布加载流程 | 有 | 有 | app → graph → node-metas → initialData 就绪前 loading | ✅ | L0 |
+
+#### K. 存量任务状态校正
+
+| 任务 | roadmap 原状态 | 代码核对结论 |
+|---|---|---|
+| U-HTTP1 URL 路径参数高亮 | 7.7.9「保留」 | ✅ 已实现（`RefChipInput highlightPathParams` + 提示行） |
+| U-CODE1 代码编辑器升级 | 7.7.9「保留」 | ✅ 已实现（`components/CodeEditor.tsx`，react-simple-code-editor） |
+| U-DS1 知识库下拉 | 7.7.9「保留（可占位）」 | ✅ 已实现（datasetId → Select + listDatasets） |
+| U-S1 保存状态视觉 | 7.8 P1 | ✅ 已实现（左上角三态 + 失败点击重试） |
+| U-S3 删除二次确认 | 7.8 P2 | ✅ 已实现（T9-03，含 START 保护） |
+| U-S4 端口 tooltip | 7.8 P2 | ✅ 已修复：选择器改 `[data-port-entity-id]`，从实体 id 截出端口名（N9-14） |
+| U-N4 对齐辅助线 | 7.3 唯一未勾选 | 🟧 已实现但需重构（`AlignGuides` 已挂载），排入 N9-12 |
+| 9.7「对齐辅助线不做」 | 已裁决不做 | 2026-11-01 评估后改为**只显示不吸附**的折中方案，已排入 N9-12（见 13.9.1），原裁决作废 |
+| T8-01 ~ T8-06 | 12.6 全部落地 | ✅ 全部已实现 |
+| 4.3 结构性遗漏 10 项 | — | 10 项已完成（Note type=7 于 2026-11-01 作为 E1 试点落地） |
+
+---
+
+### 13.9 未完成任务清单（2026-11-01 复盘后）
+
+> 范围：只列**画布交互与前端呈现**。后端执行引擎 A1–A13 / T1–T18 已全部完成，不再列入。
+> 优先级：P1 = 影响对齐 Coze 核心体感；P2 = 体验增强；P3 = 可延后。
+> **约束**：本轮及后续所有 N9/N10… 任务必须遵守第十四章 14.1 的可扩展性原则；可扩展性改造任务（E1–E7）见 14.4。
+
+#### P1
+
+| 任务 | 内容 | 涉及文件 | 验收 |
+|---|---|---|---|
+| **N9-01 缩放菜单化** | 浮条百分比改为下拉：50% / 75% / 100% / 150% / 200% / 自适应，选中项高亮；保留 ± 按钮 | `CanvasToolbar.tsx` | 下拉选择后画布缩放正确；「自适应」等价于 fitView |
+| **N9-02 框选计数提示** | 框选/多选时在浮条上方显示「已选中 N 个节点」+ 批量删除按钮 | `AppEditPage.tsx` | 框选 2 个节点后提示出现；清空选中后消失 |
+| **N9-03 单节点试运行** | 抽屉底部「试运行此节点」+ 输出预览；**阻塞于 B-N9-03**（需后端接口），接口就绪前不进入前端实现 | `AppEditPage.tsx`、后端 debug 路由 | 单节点返回 outputs 并展示；不污染全图运行状态 |
+| **N9-04 Space+拖拽平移** | 按住 Space 时指针落在节点上也进入平移（当前仅空白可拖） | `AppEditPage.tsx` `setupCanvasPan` | Space+拖拽节点区域可平移；松开后节点拖拽恢复 |
+| **N9-05 会话管理入口** | 左栏「会话管理（开发中）」接后端会话列表 API；**阻塞于 B-N9-05** | `ResourceSidebar.tsx`、会话 API | 入口可用，列表可查看/删除 |
+
+#### P2
+
+| 任务 | 内容 | 涉及文件 | 验收 |
+|---|---|---|---|
+| **N9-06 导出菜单** | 浮条「导出」：导出 JSON（含 coze IR）/ 导出 PNG。PNG 需先做 0.5h 选型 spike（当前无 html-to-image 等依赖，新增依赖需用户确认） | `CanvasToolbar.tsx`、`package.json` | 两种格式可下载，PNG 含节点与连线 |
+| **N9-07 节点 hover「⋯」菜单** | 卡片 hover 显示「⋯」，聚合重命名 / 复制 / 删除 / 运行 | `NodeCard.tsx`、`AppEditPage.tsx` | 菜单项均可用，不遮挡端口 |
+| **N9-08 试运行历史** | 调试面板加「历史」Tab，列出最近 N 次 run（时间/状态/耗时） | `AppEditPage.tsx`、runs API | 可点开查看当次节点输出 |
+| **N9-09 Esc / Ctrl+A** | Esc 清空选中并关闭浮层；Ctrl/Cmd+A 全选节点 | `AppEditPage.tsx` `onKeyDown` | 两个快捷键生效且不影响输入框 |
+| **N9-10 多选整体拖拽** | 验证 FlowGram 是否原生支持；不支持则自绘 | `AppEditPage.tsx` | 多选后拖任一节点，整体平移 |
+| **N9-11 抽屉窄屏自适应** | <900px 时抽屉宽度改 `min(480, 92vw)` | `AppEditPage.tsx` | 窄屏不溢出、字段不换行错乱 |
+| **N9-12 对齐辅助线折中实现** | 保留「只显示、不吸附」方案并重构：稳定选择器、缩放阈值、rect 缓存、rAF 节流、多选排除、令牌化样式（详见 13.9.1） | `AlignGuides.tsx`、`tokens.ts` | 见 13.9.1 验收清单 |
+| **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
+| **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
+
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+
+**E4 落地说明**：新增 `canvas/metadata/capabilities.ts`，优先消费后端 `NodeMeta.capabilities`，本地 `CAPABILITY_FALLBACK` 仅在元数据未加载时兜底；`AppEditPage` 的复制、删除（右键 / `canDeleteNode` / 抽屉按钮）、子图双击、输出编辑器均已改为能力驱动，`start` 等特例不再散落 `typeKey === 'start'` 判断。N9-07（节点「⋯」菜单）依赖已解除。
+
+**E5 落地说明**：
+- `backend/tests/test_node_meta_contract.py`：枚举 ↔ 元数据 ↔ handler 三方互查（历史类型走显式白名单），并校验展示字段完整性、`next_recommendations` 可达性、`field_type` 是否被前端支持、字段名唯一、能力语义（start 不可删 / comment+note 不可执行 / 子图集合固定）、API `asdict` 字段形状。
+- `canvas/metadata/capabilities.test.ts`、`nodePresentation.test.ts`：锁定「后端声明优先 → 本地兜底 → 默认值」裁决顺序，以及分类分组 / 配置分组 / 下一步推荐的适配行为。
+- 新增节点若漏登记元数据、漏注册 handler 或使用前端未实现的 `field_type`，pytest 直接失败。
+
+**E2a 落地说明**：
+- 新增 `canvas/adapters/flowgramContext.ts`：封装缩放（`setZoom`/`zoomBy`）、视图（`getViewport`/`fitView`/`scrollToCanvasPoint`）、滚动平移（`getScroll`/`setScroll`）、鼠标坐标（`getWorldPosFromMouseEvent`/`worldToScreen`）、节点（`toWorkflowJSON`/`getNode`/`getNodeTypeKey`/`createNodeByType`/`removeNode`/`getNodeExtInfo`/`updateNodeExtInfo`）、连线（`getPortFromMousePos`/`getLineFromMousePos`/`getNodeFromMousePos`/`createLine`/`disposeLinesByIds`）、选中（`getSelection`/`subscribeSelection`/`clearSelection`）、撤销重做（`undo`/`redo`/`subscribeHistory`）与视图订阅。`as any` 仅存在于该文件。
+- 新增 `canvas/adapters/cozeIR.ts`：`toCozeIR`/`fromCozeIR`/`DEFAULT_GRAPH`/`SUBGRAPH_NODE_TYPES` 迁出页面；`schema_version` 从后端 `graph_schema_version`（或 IR 自带字段）读取并在保存/校验/试运行时原样透传。
+- `CanvasToolbar` 与 `AppEditPage` 全部改为调用封装方法；`getNodeTypeKey` 统一为 `flowNodeType → 非 FlowNodeEntity 的 type → id 前缀`，删除/复制/子图判断不再各自取值。
+- 新增 `cozeIR.test.ts`（8 用例）：类型双向映射、schema_version 透传、子图 blocks/edges 递归、脏坐标重置、空图兜底。
+- 验收对账：`grep "ctx as any"` 仅命中 adapter；`AppEditPage.tsx` 3324 行（≤1800 留待 E2b）；tsc/build/单测通过。
+
+**E6 落地说明**：
+- 新增 `scripts/canvas-status.mjs`，直接解析 `docs/canvas-roadmap.md` §13.8 的七列表格，不引入第二份数据源。
+- 输出：总量与状态汇总、按 A–J 层级分项、未完成清单（⬜/🟧/🟨）；`--unfinished` 只列未完成，`--json` 输出机读结构。
+- 表格出现未知状态字符、或 13.8 未解析到任何行时退出码为 1，防止新增标记悄悄漏统计。
+- 当前基线：108 项（✅ 84 / 🟨 2 / 🟧 7 / ⬜ 8 / ⛔ 7），未完成 17 项。
+
+**编号说明**：`T9-xx` 为阶段 9 已收口任务；`N9-xx` 为阶段 9 复盘后产生的**阶段 10 增量**，沿用 N9 前缀以免推翻既有引用；后端配套任务以 `B-N9-xx` 标识。
+
+#### 后端配套任务（不在「只做前端」边界内，需单独排期）
+
+| 任务 | 内容 | 涉及 | 依赖方 | 预估 |
+|---|---|---|---|---|
+| **B-N9-03** 单节点试运行接口 | 新增 debug 单节点执行（或按单节点构造临时子图），返回该节点 outputs / 耗时 / 错误；不改既有全图执行语义 | `web/admin/routers/apps_admin.py`、`engine/runtime.py` | N9-03 | 4h |
+| **B-N9-05** 应用会话管理接口 | 会话列表 / 消息列表 / 删除；复用 `conversation_repository`，按 `application_id` + 租户过滤 | 新建 `web/admin/routers/app_conversations.py`、service | N9-05 | 5h |
+| **B-N9-13** Note 节点执行语义 | `node_meta.py` 增加 type=7 后，必须提供 no-op handler（或 compiler 跳过），否则 `nodes/__init__.py:27` 抛 `KeyError` | `domain/graph/nodes/` | N9-13 | 1h |
+
+#### 13.9.1 N9-12 对齐辅助线折中方案（评估结论）
+
+**评估背景**：9.7 曾裁决「不做（FlowGram 未暴露 API）」，但代码中已有 `AlignGuides.tsx` 且已挂载。本轮评估了三种实现路径：
+
+| 方案 | 做法 | 可行性 | 结论 |
+|---|---|---|---|
+| A 纯显示（现状改进） | 拖拽时读节点 DOM rect，命中阈值即画参考线，不改节点坐标 | 高，无 API 依赖 | ✅ **采用** |
+| B 拖拽中实时吸附 | mousemove 时用 FlowGram API 改写节点坐标 | 低：内置拖拽持续写入坐标，二次改写会互相覆盖，产生抖动；API 未验证 | ❌ 不做 |
+| C 松手后落点吸附 | mouseup 时把节点坐标修正到对齐线 | 中：可行但松手瞬间跳位体验差，且同样依赖未验证的坐标写 API | ❌ 本期不做 |
+
+**结论**：采用 A。Coze 对齐辅助线的核心价值是「提示当前位置已与其他节点对齐」，纯显示已覆盖约 80% 体感；吸附带来的收益不足以承担与 FlowGram 拖拽引擎冲突的风险。
+
+**现有实现的问题（需在 N9-12 修复）**：
+
+| # | 问题 | 影响 |
+|---|---|---|
+| 1 | 阈值固定 4 屏幕像素，未按缩放换算 | 25% 缩放下等效约 13 世界像素（过粘），200% 下约 2 像素（几乎不触发） |
+| 2 | 用 `el.id` + 正则 `NODE_ID_RE` 识别节点 | FlowGram 已有 `[data-node-id]`，id 命名变化即失效 |
+| 3 | 每次 mousemove 全量 `querySelectorAll + getBoundingClientRect` | 节点多时掉帧 |
+| 4 | 只监听 `mousedown/mousemove/mouseup` | 触控笔 / 触摸拖拽不触发 |
+| 5 | 多选拖拽时未排除同批选中节点 | 会与一起移动的节点互相「对齐」 |
+| 6 | 颜色写死 `#ef4444` 实线 | 与 Coze 蓝紫细线不一致，也未走令牌 |
+| 7 | 线条只覆盖两个节点之间，不外延 | 视觉上像连线，不像参考线 |
+
+**实施方案**：
+
+1. 选择器改 `[data-node-id]`，去掉 id 正则；拖拽起点改用 `pointerdown`（捕获阶段），结束监听 `pointerup` / `pointercancel`。
+2. 阈值换算：`THRESHOLD_PX / zoom`（`zoom` 取 `ctx.playground.config.zoom`，经 E2 的 adapter 获取），保证 25%–200% 下视觉一致。
+3. 拖拽开始时缓存非选中节点的 rect；mousemove 只更新被拖节点，用 `requestAnimationFrame` 节流。
+4. 排除同批选中的节点（与多选拖拽兼容）。
+5. 样式走 `tokens.ts`：`--canvas-guide = #6366f1`，1px 虚线；线在两端各外延 12px。
+6. 在 `mouseup` / `pointercancel` / 缩放 / 滚动 / 切换子图时隐藏并清缓存。
+7. 仅显示，不修改任何节点坐标。
+
+**不做（评估后放弃或延后）**：
+- ❌ 真吸附（方案 B）
+- ❌ 松手落点吸附（方案 C，若后续 FlowGram 暴露稳定坐标 API 再评估）
+- ⏸ 等间距辅助线（Coze 的间距提示）：P3，收益/复杂度不划算
+
+**验收清单**：
+- [ ] 拖动节点靠近其他节点左/中/右/上/中/下 4 屏幕像素内，出现对应参考线，移开即消失
+- [ ] 25% / 100% / 200% 三档缩放下阈值体感一致
+- [ ] 30 节点画布拖拽无明显掉帧（DevTools Performance 抽检）
+- [ ] 多选拖拽时只与非选中节点比较
+- [ ] 松开鼠标、按 Esc、切换子图后参考线立即消失
+- [ ] 颜色/线型与 Coze 基准图（`coze-05-dragging.png` / `coze-08-box-select.png`）一致
+- [ ] `tsc --noEmit` EXIT:0、`vite build` 通过、控制台 0 error
+
+**依赖与排队**：依赖 E3（设计令牌）与 E2（提供 zoom 的 adapter 读取）；排队位置在 E3 之后、N9-02/N9-06 同批。
+
+#### P3 / 明确不做（维持裁决）
+
+- ⛔ Dify 左侧竖排工具栏（指针/手/注释/整理/导出图片）
+- ⛔ Dify 常驻右侧面板挤压画布、灰色无箭头连线、连线中点「+」
+- ⛔ Dify 源码参考（仅借鉴交互思路）
+- ⛔ 双 Tab（业务逻辑/用户界面）、插件 / 数据分组
+- ⛔ 连线文本标签
+- ⛔ 输入字段 chip 化（已由 `RefChipInput` 覆盖单行场景）
+- ⛔ D5 点击端口「+」直接弹面板（采用 Coze 拖空白释放）
+
+#### 收口验证（全部 P1 完成后）
+
+- `tsc --noEmit` EXIT:0；`vite build` 通过
+- Playwright 覆盖：缩放下拉、框选计数、单节点试运行、Space 平移
+- 控制台 0 error；`docs/canvas-refs/` 基准图与实现逐条对照无新增差异
+
+---
+
+## 十四、持续跟随 Coze / Dify 版本的可扩展性设计（2026-11-01）
+
+> 背景：本项目不是一次性对齐 Coze，而是**长期跟随 Coze 版本演进**，同时持续借鉴 Dify 的展示交互。
+> 因此本轮及后续所有 N9/N10… 任务的实现方式必须建立在可扩展结构上，**不允许用一次性硬编码换交付速度**。
+
+### 14.1 设计原则
+
+| # | 原则 | 含义 |
+|---|---|---|
+| P1 | **单一事实源** | 节点类型、端口、配置字段、展示元数据、能力声明统一由后端 `node_meta.py` 提供；前端只做渲染映射 |
+| P2 | **一层适配** | FlowGram 内部 API（`ctx.history/selection/linesManager/playground`）与 Coze IR 转换各自收敛到一个 adapter，UI 层不直接访问 |
+| P3 | **声明优先于判断** | 节点差异（可删/可复制/可试运行/有子图/有推荐）用 `capabilities` 声明，不写 `typeKey === 'start'` 散落判断 |
+| P4 | **令牌化** | 颜色、尺寸、z-index 统一进设计令牌，JSX 与 CSS 不出现重复色值 |
+| P5 | **登记制跟随** | 13.8 是交互基线；每次版本跟随**只追加行**，不改写历史结论；新交互必须有状态与任务号 |
+| P6 | **单一入口扩展** | 新增一个节点/一种字段/一条交互，理想情况下只改 **1 个后端文件 + 1 个前端文件** |
+
+### 14.2 当前可扩展性缺口（代码核对）
+
+| # | 缺口 | 证据 | 影响 |
+|---|---|---|---|
+| X1 | 页面文件过大 | `AppEditPage.tsx` 3497 行，渲染器 / 表单 / 快捷键 / 试运行 / 保存 / 适配器混在一处 | 每加一条交互都在同一文件加分支，冲突率高、review 困难 |
+| X2 | 节点展示元数据分散在 5 处 | `NodeIcon.tsx` `ICON_MAP`、`nodeSubtitle.ts` 31 类、`configSections.ts` `SECTION_DEFS`、`nodeNextRecommendations.ts` `NEXT_MAP`、`AddNodePopover.tsx` 分组 | 新增一个节点要改 5+ 个前端文件，Note(type=7) 漏项即由此产生 |
+| X3 | 后端元数据未被展示层消费 | `node_meta.py` 已有 title/color/ports/config，但 icon/副标题/分组/推荐仍在前端硬编码 | 后端加节点后前端必须人工同步，无法自动跟随 |
+| X4 | Coze IR 适配器与 UI 耦合 | `toCozeIR` / `fromCozeIR` 内联在 `AppEditPage.tsx:3406-3490` | Coze IR 升级时改动点不隔离 |
+| X5 | 视觉令牌散落 | 连线 `#5044fc`、选中 `#22c1e8`、端口 `#6366f1`、浮条 `#10b981` 等直接写在 JSX inline style / 内联 `<style>` | 再对齐一轮配色需要全文搜索替换 |
+| X6 | 字段控件靠 switch 分发 | `FieldControl` 的 `switch(field.field_type)` 单文件增长 | 新字段类型要改大 switch，易漏分支 |
+| X7 | FlowGram 内部 API 直连 | 大量 `(ctxRef.current as any)?.history/selection/linesManager` | FlowGram 升级（0.1.x → 0.2.x）时断点不可控 |
+| X8 | 交互基线不可机检 | 13.8 是 Markdown 表 | 回归时无法自动统计「还有几项 ⬜/🟧」 |
+| X9 | 无契约测试 | 后端 node_meta / handler 注册 / 前端展示无一致性校验 | 新增节点类型时静默漂移 |
+
+### 14.3 目标结构
+
+```
+backend/internal/domain/canvas/node_meta.py     ← 唯一事实源
+  type_code / type_key / title / color / category / icon
+  ports / config(field_type) / capabilities / next_recommendations / subtitle_hint
+        │  GET /admin/node-metas
+        ▼
+frontend/admin/src/pages/apps/
+  canvas/
+    adapters/
+      flowgramContext.ts      ← 唯一允许出现 (ctx as any) 的地方
+      cozeIR.ts               ← toCozeIR / fromCozeIR
+    metadata/
+      nodePresentation.ts     ← 后端 meta → 图标/分组/副标题/推荐（本地 fallback 仅离线用）
+      capabilities.ts         ← 能力判断（canDelete / canCopy / canRun / hasSubgraph）
+    fields/
+      fieldControls.tsx       ← field_type → 控件注册表
+    tokens.ts                 ← 颜色/尺寸/z-index
+  components/                 ← 纯展示组件（NodeCard / CanvasToolbar / NodeIcon …）
+  AppEditPage.tsx             ← 只做编排（目标 ≤ 1800 行）
+```
+
+### 14.4 可扩展性改造任务（E 系列）
+
+#### E1（P0，6h）后端元数据升格为展示事实源（仅静态部分）
+
+- **边界（review 修正）**：后端只承载**静态**展示元数据；依赖运行期 config 的内容（`nodeSubtitle` 的 model/url/datasetId 摘要、IF 条件摘要等）**保留在前端函数**，后端只提供 `subtitle_hint` 兜底。
+- **改动**：`NodeMeta` 扩展 `category` / `icon` / `subtitle_hint` / `next_recommendations` / `capabilities` 字段；`config` 的每个字段增加 `group`（供 `configSections` 使用）。`/node-metas` 原样下发。
+- **前端**：新增 `metadata/nodePresentation.ts`，从接口结果构建 icon/分组/副标题兜底/推荐；`ICON_MAP` / `NEXT_MAP` / `SECTION_DEFS` 降级为 fallback。
+- **验收**：新增一个节点只改 `node_meta.py`，添加面板分组、图标、静态副标题、下一步推荐、配置分组**全部自动生效**；动态副标题仍由前端生成且不回归。
+- **试点**：N9-13（Note 节点）作为 E1 的第一个验证用例。
+
+#### E2（P0，11h）拆分 AppEditPage 与 adapter 收敛
+
+- **E2a（3h，低风险）**：抽 `canvas/adapters/flowgramContext.ts`（封装 history/selection/linesManager/playground/scroll/zoom/fitView）与 `canvas/adapters/cozeIR.ts`（含 `schema_version` 透传与映射测试）；页面改为调用封装方法。
+- **E2b（8h，中风险）**：拆分 `NodeConfigForm`、试运行面板、校验/日志面板为独立组件；每拆一块跑一次 E2E 回归。
+- **E2c（含在 E2b）**：新增 `canvas/fields/fieldControls.tsx` 注册表，替代 `FieldControl` 的大 switch（对应 X6）。
+- **前置**：动手前先固化 Playwright 回归基线（登录 → 打开画布 → 加节点 → 连线 → 保存 → 试运行）。
+- **约束**：UI 组件中禁止新增 `(ctx as any)`；加 ESLint `no-restricted-syntax` 规则限制 `AppEditPage` 内出现该写法。
+- **验收**：`AppEditPage.tsx` ≤ 1800 行；grep `ctx as any` 仅出现在 adapter；回归基线全绿；`tsc`/`build` 通过。
+
+#### E3（P0，2h）设计令牌与样式集中
+
+- **改动**：新增 `canvas/tokens.ts` + 画布根节点 CSS 变量（`--canvas-line` / `--canvas-line-active` / `--canvas-port` / `--canvas-accent` / `--canvas-run` / `--canvas-danger` / `--z-*`）。
+- **验收**：连线/端口/浮条/状态色全部引用 token；`grep -n "#5044fc\|#22c1e8\|#10b981"` 仅命中 tokens 文件。
+
+#### E4（P1，3h）能力声明驱动交互
+
+- **改动**：`capabilities.ts` 读取 meta 的 `capabilities`；替换散落的 `typeKey === 'start'`、`flowNodeType !== 'root'` 等判断。
+- **默认能力**：`deletable`（START 为 false）、`copyable`、`runnable`、`hasSubgraph`、`hasOutputs`。
+- **验收**：新增节点通过 meta 声明即可控制删除/复制/试运行入口，无需改页面逻辑。
+
+#### E5（P1，3h）契约测试防漂移
+
+- **后端**：测试断言 `_NODE_METAS` 中每个 `type_key` 都在 handler 注册表存在（comment/Note 无执行语义者白名单）。
+- **前端**：单测断言每个后端 `type_key` 都能从 `nodePresentation` 解析出 icon/category/副标题兜底。
+- **验收**：故意删除任一映射，测试失败并指出 type_key。
+
+#### E6（P1，3h）交互基线机读化（单源）
+
+- **修正（review）**：**不新增 yaml**，避免 Markdown 与 yaml 双源维护。13.8 的 Markdown 表就是唯一事实源。
+- **脚本**：`scripts/canvas-status.mjs` 直接解析 `docs/canvas-roadmap.md` 中 13.8 的表格行，输出统计与未完成清单（⬜/🟧/🟨）。
+- **验收**：`node scripts/canvas-status.mjs` 输出与 13.8 表逐行一致；新增/修改表格行无需改第二处。
+
+#### E7（P2，1h）跟随流程固化
+
+- 把 14.5 SOP 作为固定流程；截图与记录命名规范化。
+- **验收**：下一轮跟随无需重新讨论流程，直接按 SOP 出差异表与任务号。
+
+### 14.5 版本跟随 SOP（每轮照此执行）
+
+| 步骤 | 动作 | 产出 |
+|---|---|---|
+| 1 采集 | Playwright 打开 Coze / Dify 对应工作流，按 `{站点}-{YYYYMMDD}-{序号}-{主题}.png` 存 `docs/canvas-refs/{YYYYMMDD}/`，同目录写 `meta.json`（站点 / 采集日期 / 页面版本或构建号 / URL / 工作流 ID） | 基准截图 + 元数据 |
+| 2 差异登记 | 对照 13.8 逐层扫描，**新交互追加新行**（层级内顺延编号）；已有行只更新「本项目实现/状态」 | 更新后的 13.8 |
+| 3 冲突裁决 | 与 13.5 已有裁决冲突或全新冲突时，用 AskUserQuestion 让用户裁决，回填 13.5 | 13.5 新行 |
+| 4 任务化 | 编号 `N{轮次}-{序号}`，标 P1/P2；写清涉及文件与验收 | 14.6 未完成清单 |
+| 5 实施 | 必须使用 E1–E4 提供的扩展点；**禁止**新增第 6 处节点映射、禁止散落色值、禁止页面内直连 FlowGram API。接入检查清单：① 是否影响自动保存 ② 是否进入撤销栈 ③ 是否与键盘拦截冲突 ④ z-index 是否压住端口/浮条 ⑤ 抽屉/选中态是否联动 ⑥ 窄屏是否溢出 | 代码 |
+| 6 验收 | `tsc` / `build` / Playwright 断言 / 控制台 0 error；回填 13.8 状态与 13.9 记录 | 收口记录 |
+| 7 复盘 | 若新一轮出现「改 5 处才能加一个节点」的情况，视为 E 系列回归，先修扩展点再做功能 | 复盘条目 |
+
+### 14.6 未完成任务总表（N9 交互 + E 可扩展性）
+
+> N9-01 ~ N9-13 见 13.9；E1 ~ E7 见 14.4。执行顺序建议：
+
+```
+H0（提交拆分，需授权）
+ └→ E3（令牌，低风险）──┬→ N9-01（缩放菜单）、N9-02（多选提示）、N9-06（导出按钮）、N9-12（辅助线重构）
+                        └→ N9-14（端口 tooltip 修复）
+E1（元数据升格）──┬→ N9-13（Note 节点，试点）
+                  └→ E4（能力）→ N9-07（⋯ 菜单）
+E2a（adapter）→ E2b（拆组件 + fieldControls）→ N9-04 / N9-09 / N9-10
+B-N9-03 → N9-03（单节点试运行）
+B-N9-05 → N9-05（会话管理）
+N9-08（运行历史）、N9-11（窄屏抽屉）可并行
+E5 / E6 在下一轮跟随开始前完成；E7 已随 14.5 落地
+```
+
+| 序号 | 任务 | 优先级 | 状态 | 依赖 |
+|---|---|---|---|---|
+| H0 | 现有改动拆分提交 | P0 | ⬜ | 需用户授权 |
+| E1 | 后端元数据升格（仅静态部分） | P0 | ✅ 2026-11-01 完成（N9-13 试点通过） | — |
+| E2a | FlowGram / Coze IR adapter 抽离 | P0 | ✅ 2026-11-01 完成（tsc/build/单测通过） | — |
+| E2b | 拆分 AppEditPage + fieldControls 注册表 | P0 | ⬜ | E2a |
+| E3 | 设计令牌与样式集中 | P0 | ✅ 2026-11-01 完成（tsc/build 通过） | — |
+| E4 | 能力声明驱动交互 | P1 | ✅ 2026-11-01 完成（tsc/build 通过） | E1 |
+| E5 | 契约测试防漂移 | P1 | ✅ 2026-11-01 完成（12 后端 + 10 前端用例） | E1 |
+| E6 | 交互基线机读化（解析 13.8） | P1 | ✅ 2026-11-01 完成（108 项解析通过） | — |
+| E7 | 跟随流程固化 | P2 | ✅ | 14.5 已写入 |
+| N9-01 ~ N9-14 | 交互补全 | P1/P2 | 🟨 N9-01 / N9-13 / N9-14 已完成 | 见 13.9 |
+| B-N9-03 / 05 / 13 | 后端配套 | P1 | ⬜ | 见 13.9 |
+
+### 14.7 完成判定（可扩展性验收）
+
+- [ ] 新增节点：只改 `node_meta.py`（含 icon/category/推荐/能力），前端零改动即可在添加面板、卡片、抽屉、推荐中正确显示
+- [ ] 新增配置字段类型：只加 `node_meta.py` 一处 + `fieldControls.tsx` 注册表一行
+- [ ] 新增交互：只改对应组件 +（必要时）adapter，不改 `AppEditPage` 的多个分支
+- [ ] 再对齐一轮配色：只改 `tokens.ts`
+- [ ] `AppEditPage.tsx` ≤ 1800 行；组件中无新增 `(ctx as any)`
+- [x] `scripts/canvas-status.mjs` 能解析 13.8 表并输出未完成项（不引第二份数据源）
+- [x] 契约测试覆盖全部 `type_key`，新增类型漏配即测试失败（E5 已落地，见 14.6 说明）
+- [ ] 画布性能基线：100 节点下拖拽 ≥55fps（DevTools Performance 抽检）
+
+### 14.8 H0 提交拆分（需用户授权后执行）
+
+> T9-07 原文要求「单条差异单独提交」，但 T9-02 ~ T9-07 与文档改动目前全部混在工作区。E 系列重构前必须先拆分，否则 diff 无法 review。
+
+| 提交 | 内容 | 涉及文件 |
+|---|---|---|
+| H0-1 | 画布平移 / Shift 框选 / 撤销重做 | `AppEditPage.tsx`（`setupCanvasPan`、history 订阅、selectBox 配置）、`CanvasToolbar.tsx` |
+| H0-2 | 端口 hover「+」/ 连线配色与选中态 / 拖线空白弹面板修复 | `AppEditPage.tsx`（端口 CSS、连线 CSS、`onDragLineEnd`） |
+| H0-3 | 右键菜单 / 侧栏窄屏折叠 | `CanvasContextMenu.tsx`、`ResourceSidebar.tsx`、`AppEditPage.tsx`（matchMedia） |
+| H0-4 | 计划文档（13.8 / 13.9 / 14 章） | `docs/canvas-roadmap.md`、`docs/canvas-refs/` |
+
+- **执行条件**：用户明确授权提交后再执行；每个提交单独跑 `tsc --noEmit`。
+- **禁止**：使用 `git add -A`；按文件清单显式 add。
