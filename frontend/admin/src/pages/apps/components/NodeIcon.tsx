@@ -12,6 +12,7 @@ const ICON_MAP: Record<string, { emoji: string; fallbackColor: string }> = {
   human_approval: { emoji: '👤', fallbackColor: '#f97316' },
   subworkflow: { emoji: '▣', fallbackColor: '#64748b' },
   comment: { emoji: '✎', fallbackColor: '#eab308' },
+  note: { emoji: '📝', fallbackColor: '#fbbf24' },
 
   // AI / 逻辑
   llm: { emoji: 'AI', fallbackColor: '#8b5cf6' },
@@ -52,11 +53,14 @@ function hexToRgba(hex: string, alpha: number): string {
   return `rgba(${r},${g},${b},${alpha})`;
 }
 
-export function NodeIcon({ typeKey, color, size = 24 }: { typeKey: string; color: string; size?: number }) {
-  const icon = ICON_MAP[typeKey] || { emoji: '•', fallbackColor: color || '#6366f1' };
-  const bgColor = hexToRgba(color || icon.fallbackColor, 0.12);
-  const fgColor = color || icon.fallbackColor;
-  const fontSize = icon.emoji.length <= 2 ? 11 : 9;
+export function NodeIcon({
+  typeKey, color, icon, size = 24,
+}: { typeKey: string; color: string; icon?: string; size?: number }) {
+  const fallback = ICON_MAP[typeKey] || { emoji: '•', fallbackColor: color || '#6366f1' };
+  const emoji = icon || fallback.emoji;
+  const bgColor = hexToRgba(color || fallback.fallbackColor, 0.12);
+  const fgColor = color || fallback.fallbackColor;
+  const fontSize = emoji.length <= 2 ? 11 : 9;
   return (
     <div
       style={{
@@ -74,7 +78,7 @@ export function NodeIcon({ typeKey, color, size = 24 }: { typeKey: string; color
         lineHeight: 1,
       }}
     >
-      {icon.emoji}
+      {emoji}
     </div>
   );
 }

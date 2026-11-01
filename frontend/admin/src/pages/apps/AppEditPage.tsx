@@ -10,7 +10,7 @@ import type {
 import '@flowgram.ai/free-layout-editor/index.css';
 import { useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Popover, Tree, Modal, Collapse, message, Upload, AutoComplete } from 'antd';
+import { Drawer, Input, Button, Select, Tag, Space, Typography, InputNumber, Popover, Tree, Modal, Collapse, message, Upload, AutoComplete, Tooltip } from 'antd';
 import type { UploadFile } from 'antd';
 import type { TreeProps } from 'antd';
 import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload } from '../../api/apps';
@@ -32,9 +32,48 @@ import { MiniMap } from './components/MiniMap';
 import { RefChipInput } from './components/RefChipInput';
 import { CodeEditor } from './components/CodeEditor';
 import { getNextRecommendations } from './components/nodeNextRecommendations';
+import { canCopy, canDelete, hasOutputs, hasSubgraph } from './canvas/metadata/capabilities';
 import { AlignGuides } from './components/AlignGuides';
 import { ParameterListEditor } from './components/ParameterListEditor';
 import { ToolListEditor } from './components/ToolListEditor';
+import { CANVAS_TOKENS } from './canvas/tokens';
+import {
+  clearSelection,
+  createLine,
+  createNodeByType,
+  disposeLinesByIds,
+  fitView,
+  getLineFromMousePos,
+  getNode,
+  getNodeCount,
+  getNodeExtInfo,
+  getNodeFromMousePos,
+  getNodeTypeKey,
+  getPortFromMousePos,
+  getScroll,
+  getSelection,
+  getViewport,
+  getWorldPosFromMouseEvent,
+  removeNode,
+  redo,
+  scrollToCanvasPoint,
+  setScroll,
+  subscribeHistory,
+  subscribeSelection,
+  subscribeViewport,
+  toWorkflowJSON,
+  undo,
+  updateNodeExtInfo,
+  worldToScreen,
+  type FlowContext,
+} from './canvas/adapters/flowgramContext';
+import {
+  DEFAULT_GRAPH,
+  DEFAULT_SCHEMA_VERSION,
+  fromCozeIR,
+  readSchemaVersion,
+  toCozeIR,
+} from './canvas/adapters/cozeIR';
 
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
@@ -200,9 +239,9 @@ function makeNodeRenderer(
     }, [node, readExtInfo]);
     const title = nodeData.title || meta.title;
 
-    // Comment 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
-    if (meta.type_key === 'comment') {
-      const content = String(nodeData.content || title || '双击编辑便签');
+    // Comment / Note 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
+    if (meta.type_key === 'comment' || meta.type_key === 'note') {
+      const content = String(nodeData.config?.content || nodeData.content || title || '双击编辑便签');
       return (
         <WorkflowNodeRenderer node={node}>
           <div
@@ -235,8 +274,10 @@ function makeNodeRenderer(
         <NodeCard
           typeKey={meta.type_key}
           color={meta.color}
+          icon={meta.icon}
           title={title}
           config={nodeData.config}
+          subtitleHint={meta.subtitle_hint}
           onDoubleClick={() => onNodeDoubleClick(node)}
           onAddNext={onAddNextToNode ? () => onAddNextToNode(node) : undefined}
         />
@@ -244,19 +285,6 @@ function makeNodeRenderer(
     );
   };
 }
-
-// ========== 默认图 ==========
-const DEFAULT_GRAPH: WorkflowJSON = {
-  nodes: [
-    {
-      id: 'start-1',
-      type: 'start',
-      meta: { position: { x: 200, y: 200 } },
-      data: {},
-    } as WorkflowJSON['nodes'][number],
-  ],
-  edges: [],
-};
 
 // ========== 节点配置表单 ==========
 type NodeConfigValues = Record<string, any>;
@@ -381,7 +409,7 @@ function FieldControl({
           />
           {isUrl && (
             <div style={{ fontSize: 11, color: '#9ca3af' }}>
-              支持变量参数：https://api.example.com/users/<span style={{ color: '#6366f1' }}>{'{{node.output.id}}'}</span>
+              支持变量参数：https://api.example.com/users/<span style={{ color: CANVAS_TOKENS.accent }}>{'{{node.output.id}}'}</span>
             </div>
           )}
         </Space>
@@ -955,6 +983,73 @@ function TabSwitch({
   );
 }
 
+// 配置分组折叠容器：折叠状态按节点类型持久化到 localStorage
+function ConfigSectionBox({
+  typeKey,
+  title,
+  defaultOpen,
+  children,
+}: {
+  typeKey: string;
+  title: string;
+  defaultOpen: boolean;
+  children: React.ReactNode;
+}) {
+  const storageKey = `boxia_cfg_sections_${typeKey}`;
+  const [open, setOpen] = useState<boolean>(() => {
+    try {
+      const raw = localStorage.getItem(storageKey);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, boolean>;
+        if (typeof parsed[title] === 'boolean') return parsed[title];
+      }
+    } catch {
+      // 本地缓存损坏时回落到默认展开状态
+    }
+    return defaultOpen;
+  });
+
+  const toggle = () => {
+    setOpen((prev) => {
+      const next = !prev;
+      try {
+        const raw = localStorage.getItem(storageKey);
+        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
+        parsed[title] = next;
+        localStorage.setItem(storageKey, JSON.stringify(parsed));
+      } catch {
+        // 缓存写入失败不影响折叠交互
+      }
+      return next;
+    });
+  };
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <div
+        onClick={toggle}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+          padding: '4px 0',
+          marginBottom: open ? 8 : 0,
+          borderBottom: open ? '1px solid #f0f0f0' : 'none',
+        }}
+      >
+        <span style={{
+          fontSize: 9, color: '#9ca3af',
+          display: 'inline-block',
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 0.15s',
+        }}>
+          ▶
+        </span>
+        <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{title}</span>
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
 function NodeConfigForm({
   nodeMeta,
   values,
@@ -1054,23 +1149,26 @@ function NodeConfigForm({
       )}
 
       {groupConfigFields(nodeMeta.type_key, nodeMeta.config_fields).map((section) => (
-        <div key={section.title} style={{ marginTop: 4 }}>
-          <div style={{
-            fontSize: 12, fontWeight: 600, color: '#374151',
-            marginBottom: 8, paddingBottom: 4, borderBottom: '1px solid #f0f0f0',
-          }}>
-            {section.title}
-          </div>
+        <ConfigSectionBox
+          key={section.title}
+          typeKey={nodeMeta.type_key}
+          title={section.title}
+          defaultOpen={section.title !== '高级'}
+        >
           <Space direction="vertical" style={{ width: '100%' }} size={12}>
             {section.fields.map((field) => (
               <div key={field.name}>
-                <Typography.Text type="secondary">
-                  {field.required && <span style={{ color: '#ff4d4f' }}>* </span>}
-                  {field.label}
-                </Typography.Text>
-                {field.description && (
-                  <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>{field.description}</div>
-                )}
+                <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                  <Typography.Text type="secondary">
+                    {field.required && <span style={{ color: '#ff4d4f' }}>* </span>}
+                    {field.label}
+                  </Typography.Text>
+                  {field.description && (
+                    <Tooltip title={field.description}>
+                      <span style={{ fontSize: 12, color: '#9ca3af', cursor: 'help' }}>ⓘ</span>
+                    </Tooltip>
+                  )}
+                </div>
                 {field.field_type === 'case_list' ? (
                   <CaseListEditor
                     value={values[field.name]}
@@ -1109,19 +1207,21 @@ function NodeConfigForm({
               </div>
             ))}
           </Space>
-        </div>
+        </ConfigSectionBox>
       ))}
 
-      <div>
-        <Typography.Text type="secondary">输出字段（outputs）</Typography.Text>
-        <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
-          自定义本节点产出的字段列表，保存后写入 node.data.outputs
+      {hasOutputs(nodeMeta) && (
+        <div>
+          <Typography.Text type="secondary">输出字段（outputs）</Typography.Text>
+          <div style={{ fontSize: 12, color: '#999', marginBottom: 4 }}>
+            自定义本节点产出的字段列表，保存后写入 node.data.outputs
+          </div>
+          <OutputsEditor value={outputs} onChange={onOutputsChange} />
         </div>
-        <OutputsEditor value={outputs} onChange={onOutputsChange} />
-      </div>
+      )}
 
       {/* V10：下一步推荐 */}
-      {onAddNext && getNextRecommendations(nodeMeta.type_key).length > 0 && (
+      {onAddNext && getNextRecommendations(nodeMeta.type_key, keyToMeta).length > 0 && (
         <div style={{
           marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0',
         }}>
@@ -1131,7 +1231,7 @@ function NodeConfigForm({
             下一步
           </div>
           <Space direction="vertical" style={{ width: '100%' }} size={6}>
-            {getNextRecommendations(nodeMeta.type_key).map((rec) => {
+            {getNextRecommendations(nodeMeta.type_key, keyToMeta).map((rec) => {
               const meta = keyToMeta[rec.typeKey];
               return (
                 <div
@@ -1159,6 +1259,74 @@ function NodeConfigForm({
       )}
     </Space>
   );
+}
+
+// T9-07：对齐 Coze —— 空白处普通左键拖拽平移（Shift+拖拽由 selectBox 负责框选）。
+// FlowGram 的选区插件在 canSelect 返回 false 时不会开始框选，也不会平移，需要自绘。
+function setupCanvasPan(ctx: FlowContext): () => void {
+  if (!ctx) return () => undefined;
+
+  // 命中这些元素时不启动平移，避免抢走节点/端口/连线/浮层的既有交互
+  const interactiveSelector = [
+    '[data-node-id]',
+    '[data-port-entity-id]',
+    '.gedit-flow-activity-edge',
+    '.boxia-minimap',
+    '.ant-popover',
+    '.ant-drawer',
+    '.ant-dropdown',
+    'button',
+    'input',
+    'textarea',
+    'select',
+    'a',
+  ].join(',');
+
+  let panning = false;
+  let startX = 0;
+  let startY = 0;
+  let originScrollX = 0;
+  let originScrollY = 0;
+
+  // 用捕获阶段挂在 document 上：FlowGram 的拖拽层会 stopPropagation，冒泡阶段收不到
+  const onPointerDown = (e: PointerEvent) => {
+    if (e.button !== 0 || e.shiftKey) return;
+    const target = e.target as HTMLElement | null;
+    if (!target || !target.closest('.gedit-playground-container')) return;
+    if (target.closest(interactiveSelector)) return;
+    panning = true;
+    startX = e.clientX;
+    startY = e.clientY;
+    const origin = getScroll(ctx);
+    originScrollX = origin.x;
+    originScrollY = origin.y;
+    document.body.style.cursor = 'grabbing';
+  };
+
+  const onPointerMove = (e: PointerEvent) => {
+    if (!panning) return;
+    const dx = e.clientX - startX;
+    const dy = e.clientY - startY;
+    // scrollX/Y 是画布层的屏幕平移量，与鼠标位移 1:1
+    setScroll(ctx, originScrollX + dx, originScrollY + dy);
+  };
+
+  const onPointerUp = () => {
+    if (!panning) return;
+    panning = false;
+    document.body.style.cursor = '';
+  };
+
+  document.addEventListener('pointerdown', onPointerDown, true);
+  document.addEventListener('pointermove', onPointerMove, true);
+  document.addEventListener('pointerup', onPointerUp, true);
+  return () => {
+    panning = false;
+    document.body.style.cursor = '';
+    document.removeEventListener('pointerdown', onPointerDown, true);
+    document.removeEventListener('pointermove', onPointerMove, true);
+    document.removeEventListener('pointerup', onPointerUp, true);
+  };
 }
 
 // ========== 页面组件 ==========
@@ -1212,13 +1380,22 @@ export default function AppEditPage() {
   const [canvasViewport, setCanvasViewport] = useState<{ x: number; y: number; w: number; h: number; zoom: number } | null>(null);
   const [nodeCount, setNodeCount] = useState(0);
   const [deleteNodeOpen, setDeleteNodeOpen] = useState(false);
+  // 多选集合（框选 / Shift 点选）与批量删除目标
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
+  // 连线选中集合（点击连线时 FlowGram 会把 line 实体放进 selection）
+  const selectedLineIdsRef = useRef<string[]>([]);
   // 配置抽屉开关与"选中节点"分离：关闭抽屉后仍保留选中态，供右键复制/删除使用
   const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
+  // 当前抽屉承载的节点，用于选择切换时判断是否需要关闭
+  const drawerNodeIdRef = useRef<string | null>(null);
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
   const [addNodePopover, setAddNodePopover] = useState<{ x: number; y: number; fromNodeId?: string } | null>(null);
   const [datasetOptions, setDatasetOptions] = useState<DatasetItem[]>([]);
   // V4：左侧资源树折叠状态
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  // 窄屏下手动展开后，本次会话不再被断点监听强制折叠
+  const manualSidebarExpandRef = useRef(false);
   // V1/V2：右下角校验/日志合并面板
   const [panelOpen, setPanelOpen] = useState(false);
   const [panelTab, setPanelTab] = useState<'validation' | 'logs'>('logs');
@@ -1230,23 +1407,90 @@ export default function AppEditPage() {
   const nodeClipboardRef = useRef<{ typeKey: string; title?: string; config: Record<string, any>; outputs?: unknown[] } | null>(null);
   // 画布缩放/滚动订阅句柄，切换子图重挂载编辑器时先释放旧订阅
   const viewportDisposablesRef = useRef<Array<{ dispose?: () => void }>>([]);
+  // FlowGram 选中集合同步句柄
+  const selectionDisposableRef = useRef<{ dispose?: () => void } | null>(null);
+  // 撤销/重做可用性（FlowGram history 插件开启后由 onApply 驱动）
+  const [historyState, setHistoryState] = useState({ canUndo: false, canRedo: false });
+  const historyDisposableRef = useRef<{ dispose?: () => void } | null>(null);
+  // 空白拖拽平移的监听器释放句柄（编辑器重挂载时先解绑）
+  const panCleanupRef = useRef<(() => void) | null>(null);
 
   // 同步画布缩放与可视区域：小地图相机框、底部工具栏缩放百分比都依赖它
   const syncCanvasViewport = useCallback(() => {
-    const ctx = ctxRef.current as any;
-    const config = ctx?.playground?.config;
-    if (!config) return;
-    const zoom = config.zoom ?? 1;
-    setCanvasZoom(zoom);
-    const vp = config.getViewport?.();
-    if (vp) {
-      setCanvasViewport({ x: vp.x, y: vp.y, w: vp.width, h: vp.height, zoom });
-    }
+    const viewport = getViewport(ctxRef.current);
+    if (!viewport) return;
+    setCanvasZoom(viewport.zoom);
+    setCanvasViewport(viewport);
   }, []);
 
   useEffect(() => () => {
     viewportDisposablesRef.current.forEach((d) => d.dispose?.());
     viewportDisposablesRef.current = [];
+    selectionDisposableRef.current?.dispose?.();
+    selectionDisposableRef.current = null;
+    historyDisposableRef.current?.dispose?.();
+    historyDisposableRef.current = null;
+    panCleanupRef.current?.();
+    panCleanupRef.current = null;
+  }, []);
+
+  // 窄屏自动折叠左侧栏（U-P4）
+  useEffect(() => {
+    const mq = window.matchMedia('(max-width: 1100px)');
+    const apply = () => {
+      if (mq.matches) {
+        manualSidebarExpandRef.current = false;
+        setSidebarCollapsed(true);
+      } else if (!manualSidebarExpandRef.current) {
+        setSidebarCollapsed(false);
+      }
+    };
+    apply();
+    mq.addEventListener('change', apply);
+    return () => mq.removeEventListener('change', apply);
+  }, []);
+
+  // 拖线时高亮可落点的输入端口（FlowGram 仅在非绘制态做 hover，需自行标记）
+  useEffect(() => {
+    let dragging = false;
+    let activePortEl: HTMLElement | null = null;
+    const clearActive = () => {
+      activePortEl?.classList.remove('boxia-port-drop-target');
+      activePortEl = null;
+    };
+    const onPointerDown = (e: PointerEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest?.('.gedit-playground-container')) return;
+      dragging = Boolean(target.closest('[data-port-entity-type="output"]'));
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (!dragging) return;
+      const ctx = ctxRef.current;
+      const worldPos = getWorldPosFromMouseEvent(ctx, e);
+      if (!worldPos) return;
+      const port = getPortFromMousePos(ctx, worldPos);
+      const nextEl = port?.portType === 'input'
+        ? (document.querySelector(`[data-port-entity-id="${port.id}"]`) as HTMLElement | null)
+        : null;
+      if (nextEl !== activePortEl) {
+        clearActive();
+        activePortEl = nextEl;
+        activePortEl?.classList.add('boxia-port-drop-target');
+      }
+    };
+    const onPointerUp = () => {
+      dragging = false;
+      clearActive();
+    };
+    document.addEventListener('pointerdown', onPointerDown, true);
+    window.addEventListener('pointermove', onPointerMove, true);
+    window.addEventListener('pointerup', onPointerUp, true);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown, true);
+      window.removeEventListener('pointermove', onPointerMove, true);
+      window.removeEventListener('pointerup', onPointerUp, true);
+      clearActive();
+    };
   }, []);
 
   // ========== 子图导航（B6） ==========
@@ -1254,6 +1498,8 @@ export default function AppEditPage() {
   // subgraphStack 记录从 root 到当前编辑层的 node_id 路径；空数组 = 编辑 root
   // editorKey 强制 FreeLayoutEditor 重挂载（切换层级时 initialData 改变）
   const rootGraphRef = useRef<WorkflowJSON>(DEFAULT_GRAPH);
+  // Coze IR 的 schema 版本来自后端独立字段，保存时原样透传
+  const graphSchemaVersionRef = useRef(DEFAULT_SCHEMA_VERSION);
   const [subgraphStack, setSubgraphStack] = useState<string[]>([]);
   const [editorKey, setEditorKey] = useState(0);
   const [subgraphBreadcrumb, setSubgraphBreadcrumb] = useState<Array<{ id: string; title: string }>>([]);
@@ -1262,7 +1508,7 @@ export default function AppEditPage() {
   const persistCurrentEditor = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    const json = ctx.document.toJSON() as unknown as WorkflowJSON;
+    const json = toWorkflowJSON(ctx);
     const stack = subgraphStack;
     if (stack.length === 0) {
       rootGraphRef.current = json;
@@ -1361,6 +1607,9 @@ export default function AppEditPage() {
     nodeMetas.forEach((m) => { map[m.type_key] = m; });
     return map;
   }, [nodeMetas]);
+  // onLoad 闭包会长期驻留，通过 ref 读取最新的节点元数据
+  const keyToMetaRef = useRef<Record<string, NodeMeta>>(keyToMeta);
+  keyToMetaRef.current = keyToMeta;
 
   // ========== 节点注册表 ==========
   const nodeRegistries: WorkflowNodeRegistry[] = useMemo(() => {
@@ -1368,7 +1617,9 @@ export default function AppEditPage() {
       // 按 outputs 数量动态计算高度，避免端口圆点覆盖卡片拖拽区域
       const baseHeight = 52;
       const outputPortHeight = meta.outputs.length > 1 ? (meta.outputs.length - 1) * 20 : 0;
-      const height = meta.type_key === 'comment' ? 100 : baseHeight + outputPortHeight;
+      const height = meta.type_key === 'comment' || meta.type_key === 'note'
+        ? 100
+        : baseHeight + outputPortHeight;
       return {
         type: meta.type_key,
         meta: {
@@ -1395,6 +1646,7 @@ export default function AppEditPage() {
           const resp = await getAppGraph(id);
           if (cancelled) return;
           setPublishedVersion(resp.published_graph_version ?? null);
+          graphSchemaVersionRef.current = resp.graph_schema_version ?? readSchemaVersion(resp.graph);
           const graph = fromCozeIR(resp.graph, cozeTypeToKey);
           rootGraphRef.current = graph;
           setSubgraphStack([]);
@@ -1454,7 +1706,7 @@ export default function AppEditPage() {
     setValidating(true);
     try {
       const flowgram = collectFullGraph();
-      const cozeIR = toCozeIR(flowgram, keyToCozeType);
+      const cozeIR = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
       const result = await validateGraph(cozeIR as never);
       setValidationIssues(result.issues);
       collectIssuesForNodes(result.issues);
@@ -1479,7 +1731,7 @@ export default function AppEditPage() {
         // 新增未连线节点、必填项未填都是编辑中间态，应允许随时落盘。
         await doValidate();
         const flowgram = collectFullGraph();
-        const cozeIR = toCozeIR(flowgram, keyToCozeType);
+        const cozeIR = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
         await saveAppGraph(id, cozeIR as never);
         setSaveStatus('saved');
         setLastSavedAt(new Date());
@@ -1527,7 +1779,7 @@ export default function AppEditPage() {
     const nodeId = `${typeKey}-${Date.now().toString(36)}-${nodeCounterRef.current[typeKey]}`;
 
     // 从当前文档 JSON 读取节点位置（toJSON 的 meta.position 即真实 TransformData 位置）
-    const docJson = ctx.document.toJSON() as unknown as WorkflowJSON;
+    const docJson = toWorkflowJSON(ctx);
     const allNodes = (docJson.nodes || []) as Array<{ id: string; meta?: { position?: { x: number; y: number } } }>;
 
     let posX = 400;
@@ -1566,34 +1818,26 @@ export default function AppEditPage() {
       attempts += 1;
     }
 
-    const root = ctx.document.getNode('root');
     // 必须走 createWorkflowNodeByType：裸 addNode 不会初始化 TransformData，
     // 节点会渲染在 (0,0) 且无法拖拽
-    ctx.document.createWorkflowNodeByType(
-      meta.type_key,
-      { x: posX, y: posY },
-      { id: nodeId, data: { title: meta.title, config: {} } },
-      root?.id,
-    );
+    createNodeByType(ctx, meta.type_key, { x: posX, y: posY }, {
+      id: nodeId,
+      data: { title: meta.title, config: {} },
+    });
 
     // 新节点添加后自动适应视图，确保用户能看到新节点（WorkflowDocument.fitView）
-    setTimeout(() => {
-      ctx.document.fitView?.(true).catch(() => undefined);
-    }, 100);
+    setTimeout(() => { void fitView(ctx, true); }, 100);
 
     // V9/V10：自动从 source 节点第一个 output 端口连线到新节点第一个 input 端口
     if (options?.fromNodeId) {
       const fromNodeId = options.fromNodeId;
-      const fromNode = ctx.document.getNode(fromNodeId) as any;
+      const fromNode = getNode(ctx, fromNodeId);
       if (fromNode) {
-        // 实体上的 type 恒为 FlowNodeEntity，节点类型要用 flowNodeType
-        const fromTypeKey = String(fromNode.flowNodeType || fromNodeId.split('-')[0]);
-        const fromMeta = keyToMeta[fromTypeKey];
+        const fromMeta = keyToMeta[getNodeTypeKey(fromNode)];
         const fromPortId = fromMeta?.outputs?.[0]?.name;
         const toPortId = meta.inputs?.[0]?.name;
         if (fromPortId) {
-          const linesManager = (ctx.document as any).linesManager;
-          linesManager?.createLine({
+          createLine(ctx, {
             from: fromNodeId,
             fromPort: fromPortId,
             to: nodeId,
@@ -1609,26 +1853,25 @@ export default function AppEditPage() {
   const NODE_CLIPBOARD_KEY = 'boxia_node_clipboard';
 
   const copyNode = useCallback(() => {
-    const ctx = ctxRef.current as any;
-    if (!ctx || !selectedNodeId) {
+    if (!ctxRef.current || !selectedNodeId) {
       message.info('请先选中一个节点');
       return;
     }
-    const node = ctx.document?.getNode?.(selectedNodeId);
+    const node = getNode(ctxRef.current, selectedNodeId);
     if (!node) {
       message.error('未找到选中节点');
       return;
     }
-    const typeKey = String(node.flowNodeType || '');
+    const typeKey = getNodeTypeKey(node);
     const meta = keyToMeta[typeKey];
-    if (!meta) {
+    if (!canCopy(meta, typeKey)) {
       message.error('该节点不支持复制');
       return;
     }
-    const data = ((node.getExtInfo?.() || node.data || {}) as Record<string, any>);
+    const data = getNodeExtInfo(node);
     const payload = {
       typeKey,
-      title: data.title ? String(data.title) : meta.title,
+      title: data.title ? String(data.title) : meta?.title || typeKey,
       config: (data.config || {}) as Record<string, any>,
       outputs: Array.isArray(data.outputs) ? data.outputs : [],
     };
@@ -1660,11 +1903,9 @@ export default function AppEditPage() {
       message.error('粘贴失败：未知节点类型');
       return;
     }
-    const ctx = ctxRef.current as any;
-    const node = ctx?.document?.getNode?.(newId);
+    const node = getNode(ctxRef.current, newId);
     if (node) {
-      node.updateExtInfo?.({
-        ...(node.getExtInfo?.() || node.data || {}),
+      updateNodeExtInfo(node, {
         title: payload.title ? `${payload.title} 副本` : keyToMeta[payload.typeKey]?.title,
         config: JSON.parse(JSON.stringify(payload.config || {})),
         outputs: JSON.parse(JSON.stringify(payload.outputs || [])),
@@ -1679,7 +1920,7 @@ export default function AppEditPage() {
   const refreshPickerNodes = useCallback(() => {
     const ctx = ctxRef.current;
     if (!ctx) return;
-    const json = ctx.document.toJSON() as unknown as WorkflowJSON;
+    const json = toWorkflowJSON(ctx);
     const nodes: GraphNodeSummary[] = (json.nodes || []).map((n) => {
       const data = (n.data || {}) as { title?: string; config?: Record<string, any> };
       const meta = (n.meta || {}) as { position?: { x: number; y: number } };
@@ -1696,14 +1937,13 @@ export default function AppEditPage() {
   }, []);
 
   const handleNodeDoubleClick = useCallback((node: WorkflowNodeEntity) => {
-    const prefix = node.id.split('-')[0];
-    const nodeTypeKey = String(node.type || prefix || '');
-    const nodeData = ((node as unknown as { getExtInfo?: () => Record<string, any> }).getExtInfo?.()
-      || (node as unknown as { data?: Record<string, any> }).data
-      || {}) as { title?: string; config?: NodeConfigValues; outputs?: unknown[]; subgraph?: WorkflowJSON };
+    const nodeTypeKey = getNodeTypeKey(node);
+    const nodeData = getNodeExtInfo(node) as {
+      title?: string; config?: NodeConfigValues; outputs?: unknown[]; subgraph?: WorkflowJSON;
+    };
 
     // 子图节点：双击直接进入子图编辑
-    if (SUBGRAPH_NODE_TYPES.has(nodeTypeKey)) {
+    if (hasSubgraph(keyToMetaRef.current[nodeTypeKey], nodeTypeKey)) {
       // 首次进入时如果还没有 subgraph，自动初始化一个空 START 节点
       const existing = (nodeData.subgraph as WorkflowJSON | undefined);
       if (!existing || !Array.isArray(existing.nodes) || existing.nodes.length === 0) {
@@ -1720,18 +1960,16 @@ export default function AppEditPage() {
           edges: [],
         };
         // 同步回写到节点 extInfo（FlowGram 的节点数据载体）
-        (node as unknown as { updateExtInfo?: (info: Record<string, any>) => void }).updateExtInfo?.({
-          ...nodeData,
-          subgraph: initSubgraph,
-        });
+        updateNodeExtInfo(node, { subgraph: initSubgraph });
       }
       enterSubgraph(node.id, nodeData.title || nodeTypeKey);
       return;
     }
 
     setSelectedNodeId(node.id);
+    drawerNodeIdRef.current = node.id;
     setConfigDrawerOpen(true);
-    const meta = prefix ? keyToMeta[prefix] : undefined;
+    const meta = keyToMeta[nodeTypeKey];
     if (meta) {
       setSelectedNodeMeta(meta);
     }
@@ -1742,7 +1980,7 @@ export default function AppEditPage() {
     setNodeOutputs(parseOutputsValue(nodeData.outputs));
 
     // 抽屉「输入」区：按入边反查上游可引用字段
-    const json = ctxRef.current?.document.toJSON() as unknown as WorkflowJSON | undefined;
+    const json = toWorkflowJSON(ctxRef.current);
     const edges = ((json?.edges || []) as unknown as Array<{ source?: string; target?: string }>);
     const groups: UpstreamInputGroup[] = [];
     for (const edge of edges) {
@@ -1774,28 +2012,45 @@ export default function AppEditPage() {
 
   // ========== 删除节点（U-S3） ==========
   const confirmDeleteNode = useCallback(() => {
-    const ctx = ctxRef.current as any;
-    const nodeId = selectedNodeId;
-    if (!ctx || !nodeId) return;
-    try {
-      const node = ctx.document?.getNode?.(nodeId);
-      if (node && typeof node.remove === 'function') {
-        node.remove();
-      } else if (typeof ctx.document?.removeNode === 'function') {
-        ctx.document.removeNode(nodeId);
-      } else {
-        message.error('当前画布不支持删除节点');
-        return;
-      }
-      message.success('节点已删除');
-    } catch (err) {
+    const ctx = ctxRef.current;
+    const ids = deleteTargetIds.length > 0
+      ? deleteTargetIds
+      : (selectedNodeId ? [selectedNodeId] : []);
+    if (!ctx || ids.length === 0) {
+      setDeleteNodeOpen(false);
+      return;
+    }
+    const resolveTypeKey = (nodeId: string): string => getNodeTypeKey(getNode(ctx, nodeId));
+    const deletable = ids.filter((nodeId) => {
+      const typeKey = resolveTypeKey(nodeId);
+      return canDelete(keyToMeta[typeKey], typeKey);
+    });
+    if (deletable.length === 0) {
+      message.warning('所选节点不允许删除');
+      setDeleteNodeOpen(false);
+      return;
+    }
+    let removed = 0;
+    for (const nodeId of deletable) {
+      if (removeNode(ctx, nodeId)) removed += 1;
+    }
+    // 清空 FlowGram 选中集合，避免残留已删除节点导致后续点击不再触发选中同步
+    clearSelection(ctx);
+    const skipped = ids.length - deletable.length;
+    if (removed > 0) {
+      const base = removed > 1 ? `已删除 ${removed} 个节点` : '节点已删除';
+      message.success(skipped > 0 ? `${base}，不可删除的节点已跳过` : base);
+    } else {
       message.error('删除节点失败');
     }
     setSelectedNodeId(null);
+    setSelectedNodeIds([]);
+    setDeleteTargetIds([]);
     setConfigDrawerOpen(false);
+    drawerNodeIdRef.current = null;
     setDeleteNodeOpen(false);
     scheduleSave();
-  }, [selectedNodeId, scheduleSave]);
+  }, [deleteTargetIds, selectedNodeId, keyToMeta, scheduleSave]);
 
   // V9：节点右上角 + 按钮 → 在节点下方弹出 AddNodePopover（自动连线到当前节点）
   const handleAddNextToNode = useCallback((node: WorkflowNodeEntity) => {
@@ -1824,19 +2079,11 @@ export default function AppEditPage() {
       const next = { ...prev, ...patch };
       const ctx = ctxRef.current;
       if (ctx && selectedNodeId) {
-        const node = ctx.document.getNode(selectedNodeId) as unknown as {
-          updateExtInfo?: (info: Record<string, any>) => void;
-          getExtInfo?: () => Record<string, any> | undefined;
-          data?: Record<string, unknown>;
-        };
+        const node = getNode(ctx, selectedNodeId);
         if (node) {
           // title 单独存放，避免混入 config 后被写进后端 inputs
           const { title, ...configOnly } = next;
-          node.updateExtInfo?.({
-            ...(node.getExtInfo?.() || node.data || {}),
-            title,
-            config: configOnly,
-          });
+          updateNodeExtInfo(node, { title, config: configOnly });
         }
       }
       return next;
@@ -1847,14 +2094,9 @@ export default function AppEditPage() {
     setNodeOutputs(next);
     const ctx = ctxRef.current;
     if (ctx && selectedNodeId) {
-      const node = ctx.document.getNode(selectedNodeId) as unknown as {
-        updateExtInfo?: (info: Record<string, any>) => void;
-        getExtInfo?: () => Record<string, any> | undefined;
-        data?: Record<string, unknown>;
-      };
+      const node = getNode(ctx, selectedNodeId);
       if (node) {
-        node.updateExtInfo?.({
-          ...(node.getExtInfo?.() || node.data || {}),
+        updateNodeExtInfo(node, {
           outputs: next.map((it) => ({
             name: it.name,
             type: it.type,
@@ -1919,7 +2161,7 @@ export default function AppEditPage() {
   const extractStartParams = useCallback((): Array<{ name: string; type?: string }> => {
     const ctx = ctxRef.current;
     if (!ctx) return [];
-    const flowgram = ctx.document.toJSON() as unknown as WorkflowJSON;
+    const flowgram = toWorkflowJSON(ctx);
     const startNode = (flowgram.nodes || []).find((n) => n.type === 'start');
     if (!startNode) return [];
     const data = (startNode.data || {}) as { config?: { inputs?: Array<{ name: string; type?: string }> } };
@@ -2026,8 +2268,8 @@ export default function AppEditPage() {
       const ctx = ctxRef.current;
       let graph: Record<string, unknown>;
       if (ctx) {
-        const flowgram = ctx.document.toJSON() as unknown as WorkflowJSON;
-        graph = toCozeIR(flowgram, keyToCozeType);
+        const flowgram = toWorkflowJSON(ctx);
+        graph = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
       } else {
         graph = {};
       }
@@ -2055,8 +2297,8 @@ export default function AppEditPage() {
       setRunLogs((prev) => [...prev, { time, text, level }]);
     };
     try {
-      const flowgram = ctx.document.toJSON() as unknown as WorkflowJSON;
-      const graph = toCozeIR(flowgram, keyToCozeType);
+      const flowgram = toWorkflowJSON(ctx);
+      const graph = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
       appendLog(`${approved ? '✓ 审批通过' : '✗ 审批拒绝'}，续跑...`);
       await debugRunAppStreamResume(
         {
@@ -2093,6 +2335,15 @@ export default function AppEditPage() {
     }
   }, [id, running, extractStartParams, doRun]);
 
+  // 删除连线：line.dispose 会触发 linesManager 的 DELETE_LINE，从而走 onContentChange 自动保存
+  const deleteLines = useCallback((lineIds: string[]) => {
+    const removed = disposeLinesByIds(ctxRef.current, lineIds);
+    selectedLineIdsRef.current = [];
+    if (removed > 0) {
+      message.success(removed > 1 ? `已删除 ${removed} 条连线` : '连线已删除');
+    }
+  }, []);
+
   // ========== 键盘快捷键（U-P1 + U-P6 撤销重做） ==========
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -2113,25 +2364,56 @@ export default function AppEditPage() {
       // Ctrl/Cmd+Z：撤销（非输入框时交给 FlowGram history）
       if ((e.ctrlKey || e.metaKey) && e.key === 'z' && !inInput) {
         e.preventDefault();
-        const ctx = ctxRef.current as any;
-        if (e.shiftKey) {
-          ctx?.history?.redo?.();
-        } else {
-          ctx?.history?.undo?.();
-        }
+        if (e.shiftKey) redo(ctxRef.current);
+        else undo(ctxRef.current);
         return;
       }
       // Ctrl/Cmd+Y：重做
       if ((e.ctrlKey || e.metaKey) && e.key === 'y' && !inInput) {
         e.preventDefault();
-        const ctx = ctxRef.current as any;
-        ctx?.history?.redo?.();
+        redo(ctxRef.current);
+        return;
+      }
+      // Ctrl/Cmd+C / V：复制 / 粘贴节点（不在输入框且无文本选区时生效）
+      if ((e.ctrlKey || e.metaKey) && (e.key === 'c' || e.key === 'v') && !inInput) {
+        const selection = window.getSelection?.();
+        if (selection && !selection.isCollapsed && selection.toString().length > 0) return;
+        e.preventDefault();
+        if (e.key === 'c') copyNode();
+        else pasteNode();
+        return;
+      }
+      // Delete / Backspace：删除选中节点（单选或多选均弹一次确认）
+      if ((e.key === 'Delete' || e.key === 'Backspace') && !inInput) {
+        const ids = selectedNodeIds.length > 0
+          ? selectedNodeIds
+          : (selectedNodeId ? [selectedNodeId] : []);
+        if (ids.length > 0) {
+          e.preventDefault();
+          // 捕获阶段截断：避免 FlowGram 内置 Delete 抢在确认弹窗前直接删节点
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          setDeleteTargetIds(ids);
+          setDeleteNodeOpen(true);
+          return;
+        }
+        // 无节点选中时，若选中了连线则直接删除（连线删除无副作用，不需要二次确认）
+        const lineIds = selectedLineIdsRef.current.length > 0
+          ? selectedLineIdsRef.current
+          : getSelection(ctxRef.current).lineIds;
+        if (lineIds.length > 0) {
+          e.preventDefault();
+          e.stopPropagation();
+          e.stopImmediatePropagation();
+          deleteLines(lineIds);
+        }
         return;
       }
     };
-    window.addEventListener('keydown', onKeyDown);
-    return () => window.removeEventListener('keydown', onKeyDown);
-  }, [scheduleSave, handleRun]);
+    // 捕获阶段注册，Delete 需先于画布内部快捷键处理
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [scheduleSave, handleRun, copyNode, pasteNode, deleteLines, selectedNodeId, selectedNodeIds]);
 
   // ========== 版本历史（B9） ==========
   const openVersionDrawer = useCallback(async () => {
@@ -2153,6 +2435,7 @@ export default function AppEditPage() {
       setVersionDrawerOpen(false);
       // 重新加载 graph
       const resp = await getAppGraph(id);
+      graphSchemaVersionRef.current = resp.graph_schema_version ?? readSchemaVersion(resp.graph);
       setInitialData(fromCozeIR(resp.graph, cozeTypeToKey));
     } catch (err) {
       message.error(err instanceof Error ? err.message : '回滚失败');
@@ -2161,7 +2444,7 @@ export default function AppEditPage() {
 
   // ========== 渲染 ==========
   if (!id) return <div style={{ padding: 24 }}>缺少应用 ID</div>;
-  if (loadError) return <div style={{ padding: 24, color: '#d4380d' }}>加载失败：{loadError}</div>;
+  if (loadError) return <div style={{ padding: 24, color: CANVAS_TOKENS.dangerDeep }}>加载失败：{loadError}</div>;
   // nodeMetas 未就绪时不要挂载编辑器：节点类型未注册会导致节点 0 尺寸、画布空白
   if (!initialData || !nodeMetaReady) return <div style={{ padding: 24 }}>加载中…</div>;
 
@@ -2179,7 +2462,14 @@ export default function AppEditPage() {
       <ResourceSidebar
         appName={id || ''}
         collapsed={sidebarCollapsed}
-        onToggleCollapse={() => setSidebarCollapsed((v) => !v)}
+        onToggleCollapse={() =>
+          setSidebarCollapsed((v) => {
+            const next = !v;
+            // 手动展开后标记，避免窄屏断点监听再次强制折叠
+            if (!next) manualSidebarExpandRef.current = true;
+            return next;
+          })
+        }
         onOpenVariables={() => setVariablesDrawerOpen(true)}
         onOpenVersions={openVersionDrawer}
         onOpenConversation={() => message.info('会话管理模块开发中')}
@@ -2204,26 +2494,22 @@ export default function AppEditPage() {
             box-shadow: 0 0 0 3px rgba(239,68,68,0.5) !important;
             border-radius: 8px;
           }
-          /* ========== 连线样式（V5 配色 #a5b4fc） ========== */
-          .gedit-flow-line,
-          [class*='flow-line'] path {
-            stroke: #a5b4fc !important;
-            stroke-width: 2 !important;
+          /* ========== 连线样式（V6 对齐 Coze：主色 #5044fc，选中亮青） ==========
+             FlowGram 每条连线渲染两个 path：曲线 + 箭头（V 形折线），二者共用同一套样式。
+             选中态由 FlowGram 用 path 的 stroke-width 属性区分（2 → 3），
+             因此这里不能再给 stroke-width 加 !important，否则选中态被抹平。 */
+          .gedit-flow-activity-edge path {
+            stroke: ${CANVAS_TOKENS.line} !important;
             fill: none !important;
-            transition: stroke 0.15s, stroke-width 0.15s;
+            transition: stroke 0.15s, stroke-width 0.15s, filter 0.15s;
           }
-          .gedit-flow-line:hover,
-          [class*='flow-line']:hover path {
-            stroke: #6366f1 !important;
-            stroke-width: 2.5 !important;
+          .gedit-flow-activity-edge:hover path {
+            stroke: ${CANVAS_TOKENS.lineHover} !important;
           }
-          .gedit-flow-line.selected,
-          .gedit-flow-line.active,
-          [class*='flow-line'].selected path,
-          [class*='flow-line'].active path {
-            stroke: #6366f1 !important;
-            stroke-width: 2.5 !important;
-            filter: drop-shadow(0 0 3px rgba(99,102,241,0.4));
+          .gedit-flow-activity-edge path[stroke-width='3'],
+          .gedit-flow-activity-edge:hover path[stroke-width='3'] {
+            stroke: ${CANVAS_TOKENS.lineActive} !important;
+            filter: drop-shadow(0 0 4px ${CANVAS_TOKENS.lineActiveGlow});
           }
           /* ========== 端口圆点（对齐 Coze 实机） ==========
              FlowGram 端口 DOM：
@@ -2260,35 +2546,64 @@ export default function AppEditPage() {
             width: 12px !important;
             height: 12px !important;
             margin: -6px 0 0 -6px !important;
-            background: #6366f1 !important;
+            background: ${CANVAS_TOKENS.port} !important;
             transform: scale(1) !important;
-            border: 2px solid #fff !important;
-            box-shadow: 0 0 0 1px #6366f1 !important;
+            border: 2px solid ${CANVAS_TOKENS.white} !important;
+            box-shadow: 0 0 0 1px ${CANVAS_TOKENS.port} !important;
             cursor: crosshair !important;
           }
           [data-port-entity-id]:hover > .bg,
           [data-port-entity-id]:hover > .workflow-port-bg,
           [data-port-entity-id].hovered > .bg,
           [data-port-entity-id].hovered > .workflow-port-bg {
-            background: #4338ca !important;
+            background: ${CANVAS_TOKENS.portHover} !important;
             transform: scale(1.15) !important;
           }
           [data-port-entity-id].linked > .bg,
           [data-port-entity-id].linked > .workflow-port-bg {
-            background: #4d53e8 !important;
+            background: ${CANVAS_TOKENS.portLinked} !important;
+          }
+          /* 输出端口 hover：对齐 Coze 的紫色「+」拖拽提示（输入端口保持圆点） */
+          [data-port-entity-id][data-port-entity-type='output']:hover > .bg,
+          [data-port-entity-id][data-port-entity-type='output'].hovered > .bg {
+            width: 18px !important;
+            height: 18px !important;
+            margin: -9px 0 0 -9px !important;
+            background: ${CANVAS_TOKENS.port} !important;
+            transform: scale(1) !important;
+            box-shadow: 0 0 0 1px ${CANVAS_TOKENS.port}, 0 0 0 5px ${CANVAS_TOKENS.portRing} !important;
+          }
+          [data-port-entity-id][data-port-entity-type='output']:hover > .bg::after,
+          [data-port-entity-id][data-port-entity-type='output'].hovered > .bg::after {
+            content: '+';
+            position: absolute;
+            inset: 0;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: #fff;
+            font-size: 14px;
+            font-weight: 400;
+            line-height: 1;
           }
           [data-port-entity-id] > .bg > .cross-hair,
           [data-port-entity-id] .focus-circle {
             display: none !important;
           }
-          /* 窄屏适配（V4）：< 1280px 隐藏左侧资源树 */
-          @media (max-width: 1280px) {
-            .boxia-left-panel { display: none !important; }
+          /* 拖线时命中的可落点输入端口（JS 打标，拖拽中 :hover 不可靠） */
+          [data-port-entity-id].boxia-port-drop-target > .bg,
+          [data-port-entity-id].boxia-port-drop-target > .workflow-port-bg {
+            background: ${CANVAS_TOKENS.portDrop} !important;
+            transform: scale(1.35) !important;
+          }
+          [data-port-entity-id].boxia-port-drop-target {
+            border-radius: 50% !important;
+            box-shadow: 0 0 0 5px ${CANVAS_TOKENS.portDropRing} !important;
           }
           /* RefChipInput 聚焦态 */
           .boxia-ref-chip-input:focus-within {
-            border-color: #6366f1 !important;
-            box-shadow: 0 0 0 2px rgba(99,102,241,0.1);
+            border-color: ${CANVAS_TOKENS.accent} !important;
+            box-shadow: 0 0 0 2px ${CANVAS_TOKENS.portRingSoft};
           }
         `}</style>
 
@@ -2297,6 +2612,10 @@ export default function AppEditPage() {
           ctxRef={ctxRef}
           zoom={canvasZoom}
           running={running}
+          canUndo={historyState.canUndo}
+          canRedo={historyState.canRedo}
+          onUndo={() => undo(ctxRef.current)}
+          onRedo={() => redo(ctxRef.current)}
           onAddNode={() => {
             const playground = document.querySelector('.gedit-playground-container');
             if (!playground) return;
@@ -2313,16 +2632,30 @@ export default function AppEditPage() {
         <CanvasContextMenu
           onAddNode={() => { /* 打开左侧节点库 */ }}
           onAutoLayout={() => message.info('自动排版功能待 FlowGram 插件支持')}
-          onFitView={() => {
-            const ctx = ctxRef.current as any;
-            ctx?.document?.fitView?.(true);
-          }}
+          onFitView={() => { void fitView(ctxRef.current, true); }}
           onDeleteSelected={() => {
-            if (selectedNodeId) setDeleteNodeOpen(true);
-            else message.info('请先选中一个节点');
+            const ids = selectedNodeIds.length > 0
+              ? selectedNodeIds
+              : (selectedNodeId ? [selectedNodeId] : []);
+            if (ids.length > 0) {
+              setDeleteTargetIds(ids);
+              setDeleteNodeOpen(true);
+            } else {
+              message.info('请先选中一个节点');
+            }
           }}
           onCopyNode={copyNode}
           onPasteNode={pasteNode}
+          getLineIdAt={(e) => {
+            try {
+              const pos = getWorldPosFromMouseEvent(ctxRef.current, e);
+              if (!pos) return null;
+              return getLineFromMousePos(ctxRef.current, pos)?.id ?? null;
+            } catch {
+              return null;
+            }
+          }}
+          onDeleteLine={(lineId) => deleteLines([lineId])}
         />
 
         {/* 空白画布欢迎页 */}
@@ -2357,8 +2690,7 @@ export default function AppEditPage() {
           viewport={canvasViewport}
           onNavigate={(x, y) => {
             // 点击小地图把相机中心移到对应画布坐标
-            const config = (ctxRef.current as any)?.playground?.config;
-            config?.scrollToView?.({ position: { x, y }, scrollToCenter: true, easing: true });
+            scrollToCanvasPoint(ctxRef.current, x, y);
           }}
         />
 
@@ -2366,12 +2698,12 @@ export default function AppEditPage() {
         <div style={{
           position: 'absolute', top: 12, left: 16, zIndex: 100,
           fontSize: 12,
-          color: saveStatus === 'error' ? '#d4380d' : saveStatus === 'saving' ? '#3b82f6' : '#10b981',
+          color: saveStatus === 'error' ? CANVAS_TOKENS.dangerDeep : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,
           display: 'flex', alignItems: 'center', gap: 6,
         }}>
           <span style={{
             width: 6, height: 6, borderRadius: '50%',
-            background: saveStatus === 'error' ? '#ff4d4f' : saveStatus === 'saving' ? '#3b82f6' : '#10b981',
+            background: saveStatus === 'error' ? CANVAS_TOKENS.dangerDot : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,
             animation: saveStatus === 'saving' ? 'boxia-pulse 1.2s ease-in-out infinite' : undefined,
           }} />
           {validating && '校验中…'}
@@ -2382,7 +2714,7 @@ export default function AppEditPage() {
           <span
             style={{
               cursor: 'pointer',
-              color: validationIssues.some((i) => i.severity === 'error') ? '#ef4444' : '#6b7280',
+              color: validationIssues.some((i) => i.severity === 'error') ? CANVAS_TOKENS.danger : '#6b7280',
             }}
             onClick={async () => {
               await doValidate();
@@ -2449,7 +2781,7 @@ export default function AppEditPage() {
                   validationIssues.map((issue, idx) => (
                     <div key={idx} style={{
                       fontSize: 12, padding: '6px 0',
-                      color: issue.severity === 'error' ? '#ef4444' : '#f59e0b',
+                      color: issue.severity === 'error' ? CANVAS_TOKENS.danger : CANVAS_TOKENS.warning,
                       display: 'flex', gap: 8, alignItems: 'flex-start', cursor: 'pointer',
                       borderBottom: '1px dashed #f3f4f6',
                     }}
@@ -2480,7 +2812,7 @@ export default function AppEditPage() {
                     maxHeight: 280, overflowY: 'auto',
                   }}>
                     {runLogs.map((log, i) => (
-                      <div key={i} style={{ color: log.level === 'error' ? '#ff4d4f' : '#d9d9d9' }}>
+                      <div key={i} style={{ color: log.level === 'error' ? CANVAS_TOKENS.dangerDot : '#d9d9d9' }}>
                         <span style={{ color: '#666' }}>[{log.time}]</span> {log.text}
                       </div>
                     ))}
@@ -2531,64 +2863,92 @@ export default function AppEditPage() {
           nodeRegistries={nodeRegistries}
           materials={{ renderNodes: renderNodes as any }}
           initialData={initialData}
-          selectBox={{ enabled: true }}
+          // T9-07：对齐 Coze —— 普通左键拖拽平移（下方自绘），Shift+拖拽才框选
+          selectBox={{ enabled: true, canSelect: (e) => e.shiftKey }}
+          // T9-07：撤销/重做依赖 history 插件，未开启时 ctx.history 取值会抛异常
+          history={{ enable: true, limit: 100 }}
           onLoad={(ctx) => {
             ctxRef.current = ctx;
             (window as any).__flowCtx = ctx;
-            const doc = ctx.document as any;
-            if (doc?.nodes) setNodeCount(doc.nodes.length || 0);
+            setNodeCount(getNodeCount(ctx));
             refreshPickerNodes();
+
+            // 同步 FlowGram 原生选中集合（单击 / Shift 点选 / 框选）到 React 状态
+            selectionDisposableRef.current?.dispose?.();
+            selectionDisposableRef.current = subscribeSelection(ctx, (snapshot) => {
+              selectedLineIdsRef.current = snapshot.lineIds;
+              setSelectedNodeIds(snapshot.nodeIds);
+              if (snapshot.nodeIds.length === 1) {
+                setSelectedNodeId(snapshot.nodeIds[0] ?? null);
+                const meta = keyToMetaRef.current[snapshot.nodeTypeKeys[0] ?? ''];
+                if (meta) setSelectedNodeMeta(meta);
+              } else {
+                setSelectedNodeId(null);
+                // 多选或清空选中时收起配置抽屉，避免内容与选中态错位
+                if (snapshot.nodeIds.length !== 0 || drawerNodeIdRef.current) {
+                  setConfigDrawerOpen(false);
+                  drawerNodeIdRef.current = null;
+                }
+              }
+              if (drawerNodeIdRef.current && !snapshot.nodeIds.includes(drawerNodeIdRef.current)) {
+                setConfigDrawerOpen(false);
+                drawerNodeIdRef.current = null;
+              }
+            });
+
+            // 订阅 history 变更：驱动底部撤销/重做按钮可用态
+            historyDisposableRef.current?.dispose?.();
+            historyDisposableRef.current = subscribeHistory(ctx, setHistoryState);
+
+            // 空白处左键拖拽平移（Shift+拖拽留给框选）
+            panCleanupRef.current?.();
+            panCleanupRef.current = setupCanvasPan(ctx);
 
             // 订阅画布缩放/滚动：驱动小地图相机框和底部缩放百分比
             viewportDisposablesRef.current.forEach((d) => d.dispose?.());
-            viewportDisposablesRef.current = [];
-            const playground = (ctx as any).playground;
-            const config = playground?.config;
-            if (config?.onConfigChanged) {
-              viewportDisposablesRef.current.push(config.onConfigChanged(() => syncCanvasViewport()));
-            }
-            if (playground?.onZoom) {
-              viewportDisposablesRef.current.push(playground.onZoom(() => syncCanvasViewport()));
-            }
-            if (playground?.onScroll) {
-              viewportDisposablesRef.current.push(playground.onScroll(() => syncCanvasViewport()));
-            }
+            viewportDisposablesRef.current = [subscribeViewport(ctx, syncCanvasViewport)];
             syncCanvasViewport();
 
             // 首次加载布局完成后适应视图，避免节点落在视口外
-            setTimeout(() => ctx.document.fitView?.(false).then(() => syncCanvasViewport()).catch(() => undefined), 100);
+            setTimeout(() => { void fitView(ctx, false).then(syncCanvasViewport); }, 100);
           }}
           onContentChange={() => {
             scheduleSave();
-            const ctx = ctxRef.current as any;
-            const doc = ctx?.document;
-            if (doc?.nodes) setNodeCount(doc.nodes.length || 0);
+            setNodeCount(getNodeCount(ctxRef.current));
             refreshPickerNodes();
           }}
           canAddLine={canAddLine}
           canDeleteLine={() => true}
-          canDeleteNode={(ctx, node) => {
-            // start 节点不允许删除
-            if (node.id.startsWith('start-')) {
-              message.warning('开始节点不允许删除');
+          canDeleteNode={(_ctx, node) => {
+            const typeKey = getNodeTypeKey(node);
+            if (!canDelete(keyToMeta[typeKey], typeKey)) {
+              message.warning('该节点不允许删除');
               return false;
             }
             return true;
           }}
-          onDragLineEnd={async (ctx: any, params: any) => {
+          onDragLineEnd={async (ctx: FlowContext, params: any) => {
             // 拖线到空白处（没有 toPort）时弹出节点选择面板
-            if (!params?.toPort && params?.startPosition) {
-              const pos = params.startPosition;
-              // startPosition 是相对画布容器的坐标，需转成屏幕绝对坐标（Popover 用 position: fixed）
-              const playground = document.querySelector('.gedit-playground-container');
-              if (playground) {
-                const rect = playground.getBoundingClientRect();
-                setAddNodePopover({
-                  x: rect.left + pos.x - 140,
-                  y: rect.top + pos.y - 200,
-                });
-              }
-            }
+            // mousePos 是画布世界坐标，toFixedPos 才能转成 Popover 需要的屏幕坐标
+            if (params?.toPort || !params?.mousePos) return;
+            // 点击/拖动已有连线时 FlowGram 也会回调 onDragLineEnd（originLine 非空），不是新建连线
+            if (params?.originLine) return;
+            // 拖到端口/节点上时 FlowGram 会自动连线，但多输入端口节点的 toPort 可能仍为空，
+            // 这里再按落点判断一次，避免连完线又弹出节点面板
+            if (getPortFromMousePos(ctx, params.mousePos)) return;
+            const nearbyLine = getLineFromMousePos(ctx, params.mousePos);
+            // 拖拽中的临时连线终点就在鼠标处，会命中它自己，需按 id 排除
+            if (nearbyLine && nearbyLine.id !== params?.line?.id) return;
+            const hitNode = getNodeFromMousePos(ctx, params.mousePos);
+            if (hitNode && hitNode.flowNodeType !== 'root') return;
+            const win = worldToScreen(ctx, params.mousePos);
+            if (!win) return;
+            const fromPort = params.fromPort as { node?: { id?: string } } | undefined;
+            const POPOVER_W = 320;
+            const POPOVER_H = 460;
+            const x = Math.min(Math.max(8, win.x - POPOVER_W / 2), window.innerWidth - POPOVER_W - 16);
+            const y = Math.min(Math.max(8, win.y + 12), window.innerHeight - POPOVER_H - 16);
+            setAddNodePopover({ x, y, fromNodeId: fromPort?.node?.id });
           }}
         />
 
@@ -2674,7 +3034,12 @@ export default function AppEditPage() {
       <Drawer
         title={selectedNodeMeta ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <NodeIcon typeKey={selectedNodeMeta.type_key} color={selectedNodeMeta.color} size={28} />
+            <NodeIcon
+              typeKey={selectedNodeMeta.type_key}
+              color={selectedNodeMeta.color}
+              icon={selectedNodeMeta.icon}
+              size={28}
+            />
             <div style={{ minWidth: 0 }}>
               <div style={{ fontSize: 15, fontWeight: 600, lineHeight: '20px' }}>
                 {selectedNodeMeta.title}
@@ -2694,8 +3059,11 @@ export default function AppEditPage() {
         onClose={() => setConfigDrawerOpen(false)}
         width={480}
         extra={
-          selectedNodeId && selectedNodeMeta?.type_key !== 'start' ? (
-            <Button danger size="small" onClick={() => setDeleteNodeOpen(true)}>
+          selectedNodeId && selectedNodeMeta && canDelete(selectedNodeMeta) ? (
+            <Button danger size="small" onClick={() => {
+              setDeleteTargetIds(selectedNodeId ? [selectedNodeId] : []);
+              setDeleteNodeOpen(true);
+            }}>
               删除节点
             </Button>
           ) : undefined
@@ -2729,16 +3097,24 @@ export default function AppEditPage() {
 
       {/* 删除节点确认弹窗（U-S3） */}
       <Modal
-        title="删除节点"
+        title={deleteTargetIds.length > 1 ? '批量删除节点' : '删除节点'}
         open={deleteNodeOpen}
         onOk={confirmDeleteNode}
-        onCancel={() => setDeleteNodeOpen(false)}
+        onCancel={() => { setDeleteNodeOpen(false); setDeleteTargetIds([]); }}
         okText="删除"
         okButtonProps={{ danger: true }}
         cancelText="取消"
       >
         <div>
-          确定要删除节点 <Tag color="blue">{selectedNodeMeta?.title || selectedNodeId}</Tag> 吗？
+          {deleteTargetIds.length > 1 ? (
+            <span>
+              确定要删除选中的 <Tag color="blue">{deleteTargetIds.length}</Tag> 个节点吗？
+            </span>
+          ) : (
+            <span>
+              确定要删除节点 <Tag color="blue">{selectedNodeMeta?.title || deleteTargetIds[0] || selectedNodeId}</Tag> 吗？
+            </span>
+          )}
           <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
             与该节点相连的所有连线将一并删除，此操作不可撤销。
           </div>
@@ -2945,100 +3321,4 @@ export default function AppEditPage() {
       </Drawer>
     </div>
   );
-}
-
-// ========== 格式适配 ==========
-const SUBGRAPH_NODE_TYPES = new Set(['loop', 'batch', 'subworkflow']);
-
-function toCozeIR(
-  flowgram: WorkflowJSON,
-  keyToCozeType: Record<string, string>,
-): Record<string, unknown> {
-  const nodes = (flowgram.nodes || []).map((n) => {
-    const cozeType = keyToCozeType[n.type as string] || n.type;
-    const data = (n.data || {}) as Record<string, unknown>;
-    const config = ((data.config || {}) as Record<string, unknown>);
-    const out: Record<string, unknown> = {
-      id: n.id,
-      type: cozeType,
-      meta: { position: (n.meta as { position?: { x: number; y: number } })?.position ?? { x: 0, y: 0 } },
-      data: {
-        nodeMeta: { title: data.title || '' },
-        inputs: {
-          inputParameters: ((config.inputParameters || []) as Array<{ name: string; input: unknown }>),
-          ...config,
-        },
-        outputs: (data.outputs || []) as unknown[],
-      },
-    };
-    // 子图节点：把 node.data.subgraph (WorkflowJSON) 转成 blocks/edges
-    if (SUBGRAPH_NODE_TYPES.has(String(n.type)) && data.subgraph) {
-      const sub = data.subgraph as WorkflowJSON;
-      const nested = toCozeIR(sub, keyToCozeType);
-      out.blocks = nested.nodes;
-      out.edges = nested.edges;
-    }
-    return out;
-  });
-
-  const edges = (flowgram.edges || []).map((e) => {
-    const edge = e as unknown as Record<string, unknown>;
-    return {
-      id: (edge.id as string) || `edge-${Math.random().toString(36).slice(2, 8)}`,
-      sourceNodeID: edge.source,
-      targetNodeID: edge.target,
-      sourcePortID: edge.sourcePortID,
-      targetPortID: edge.targetPortID,
-    };
-  });
-
-  return { nodes, edges };
-}
-
-function fromCozeIR(
-  coze: unknown,
-  cozeTypeToKey: Record<string, string>,
-): WorkflowJSON {
-  if (!coze || typeof coze !== 'object') return DEFAULT_GRAPH;
-  const raw = coze as { nodes?: Array<Record<string, unknown>>; edges?: Array<Record<string, unknown>> };
-  if (!Array.isArray(raw.nodes) || raw.nodes.length === 0) return DEFAULT_GRAPH;
-
-  const nodes = raw.nodes.map((n) => {
-    const cozeType = String(n.type ?? '');
-    const registryType = cozeTypeToKey[cozeType] || String(n.type || 'default');
-    const data = (n.data || {}) as Record<string, unknown>;
-    const nodeMeta = (data.nodeMeta || {}) as { title?: string };
-    const inputs = (data.inputs || {}) as Record<string, unknown>;
-    const rawPos = (n.meta as { position?: { x: number; y: number } })?.position ?? { x: 0, y: 0 };
-    // 修正脏位置：如果节点在画布坐标 y > 1000（之前拖拽测试留下的），重置到合理位置
-    const pos = rawPos.y > 1000 ? { x: 200, y: 200 } : rawPos;
-    const out: WorkflowJSON['nodes'][number] = {
-      id: String(n.id),
-      type: registryType,
-      meta: { position: pos },
-      data: {
-        title: nodeMeta.title,
-        config: inputs,
-        outputs: (data.outputs || []) as unknown[],
-      },
-    } as WorkflowJSON['nodes'][number];
-    // 子图节点：blocks/edges 还原成 node.data.subgraph
-    const blocks = Array.isArray(n.blocks) ? n.blocks as Array<Record<string, unknown>> : [];
-    const innerEdges = Array.isArray(n.edges) ? n.edges as Array<Record<string, unknown>> : [];
-    if (blocks.length > 0) {
-      const subCoze = { nodes: blocks, edges: innerEdges };
-      (out.data as Record<string, unknown>).subgraph = fromCozeIR(subCoze, cozeTypeToKey);
-    }
-    return out;
-  });
-
-  const edges = (raw.edges || []).map((e) => ({
-    id: String(e.id ?? `edge-${Math.random().toString(36).slice(2, 8)}`),
-    source: e.sourceNodeID,
-    target: e.targetNodeID,
-    sourcePortID: e.sourcePortID,
-    targetPortID: e.targetPortID,
-  })) as unknown as WorkflowJSON['edges'];
-
-  return { nodes, edges };
 }

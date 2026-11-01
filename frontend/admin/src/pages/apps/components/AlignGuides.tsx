@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react';
+import { CANVAS_TOKENS } from '../canvas/tokens';
 
 // U-N4 对齐辅助线：轻量实现，不依赖 FlowGram 内部 API
 // 原理：监听 mousedown/mousemove/mouseup，拖拽节点时读取所有节点 DOM rect，
-// 找 ±4px 内的最近锚点，画 1px 红色对齐线；mouseup 时隐藏。
+// 找 ±4px 内的最近锚点，画 1px 蓝紫对齐线；mouseup 时隐藏。
 const SNAP_THRESHOLD = 4;
-const LINE_COLOR = '#ef4444';
+const LINE_COLOR = CANVAS_TOKENS.guide;
 // 节点 id 形如 llm-xxx-1 / start-xxx-0 / comment-xxx-2 / if_else-xxx-3
 const NODE_ID_RE = /^[a-z][a-z_]*-[A-Za-z0-9]+-/;
 
@@ -143,7 +144,7 @@ export function AlignGuides() {
           background: LINE_COLOR,
           opacity: 0,
           pointerEvents: 'none',
-          zIndex: 90,
+          zIndex: CANVAS_TOKENS.z.guides,
           transition: 'opacity 0.1s',
         }}
       />
@@ -155,7 +156,7 @@ export function AlignGuides() {
           background: LINE_COLOR,
           opacity: 0,
           pointerEvents: 'none',
-          zIndex: 90,
+          zIndex: CANVAS_TOKENS.z.guides,
           transition: 'opacity 0.1s',
         }}
       />

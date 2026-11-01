@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { CANVAS_TOKENS } from '../canvas/tokens';
 
 interface MiniMapNode {
   id: string;
@@ -109,7 +110,7 @@ export function MiniMap({ nodes, viewport, onNavigate }: MiniMapProps) {
         height: MAP_HEIGHT,
         background: 'rgba(255,255,255,0.95)',
         borderRadius: 6,
-        border: '1px solid #e5e7eb',
+        border: `1px solid ${CANVAS_TOKENS.border}`,
         boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
         overflow: 'hidden',
         zIndex: 100,
@@ -125,7 +126,7 @@ export function MiniMap({ nodes, viewport, onNavigate }: MiniMapProps) {
             top: node.y * scale + offsetY,
             width: Math.max((node.w ?? DEFAULT_NODE_W) * scale, 2),
             height: Math.max((node.h ?? DEFAULT_NODE_H) * scale, 2),
-            background: node.color || '#6366f1',
+            background: node.color || CANVAS_TOKENS.accent,
             borderRadius: 2,
             opacity: 0.85,
           }}

@@ -2,16 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { Input, Empty } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import { NodeIcon } from './NodeIcon';
-
-// 与后端 node_meta.py 的 category 对齐，按顺序展示分组
-const CATEGORY_LABELS: Array<{ key: string; label: string }> = [
-  { key: 'control', label: '流程控制' },
-  { key: 'ai', label: 'AI 能力' },
-  { key: 'logic', label: '逻辑与工具' },
-  { key: 'data', label: '数据' },
-  { key: 'conversation', label: '会话与消息' },
-  { key: 'misc', label: '其他' },
-];
+import { buildCategoryGroups } from '../canvas/metadata/nodePresentation';
 
 interface AddNodePopoverProps {
   x: number;
@@ -44,16 +35,10 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
     }
   }, [query, metas]);
 
-  const groups = useMemo(() => {
-    const visible = filtered.filter((m) => m.type_key !== 'start');
-    return CATEGORY_LABELS
-      .map(({ key, label }) => ({
-        key,
-        label,
-        items: visible.filter((m) => m.category === key),
-      }))
-      .filter((g) => g.items.length > 0);
-  }, [filtered]);
+  const groups = useMemo(
+    () => buildCategoryGroups(filtered, (m) => m.type_key !== 'start'),
+    [filtered],
+  );
 
   useEffect(() => {
     // 延迟绑定：避免触发 popover 的那个 click 事件冒泡到 document 时立即关闭它
@@ -128,7 +113,7 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
                 onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
-                <NodeIcon typeKey={m.type_key} color={m.color} size={24} />
+                <NodeIcon typeKey={m.type_key} color={m.color} icon={m.icon} size={24} />
                 <div style={{ minWidth: 0, flex: 1 }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
                     {m.title}

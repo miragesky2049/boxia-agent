@@ -24,7 +24,7 @@ export function ResourceSidebar({
       <div
         className="boxia-left-panel"
         style={{
-          width: 40, padding: '8px 0', background: '#fafafa',
+          width: 40, flexShrink: 0, padding: '8px 0', background: '#fafafa',
           borderRight: '1px solid #f0f0f0',
           display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8,
         }}
@@ -43,7 +43,7 @@ export function ResourceSidebar({
     <div
       className="boxia-left-panel"
       style={{
-        width: 280, padding: 12, background: '#fafafa',
+        width: 280, flexShrink: 0, padding: 12, background: '#fafafa',
         borderRight: '1px solid #f0f0f0',
         display: 'flex', flexDirection: 'column', gap: 4, overflowY: 'auto',
       }}

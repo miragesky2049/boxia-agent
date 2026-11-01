@@ -1,103 +1,15 @@
-// V10：节点类型 → 推荐下游节点映射（前端硬编码，对齐 Dify "下一步" 交互）
-export interface NextRecommendation {
-  typeKey: string;
-  label: string;
-}
+import type { NodeMeta } from '../../../api/nodeMeta';
+import {
+  resolveNextRecommendations,
+  type NextRecommendation,
+} from '../canvas/metadata/nodePresentation';
 
-// 按当前节点 type_key 查推荐下游；未列出的类型不显示推荐区块
-const NEXT_MAP: Record<string, NextRecommendation[]> = {
-  start: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'dataset', label: '知识检索' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'code', label: '代码' },
-  ],
-  llm: [
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'dataset', label: '知识检索' },
-    { typeKey: 'http', label: 'HTTP 请求' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  http: [
-    { typeKey: 'code', label: '代码' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  if_else: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'code', label: '代码' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  code: [
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  dataset: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'if_else', label: '条件分支' },
-  ],
-  agent_loop: [
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  api_plugin: [
-    { typeKey: 'code', label: '代码' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  text_processor: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  json_stringify: [
-    { typeKey: 'code', label: '代码' },
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  json_parser: [
-    { typeKey: 'code', label: '代码' },
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  set_variable: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  variable_merge: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  human_approval: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  subworkflow: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  loop: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'if_else', label: '条件分支' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  batch: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  dataset_write: [
-    { typeKey: 'llm', label: '大语言模型' },
-    { typeKey: 'end', label: '结束' },
-  ],
-  create_conversation: [
-    { typeKey: 'create_message', label: '创建消息' },
-    { typeKey: 'end', label: '结束' },
-  ],
-};
+export type { NextRecommendation };
 
-export function getNextRecommendations(typeKey: string): NextRecommendation[] {
-  return NEXT_MAP[typeKey] || [];
+// 推荐下游节点：优先读后端 meta.next_recommendations，缺失时走本地 fallback
+export function getNextRecommendations(
+  typeKey: string,
+  keyToMeta: Record<string, NodeMeta> = {},
+): NextRecommendation[] {
+  return resolveNextRecommendations(keyToMeta[typeKey], keyToMeta, typeKey);
 }

@@ -1,6 +1,7 @@
 import type { ConfigFieldMeta } from '../../../api/nodeMeta';
+import { groupFieldsByMetaGroup } from '../canvas/metadata/nodePresentation';
 
-// 节点配置分组：按 node type_key 把 config_fields 分成若干 section
+// 节点配置分组：优先读后端 field.group；缺失时才回落到本地 SECTION_DEFS
 // 字段名与后端 node_meta.py 保持一致（camelCase）
 export interface ConfigSection {
   title: string;
@@ -90,6 +91,9 @@ const SECTION_DEFS: Record<string, Array<{ title: string; match: (f: ConfigField
 };
 
 export function groupConfigFields(typeKey: string, fields: ConfigFieldMeta[]): ConfigSection[] {
+  const backendSections = groupFieldsByMetaGroup(fields);
+  if (backendSections) return backendSections;
+
   const defs = SECTION_DEFS[typeKey];
   if (!defs) {
     return [{ title: '配置', fields }];

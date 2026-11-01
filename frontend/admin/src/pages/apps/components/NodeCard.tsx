@@ -2,12 +2,15 @@ import { useState } from 'react';
 import { NodeIcon } from './NodeIcon';
 import { buildNodeSubtitle } from './nodeSubtitle';
 import type { RunNodeStatus } from './nodeStatus';
+import { CANVAS_TOKENS } from '../canvas/tokens';
 
 interface NodeCardProps {
   typeKey: string;
   color: string;
+  icon?: string;
   title: string;
   config?: Record<string, any>;
+  subtitleHint?: string;
   selected?: boolean;
   runStatus?: RunNodeStatus;
   width?: number;
@@ -20,8 +23,10 @@ interface NodeCardProps {
 export function NodeCard({
   typeKey,
   color,
+  icon,
   title,
   config,
+  subtitleHint,
   selected,
   runStatus,
   width = 220,
@@ -29,22 +34,23 @@ export function NodeCard({
   onAddNext,
   children,
 }: NodeCardProps) {
-  const subtitle = buildNodeSubtitle(typeKey, config);
+  // 动态副标题优先，后端 subtitle_hint 仅作静态兜底
+  const subtitle = buildNodeSubtitle(typeKey, config) || subtitleHint || '';
   const [hover, setHover] = useState(false);
 
-  let borderColor = '#e5e7eb';
+  let borderColor: string = CANVAS_TOKENS.border;
   let boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
   if (selected) {
-    borderColor = '#6366f1';
+    borderColor = CANVAS_TOKENS.accent;
     boxShadow = '0 0 0 2px rgba(99,102,241,0.18), 0 1px 3px rgba(0,0,0,0.06)';
   }
   if (runStatus === 'running') {
-    borderColor = '#8b5cf6';
+    borderColor = CANVAS_TOKENS.running;
     boxShadow = '0 0 0 3px rgba(139,92,246,0.25)';
   } else if (runStatus === 'success') {
-    borderColor = '#10b981';
+    borderColor = CANVAS_TOKENS.run;
   } else if (runStatus === 'error') {
-    borderColor = '#ef4444';
+    borderColor = CANVAS_TOKENS.danger;
     boxShadow = '0 0 0 3px rgba(239,68,68,0.15)';
   }
 
@@ -89,7 +95,7 @@ export function NodeCard({
           +
         </div>
       )}
-      <NodeIcon typeKey={typeKey} color={color} size={30} />
+      <NodeIcon typeKey={typeKey} color={color} icon={icon} size={30} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div
           style={{
