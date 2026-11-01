@@ -2347,7 +2347,7 @@ T9-01（人工，可与后续并行）
 | E3 | hover 态 | 阴影 | 阴影 | 有 | ✅ | U-N1 |
 | E4 | 运行状态色 | 蓝呼吸/绿/红/黄 | 同左 | SSE 事件驱动节点着色 | ✅ | U-N5 / V2 |
 | E5 | 节点重命名 | 有 | 有 | 抽屉「节点标题」可编辑，卡片实时同步 | ✅ | T8-03 / U-S2 |
-| E6 | 卡片 hover「⋯」菜单 | 右上角操作 | 节点上方 ▶/⋯ | 仅有「+」 | 🟧 | N9-07 |
+| E6 | 卡片 hover「⋯」菜单 | 右上角操作 | 节点上方 ▶/⋯ | 右上角「⋯」聚合重命名/复制/删除（能力声明裁剪）；「运行」待 N9-03 | 🟨 | N9-07 |
 | E7 | 单节点试运行 | 抽屉底部试运行 | 节点上方 ▶ | 无（只有全图试运行） | ⬜ | N9-03 |
 | E8 | 双击打开配置 | 有 | 有 | 有，且区分拖拽（dragDistance 判定） | ✅ | B2 |
 | E9 | 删除节点二次确认 | 有 | 有 | Delete/Backspace → Modal 确认；START 不可删 | ✅ | T9-03 / U-S3 |
@@ -2471,7 +2471,7 @@ T9-01（人工，可与后续并行）
 | 任务 | 内容 | 涉及文件 | 验收 |
 |---|---|---|---|
 | **N9-06 导出菜单** | 浮条「导出」：导出 JSON（含 coze IR）/ 导出 PNG。PNG 需先做 0.5h 选型 spike（当前无 html-to-image 等依赖，新增依赖需用户确认） | `CanvasToolbar.tsx`、`package.json` | 两种格式可下载，PNG 含节点与连线 |
-| **N9-07 节点 hover「⋯」菜单** | 卡片 hover 显示「⋯」，聚合重命名 / 复制 / 删除 / 运行 | `NodeCard.tsx`、`AppEditPage.tsx` | 菜单项均可用，不遮挡端口 |
+| **N9-07 节点 hover「⋯」菜单** | 卡片 hover 显示「⋯」，聚合重命名 / 复制 / 删除 / 运行（运行项随 N9-03 接入） | `NodeCard.tsx`、`AppEditPage.tsx` | 菜单项均可用，不遮挡端口 |
 | **N9-08 试运行历史** | 调试面板加「历史」Tab，列出最近 N 次 run（时间/状态/耗时） | `AppEditPage.tsx`、runs API | 可点开查看当次节点输出 |
 | **N9-09 Esc / Ctrl+A** | Esc 清空选中并关闭浮层；Ctrl/Cmd+A 全选节点 | `AppEditPage.tsx` `onKeyDown` | 两个快捷键生效且不影响输入框 |
 | **N9-10 多选整体拖拽** | 验证 FlowGram 是否原生支持；不支持则自绘 | `AppEditPage.tsx` | 多选后拖任一节点，整体平移 |
@@ -2480,7 +2480,14 @@ T9-01（人工，可与后续并行）
 | **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
 | **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
 
-**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-07 节点「⋯」菜单、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+
+**N9-07 落地说明**：
+- `NodeCard` 新增 `actions` 入参，hover（或菜单展开中）在卡片右上角渲染「⋯」，菜单项由页面按能力声明构造，`comment`/`note` 便签不渲染该入口。
+- 重命名走独立弹窗（Enter 保存 / Esc 取消），写 `extInfo.title` 后触发保存；复制复用 `copyNodeById`，删除复用既有确认弹窗（`deleteTargetIds` 单元素）。
+- 「+」从右上角移到节点右侧中线，与「⋯」错开，同时更贴近 Coze 的「右侧加下游节点」位置。
+- 「运行」项依赖 B-N9-03，未接前不生成该菜单项；接入时只需在 `NodeCardActions` 增加 `onRun` 并按 `capabilities.runnable` 放行。
+- 静态验证：`tsc --noEmit`、`npm run build`、18 个画布单测通过；**浏览器实机点验未做**（本地前后端未启动）。
 
 **E4 落地说明**：新增 `canvas/metadata/capabilities.ts`，优先消费后端 `NodeMeta.capabilities`，本地 `CAPABILITY_FALLBACK` 仅在元数据未加载时兜底；`AppEditPage` 的复制、删除（右键 / `canDeleteNode` / 抽屉按钮）、子图双击、输出编辑器均已改为能力驱动，`start` 等特例不再散落 `typeKey === 'start'` 判断。N9-07（节点「⋯」菜单）依赖已解除。
 

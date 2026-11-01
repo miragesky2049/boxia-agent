@@ -1,8 +1,18 @@
 import { useState } from 'react';
+import { Dropdown } from 'antd';
+import { MoreOutlined } from '@ant-design/icons';
 import { NodeIcon } from './NodeIcon';
 import { buildNodeSubtitle } from './nodeSubtitle';
 import type { RunNodeStatus } from './nodeStatus';
 import { CANVAS_TOKENS } from '../canvas/tokens';
+
+export interface NodeCardAction {
+  key: string;
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}
 
 interface NodeCardProps {
   typeKey: string;
@@ -16,6 +26,7 @@ interface NodeCardProps {
   width?: number;
   onDoubleClick?: () => void;
   onAddNext?: () => void;
+  actions?: NodeCardAction[];
   children?: React.ReactNode;
 }
 
@@ -32,11 +43,15 @@ export function NodeCard({
   width = 220,
   onDoubleClick,
   onAddNext,
+  actions,
   children,
 }: NodeCardProps) {
   // 动态副标题优先，后端 subtitle_hint 仅作静态兜底
   const subtitle = buildNodeSubtitle(typeKey, config) || subtitleHint || '';
   const [hover, setHover] = useState(false);
+  // 菜单展开期间保持触发按钮可见，避免鼠标移入弹出层时按钮闪烁
+  const [menuOpen, setMenuOpen] = useState(false);
+  const showActions = Boolean(actions?.length) && (hover || menuOpen);
 
   let borderColor: string = CANVAS_TOKENS.border;
   let boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
@@ -76,7 +91,42 @@ export function NodeCard({
         animation: runStatus === 'running' ? 'boxia-node-pulse 1.2s ease-in-out infinite' : undefined,
       }}
     >
-      {/* V9：hover 时右上角显示 + 按钮，点击在节点下方弹出 AddNodePopover */}
+      {/* hover 时右上角显示「⋯」，聚合重命名 / 复制 / 删除（对齐 Coze 卡片右上角操作） */}
+      {showActions && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          onClick={(e) => e.stopPropagation()}
+          style={{
+            position: 'absolute', top: -10, right: -10,
+            width: 20, height: 20, borderRadius: '50%',
+            background: CANVAS_TOKENS.white, border: `1px solid ${CANVAS_TOKENS.border}`,
+            color: '#6b7280', fontSize: 14, lineHeight: '17px', textAlign: 'center',
+            cursor: 'pointer', boxShadow: '0 2px 4px rgba(0,0,0,0.12)',
+            zIndex: 13,
+          }}
+        >
+          <Dropdown
+            trigger={['click']}
+            open={menuOpen}
+            onOpenChange={setMenuOpen}
+            placement="bottomRight"
+            menu={{
+              items: (actions || []).map(({ key, label, danger, disabled }) => ({
+                key, label, danger, disabled,
+              })),
+              onClick: ({ key, domEvent }) => {
+                domEvent.stopPropagation();
+                const action = actions?.find((item) => item.key === key);
+                setMenuOpen(false);
+                action?.onClick();
+              },
+            }}
+          >
+            <MoreOutlined />
+          </Dropdown>
+        </div>
+      )}
+      {/* V9：hover 时节点右侧显示 + 按钮，点击在节点下方弹出 AddNodePopover（与「⋯」错开） */}
       {onAddNext && hover && (
         <div
           onClick={(e) => {
@@ -84,7 +134,8 @@ export function NodeCard({
             onAddNext();
           }}
           style={{
-            position: 'absolute', top: -10, right: -10,
+            position: 'absolute', top: '50%', right: -10,
+            transform: 'translateY(-50%)',
             width: 20, height: 20, borderRadius: '50%',
             background: '#4f46e5', color: '#fff',
             fontSize: 14, lineHeight: '20px', textAlign: 'center',

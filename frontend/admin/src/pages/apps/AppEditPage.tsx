@@ -18,7 +18,7 @@ import { ApiError } from '../../api/client';
 import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
 import { listAvailableModels, type ModelCatalogItem } from '../../api/models';
 import { listDatasets, type DatasetItem } from '../../api/datasets';
-import { NodeCard } from './components/NodeCard';
+import { NodeCard, type NodeCardAction } from './components/NodeCard';
 import { NodeIcon } from './components/NodeIcon';
 import { CanvasToolbar } from './components/CanvasToolbar';
 import { ResourceSidebar } from './components/ResourceSidebar';
@@ -32,7 +32,7 @@ import { MiniMap } from './components/MiniMap';
 import { RefChipInput } from './components/RefChipInput';
 import { CodeEditor } from './components/CodeEditor';
 import { getNextRecommendations } from './components/nodeNextRecommendations';
-import { canCopy, canDelete, hasOutputs, hasSubgraph } from './canvas/metadata/capabilities';
+import { canCopy, canDelete, hasOutputs, hasSubgraph, resolveCapabilities } from './canvas/metadata/capabilities';
 import { AlignGuides } from './components/AlignGuides';
 import { ParameterListEditor } from './components/ParameterListEditor';
 import { ToolListEditor } from './components/ToolListEditor';
@@ -215,12 +215,20 @@ function RefPickerButton({
   );
 }
 
+// 卡片「⋯」菜单回调：按节点粒度操作，不依赖画布当前选中态
+interface NodeCardActions {
+  onRename: (node: WorkflowNodeEntity) => void;
+  onCopy: (node: WorkflowNodeEntity) => void;
+  onDelete: (node: WorkflowNodeEntity) => void;
+}
+
 // ========== 节点渲染组件（双击打开配置） ==========
 function makeNodeRenderer(
   meta: NodeMeta,
   _ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>,
   onNodeDoubleClick: (node: WorkflowNodeEntity) => void,
   onAddNextToNode?: (node: WorkflowNodeEntity) => void,
+  cardActions?: NodeCardActions,
 ) {
   return function NodeRenderer({ node }: { node: WorkflowNodeEntity }) {
     // FlowGram 把节点 data 存在 extInfo 里（node.data 是空对象），且需订阅变更才能重渲染
@@ -269,6 +277,19 @@ function makeNodeRenderer(
       );
     }
 
+    // 菜单项按能力声明裁剪，后端新增节点无需在此改判断
+    const capabilities = resolveCapabilities(meta, meta.type_key);
+    const actions: NodeCardAction[] = [];
+    if (cardActions?.onRename) {
+      actions.push({ key: 'rename', label: '重命名', onClick: () => cardActions.onRename(node) });
+    }
+    if (cardActions?.onCopy && capabilities.copyable) {
+      actions.push({ key: 'copy', label: '复制节点', onClick: () => cardActions.onCopy(node) });
+    }
+    if (cardActions?.onDelete && capabilities.deletable) {
+      actions.push({ key: 'delete', label: '删除', danger: true, onClick: () => cardActions.onDelete(node) });
+    }
+
     return (
       <WorkflowNodeRenderer node={node}>
         <NodeCard
@@ -280,6 +301,7 @@ function makeNodeRenderer(
           subtitleHint={meta.subtitle_hint}
           onDoubleClick={() => onNodeDoubleClick(node)}
           onAddNext={onAddNextToNode ? () => onAddNextToNode(node) : undefined}
+          actions={actions}
         />
       </WorkflowNodeRenderer>
     );
@@ -1380,6 +1402,8 @@ export default function AppEditPage() {
   const [canvasViewport, setCanvasViewport] = useState<{ x: number; y: number; w: number; h: number; zoom: number } | null>(null);
   const [nodeCount, setNodeCount] = useState(0);
   const [deleteNodeOpen, setDeleteNodeOpen] = useState(false);
+  // 卡片「⋯」重命名弹窗目标
+  const [renameTarget, setRenameTarget] = useState<{ nodeId: string; value: string } | null>(null);
   // 多选集合（框选 / Shift 点选）与批量删除目标
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
   const [deleteTargetIds, setDeleteTargetIds] = useState<string[]>([]);
@@ -1852,12 +1876,12 @@ export default function AppEditPage() {
   // ========== 节点复制 / 粘贴（右键菜单） ==========
   const NODE_CLIPBOARD_KEY = 'boxia_node_clipboard';
 
-  const copyNode = useCallback(() => {
-    if (!ctxRef.current || !selectedNodeId) {
+  const copyNodeById = useCallback((nodeId: string | null) => {
+    if (!ctxRef.current || !nodeId) {
       message.info('请先选中一个节点');
       return;
     }
-    const node = getNode(ctxRef.current, selectedNodeId);
+    const node = getNode(ctxRef.current, nodeId);
     if (!node) {
       message.error('未找到选中节点');
       return;
@@ -1882,7 +1906,9 @@ export default function AppEditPage() {
       // localStorage 写满时仅用内存剪贴板
     }
     message.success(`已复制「${payload.title}」`);
-  }, [selectedNodeId, keyToMeta]);
+  }, [keyToMeta]);
+
+  const copyNode = useCallback(() => copyNodeById(selectedNodeId), [copyNodeById, selectedNodeId]);
 
   const pasteNode = useCallback(() => {
     let payload = nodeClipboardRef.current;
@@ -1915,6 +1941,54 @@ export default function AppEditPage() {
     // 等新节点数据落盘后再触发保存
     setTimeout(() => scheduleSave(), 100);
   }, [addNode, keyToMeta, scheduleSave]);
+
+  // ========== 卡片「⋯」菜单（N9-07） ==========
+  const handleCardRename = useCallback((node: WorkflowNodeEntity) => {
+    const typeKey = getNodeTypeKey(node);
+    const data = getNodeExtInfo(node);
+    setRenameTarget({
+      nodeId: node.id,
+      value: String(data.title || keyToMeta[typeKey]?.title || typeKey),
+    });
+  }, [keyToMeta]);
+
+  const confirmCardRename = useCallback(() => {
+    if (!renameTarget) return;
+    const title = renameTarget.value.trim();
+    if (!title) {
+      message.warning('节点名称不能为空');
+      return;
+    }
+    const node = getNode(ctxRef.current, renameTarget.nodeId);
+    if (!node) {
+      message.error('未找到节点');
+      setRenameTarget(null);
+      return;
+    }
+    updateNodeExtInfo(node, { title });
+    scheduleSave();
+    setRenameTarget(null);
+  }, [renameTarget, scheduleSave]);
+
+  const handleCardCopy = useCallback((node: WorkflowNodeEntity) => {
+    copyNodeById(node.id);
+  }, [copyNodeById]);
+
+  const handleCardDelete = useCallback((node: WorkflowNodeEntity) => {
+    const typeKey = getNodeTypeKey(node);
+    if (!canDelete(keyToMeta[typeKey], typeKey)) {
+      message.warning('该节点不允许删除');
+      return;
+    }
+    setDeleteTargetIds([node.id]);
+    setDeleteNodeOpen(true);
+  }, [keyToMeta]);
+
+  const nodeCardActions = useMemo<NodeCardActions>(() => ({
+    onRename: handleCardRename,
+    onCopy: handleCardCopy,
+    onDelete: handleCardDelete,
+  }), [handleCardRename, handleCardCopy, handleCardDelete]);
 
   // ========== 双击节点打开配置 ==========
   const refreshPickerNodes = useCallback(() => {
@@ -2068,10 +2142,10 @@ export default function AppEditPage() {
     return Object.fromEntries(
       nodeMetas.map((meta) => [
         meta.type_key,
-        makeNodeRenderer(meta, ctxRef, handleNodeDoubleClick, handleAddNextToNode) as unknown as React.ComponentType<any>,
+        makeNodeRenderer(meta, ctxRef, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions) as unknown as React.ComponentType<any>,
       ]),
     ) as Record<string, React.ComponentType<any>>;
-  }, [nodeMetas, handleNodeDoubleClick, handleAddNextToNode]);
+  }, [nodeMetas, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions]);
 
   // ========== 抽屉配置变更 ==========
   const handleConfigChange = useCallback((patch: Partial<NodeConfigValues>) => {
@@ -3094,6 +3168,28 @@ export default function AppEditPage() {
           <Tag color="blue">节点 ID：{selectedNodeId}</Tag>
         </div>
       </Drawer>
+
+      {/* 卡片「⋯」重命名弹窗（N9-07） */}
+      <Modal
+        title="重命名节点"
+        open={Boolean(renameTarget)}
+        onOk={confirmCardRename}
+        onCancel={() => setRenameTarget(null)}
+        okText="保存"
+        cancelText="取消"
+      >
+        <Input
+          autoFocus
+          maxLength={60}
+          placeholder="节点名称"
+          value={renameTarget?.value ?? ''}
+          onChange={(e) => {
+            const next = e.target.value;
+            setRenameTarget((prev) => (prev ? { ...prev, value: next } : prev));
+          }}
+          onPressEnter={confirmCardRename}
+        />
+      </Modal>
 
       {/* 删除节点确认弹窗（U-S3） */}
       <Modal
