@@ -150,9 +150,25 @@ class Settings(BaseSettings):
     rag_query_rewrite_enabled: bool = True
     rag_query_rewrite_variants: int = Field(default=3, ge=1, le=5)
 
+    # T2：向量库 provider。memory=开发态内存（重启丢数据）；pgvector=复用 PG；milvus=独立集群
+    vector_store_provider: str = "memory"
+    milvus_uri: str = ""
+    milvus_token: str = ""
+
     # Celery 异步 ingest：broker / backend 独立 Redis DB，避免与短期记忆混用
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
+
+    # ============================================================
+    # A12：大 graph 对象存储（MinIO / S3 兼容）
+    # graph JSONB 超过 1MB 阈值时写入对象存储，DB 只存 URI 引用。
+    # 留空 endpoint 表示不启用对象存储，超过阈值时降级为内联写入并打 warning。
+    # ============================================================
+    object_storage_endpoint: str = ""          # 如 127.0.0.1:9000
+    object_storage_access_key: str = ""
+    object_storage_secret_key: SecretStr = SecretStr("")
+    object_storage_bucket: str = "boxia-graphs"
+    object_storage_secure: bool = False        # True 用 https
 
     # ============================================================
     # 产品级平台管理员自动初始化（部署产品级运营平台时开启）

@@ -1,4 +1,4 @@
-"""技能 / 工具 / 组件 / 提示词四个资源的 CRUD 测试。"""
+"""工具资源 CRUD 测试。"""
 
 from typing import Any
 
@@ -7,24 +7,9 @@ from fastapi.testclient import TestClient
 
 RESOURCE_CASES: list[tuple[str, str, dict[str, Any]]] = [
     (
-        "skills",
-        "技能",
-        {"content": "按要求生成陪练剧本", "config": {"engine": "script"}},
-    ),
-    (
         "tools",
         "工具",
         {"type": "http", "config": {"url": "https://example.com/api", "method": "GET"}},
-    ),
-    (
-        "components",
-        "组件",
-        {"type": "card", "config": {"layout": "grid"}},
-    ),
-    (
-        "prompts",
-        "提示词",
-        {"content": "你好，{{name}}", "variables": ["name"], "category": "system"},
     ),
 ]
 
@@ -51,7 +36,6 @@ def test_create_and_get(client: TestClient, auth_headers, case) -> None:
     assert created.status_code == 201, created.text
 
     body = created.json()
-    # 雪花 ID 以字符串输出，比较前需转为整数
     assert body["id"]
     assert body["name"] == "示例资源"
     assert body["description"] == "描述"
@@ -221,15 +205,15 @@ def test_list_filter_is_enabled(client: TestClient, auth_headers, case) -> None:
 def test_paging_page_size_limit(client: TestClient, auth_headers) -> None:
     """接口层 page_size 上限为 100。"""
     assert (
-        client.get("/api/v1/admin/skills?page=1&page_size=100", headers=auth_headers).status_code
+        client.get("/api/v1/admin/tools?page=1&page_size=100", headers=auth_headers).status_code
         == 200
     )
     assert (
-        client.get("/api/v1/admin/skills?page=1&page_size=150", headers=auth_headers).status_code
+        client.get("/api/v1/admin/tools?page=1&page_size=150", headers=auth_headers).status_code
         == 422
     )
 
 
 def test_paging_invalid(client: TestClient, auth_headers) -> None:
-    assert client.get("/api/v1/admin/skills?page=0", headers=auth_headers).status_code == 422
-    assert client.get("/api/v1/admin/skills?page_size=0", headers=auth_headers).status_code == 422
+    assert client.get("/api/v1/admin/tools?page=0", headers=auth_headers).status_code == 422
+    assert client.get("/api/v1/admin/tools?page_size=0", headers=auth_headers).status_code == 422

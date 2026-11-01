@@ -1,4 +1,4 @@
-import { Result } from 'antd'
+import { Typography } from '@douyinfe/semi-ui'
 import { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react'
 import type { ReactNode } from 'react'
 import { ApiError } from '../api/client'
@@ -139,7 +139,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       switchMode: context?.tenant_switch_mode ?? 'none',
       selectableTenants,
       platformName: context?.platform_name ?? 'AI智能体运营管理平台',
-      scopeLabel: isPlatform ? '产品级运营管理平台' : (context?.tenant?.name ?? '租户'),
+      scopeLabel: isPlatform ? '产品级平台' : (context?.tenant?.name ?? '租户'),
       switchTenant,
     }
   }, [context, loading, error, selectableTenants, switchTenant])
@@ -161,8 +161,9 @@ export function TenantGate({ children }: { children: ReactNode }) {
   if (loading) return <PageLoading />
   if (error) {
     return (
-      <div className="page-loading">
-        <Result status="error" title="无法访问当前站点" subTitle={error} />
+      <div className="page-loading" style={{ padding: 48, textAlign: 'center' }}>
+        <Typography.Title heading={4}>无法访问当前站点</Typography.Title>
+        <Typography.Paragraph type="secondary">{error}</Typography.Paragraph>
       </div>
     )
   }

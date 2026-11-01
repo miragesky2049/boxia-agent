@@ -23,11 +23,10 @@ def list_documents(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     keyword: str | None = Query(None, max_length=100),
-    agent_id: UUID | None = Query(None),
     ingest_status: str | None = Query(None, max_length=16),
 ) -> PageOut[DocumentOut]:
     """分页查询知识库文档。"""
-    result = service.list(page, page_size, keyword, agent_id, ingest_status)
+    result = service.list(page, page_size, keyword, ingest_status)
     return PageOut[DocumentOut](
         items=[DocumentOut.model_validate(item) for item in result.items],
         total=result.total,
@@ -51,7 +50,6 @@ def create_document(
         title=payload.title,
         source_type=payload.source_type,
         content=payload.content,
-        agent_id=payload.agent_id,
         metadata=payload.metadata,
     )
     return DocumentOut.model_validate(document)

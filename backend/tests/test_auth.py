@@ -275,10 +275,10 @@ def test_viewer_cannot_write(client: TestClient) -> None:
     )
     headers = _bearer(response.json()["access_token"])
 
-    assert client.get("/api/v1/admin/skills", headers=headers).status_code == 200
+    assert client.get("/api/v1/admin/tools", headers=headers).status_code == 200
     assert (
         client.post(
-            "/api/v1/admin/skills",
+            "/api/v1/admin/tools",
             json={"name": "只读", "description": "", "content": "", "config": {}},
             headers=headers,
         ).status_code

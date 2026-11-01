@@ -56,7 +56,7 @@ def test_create_user_requires_password_change(
     assert created["must_change_password"] is True
     assert created["role_code"] == "admin"
     operator_headers = _login(client, "operator", OPERATOR_PASSWORD)
-    assert client.get("/api/v1/admin/skills", headers=operator_headers).status_code == 200
+    assert client.get("/api/v1/admin/tools", headers=operator_headers).status_code == 200
 
 
 def test_create_duplicate_username(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -107,7 +107,7 @@ def test_demote_user_takes_effect_immediately(
     assert response.json()["role_code"] == "viewer"
     assert (
         client.post(
-            "/api/v1/admin/skills",
+            "/api/v1/admin/tools",
             json={"name": "降级后写入", "description": "", "content": "", "config": {}},
             headers=operator_headers,
         ).status_code
@@ -173,9 +173,9 @@ def test_platform_account_binds_platform_role(
 
     # 平台只读账号仍可登录，资源范围由角色授权决定（此时为空）
     operator_headers = _login(client, "platform-viewer", OPERATOR_PASSWORD)
-    listed = client.get("/api/v1/admin/agents", headers=operator_headers)
+    listed = client.get("/api/v1/admin/apps", headers=operator_headers)
     assert listed.status_code == 200, listed.text
-    assert listed.json()["total"] == 0
+    assert len(listed.json()) == 0
 
 
 def test_platform_account_rejects_tenant_role(
@@ -203,14 +203,19 @@ def test_platform_account_rejects_tenant_role(
 
 def test_write_request_is_audited(client: TestClient, auth_headers: dict[str, str]) -> None:
     created = client.post(
-        "/api/v1/admin/skills",
-        json={"name": "审计技能", "description": "", "content": "", "config": {}},
+        "/api/v1/admin/tools",
+        json={
+            "name": "审计工具",
+            "description": "",
+            "type": "http",
+            "config": {"url": "https://example.com/api", "method": "GET"},
+        },
         headers=auth_headers,
     )
     assert created.status_code == 201
 
-    response = client.get("/api/v1/admin/audit-logs?action=post.skills", headers=auth_headers)
+    response = client.get("/api/v1/admin/audit-logs?action=post.tools", headers=auth_headers)
 
     assert response.status_code == 200, response.text
     assert response.json()["total"] >= 1
-    assert response.json()["items"][0]["resource_type"] == "skills"
+    assert response.json()["items"][0]["resource_type"] == "tools"

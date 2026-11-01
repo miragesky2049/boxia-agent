@@ -9,7 +9,7 @@ from sqlalchemy import text
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.config.settings import Settings
 from internal.infrastructure.id.uuid7 import new_uuid
-from internal.infrastructure.model.database import get_engine
+from internal.infrastructure.model.database import get_engine, get_session_factory
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
 logger = logging.getLogger(__name__)
@@ -78,3 +78,22 @@ def ensure_platform_admin(settings: Settings) -> None:
             },
         )
         logger.info("自动初始化平台管理员账号成功: %s", username)
+
+
+def ensure_model_catalog() -> None:
+    """启动时把 settings.llm_* 种子写入 model_provider / model_catalog。
+
+    只在不存在时插入，不覆盖管理员在 admin 端改过的凭证。
+    """
+    from internal.application.apps.model_service import ModelService
+
+    session_factory = get_session_factory()
+    session = session_factory()
+    try:
+        ModelService(session).seed_from_settings()
+        session.commit()
+    except Exception:
+        logger.exception("模型目录 seed 失败")
+        session.rollback()
+    finally:
+        session.close()

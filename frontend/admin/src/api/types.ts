@@ -72,40 +72,6 @@ export interface TenantUpdatePayload {
   is_active?: boolean
 }
 
-export interface TenantAgent {
-  id: string
-  name: string
-  avatar_url: string
-  description: string
-  is_enabled: boolean
-  is_opened: boolean
-  opened_at: string | null
-  opened_by: string | null
-}
-
-export interface TenantAgentOpenResult {
-  agent_id: string
-  tenant_id: string
-  is_opened: boolean
-  opened_at: string | null
-}
-
-export interface TenantAgentBatchOpenResult {
-  tenant_id: string
-  opened: boolean
-  count: number
-  agent_ids: string[]
-}
-
-export interface AgentOpenedTenant {
-  id: string
-  code: string
-  name: string
-  is_active: boolean
-  opened_at: string
-  opened_by: string | null
-}
-
 export interface AdminUser {
   id: string
   username: string
@@ -178,11 +144,7 @@ export type PermissionCategory =
   | 'menu'
   | 'page'
   | 'button'
-  | 'agent'
-  | 'skill'
   | 'tool'
-  | 'component'
-  | 'prompt'
 
 export interface PermissionResource {
   id: string
@@ -414,7 +376,7 @@ export interface ResourceGrant {
   created_at: string
 }
 
-export type ResourceType = 'agent' | 'skill' | 'tool' | 'component' | 'prompt'
+export type ResourceType = 'tool' | 'app'
 
 export type GrantBatchMode = 'merge' | 'replace' | 'clear'
 
@@ -471,39 +433,9 @@ export interface ResourceBase {
   description: string
   is_enabled: boolean
   tenant_id: string | null
-  agent_id: string | null
   is_platform: boolean
   created_at: string
   updated_at: string
-}
-
-export interface Skill extends ResourceBase {
-  content: string
-  config: Record<string, unknown>
-}
-
-export interface SkillFileMeta {
-  path: string
-  size_bytes: number
-  content_hash: string
-  media_type: string
-  updated_at: string
-}
-
-export interface SkillFile extends SkillFileMeta {
-  content: string
-}
-
-export interface SkillFileList {
-  items: SkillFileMeta[]
-  total: number
-  total_bytes: number
-}
-
-export interface SkillFileWritePayload {
-  path: string
-  content: string
-  expected_hash?: string
 }
 
 export interface Tool extends ResourceBase {
@@ -511,149 +443,11 @@ export interface Tool extends ResourceBase {
   config: Record<string, unknown>
 }
 
-export interface ComponentResource extends ResourceBase {
-  type: string
-  config: Record<string, unknown>
-}
-
-export interface PromptResource extends ResourceBase {
-  content: string
-  variables: string[]
-  category: string
-}
-
-export interface FaqItem {
-  question: string
-  answer: string
-}
-
-export interface ModelSettings {
-  model: string
-  temperature: number
-  max_output_tokens: number
-  reasoning_effort: string
-  context_window: number
-  max_thinking_tokens: number
-}
-
-export interface PromptSettings {
-  role_setting: string
-  persona: string
-  user_prompt: string
-  memory_count: number
-  memory_model: string
-}
-
-export interface MemorySettings {
-  enabled: boolean
-  task_memory_prompt: string
-  long_term_enabled: boolean
-  long_term_prompt: string
-}
-
-export interface ConversationSettings {
-  welcome: string
-  fallback: string
-  input_placeholder: string
-  common_questions_enabled: boolean
-  faqs: FaqItem[]
-}
-
-export interface ChannelSettings {
-  type: string
-  enabled: boolean
-}
-
-export interface KnowledgeSettings {
-  enabled: boolean
-  dataset_ids: string[]
-}
-
-export interface OtherSettings {
-  system_prompt_template: string
-  max_turns: number
-  deep_thinking: boolean
-  show_reasoning: boolean
-  web_search: boolean
-  create_task: boolean
-  history_task: boolean
-  scheduled_task: boolean
-  artifacts: boolean
-  upload_attachment: boolean
-  upload_file_types: string[]
-  upload_max_size_mb: number
-  task_list: boolean
-}
-
-export interface AgentConfig {
-  model: ModelSettings
-  prompt: PromptSettings
-  memory: MemorySettings
-  conversation: ConversationSettings
-  channel: ChannelSettings
-  knowledge: KnowledgeSettings
-  other: OtherSettings
-  extensions: Record<string, string | null>
-}
-
-export interface AgentSummary extends ResourceBase {
-  avatar_url: string
-  department_id?: string | null
-}
-
-export interface Agent extends AgentSummary {
-  config: AgentConfig
-  tool_ids: string[]
-  skill_ids: string[]
-  created_by?: string | null
-  visibility_mode: 'all' | 'custom'
-}
-
-export interface AgentPayload {
-  name: string
-  avatar_url: string
-  description: string
-  is_enabled: boolean
-  config: AgentConfig
-  tool_ids: string[]
-  skill_ids: string[]
-  department_id?: string | null
-}
-
-export type AgentVisibilityMode = 'all' | 'custom'
-
-export interface AgentVisibilityDepartmentItem {
-  department_id: string
-  include_subtree: boolean
-}
-
-export interface AgentVisibility {
-  mode: AgentVisibilityMode
-  departments: AgentVisibilityDepartmentItem[]
-  user_ids: string[]
-}
-
-export interface AgentVisibilityPayload {
-  mode: AgentVisibilityMode
-  departments: AgentVisibilityDepartmentItem[]
-  user_ids: string[]
-}
-
 export interface ListParams {
   page?: number
   page_size?: number
   keyword?: string
   is_enabled?: boolean
-  agent_id?: string
-}
-
-export interface SkillPayload {
-  name: string
-  description: string
-  is_enabled: boolean
-  content: string
-  config: Record<string, unknown>
-  agent_id?: string | null
 }
 
 export interface ToolPayload {
@@ -662,24 +456,4 @@ export interface ToolPayload {
   is_enabled: boolean
   type: string
   config: Record<string, unknown>
-  agent_id?: string | null
-}
-
-export interface ComponentPayload {
-  name: string
-  description: string
-  is_enabled: boolean
-  type: string
-  config: Record<string, unknown>
-  agent_id?: string | null
-}
-
-export interface PromptPayload {
-  name: string
-  description: string
-  is_enabled: boolean
-  content: string
-  variables: string[]
-  category: string
-  agent_id?: string | null
 }

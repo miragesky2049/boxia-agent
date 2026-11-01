@@ -17,6 +17,7 @@ from internal.domain.entity.common import Page
 from internal.domain.entity.permission import DATA_ALL
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
+from sqlalchemy import text
 
 # 模块级别名：避免类内 list 方法遮蔽内置类型
 ResourceIdList = list[UUID]
@@ -33,6 +34,78 @@ class RoleGrantResource:
     is_enabled: bool
     updated_at: datetime
     is_granted: bool
+
+
+@dataclass(frozen=True)
+class _AppGrantRow:
+    """应用授权候选行：字段与 _to_item 预期对齐。"""
+
+    id: UUID
+    name: str
+    description: str
+    tenant_id: UUID
+    is_enabled: bool
+    updated_at: datetime
+
+
+class _AppGrantRepository:
+    """应用授权适配器：把 application 表适配成 ResourceRepository 协议所需的最小接口。"""
+
+    def __init__(self, session: Any) -> None:
+        self._session = session
+
+    def list_grantable(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        ids: list[UUID] | None = None,
+    ) -> tuple[list[_AppGrantRow], int]:
+        conditions = ["owner_type = 'platform'"]
+        params: dict[str, Any] = {}
+        if keyword:
+            conditions.append("name ILIKE :kw")
+            params["kw"] = f"%{keyword}%"
+        if ids is not None:
+            if not ids:
+                return [], 0
+            conditions.append("id = ANY(:ids)")
+            params["ids"] = [str(i) for i in ids]
+        where = " AND ".join(conditions)
+        total = self._session.execute(
+            text(f"SELECT COUNT(*) FROM application WHERE {where}"), params
+        ).scalar() or 0
+        rows = self._session.execute(
+            text(
+                f"SELECT id, name, description, is_enabled, updated_at "
+                f"FROM application WHERE {where} "
+                f"ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
+            ),
+            {**params, "limit": page_size, "offset": (page - 1) * page_size},
+        ).all()
+        items = [
+            _AppGrantRow(
+                id=r._mapping["id"],
+                name=r._mapping["name"],
+                description=r._mapping["description"] or "",
+                tenant_id=PLATFORM_TENANT_ID,
+                is_enabled=r._mapping["is_enabled"],
+                updated_at=r._mapping["updated_at"],
+            )
+            for r in rows
+        ]
+        return items, int(total)
+
+    def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
+        if not ids:
+            return set()
+        rows = self._session.execute(
+            text(
+                "SELECT id FROM application WHERE owner_type = 'platform' AND id = ANY(:ids)"
+            ),
+            {"ids": [str(i) for i in ids]},
+        ).all()
+        return {r._mapping["id"] for r in rows}
 
 
 class RoleGrantService:
@@ -270,14 +343,9 @@ class RoleGrantService:
 
     def _resource_repository(self, resource_type: str) -> Any:
         self._ensure_resource_type(resource_type)
-        repositories = {
-            "agent": self._uow.agents,
-            "skill": self._uow.skills,
-            "tool": self._uow.tools,
-            "component": self._uow.components,
-            "prompt": self._uow.prompts,
-        }
-        return repositories[resource_type]
+        if resource_type == "app":
+            return _AppGrantRepository(self._uow.session)
+        return self._uow.tools
 
     @staticmethod
     def _validate_ids(repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:

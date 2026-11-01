@@ -2,11 +2,14 @@ import {
   ArrowLeftOutlined,
   CheckCircleOutlined,
   ClearOutlined,
+  HistoryOutlined,
   LoadingOutlined,
+  MessageOutlined,
+  PlusOutlined,
   SendOutlined,
   ToolOutlined,
 } from '@ant-design/icons'
-import { Alert, App as AntdApp, Button, Collapse, Spin, Tag, Tooltip } from 'antd'
+import { Alert, Button, Collapse, Spin, Tag, Tooltip } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
@@ -14,9 +17,12 @@ import remarkGfm from 'remark-gfm'
 import { getAgent } from '../api/agents'
 import { runAgentStream } from '../api/agentRun'
 import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
+import {
+  listConversationMessages,
+  listConversations,
+} from '../api/conversations'
+import type { ConversationSummary } from '../api/conversations'
 import type { UserAgentDetail } from '../api/types'
-import { ActionBar, UploadMaterial } from '../components/senclaw-cmp'
-import type { ActionBarAction, UploadedMaterialFile } from '../components/senclaw-cmp'
 
 interface Message {
   id: string
@@ -32,138 +38,6 @@ const SUGGESTED_PROMPTS = [
   '帮我快速梳理当前任务的关键点',
   '演示一次你的核心能力',
 ]
-
-/**
- * 组件渲染协议：assistant 消息中使用围栏代码块声明前端组件，
- * 语言标记为 senclaw-component，内容为 JSON：
- *
- * ```senclaw-component
- * {"name":"@senclaw-elearning-cmp/upload-material","props":{"sceneRobotId":"xxx"}}
- * ```
- */
-const COMPONENT_BLOCK_RE = /```senclaw-component\s*\n([\s\S]*?)```/g
-
-interface ContentSegment {
-  type: 'markdown' | 'component'
-  value: string
-}
-
-function parseContentSegments(content: string): ContentSegment[] {
-  const segments: ContentSegment[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
-  COMPONENT_BLOCK_RE.lastIndex = 0
-  while ((match = COMPONENT_BLOCK_RE.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      segments.push({ type: 'markdown', value: content.slice(lastIndex, match.index) })
-    }
-    segments.push({ type: 'component', value: match[1].trim() })
-    lastIndex = COMPONENT_BLOCK_RE.lastIndex
-  }
-  if (lastIndex < content.length) {
-    segments.push({ type: 'markdown', value: content.slice(lastIndex) })
-  }
-  return segments
-}
-
-interface ComponentBlockPayload {
-  name: string
-  props?: Record<string, unknown>
-}
-
-function isComponentBlockPayload(data: unknown): data is ComponentBlockPayload {
-  return (
-    typeof data === 'object' &&
-    data !== null &&
-    typeof (data as { name?: unknown }).name === 'string'
-  )
-}
-
-function SenclawComponentBlock({ json }: { json: string }) {
-  const { message } = AntdApp.useApp()
-
-  const parsed = useMemo(() => {
-    try {
-      return { ok: true, data: JSON.parse(json) as unknown }
-    } catch (err) {
-      return {
-        ok: false as const,
-        error: err instanceof Error ? err.message : 'JSON 解析失败',
-      }
-    }
-  }, [json])
-
-  if (!parsed.ok) {
-    return (
-      <Alert
-        type="error"
-        showIcon
-        message="组件声明解析失败"
-        description={parsed.error}
-      />
-    )
-  }
-
-  const data = parsed.data
-  if (!isComponentBlockPayload(data)) {
-    return <Alert type="warning" showIcon message="组件声明格式不正确" description={json} />
-  }
-
-  if (data.name === '@senclaw-elearning-cmp/upload-material') {
-    const props = data.props ?? {}
-    return (
-      <UploadMaterial
-        sceneRobotId={typeof props.sceneRobotId === 'string' ? props.sceneRobotId : undefined}
-        disabled={typeof props.disabled === 'boolean' ? props.disabled : undefined}
-        onUploaded={(files: UploadedMaterialFile[]) => {
-          message.success(`已上传 ${files.filter((f) => f.status === 'done').length} 份资料`)
-        }}
-        onSkip={() => {
-          message.info('已跳过资料上传')
-        }}
-      />
-    )
-  }
-
-  if (data.name === '@senclaw-elearning-cmp/action-bar') {
-    const placement =
-      data.props?.placement === 'right' || data.props?.placement === 'center'
-        ? data.props.placement
-        : 'left'
-    const rawActions = Array.isArray(data.props?.actions) ? data.props.actions : []
-    const actions: ActionBarAction[] = rawActions.map((a) => {
-      const item = (a ?? {}) as Record<string, unknown>
-      return {
-        label: typeof item.label === 'string' ? item.label : '',
-        type: item.type === 'primary' || item.type === 'text' ? item.type : 'secondary',
-        action:
-          typeof item.action === 'object' && item.action !== null
-            ? (item.action as { type: string })
-            : undefined,
-      }
-    })
-    return (
-      <ActionBar
-        placement={placement}
-        actions={actions}
-        onAction={(action) => {
-          if (action.action?.type === 'goto_free_detail') {
-            message.success('剧本已保存，即将进入详情')
-          }
-        }}
-      />
-    )
-  }
-
-  return (
-    <Alert
-      type="warning"
-      showIcon
-      message={`未识别的组件：${data.name}`}
-      description={json}
-    />
-  )
-}
 
 let messageSeq = 0
 function nextMessageId(): string {
@@ -211,8 +85,60 @@ export default function ChatPage() {
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState('')
 
+  const [conversations, setConversations] = useState<ConversationSummary[]>([])
+  const [conversationsLoading, setConversationsLoading] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+
   const scrollRef = useRef<HTMLDivElement | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+
+  const refreshConversations = async (cid?: string) => {
+    if (!agentId) return
+    setConversationsLoading(true)
+    try {
+      const list = await listConversations(agentId, { limit: 50 })
+      setConversations(list)
+      if (cid && list.length > 0) {
+        setConversationId(cid)
+      }
+    } catch (err) {
+      console.error('加载会话列表失败', err)
+    } finally {
+      setConversationsLoading(false)
+    }
+  }
+
+  const handleSelectConversation = async (cid: string) => {
+    if (!agentId || cid === conversationId) {
+      setSidebarOpen(false)
+      return
+    }
+    try {
+      setConversationsLoading(true)
+      const history = await listConversationMessages(agentId, cid)
+      const restored: Message[] = history
+        .filter((m) => m.role === 'user' || m.role === 'assistant')
+        .map((m) => ({
+          id: m.message_id,
+          role: m.role as 'user' | 'assistant',
+          content: m.content,
+        }))
+      setMessages(restored)
+      setConversationId(cid)
+      setSidebarOpen(false)
+    } catch (err) {
+      console.error('加载历史消息失败', err)
+    } finally {
+      setConversationsLoading(false)
+    }
+  }
+
+  const handleNewConversation = () => {
+    setMessages([])
+    setConversationId('')
+    setInput('')
+    setSidebarOpen(false)
+  }
 
   useEffect(() => {
     if (!agentId) {
@@ -236,6 +162,12 @@ export default function ChatPage() {
     return () => {
       active = false
     }
+  }, [agentId])
+
+  useEffect(() => {
+    if (!agentId) return
+    void refreshConversations()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agentId])
 
   useEffect(() => {
@@ -287,10 +219,25 @@ export default function ChatPage() {
         },
         (evt: AgentStreamEvent) => {
           switch (evt.event) {
+            case 'llm_token':
+              // 流式增量：逐 token 追加到 assistant 气泡，实现打字机效果
+              if (evt.data.delta) {
+                setMessages((prev) =>
+                  prev.map((m) =>
+                    m.id === assistantMsg.id
+                      ? { ...m, loading: false, content: m.content + evt.data.delta }
+                      : m,
+                  ),
+                )
+              }
+              break
             case 'llm_end':
               // 每轮 LLM 返回的 content 是该轮完整输出；多轮时以最后一轮为准
-              if (evt.data.content) {
+              // 流式场景下 content 已通过 llm_token 累积，这里仅在非流式回退时覆盖
+              if (evt.data.content && !evt.data.usage_streamed) {
                 patchAssistant({ loading: false, content: evt.data.content })
+              } else {
+                patchAssistant({ loading: false })
               }
               break
             case 'tool_start':
@@ -327,7 +274,12 @@ export default function ChatPage() {
               break
             }
             case 'result':
-              if (!conversationId) setConversationId(evt.data.conversation_id)
+              if (!conversationId) {
+                setConversationId(evt.data.conversation_id)
+                void refreshConversations(evt.data.conversation_id)
+              } else {
+                void refreshConversations()
+              }
               patchAssistant({
                 loading: false,
                 content: evt.data.content,
@@ -357,12 +309,6 @@ export default function ChatPage() {
       e.preventDefault()
       void handleSend()
     }
-  }
-
-  const handleReset = () => {
-    setMessages([])
-    setConversationId('')
-    setInput('')
   }
 
   const renderToolTraces = (traces: ToolCallTrace[]) => {
@@ -430,11 +376,74 @@ export default function ChatPage() {
 
   return (
     <div className="chat-page">
+      <aside className={`chat-sidebar ${sidebarOpen ? 'chat-sidebar--open' : ''}`}>
+        <div className="chat-sidebar__header">
+          <span className="chat-sidebar__title">
+            <HistoryOutlined /> 历史会话
+          </span>
+          <Button
+            type="text"
+            size="small"
+            icon={<PlusOutlined />}
+            onClick={handleNewConversation}
+            disabled={sending}
+          >
+            新会话
+          </Button>
+        </div>
+        <div className="chat-sidebar__list">
+          {conversationsLoading && conversations.length === 0 ? (
+            <div className="chat-sidebar__empty">
+              <Spin size="small" />
+            </div>
+          ) : conversations.length === 0 ? (
+            <div className="chat-sidebar__empty">
+              <MessageOutlined />
+              <span>暂无历史会话</span>
+            </div>
+          ) : (
+            conversations.map((c) => (
+              <button
+                key={c.conversation_id}
+                type="button"
+                className={`chat-sidebar__item ${
+                  c.conversation_id === conversationId ? 'chat-sidebar__item--active' : ''
+                }`}
+                onClick={() => void handleSelectConversation(c.conversation_id)}
+                disabled={sending}
+              >
+                <div className="chat-sidebar__item-title">
+                  {c.title || '未命名会话'}
+                </div>
+                {c.updated_at && (
+                  <div className="chat-sidebar__item-time">
+                    {new Date(c.updated_at).toLocaleString()}
+                  </div>
+                )}
+              </button>
+            ))
+          )}
+        </div>
+      </aside>
+      {sidebarOpen && (
+        <div
+          className="chat-sidebar__mask"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+
       <header className="chat-header">
         <Link to="/" className="chat-header__back">
           <ArrowLeftOutlined />
           <span>返回</span>
         </Link>
+        <Button
+          type="text"
+          icon={<HistoryOutlined />}
+          onClick={() => setSidebarOpen((v) => !v)}
+        >
+          会话
+        </Button>
         {agent && (
           <div className="chat-header__agent">
             <AgentAvatar agent={agent} size={36} />
@@ -452,7 +461,7 @@ export default function ChatPage() {
             <Button
               type="text"
               icon={<ClearOutlined />}
-              onClick={handleReset}
+              onClick={handleNewConversation}
               disabled={messages.length === 0 || sending}
             >
               新会话
@@ -525,16 +534,9 @@ export default function ChatPage() {
                       ) : (
                         <>
                           <div className="chat-bubble__content chat-markdown">
-                            {parseContentSegments(m.content).map((seg, idx) => {
-                              if (seg.type === 'component') {
-                                return <SenclawComponentBlock key={idx} json={seg.value} />
-                              }
-                              return (
-                                <ReactMarkdown key={idx} remarkPlugins={[remarkGfm]}>
-                                  {seg.value}
-                                </ReactMarkdown>
-                              )
-                            })}
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {m.content}
+                            </ReactMarkdown>
                           </div>
                           {m.toolTraces && m.toolTraces.length > 0 && renderToolTraces(m.toolTraces)}
                         </>

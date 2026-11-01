@@ -49,8 +49,13 @@ def _bearer(token: str) -> dict[str, str]:
     return {"Authorization": f"Bearer {token}"}
 
 
-def _skill_payload(name: str) -> dict:
-    return {"name": name, "description": "", "content": "", "config": {}}
+def _tool_payload(name: str) -> dict:
+    return {
+        "name": name,
+        "description": "",
+        "type": "http",
+        "config": {"url": "https://example.com/api", "method": "GET"},
+    }
 
 
 def test_platform_context(client: TestClient) -> None:
@@ -167,44 +172,44 @@ def test_platform_resource_visible_but_readonly_for_tenant(
     tenant_headers = _bearer(_login(acme, f"{TENANT_A}-admin")["access_token"])
 
     platform_skill = client.post(
-        "/api/v1/admin/skills", json=_skill_payload("产品级技能"), headers=auth_headers
+        "/api/v1/admin/tools", json=_tool_payload("产品级技能"), headers=auth_headers
     )
     assert platform_skill.status_code == 201
     platform_id = platform_skill.json()["id"]
     assert platform_skill.json()["is_platform"] is True
 
-    hidden = acme.get("/api/v1/admin/skills?page_size=100", headers=tenant_headers)
+    hidden = acme.get("/api/v1/admin/tools?page_size=100", headers=tenant_headers)
     assert hidden.status_code == 200
     assert platform_id not in [item["id"] for item in hidden.json()["items"]]
 
     granted = client.put(
         "/api/v1/admin/grants",
-        params={"resource_type": "skill", "resource_id": platform_id},
+        params={"resource_type": "tool", "resource_id": platform_id},
         json={"grants": [{"tenant_id": tenant["id"], "role_id": None}]},
         headers=auth_headers,
     )
     assert granted.status_code == 200, granted.text
 
-    listed = acme.get("/api/v1/admin/skills?page_size=100", headers=tenant_headers)
+    listed = acme.get("/api/v1/admin/tools?page_size=100", headers=tenant_headers)
     assert listed.status_code == 200
     assert platform_id in [item["id"] for item in listed.json()["items"]]
 
     assert (
-        acme.get(f"/api/v1/admin/skills/{platform_id}", headers=tenant_headers).status_code == 200
+        acme.get(f"/api/v1/admin/tools/{platform_id}", headers=tenant_headers).status_code == 200
     )
     update = acme.put(
-        f"/api/v1/admin/skills/{platform_id}",
-        json=_skill_payload("篡改"),
+        f"/api/v1/admin/tools/{platform_id}",
+        json=_tool_payload("篡改"),
         headers=tenant_headers,
     )
     assert update.status_code == 403
     assert (
-        acme.delete(f"/api/v1/admin/skills/{platform_id}", headers=tenant_headers).status_code
+        acme.delete(f"/api/v1/admin/tools/{platform_id}", headers=tenant_headers).status_code
         == 403
     )
 
     # 产品级列表只展示产品级资源
-    platform_listed = client.get("/api/v1/admin/skills?page_size=100", headers=auth_headers)
+    platform_listed = client.get("/api/v1/admin/tools?page_size=100", headers=auth_headers)
     assert [item["id"] for item in platform_listed.json()["items"]] == [platform_id]
 
 
@@ -219,16 +224,16 @@ def test_tenant_resources_isolated(
     globex_headers = _bearer(_login(globex, f"{TENANT_B}-admin")["access_token"])
 
     created = acme.post(
-        "/api/v1/admin/skills", json=_skill_payload("租户技能"), headers=acme_headers
+        "/api/v1/admin/tools", json=_tool_payload("租户技能"), headers=acme_headers
     )
     assert created.status_code == 201, created.text
     skill_id = created.json()["id"]
     assert created.json()["tenant_id"] == acme_tenant["id"]
     assert created.json()["is_platform"] is False
 
-    assert globex.get(f"/api/v1/admin/skills/{skill_id}", headers=globex_headers).status_code == 404
+    assert globex.get(f"/api/v1/admin/tools/{skill_id}", headers=globex_headers).status_code == 404
     assert (
-        globex.get("/api/v1/admin/skills?page_size=100", headers=globex_headers).json()["total"]
+        globex.get("/api/v1/admin/tools?page_size=100", headers=globex_headers).json()["total"]
         == 0
     )
 
@@ -245,26 +250,26 @@ def test_same_name_across_tenants(
 
     assert (
         acme.post(
-            "/api/v1/admin/skills", json=_skill_payload("同名技能"), headers=acme_headers
+            "/api/v1/admin/tools", json=_tool_payload("同名技能"), headers=acme_headers
         ).status_code
         == 201
     )
     assert (
         globex.post(
-            "/api/v1/admin/skills", json=_skill_payload("同名技能"), headers=globex_headers
+            "/api/v1/admin/tools", json=_tool_payload("同名技能"), headers=globex_headers
         ).status_code
         == 201
     )
     # 租户仍不能与产品级资源重名
     assert (
         client.post(
-            "/api/v1/admin/skills", json=_skill_payload("同名技能"), headers=auth_headers
+            "/api/v1/admin/tools", json=_tool_payload("同名技能"), headers=auth_headers
         ).status_code
         == 201
     )
     assert (
         acme.post(
-            "/api/v1/admin/skills", json=_skill_payload("同名技能"), headers=acme_headers
+            "/api/v1/admin/tools", json=_tool_payload("同名技能"), headers=acme_headers
         ).status_code
         == 409
     )

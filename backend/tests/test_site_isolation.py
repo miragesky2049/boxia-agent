@@ -101,7 +101,6 @@ def test_user_routes_require_login(
     acme = user_tenant_client(TENANT_CODE)
 
     assert acme.get("/api/v1/user/me").status_code == 401
-    assert acme.get("/api/v1/user/agents").status_code == 401
 
 
 def test_user_site_health(user_client: TestClient) -> None:

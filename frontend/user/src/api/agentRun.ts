@@ -51,6 +51,7 @@ export type AgentStreamEvent =
         usage: Record<string, number>
       }
     }
+  | { event: 'llm_token'; data: { delta: string } }
   | {
       event: 'tool_start'
       data: { tool_call_id: string; name: string; arguments: Record<string, unknown> }

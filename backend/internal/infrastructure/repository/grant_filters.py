@@ -1,18 +1,13 @@
-"""资源可见性 SQL 片段：统一智能体、资源与角色授权的过滤规则。"""
+"""资源可见性 SQL 片段：统一资源与角色授权的过滤规则。"""
 
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import and_, exists, false, or_, true
-from sqlalchemy.orm import aliased
+from sqlalchemy import exists, false, or_, true
 from sqlalchemy.sql.elements import ColumnElement
 
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.access import ResourceGrantModel
-from internal.infrastructure.model.agent import AgentModel, AgentTenantOpeningModel
-
-# 内层 EXISTS 必须使用别名表，否则在智能体列表查询中会编译成 agents.id = agents.id 恒真条件
-_VisibleAgent = aliased(AgentModel, name="visible_agent")
 
 
 def _role_condition(role_ids: tuple[UUID, ...], apply_role_filter: bool) -> ColumnElement[bool]:
@@ -20,7 +15,6 @@ def _role_condition(role_ids: tuple[UUID, ...], apply_role_filter: bool) -> Colu
     if not apply_role_filter:
         return ResourceGrantModel.role_id.is_not(None) | ResourceGrantModel.role_id.is_(None)
     if not role_ids:
-        # 没有角色的账号只能命中“整租户授权”
         return ResourceGrantModel.role_id.is_(None)
     return or_(
         ResourceGrantModel.role_id.is_(None),
@@ -78,54 +72,6 @@ def tenant_grant_exists(
     )
 
 
-def tenant_grant_absent(
-    resource_type: str, resource_id_col: Any, tenant_id: UUID
-) -> ColumnElement[bool]:
-    """资源是否未对指定租户直接授权，用于产品级资源继承所属智能体。"""
-    return ~tenant_grant_exists(resource_type, resource_id_col, tenant_id)
-
-
-def agent_opening_exists(agent_id_col: Any, tenant_id: UUID) -> ColumnElement[bool]:
-    """平台智能体是否已对指定租户开通。"""
-    return exists().where(
-        AgentTenantOpeningModel.agent_id == agent_id_col,
-        AgentTenantOpeningModel.tenant_id == tenant_id,
-    )
-
-
-def agent_visible(
-    agent_id_col: Any,
-    tenant_id: UUID,
-    role_ids: tuple[UUID, ...],
-    apply_role_filter: bool,
-) -> ColumnElement[bool]:
-    """资源所属智能体对当前租户是否可见。
-
-    严格 RBAC：租户自有智能体必须显式授权；管理端超级管理员全量可见。
-    产品级智能体必须先对本租户开通；租户内再由角色数据授权细分可见范围。
-    """
-    if apply_role_filter:
-        tenant_owned = and_(
-            _VisibleAgent.tenant_id == tenant_id,
-            grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
-        )
-        platform_available = and_(
-            _VisibleAgent.tenant_id == PLATFORM_TENANT_ID,
-            agent_opening_exists(_VisibleAgent.id, tenant_id),
-            grant_exists("agent", _VisibleAgent.id, tenant_id, role_ids, True),
-        )
-    else:
-        tenant_owned = _VisibleAgent.tenant_id == tenant_id
-        platform_available = and_(
-            _VisibleAgent.tenant_id == PLATFORM_TENANT_ID,
-            agent_opening_exists(_VisibleAgent.id, tenant_id),
-        )
-    return exists().where(
-        _VisibleAgent.id == agent_id_col,
-        or_(tenant_owned, platform_available),
-    )
-
-
 def tenant_resource_visible(
     resource_type: str,
     resource_id_col: Any,
@@ -142,16 +88,9 @@ def tenant_resource_visible(
 def platform_resource_visible(
     resource_type: str,
     resource_id_col: Any,
-    agent_id_col: Any,
     tenant_id: UUID,
     role_ids: tuple[UUID, ...],
     apply_role_filter: bool,
 ) -> ColumnElement[bool]:
-    """产品级资源：直接授权命中，或本租户无直接授权时继承所属智能体授权。"""
-    direct = grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter)
-    inherited = and_(
-        tenant_grant_absent(resource_type, resource_id_col, tenant_id),
-        agent_id_col.is_not(None),
-        agent_visible(agent_id_col, tenant_id, role_ids, apply_role_filter),
-    )
-    return or_(direct, inherited)
+    """产品级资源：必须直接授权命中。"""
+    return grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter)

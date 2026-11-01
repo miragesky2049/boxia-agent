@@ -9,8 +9,8 @@ from uuid import UUID
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
-from internal.engine.embedding import EmbeddingClient
-from internal.engine.text_split import Chunk, split_markdown, split_text
+from internal.domain.retrieval.embedding import EmbeddingClient
+from internal.domain.retrieval.text_split import Chunk, split_markdown, split_text
 
 logger = logging.getLogger(__name__)
 
@@ -134,7 +134,7 @@ class IngestionService:
         """构造 embedding 客户端；测试可注入，生产从 settings 读取。"""
         if self._embedding_client is not None:
             return self._embedding_client
-        from internal.engine.embedding import OpenAICompatEmbeddingClient
+        from internal.domain.retrieval.embedding import OpenAICompatEmbeddingClient
         from internal.infrastructure.config.settings import get_settings
 
         settings = get_settings()

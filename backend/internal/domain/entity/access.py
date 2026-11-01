@@ -13,7 +13,7 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
+RESOURCE_TYPES = ("tool", "app")
 
 
 @dataclass(frozen=True)
@@ -108,17 +108,6 @@ class ResourceGrant:
 
 
 @dataclass(frozen=True)
-class AgentTenantOpening:
-    """平台智能体对租户的开通关系；不代表角色级可见性。"""
-
-    id: UUID
-    agent_id: UUID
-    tenant_id: UUID
-    opened_by: UUID | None
-    opened_at: datetime
-
-
-@dataclass(frozen=True)
 class GrantSummary:
     """资源授权汇总：用于授权管理列表，避免逐条加载授权明细。"""
 
@@ -136,6 +125,9 @@ class AccessScope:
     role_ids: tuple[UUID, ...] = ()
     apply_role_filter: bool = True
     is_platform: bool = False
+    # 新增：PRIVATE / TENANT_GROUP 可见性判定需要的当前用户与租户组
+    user_id: UUID | None = None
+    tenant_group_id: UUID | None = None
 
     @property
     def has_role_filter(self) -> bool:

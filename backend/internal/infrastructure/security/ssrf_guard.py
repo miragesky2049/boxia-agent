@@ -16,7 +16,7 @@ import logging
 import socket
 from urllib.parse import urlparse
 
-from internal.application.errors import ValidationError
+from internal.domain.errors import ValidationError
 
 logger = logging.getLogger(__name__)
 
