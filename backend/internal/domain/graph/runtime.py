@@ -105,6 +105,7 @@ class GraphRuntime:
             thread_id=self.thread_id,
             application_id=self.application_id,
         )
+        self._runtime_env = env
 
         if self._checkpointer_override is _UNSET:
             checkpointer = await get_checkpointer()
@@ -273,6 +274,60 @@ class GraphRuntime:
 
             logger.error("运行失败: run=%s error=%s", self.run_id, e)
             raise
+
+    async def invoke_node(self, node_id: str, input_data: dict[str, Any]) -> dict[str, Any]:
+        """单节点试运行：只执行指定节点，不写 run 记录、不改变全图运行语义。
+
+        Args:
+            node_id: 画布内的目标节点 ID。
+            input_data: 试运行表单入参，覆盖节点在画布中配置的入参值。
+
+        Returns:
+            {"node_id", "node_type", "status", "outputs", "error", "duration_ms"}；
+            handler 抛错时 status=error、error 为异常信息，不移交给调用方异常栈。
+        """
+        started_at = time.time()
+        await self._ensure_compiled()
+
+        assert self._canvas is not None
+        try:
+            canvas_node = self._canvas.node_by_id(node_id)
+        except KeyError as exc:
+            raise ValueError(f"画布不存在节点: {node_id}") from exc
+
+        default_globals: dict[str, Any] = {}
+        try:
+            default_globals = self._compiler_instance.default_globals()
+        except Exception:  # noqa: BLE001
+            logger.exception("单节点试运行计算变量池默认值失败，按空池继续")
+
+        status = "success"
+        error_message: str | None = None
+        outputs: dict[str, Any] = {}
+        try:
+            result = await self._compiler_instance.execute_node_only(
+                canvas_node,
+                self._runtime_env,
+                input_data,
+                default_globals,
+            )
+            outputs = result["outputs"]
+            error_message = result["error"] or None
+            if error_message:
+                status = "error"
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("单节点试运行失败: node=%s error=%s", node_id, exc)
+            status = "error"
+            error_message = str(exc)
+
+        return {
+            "node_id": canvas_node.id,
+            "node_type": canvas_node.type.value,
+            "status": status,
+            "outputs": outputs,
+            "error": error_message,
+            "duration_ms": int((time.time() - started_at) * 1000),
+        }
 
     async def resume(self, resume_payload: dict[str, Any]) -> dict[str, Any]:
         """人审批准后续跑工作流。

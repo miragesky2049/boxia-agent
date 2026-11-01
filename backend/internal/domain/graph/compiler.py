@@ -130,6 +130,69 @@ class Compiler:
 
         return sg.compile(checkpointer=checkpointer)
 
+    async def execute_node_only(
+        self,
+        canvas_node: CanvasNode,
+        env: RuntimeEnv,
+        input_data: dict[str, Any],
+        globals_pool: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """单节点试运行：只执行指定节点，不做图调度、不写 run 记录。
+
+        画布里配置的字面量/引用先按空上游求值，再用试运行表单传入的 input_data 覆盖，
+        使手动填写的值优先于未执行上游节点产生的空引用。
+
+        Args:
+            canvas_node: 目标节点 IR。
+            env: 运行时环境。
+            input_data: 试运行表单入参（覆盖画布配置值）。
+            globals_pool: graph 级变量池默认值。
+
+        Returns:
+            {"outputs", "error", "globals"}；handler 按 ErrorPolicy 降级时 error 非空。
+        """
+        handler = get_node_handler(canvas_node.type)
+        eval_context = EvalContext(
+            input=input_data,
+            node_outputs={},
+            globals=globals_pool or {},
+            env={
+                "tenant_id": str(env.tenant_id),
+                "user_id": str(env.user_id) if env.user_id else None,
+                "run_id": str(env.run_id),
+                "thread_id": env.thread_id,
+            },
+        )
+        evaluated_inputs = self._evaluator.eval_dict(canvas_node.inputs, eval_context)
+        evaluated_inputs.update(input_data)
+
+        node_ctx = NodeContext(
+            node_id=canvas_node.id,
+            node_type=canvas_node.type.value,
+            inputs=evaluated_inputs,
+            config=canvas_node.config,
+            env=env,
+            services=self._services,
+            subgraph=canvas_node.subgraph,
+            eval_context=eval_context,
+            evaluator=self._evaluator,
+        )
+
+        result, error_message = await self._execute_with_policy(
+            handler, node_ctx, canvas_node.on_error
+        )
+
+        outputs: dict[str, Any] = {**result.outputs}
+        if result.usage:
+            outputs["usage"] = result.usage
+        if result.route:
+            outputs["route"] = result.route
+        return {
+            "outputs": outputs,
+            "error": error_message,
+            "globals": dict(result.globals) if result.globals else {},
+        }
+
     def _build_node_fn(
         self,
         canvas_node: CanvasNode,

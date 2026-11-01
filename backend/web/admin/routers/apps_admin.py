@@ -506,6 +506,58 @@ async def debug_run_stream(
     )
 
 
+class DebugNodeRunPayload(BaseModel):
+    """单节点试运行请求体。"""
+
+    graph: dict[str, Any]
+    node_id: str = Field(..., min_length=1)
+    inputs: dict[str, Any] = Field(default_factory=dict)
+
+
+@router.post("/debug/run/node")
+async def debug_run_node(
+    payload: DebugNodeRunPayload,
+    uow: UowDep,
+    _principal: PlatformAdminDep,
+) -> dict:
+    """单节点试运行：只执行指定节点并返回 outputs / 耗时 / 错误。
+
+    不写 run 记录、不发 SSE、不改变全图试运行语义；画布未保存也可用。
+    上游引用按空值求值，用户在抽屉表单里填写的入参优先。
+    """
+    nodes = payload.graph.get("nodes") or []
+    if not isinstance(nodes, list) or not nodes or len(nodes) > 50:
+        raise ValidationError("graph 节点数必须在 1-50 之间")
+
+    model_service = ModelService(uow.session)
+    services = ServiceRegistry()
+    services.register(
+        "llm",
+        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
+    )
+    services.register("http", HttpService())
+
+    run_id = uuid.uuid4()
+    _register_conversation_services(
+        services, uow, _principal,
+        application_id=DEBUG_APPLICATION_ID, run_id=run_id,
+    )
+    _register_subgraph_loader(services, uow, _principal.tenant_id)
+
+    runtime = GraphRuntime(
+        canvas_json=payload.graph,
+        services=services,
+        run_id=run_id,
+        application_id=DEBUG_APPLICATION_ID,
+        # 单节点试运行不落 LangGraph 状态，避免依赖 checkpoint 连接
+        checkpointer=None,
+    )
+    try:
+        return await runtime.invoke_node(payload.node_id, payload.inputs)
+    except ValueError as exc:
+        raise ValidationError(str(exc)) from exc
+
+
 class DebugResumePayload(BaseModel):
     """人审续跑请求体。"""
 
