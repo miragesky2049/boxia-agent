@@ -68,7 +68,7 @@ export function VariablesDrawer({ open, onClose, nodes, keyToMeta }: VariablesDr
       title="变量引用"
       open={open}
       onClose={onClose}
-      width={360}
+      width="min(360px, 92vw)"
       placement="right"
     >
       <div style={{ marginBottom: 12, fontSize: 12, color: '#9ca3af' }}>

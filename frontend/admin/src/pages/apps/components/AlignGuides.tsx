@@ -1,163 +1,230 @@
 import { useEffect, useRef } from 'react';
+import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor';
 import { CANVAS_TOKENS } from '../canvas/tokens';
+import { getSelection, getZoom, subscribeViewport } from '../canvas/adapters/flowgramContext';
 
-// U-N4 对齐辅助线：轻量实现，不依赖 FlowGram 内部 API
-// 原理：监听 mousedown/mousemove/mouseup，拖拽节点时读取所有节点 DOM rect，
-// 找 ±4px 内的最近锚点，画 1px 蓝紫对齐线；mouseup 时隐藏。
-const SNAP_THRESHOLD = 4;
-const LINE_COLOR = CANVAS_TOKENS.guide;
-// 节点 id 形如 llm-xxx-1 / start-xxx-0 / comment-xxx-2 / if_else-xxx-3
-const NODE_ID_RE = /^[a-z][a-z_]*-[A-Za-z0-9]+-/;
+// U-N4 对齐辅助线（N9-12）：只显示、不吸附，不改任何节点坐标。
+// 拖拽开始时缓存其他节点 rect，拖动中只重算被拖节点，rAF 节流。
+const THRESHOLD_WORLD_PX = 4;
+const MIN_THRESHOLD_PX = 3;
+const GUIDE_EXTEND_PX = 12;
 
-function isNodeEl(el: HTMLElement | null): boolean {
-  return !!el && NODE_ID_RE.test(el.id);
+interface NodeRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
 }
 
-export function AlignGuides() {
+interface AlignGuidesProps {
+  ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>;
+}
+
+export function AlignGuides({ ctxRef }: AlignGuidesProps) {
   const verticalRef = useRef<HTMLDivElement>(null);
   const horizontalRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let draggingId: string | null = null;
+    // 其余节点的 rect 在按下时缓存，拖拽过程中不必重复查询 DOM
+    let others: NodeRect[] = [];
+    let frame = 0;
 
     const hide = () => {
+      if (frame) {
+        cancelAnimationFrame(frame);
+        frame = 0;
+      }
       if (verticalRef.current) verticalRef.current.style.opacity = '0';
       if (horizontalRef.current) horizontalRef.current.style.opacity = '0';
     };
 
-    const onMouseDown = (e: MouseEvent) => {
-      const playground = document.querySelector('.gedit-playground-container') as HTMLElement | null;
-      if (!playground) return;
-      let target = e.target as HTMLElement | null;
-      while (target && target !== playground) {
-        if (isNodeEl(target)) {
-          draggingId = target.id;
-          break;
-        }
-        target = target.parentElement;
-      }
+    const compare = (a: number, b: number, best: number | null, bestDiff: number) => {
+      const diff = Math.abs(a - b);
+      return diff < bestDiff ? { value: b, diff } : null;
     };
 
-    const onMouseMove = (_e: MouseEvent) => {
+    const apply = () => {
+      frame = 0;
       if (!draggingId) return;
-      const playground = document.querySelector('.gedit-playground-container') as HTMLElement | null;
-      if (!playground) return;
-      const draggedEl = document.getElementById(draggingId);
-      if (!draggedEl) return;
-      const pgRect = playground.getBoundingClientRect();
+      const playground = document.querySelector<HTMLElement>('.gedit-playground-container');
+      if (!playground) {
+        hide();
+        return;
+      }
+      const draggedEl = playground.querySelector<HTMLElement>(
+        `[data-node-id="${CSS.escape(draggingId)}"]`,
+      );
+      if (!draggedEl) {
+        hide();
+        return;
+      }
       const draggedRect = draggedEl.getBoundingClientRect();
       if (draggedRect.width === 0) return;
 
-      // 被拖拽节点的三条 x 锚（左/中/右）和三条 y 锚（上/中/下）
-      const dragEdgesX = [
-        draggedRect.left,
-        draggedRect.left + draggedRect.width / 2,
-        draggedRect.right,
-      ];
-      const dragEdgesY = [
-        draggedRect.top,
-        draggedRect.top + draggedRect.height / 2,
-        draggedRect.bottom,
-      ];
+      // 阈值按世界像素换算成屏幕像素，各缩放档位下手感一致
+      const zoom = getZoom(ctxRef.current) || 1;
+      const threshold = Math.max(MIN_THRESHOLD_PX, THRESHOLD_WORLD_PX * zoom);
 
-      // 收集其他节点 DOM（节点被 FlowGram 包了一层，不能用 :scope > [id]）
-      const others = Array.from(playground.querySelectorAll<HTMLElement>('[id]'))
-        .filter((el) => el.id !== draggingId && isNodeEl(el));
+      const dragXs = [draggedRect.left, draggedRect.left + draggedRect.width / 2, draggedRect.right];
+      const dragYs = [draggedRect.top, draggedRect.top + draggedRect.height / 2, draggedRect.bottom];
 
       let bestV: number | null = null;
-      let bestVDiff = SNAP_THRESHOLD + 1;
-      let bestVRange: { start: number; end: number } = { start: 0, end: 0 };
-
+      let bestVDiff = threshold;
+      let vStart = 0;
+      let vEnd = 0;
       let bestH: number | null = null;
-      let bestHDiff = SNAP_THRESHOLD + 1;
-      let bestHRange: { start: number; end: number } = { start: 0, end: 0 };
+      let bestHDiff = threshold;
+      let hStart = 0;
+      let hEnd = 0;
 
-      others.forEach((nodeEl) => {
-        const r = nodeEl.getBoundingClientRect();
-        if (r.width === 0 || r.height === 0) return;
-        const anchorXs = [r.left, r.left + r.width / 2, r.right];
-        const anchorYs = [r.top, r.top + r.height / 2, r.bottom];
+      for (const rect of others) {
+        const anchorXs = [rect.left, rect.left + (rect.right - rect.left) / 2, rect.right];
+        const anchorYs = [rect.top, rect.top + (rect.bottom - rect.top) / 2, rect.bottom];
 
-        for (const dx of dragEdgesX) {
+        for (const x of dragXs) {
           for (const ax of anchorXs) {
-            const diff = Math.abs(dx - ax);
-            if (diff < bestVDiff) {
-              bestVDiff = diff;
-              bestV = ax;
-              bestVRange = { start: r.top, end: r.bottom };
+            const hit = compare(x, ax, bestV, bestVDiff);
+            if (hit) {
+              bestV = hit.value;
+              bestVDiff = hit.diff;
+              vStart = rect.top;
+              vEnd = rect.bottom;
             }
           }
         }
-        for (const dy of dragEdgesY) {
+        for (const y of dragYs) {
           for (const ay of anchorYs) {
-            const diff = Math.abs(dy - ay);
-            if (diff < bestHDiff) {
-              bestHDiff = diff;
-              bestH = ay;
-              bestHRange = { start: r.left, end: r.right };
+            const hit = compare(y, ay, bestH, bestHDiff);
+            if (hit) {
+              bestH = hit.value;
+              bestHDiff = hit.diff;
+              hStart = rect.left;
+              hEnd = rect.right;
             }
           }
         }
-      });
+      }
+
+      const pgRect = playground.getBoundingClientRect();
 
       if (bestV != null && verticalRef.current) {
-        verticalRef.current.style.opacity = '1';
-        verticalRef.current.style.left = `${bestV - pgRect.left}px`;
-        verticalRef.current.style.top = `${bestVRange.start - pgRect.top}px`;
-        verticalRef.current.style.height = `${bestVRange.end - bestVRange.start}px`;
+        const el = verticalRef.current;
+        el.style.opacity = '1';
+        el.style.left = `${bestV - pgRect.left}px`;
+        el.style.top = `${vStart - GUIDE_EXTEND_PX - pgRect.top}px`;
+        el.style.height = `${vEnd - vStart + GUIDE_EXTEND_PX * 2}px`;
       } else if (verticalRef.current) {
         verticalRef.current.style.opacity = '0';
       }
 
       if (bestH != null && horizontalRef.current) {
-        horizontalRef.current.style.opacity = '1';
-        horizontalRef.current.style.top = `${bestH - pgRect.top}px`;
-        horizontalRef.current.style.left = `${bestHRange.start - pgRect.left}px`;
-        horizontalRef.current.style.width = `${bestHRange.end - bestHRange.start}px`;
+        const el = horizontalRef.current;
+        el.style.opacity = '1';
+        el.style.top = `${bestH - pgRect.top}px`;
+        el.style.left = `${hStart - GUIDE_EXTEND_PX - pgRect.left}px`;
+        el.style.width = `${hEnd - hStart + GUIDE_EXTEND_PX * 2}px`;
       } else if (horizontalRef.current) {
         horizontalRef.current.style.opacity = '0';
       }
     };
 
-    const onMouseUp = () => {
+    const schedule = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(apply);
+    };
+
+    const onPointerDown = (e: PointerEvent) => {
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement | null;
+      if (!target) return;
+      if (target.closest('.boxia-minimap, .ant-drawer, .ant-modal, .ant-popover, .ant-dropdown')) {
+        return;
+      }
+      const nodeEl = target.closest<HTMLElement>('[data-node-id]');
+      if (!nodeEl) return;
+      const playground = document.querySelector<HTMLElement>('.gedit-playground-container');
+      if (!playground || !playground.contains(nodeEl)) return;
+      // 空格平移模式在拖画布，不是拖节点
+      const cursor = document.body.style.cursor;
+      if (cursor === 'grab' || cursor === 'grabbing') return;
+
+      const nodeId = nodeEl.dataset.nodeId || '';
+      if (!nodeId) return;
+      draggingId = nodeId;
+
+      // 多选拖拽时，同批选中的节点会一起移动，不能作为对齐基准
+      const excluded = new Set(getSelection(ctxRef.current).nodeIds);
+      excluded.add(nodeId);
+      others = Array.from(playground.querySelectorAll<HTMLElement>('[data-node-id]'))
+        .filter((el) => !excluded.has(el.dataset.nodeId || ''))
+        .map((el) => el.getBoundingClientRect())
+        .filter((rect) => rect.width > 0 && rect.height > 0)
+        .map((rect) => ({
+          left: rect.left,
+          top: rect.top,
+          right: rect.right,
+          bottom: rect.bottom,
+        }));
+    };
+
+    const onPointerMove = () => {
+      if (!draggingId) return;
+      schedule();
+    };
+
+    const endDrag = () => {
       draggingId = null;
+      others = [];
       hide();
     };
 
-    document.addEventListener('mousedown', onMouseDown);
-    document.addEventListener('mousemove', onMouseMove);
-    document.addEventListener('mouseup', onMouseUp);
-    return () => {
-      document.removeEventListener('mousedown', onMouseDown);
-      document.removeEventListener('mousemove', onMouseMove);
-      document.removeEventListener('mouseup', onMouseUp);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') endDrag();
     };
-  }, []);
+
+    // 缩放 / 滚动 / 切换子图后参考线立即失效
+    const viewportDisposable = subscribeViewport(ctxRef.current, () => {
+      if (draggingId) hide();
+    });
+
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('pointermove', onPointerMove);
+    document.addEventListener('pointerup', endDrag);
+    document.addEventListener('pointercancel', endDrag);
+    window.addEventListener('blur', endDrag);
+    document.addEventListener('keydown', onKeyDown);
+
+    return () => {
+      endDrag();
+      viewportDisposable.dispose?.();
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('pointermove', onPointerMove);
+      document.removeEventListener('pointerup', endDrag);
+      document.removeEventListener('pointercancel', endDrag);
+      window.removeEventListener('blur', endDrag);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [ctxRef]);
+
+  const lineBase: React.CSSProperties = {
+    position: 'absolute',
+    opacity: 0,
+    pointerEvents: 'none',
+    zIndex: CANVAS_TOKENS.z.guides,
+    transition: 'opacity 0.1s',
+    backgroundImage: `repeating-linear-gradient(to bottom, ${CANVAS_TOKENS.guide} 0 4px, transparent 4px 8px)`,
+  };
 
   return (
     <>
-      <div
-        ref={verticalRef}
-        style={{
-          position: 'absolute',
-          width: 1,
-          background: LINE_COLOR,
-          opacity: 0,
-          pointerEvents: 'none',
-          zIndex: CANVAS_TOKENS.z.guides,
-          transition: 'opacity 0.1s',
-        }}
-      />
+      <div ref={verticalRef} style={{ ...lineBase, width: 1 }} />
       <div
         ref={horizontalRef}
         style={{
-          position: 'absolute',
+          ...lineBase,
           height: 1,
-          background: LINE_COLOR,
-          opacity: 0,
-          pointerEvents: 'none',
-          zIndex: CANVAS_TOKENS.z.guides,
-          transition: 'opacity 0.1s',
+          backgroundImage: `repeating-linear-gradient(to right, ${CANVAS_TOKENS.guide} 0 4px, transparent 4px 8px)`,
         }}
       />
     </>

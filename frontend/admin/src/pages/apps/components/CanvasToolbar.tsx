@@ -2,6 +2,7 @@ import { Button, Dropdown, Tooltip } from 'antd';
 import {
   ZoomInOutlined, ZoomOutOutlined, CompressOutlined, FullscreenOutlined,
   PlusOutlined, CaretRightOutlined, UndoOutlined, RedoOutlined, DownOutlined,
+  DownloadOutlined,
 } from '@ant-design/icons';
 import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor';
 import { CANVAS_TOKENS } from '../canvas/tokens';
@@ -20,11 +21,12 @@ interface CanvasToolbarProps {
   canRedo?: boolean;
   onUndo?: () => void;
   onRedo?: () => void;
+  onExportJson?: () => void;
 }
 
 // 画布底部居中浮条（V3，对齐 Coze）：撤销/重做 | 缩放 / 适应 / 全屏 | +添加节点 | 试运行
 export function CanvasToolbar({
-  ctxRef, zoom, onAddNode, onRun, running, canUndo, canRedo, onUndo, onRedo,
+  ctxRef, zoom, onAddNode, onRun, running, canUndo, canRedo, onUndo, onRedo, onExportJson,
 }: CanvasToolbarProps) {
   // 画布缩放服务挂在 playground.config 上，取值路径收敛在 flowgramContext
   const applyZoom = (next: number) => setZoom(ctxRef.current, next);
@@ -110,6 +112,21 @@ export function CanvasToolbar({
       <Tooltip title="全屏">
         <Button size="small" type="text" icon={<FullscreenOutlined />} onClick={handleFullscreen} />
       </Tooltip>
+      {onExportJson && (
+        <Dropdown
+          trigger={['click']}
+          menu={{
+            items: [{ key: 'json', label: '导出 JSON（Coze IR）' }],
+            onClick: ({ key }) => {
+              if (key === 'json') onExportJson();
+            },
+          }}
+        >
+          <Button size="small" type="text" icon={<DownloadOutlined />}>
+            导出
+          </Button>
+        </Dropdown>
+      )}
 
       <div style={{ width: 1, height: 18, background: CANVAS_TOKENS.border, margin: '0 8px' }} />
 

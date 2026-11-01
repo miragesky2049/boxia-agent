@@ -166,12 +166,20 @@ export function subscribeSelection(ctx: FlowContext, onChange: (snapshot: Select
 
 export function clearSelection(ctx: FlowContext): void {
   try {
-    const selectService = (ctx as any)?.document?.selectService;
-    if (selectService?.clear) selectService.clear();
-    else if (selectionService(ctx)) selectionService(ctx).selection = [];
+    const selection = selectionService(ctx);
+    if (selection) selection.selection = [];
   } catch {
     // 选中清理失败不影响调用方结果
   }
+}
+
+// 全选节点（N9-09）：SelectionService 只有 selection setter，赋值即触发 onSelectionChanged
+export function selectAllNodes(ctx: FlowContext): number {
+  const nodes = ((ctx as any)?.document?.nodes || []) as unknown[];
+  const selection = selectionService(ctx);
+  if (!selection || nodes.length === 0) return 0;
+  selection.selection = [...nodes];
+  return nodes.length;
 }
 
 function buildSelectionSnapshot(

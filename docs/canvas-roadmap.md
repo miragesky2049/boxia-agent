@@ -2307,19 +2307,19 @@ T9-01（人工，可与后续并行）
 | C1 | 点阵背景 | 浅灰点阵 | 浅灰点阵 | 点阵网格 | ✅ | 7.5 |
 | C2 | 滚轮缩放（以鼠标为中心） | 有 | 有 | FlowGram 原生 | ✅ | U-P1 |
 | C3 | 空白左键拖拽平移 | 有 | 无（拖拽=框选） | `setupCanvasPan` 捕获阶段监听，1:1 跟随 | ✅ | 13.5 #6 / T9-07 |
-| C4 | Space+拖拽平移 | 有 | 有 | 未实现（空白拖拽已覆盖大部分场景；指针落在节点上时无法平移） | 🟧 | N9-04 |
+| C4 | Space+拖拽平移 | 有 | 有 | 按住 Space 后指针落在节点上也平移（捕获阶段截断节点拖拽） | 🟨 | N9-04 |
 | C5 | Shift+拖拽框选 | 有 | 无（普通拖拽框选） | `selectBox.canSelect = e.shiftKey` | ✅ | 13.5 #6 / T9-07 |
 | C6 | Shift+点击加选 | 有 | 有 | FlowGram 原生 `toggleSelect` | ✅ | T9-03 |
-| C7 | 框选数量提示 | 「已选中 N 个节点」 | 有 | 无独立提示浮条 | ⬜ | N9-02 |
+| C7 | 框选数量提示 | 「已选中 N 个节点」 | 有 | 多选时工具条上方显示「已选中 N 个节点」+ 批量删除 | 🟨 | N9-02 |
 | C8 | 多选整体拖拽 | 有 | 有 | 未验证 | 🟨 | N9-10 |
 | C9 | 点空白清除选中 | 有 | 有 | 有；且会关闭配置抽屉 | ✅ | T9-03 |
-| C10 | 对齐辅助线 | 拖拽时显示 | 拖拽时显示 | `AlignGuides` 监听 DOM rect ±4px 画红线（可显示，但需重构：缩放阈值/缓存/令牌） | 🟧 | U-N4 / N9-12 |
+| C10 | 对齐辅助线 | 拖拽时显示 | 拖拽时显示 | 按 13.9.1 重构：`[data-node-id]`、缩放阈值、rect 缓存 + rAF、多选排除、令牌化虚线、两端外延 | 🟨 | U-N4 / N9-12 |
 | C11 | 小地图 + 点击导航 | 右下浮窗 | 右下浮窗 | `MiniMap` 绝对定位 right:16 bottom:16，点击改 scroll | ✅ | C2 |
 | C12 | 适应视图 | 缩放下拉「自适应」 | 无 | 浮条「适应视图」图标按钮 | ✅ | C3 |
 | C13 | 缩放 ± 与百分比 | 百分比下拉 | ± 按钮 | ± 按钮 + 百分比下拉（50% / 75% / 100% / 150% / 200% / 自适应） | ✅ | N9-01 |
 | C14 | 全屏 | 无 | 无 | 浮条「全屏」按钮 | ✅ | T9-07 前 |
 | C15 | 自动排版 | 右键「整理画布」 | 竖排工具栏「整理节点」 | 画布右键「自动排版」 | ✅ | CanvasContextMenu |
-| C16 | 导出图片 / 导出 JSON | 浮条导出菜单 | 竖排工具栏「导出图片」 | 无 | ⬜ | N9-06 |
+| C16 | 导出图片 / 导出 JSON | 浮条导出菜单 | 竖排工具栏「导出图片」 | 浮条「导出」菜单已支持导出 Coze IR JSON；PNG 待引入截图依赖后接入 | 🟧 | N9-06 |
 | C17 | 空画布欢迎页 | 模板卡片 | 模板卡片 | 仅「从空白开始」，无模板 | ✅ | 7.4 已裁决 |
 | C18 | 画布右键菜单 | 添加节点/整理/适应 | 无 | 添加节点、复制、粘贴、删除、自动排版、适应视图 | ✅ | U-P2 |
 | C19 | 最小缩放 / 最大缩放钳制 | 有 | 有 | 浮条按钮 0.25–2.0 | ✅ | CanvasToolbar |
@@ -2393,7 +2393,7 @@ T9-01（人工，可与后续并行）
 | G13 | START 入参表格 | 有 | 有 | ParameterListEditor（B4） | ✅ | B4 |
 | G14 | 关闭抽屉保留选中态 | 有 | 有 | 抽屉开关与选中态解耦 | ✅ | T8 落地记录 |
 | G15 | 抽屉底部节点试运行 + 输出预览 | 有 | 有 | 无 | ⬜ | N9-03 |
-| G16 | 窄屏抽屉宽度 | 自适应 | 自适应 | 固定 480px | 🟧 | N9-11 |
+| G16 | 窄屏抽屉宽度 | 自适应 | 自适应 | 抽屉宽度改 `min(480px, 92vw)`（变量抽屉 360px 同规则） | 🟨 | N9-11 |
 
 #### H. 快捷键
 
@@ -2404,9 +2404,9 @@ T9-01（人工，可与后续并行）
 | H3 | Delete / Backspace 删除 | 有 | 有 | 有，捕获阶段拦截 FlowGram 内置删除，走二次确认 | ✅ | T9-03 |
 | H4 | Ctrl/Cmd+C / V | 有 | 有 | 有，输入框与文本选区放行 | ✅ | T9-02 / U-P2 |
 | H5 | Ctrl/Cmd+Z / Shift+Z / Y | 有 | 有 | 有（浮条按钮同步可用态） | ✅ | U-P6 / T9-07 |
-| H6 | Space 平移 | 有 | 有 | 无 | 🟧 | N9-04 |
-| H7 | Esc 清选中 / 关浮层 | 有 | 有 | Drawer 关闭由 antd 处理；画布选中未清 | 🟧 | N9-09 |
-| H8 | Ctrl/Cmd+A 全选节点 | 有 | 有 | 无 | ⬜ | N9-09 |
+| H6 | Space 平移 | 有 | 有 | 按住 Space 进入平移模式，松开恢复 | 🟨 | N9-04 |
+| H7 | Esc 清选中 / 关浮层 | 有 | 有 | Esc 依次关添加面板 / 配置抽屉 / 清空画布选中；弹窗与抽屉的 Esc 仍交给 antd | 🟨 | N9-09 |
+| H8 | Ctrl/Cmd+A 全选节点 | 有 | 有 | 有（输入框内保留原生全选） | 🟨 | N9-09 |
 
 #### I. 试运行与调试
 
@@ -2480,7 +2480,7 @@ T9-01（人工，可与后续并行）
 | **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
 | **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
 
-**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-07 节点「⋯」菜单、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON（PNG 待依赖确认）、N9-07 节点「⋯」菜单、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
 
 **N9-07 落地说明**：
 - `NodeCard` 新增 `actions` 入参，hover（或菜单展开中）在卡片右上角渲染「⋯」，菜单项由页面按能力声明构造，`comment`/`note` 便签不渲染该入口。
@@ -2488,6 +2488,16 @@ T9-01（人工，可与后续并行）
 - 「+」从右上角移到节点右侧中线，与「⋯」错开，同时更贴近 Coze 的「右侧加下游节点」位置。
 - 「运行」项依赖 B-N9-03，未接前不生成该菜单项；接入时只需在 `NodeCardActions` 增加 `onRun` 并按 `capabilities.runnable` 放行。
 - 静态验证：`tsc --noEmit`、`npm run build`、18 个画布单测通过；**浏览器实机点验未做**（本地前后端未启动）。
+
+**N9-02 / N9-04 / N9-09 / N9-11 落地说明**：
+- N9-02：多选（≥2）时在底部工具条上方显示「已选中 N 个节点」浮条，带「批量删除」（复用既有确认弹窗）。
+- N9-04：`setupCanvasPan` 维护 Space 按下状态；按下后指针落在节点上也进入平移，并在捕获阶段 `preventDefault + stopPropagation` 截断 FlowGram 节点拖拽；`keyup` / `blur` 复位。
+- N9-09：`Ctrl/Cmd+A` 经 adapter 新增的 `selectAllNodes`（SelectionService 只有 `selection` setter，赋值即触发变更事件）全选节点；`Esc` 依次关闭添加面板 → 配置抽屉 → 清空选中，弹窗/抽屉自身的 Esc 仍交给 antd。
+- N9-11：配置抽屉、版本历史抽屉、审批抽屉统一 `width="min(480px, 92vw)"`，变量抽屉 `min(360px, 92vw)`。
+
+**N9-12 落地说明**：`AlignGuides` 改为 `[data-node-id]` 选择器（FlowGram 节点容器带 `data-node-id`），`pointerdown` 按下时缓存非选中节点 rect、排除多选批次，`pointermove` 用 rAF 节流只重算被拖节点；阈值按 `max(3px, 4 × zoom)` 换算屏幕像素；参考线改令牌色虚线并向两端各外延 12px；`pointerup` / `pointercancel` / `Esc` / 视口变化时隐藏。
+
+**N9-06 落地说明**：浮条新增「导出」下拉，导出当前画布的 Coze IR JSON（`schema_version` 透传、子图转 blocks/edges）。PNG 导出需要引入 html-to-image 一类依赖，按约定须先经用户确认，本轮未加。
 
 **E4 落地说明**：新增 `canvas/metadata/capabilities.ts`，优先消费后端 `NodeMeta.capabilities`，本地 `CAPABILITY_FALLBACK` 仅在元数据未加载时兜底；`AppEditPage` 的复制、删除（右键 / `canDeleteNode` / 抽屉按钮）、子图双击、输出编辑器均已改为能力驱动，`start` 等特例不再散落 `typeKey === 'start'` 判断。N9-07（节点「⋯」菜单）依赖已解除。
 
@@ -2565,7 +2575,7 @@ T9-01（人工，可与后续并行）
 - [ ] 多选拖拽时只与非选中节点比较
 - [ ] 松开鼠标、按 Esc、切换子图后参考线立即消失
 - [ ] 颜色/线型与 Coze 基准图（`coze-05-dragging.png` / `coze-08-box-select.png`）一致
-- [ ] `tsc --noEmit` EXIT:0、`vite build` 通过、控制台 0 error
+- [x] `tsc --noEmit` EXIT:0、`vite build` 通过（控制台 error 待实机核对）
 
 **依赖与排队**：依赖 E3（设计令牌）与 E2（提供 zoom 的 adapter 读取）；排队位置在 E3 之后、N9-02/N9-06 同批。
 

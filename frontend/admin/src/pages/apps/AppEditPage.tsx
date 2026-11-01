@@ -57,6 +57,7 @@ import {
   removeNode,
   redo,
   scrollToCanvasPoint,
+  selectAllNodes,
   setScroll,
   subscribeHistory,
   subscribeSelection,
@@ -1304,18 +1305,52 @@ function setupCanvasPan(ctx: FlowContext): () => void {
     'a',
   ].join(',');
 
+  // 空格按住时进入平移模式：指针落在节点上也平移，而不是拖动节点（N9-04）
+  const overlaySelector = '.boxia-minimap, .ant-popover, .ant-dropdown, .ant-drawer, .ant-modal';
+  const typingSelector = 'input, textarea, select, button, [contenteditable="true"]';
+
   let panning = false;
+  let spaceDown = false;
   let startX = 0;
   let startY = 0;
   let originScrollX = 0;
   let originScrollY = 0;
+
+  const onKeyDown = (e: KeyboardEvent) => {
+    if (e.code !== 'Space' || spaceDown) return;
+    const target = e.target as HTMLElement | null;
+    if (!target || target.closest(typingSelector)) return;
+    if (!document.querySelector('.gedit-playground-container')) return;
+    spaceDown = true;
+    document.body.style.cursor = 'grab';
+    // 阻止空格默认的页面滚动
+    e.preventDefault();
+  };
+
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (e.code !== 'Space') return;
+    spaceDown = false;
+    if (!panning) document.body.style.cursor = '';
+  };
+
+  const onWindowBlur = () => {
+    spaceDown = false;
+    if (!panning) document.body.style.cursor = '';
+  };
 
   // 用捕获阶段挂在 document 上：FlowGram 的拖拽层会 stopPropagation，冒泡阶段收不到
   const onPointerDown = (e: PointerEvent) => {
     if (e.button !== 0 || e.shiftKey) return;
     const target = e.target as HTMLElement | null;
     if (!target || !target.closest('.gedit-playground-container')) return;
-    if (target.closest(interactiveSelector)) return;
+    if (target.closest(overlaySelector)) return;
+    if (spaceDown) {
+      // 截断 FlowGram 的节点拖拽，本次指针序列只用于平移
+      e.preventDefault();
+      e.stopPropagation();
+    } else if (target.closest(interactiveSelector)) {
+      return;
+    }
     panning = true;
     startX = e.clientX;
     startY = e.clientY;
@@ -1336,18 +1371,25 @@ function setupCanvasPan(ctx: FlowContext): () => void {
   const onPointerUp = () => {
     if (!panning) return;
     panning = false;
-    document.body.style.cursor = '';
+    document.body.style.cursor = spaceDown ? 'grab' : '';
   };
 
   document.addEventListener('pointerdown', onPointerDown, true);
   document.addEventListener('pointermove', onPointerMove, true);
   document.addEventListener('pointerup', onPointerUp, true);
+  document.addEventListener('keydown', onKeyDown, true);
+  document.addEventListener('keyup', onKeyUp, true);
+  window.addEventListener('blur', onWindowBlur);
   return () => {
     panning = false;
+    spaceDown = false;
     document.body.style.cursor = '';
     document.removeEventListener('pointerdown', onPointerDown, true);
     document.removeEventListener('pointermove', onPointerMove, true);
     document.removeEventListener('pointerup', onPointerUp, true);
+    document.removeEventListener('keydown', onKeyDown, true);
+    document.removeEventListener('keyup', onKeyUp, true);
+    window.removeEventListener('blur', onWindowBlur);
   };
 }
 
@@ -1631,6 +1673,24 @@ export default function AppEditPage() {
     nodeMetas.forEach((m) => { map[m.type_key] = m; });
     return map;
   }, [nodeMetas]);
+
+  // N9-06：导出当前工作流为 Coze IR JSON
+  const handleExportJson = useCallback(() => {
+    const graph = toWorkflowJSON(ctxRef.current);
+    if (!graph || !Array.isArray(graph.nodes) || graph.nodes.length === 0) {
+      message.info('画布为空，无内容可导出');
+      return;
+    }
+    const ir = toCozeIR(graph, keyToCozeType, graphSchemaVersionRef.current);
+    const blob = new Blob([JSON.stringify(ir, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `${id || 'workflow'}.json`;
+    link.click();
+    URL.revokeObjectURL(url);
+    message.success('已导出工作流 JSON');
+  }, [keyToCozeType, id]);
   // onLoad 闭包会长期驻留，通过 ref 读取最新的节点元数据
   const keyToMetaRef = useRef<Record<string, NodeMeta>>(keyToMeta);
   keyToMetaRef.current = keyToMeta;
@@ -2457,6 +2517,32 @@ export default function AppEditPage() {
         else pasteNode();
         return;
       }
+      // Ctrl/Cmd+A：全选节点（输入框内保留原生全选）
+      if ((e.ctrlKey || e.metaKey) && e.key === 'a' && !inInput) {
+        e.preventDefault();
+        selectAllNodes(ctxRef.current);
+        return;
+      }
+      // Esc：优先关闭浮层，其次清空画布选中（N9-09）
+      if (e.key === 'Escape' && !inInput) {
+        // 弹窗 / 抽屉的 Esc 交给 antd 处理，避免连带清空选中
+        if (renameTarget || deleteNodeOpen || versionDrawerOpen || variablesDrawerOpen || approvalState.open) {
+          return;
+        }
+        if (addNodePopover) {
+          setAddNodePopover(null);
+          return;
+        }
+        if (configDrawerOpen) {
+          setConfigDrawerOpen(false);
+          drawerNodeIdRef.current = null;
+          return;
+        }
+        clearSelection(ctxRef.current);
+        setSelectedNodeId(null);
+        setSelectedNodeIds([]);
+        return;
+      }
       // Delete / Backspace：删除选中节点（单选或多选均弹一次确认）
       if ((e.key === 'Delete' || e.key === 'Backspace') && !inInput) {
         const ids = selectedNodeIds.length > 0
@@ -2487,7 +2573,11 @@ export default function AppEditPage() {
     // 捕获阶段注册，Delete 需先于画布内部快捷键处理
     window.addEventListener('keydown', onKeyDown, true);
     return () => window.removeEventListener('keydown', onKeyDown, true);
-  }, [scheduleSave, handleRun, copyNode, pasteNode, deleteLines, selectedNodeId, selectedNodeIds]);
+  }, [
+    scheduleSave, handleRun, copyNode, pasteNode, deleteLines,
+    selectedNodeId, selectedNodeIds, addNodePopover, configDrawerOpen,
+    renameTarget, deleteNodeOpen, versionDrawerOpen, variablesDrawerOpen, approvalState.open,
+  ]);
 
   // ========== 版本历史（B9） ==========
   const openVersionDrawer = useCallback(async () => {
@@ -2700,7 +2790,44 @@ export default function AppEditPage() {
             });
           }}
           onRun={handleRun}
+          onExportJson={handleExportJson}
         />
+
+        {/* 多选提示浮条（N9-02）：叠在底部工具条上方 */}
+        {selectedNodeIds.length > 1 && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 68,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              zIndex: CANVAS_TOKENS.z.toolbar,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 10,
+              padding: '6px 12px',
+              background: CANVAS_TOKENS.white,
+              borderRadius: 10,
+              boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
+              border: `1px solid ${CANVAS_TOKENS.border}`,
+              fontSize: 12,
+              color: '#374151',
+            }}
+          >
+            <span>已选中 {selectedNodeIds.length} 个节点</span>
+            <Button
+              size="small"
+              danger
+              type="text"
+              onClick={() => {
+                setDeleteTargetIds(selectedNodeIds);
+                setDeleteNodeOpen(true);
+              }}
+            >
+              批量删除
+            </Button>
+          </div>
+        )}
 
         {/* 画布右键菜单（U-P2） */}
         <CanvasContextMenu
@@ -3026,8 +3153,8 @@ export default function AppEditPage() {
           }}
         />
 
-        {/* U-N4 对齐辅助线：拖拽节点时显示 ±4px 红色参考线 */}
-        <AlignGuides />
+        {/* U-N4 对齐辅助线：拖拽节点时显示对齐参考线（只提示不吸附） */}
+        <AlignGuides ctxRef={ctxRef} />
 
         {/* 右侧调试面板（B8） */}
         {Object.keys(nodeDebugMap).length > 0 && (
@@ -3131,7 +3258,7 @@ export default function AppEditPage() {
         ) : ''}
         open={configDrawerOpen && !!selectedNodeId}
         onClose={() => setConfigDrawerOpen(false)}
-        width={480}
+        width="min(480px, 92vw)"
         extra={
           selectedNodeId && selectedNodeMeta && canDelete(selectedNodeMeta) ? (
             <Button danger size="small" onClick={() => {
@@ -3306,7 +3433,7 @@ export default function AppEditPage() {
         title="版本历史"
         open={versionDrawerOpen}
         onClose={() => setVersionDrawerOpen(false)}
-        width={480}
+        width="min(480px, 92vw)"
       >
         {versions.length === 0 ? (
           <Typography.Text type="secondary">暂无历史版本</Typography.Text>
@@ -3358,7 +3485,7 @@ export default function AppEditPage() {
         title={approvalState.payload ? `审批：${approvalState.payload.node_title || approvalState.payload.node_id}` : '审批'}
         open={approvalState.open}
         onClose={() => setApprovalState((prev) => ({ ...prev, open: false }))}
-        width={480}
+        width="min(480px, 92vw)"
       >
         {approvalState.payload && (
           <Space direction="vertical" style={{ width: '100%' }} size="middle">
