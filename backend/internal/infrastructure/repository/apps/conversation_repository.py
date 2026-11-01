@@ -83,6 +83,27 @@ class ConversationRepository:
         ).all()
         return [dict(r._mapping) for r in rows]
 
+    def list_conversations_by_application(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict]:
+        """管理端视角：列出某应用下全部用户的会话（按 updated_at 倒序），附带所属用户信息。"""
+        rows = self._session.execute(
+            text(
+                "SELECT c.id, c.tenant_id, c.user_id, c.application_id, c.title, "
+                "c.created_at, c.updated_at, u.username, u.display_name "
+                "FROM conversation c LEFT JOIN users u ON u.id = c.user_id "
+                "WHERE c.tenant_id = :tid AND c.application_id = :aid "
+                "ORDER BY c.updated_at DESC LIMIT :limit OFFSET :offset"
+            ),
+            {"tid": tenant_id, "aid": application_id, "limit": limit, "offset": offset},
+        ).all()
+        return [dict(r._mapping) for r in rows]
+
     def update_title(self, conversation_id: UUID, title: str) -> None:
         self._session.execute(
             text(

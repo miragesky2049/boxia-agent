@@ -3,6 +3,7 @@
 from fastapi import APIRouter, Depends
 
 from web.admin.routers.admin_users import router as admin_users_router
+from web.admin.routers.app_conversations import router as app_conversations_router
 from web.admin.routers.applies import router as applies_router
 from web.admin.routers.apps_admin import router as apps_admin_router
 from web.admin.routers.audit_logs import router as audit_logs_router
@@ -44,6 +45,7 @@ router.include_router(audit_logs_router)
 router.include_router(marketplace_router)
 router.include_router(applies_router)
 router.include_router(apps_admin_router)
+router.include_router(app_conversations_router)
 router.include_router(models_router)
 router.include_router(node_meta_router)
 router.include_router(prompt_optimize_router)
