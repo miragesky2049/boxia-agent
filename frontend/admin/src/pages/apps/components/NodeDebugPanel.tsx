@@ -1,3 +1,4 @@
+import { CloseOutlined } from '@ant-design/icons';
 import { Collapse } from 'antd';
 import { TraceEntry } from './NodeConfigForm';
 
@@ -12,7 +13,10 @@ export interface NodeDebugInfo {
 }
 
 // 右侧节点调试面板（B8）：全图试运行过程中逐节点的输入/输出/耗时/trace
-export function NodeDebugPanel({ debugMap }: { debugMap: Record<string, NodeDebugInfo> }) {
+export function NodeDebugPanel({ debugMap, onClose }: {
+  debugMap: Record<string, NodeDebugInfo>;
+  onClose: () => void;
+}) {
   if (Object.keys(debugMap).length === 0) return null;
   return (
       <div style={{
@@ -21,8 +25,16 @@ export function NodeDebugPanel({ debugMap }: { debugMap: Record<string, NodeDebu
         background: '#fff', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
         padding: 12,
       }}>
-        <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 8 }}>
-          节点调试
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          fontSize: 13, fontWeight: 600, marginBottom: 8,
+        }}>
+          <span>节点调试</span>
+          <CloseOutlined
+            aria-label="关闭节点调试"
+            onClick={onClose}
+            style={{ fontSize: 12, color: '#999', cursor: 'pointer' }}
+          />
         </div>
         <Collapse
           size="small"

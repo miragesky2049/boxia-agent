@@ -80,7 +80,7 @@ export function VariablesDrawer({ open, onClose, nodes, keyToMeta }: VariablesDr
         <Tree
           treeData={treeData as any}
           defaultExpandAll
-          onSelect={(keys, info) => {
+          onSelect={(keys) => {
             const key = keys[0];
             if (typeof key === 'string' && key.includes('.output.')) {
               const ref = `{{${key}}}`;

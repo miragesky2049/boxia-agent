@@ -1,4 +1,4 @@
-import type { ConfigFieldMeta, NodeMeta } from '../../../api/nodeMeta';
+import type { ConfigFieldMeta, NodeMeta } from '../../../../api/nodeMeta';
 
 // 后端 node_meta.py 是展示事实源；本文件只做「接口结果 → 前端展示结构」的一层适配。
 // 本地 fallback（ICON_MAP / NEXT_FALLBACK / SECTION_DEFS）仅在后端字段缺失时兜底。

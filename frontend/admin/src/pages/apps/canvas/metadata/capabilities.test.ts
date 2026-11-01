@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NodeCapabilities, NodeMeta } from '../../../api/nodeMeta';
+import type { NodeCapabilities, NodeMeta } from '../../../../api/nodeMeta';
 import { canCopy, canDelete, hasOutputs, hasSubgraph, resolveCapabilities } from './capabilities';
 
 function makeMeta(typeKey: string, capabilities: Partial<NodeCapabilities> = {}): NodeMeta {

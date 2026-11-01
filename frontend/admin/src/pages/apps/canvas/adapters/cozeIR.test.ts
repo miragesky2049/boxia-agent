@@ -92,7 +92,7 @@ describe('cozeIR adapter', () => {
       { nodes: [{ id: 'n1', type: '99', data: {} }] },
       cozeTypeToKey,
     );
-    expect(result.nodes[0].type).toBe('99');
+    expect(result.nodes[0]!.type).toBe('99');
   });
 
   it('空图回落 DEFAULT_GRAPH', () => {
@@ -106,7 +106,7 @@ describe('cozeIR adapter', () => {
       { nodes: [{ id: 'n1', type: '3', meta: { position: { x: 50, y: 2000 } }, data: {} }] },
       cozeTypeToKey,
     );
-    expect(result.nodes[0].meta).toEqual({ position: { x: 200, y: 200 } });
+    expect(result.nodes[0]!.meta).toEqual({ position: { x: 200, y: 200 } });
   });
 
   it('子图节点 blocks/edges 递归还原为 data.subgraph', () => {
@@ -124,7 +124,7 @@ describe('cozeIR adapter', () => {
       ],
     };
     const result = fromCozeIR(coze, cozeTypeToKey);
-    const subgraph = (result.nodes[0].data as any).subgraph as WorkflowJSON;
+    const subgraph = (result.nodes[0]!.data as any).subgraph as WorkflowJSON;
     expect(subgraph.nodes?.[0]).toMatchObject({ id: 'inner-1', type: 'start' });
   });
 

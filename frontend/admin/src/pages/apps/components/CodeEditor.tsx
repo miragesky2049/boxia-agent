@@ -19,7 +19,7 @@ function highlightPython(code: string): string {
   let out = '';
   let m: RegExpExecArray | null;
   while ((m = re.exec(code)) !== null) {
-    const [tok, comment, str, num, word, other] = m;
+    const [, comment, str, num, word, other] = m;
     if (comment) {
       out += `<span style="color:#6a9955">${escapeHtml(comment)}</span>`;
     } else if (str) {

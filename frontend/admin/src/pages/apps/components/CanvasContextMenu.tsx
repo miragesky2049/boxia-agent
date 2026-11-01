@@ -50,7 +50,7 @@ export function CanvasContextMenu({
   }, []);
 
   useEffect(() => {
-    const container = document.querySelector('.gedit-playground-container');
+    const container = document.querySelector<HTMLElement>('.gedit-playground-container');
     if (!container) return;
     container.addEventListener('contextmenu', handleContextMenu);
     const onClick = () => close();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { NodeMeta } from '../../../api/nodeMeta';
+import type { NodeMeta } from '../../../../api/nodeMeta';
 import {
   buildCategoryGroups,
   groupFieldsByMetaGroup,
@@ -49,7 +49,7 @@ describe('nodePresentation', () => {
     ];
     const groups = buildCategoryGroups(metas);
     expect(groups.map((g) => g.key)).toEqual(['control', 'misc', 'custom']);
-    expect(groups[2].label).toBe('custom');
+    expect(groups[2]!.label).toBe('custom');
     expect(buildCategoryGroups(metas, (m) => m.type_key !== 'b').map((g) => g.key)).toEqual([
       'misc',
       'custom',
@@ -72,7 +72,7 @@ describe('nodePresentation', () => {
     ];
     const sections = groupFieldsByMetaGroup(fields);
     expect(sections?.map((s) => s.title)).toEqual(['基础', '其他']);
-    expect(sections?.[0].fields.map((f) => f.name)).toEqual(['a', 'c']);
+    expect(sections?.[0]!.fields.map((f) => f.name)).toEqual(['a', 'c']);
   });
 
   it('下一步推荐优先使用后端声明并解析标题', () => {

@@ -4,7 +4,6 @@ import '@douyinfe/semi-ui/dist/css/semi.min.css';
 import dayjs from 'dayjs';
 import 'dayjs/locale/zh-cn';
 import 'reflect-metadata';
-import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { AuthProvider } from './auth/AuthContext';
 import AppErrorBoundary from './components/AppErrorBoundary';

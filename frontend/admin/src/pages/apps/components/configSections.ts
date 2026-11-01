@@ -102,7 +102,7 @@ export function groupConfigFields(typeKey: string, fields: ConfigFieldMeta[]): C
   const rest: ConfigFieldMeta[] = [];
   for (const f of fields) {
     const idx = defs.findIndex((d) => d.match(f));
-    if (idx >= 0) sections[idx].fields.push(f);
+    if (idx >= 0) sections[idx]!.fields.push(f);
     else rest.push(f);
   }
   const nonEmpty = sections.filter((s) => s.fields.length > 0);

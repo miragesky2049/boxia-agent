@@ -1,4 +1,4 @@
-import { Input, Select, Checkbox, Button, Space } from 'antd';
+import { Input, Select, Checkbox, Button } from 'antd';
 import { PlusOutlined, DeleteOutlined } from '@ant-design/icons';
 
 export interface ParameterItem {

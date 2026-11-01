@@ -39,7 +39,7 @@ export function AlignGuides({ ctxRef }: AlignGuidesProps) {
       if (horizontalRef.current) horizontalRef.current.style.opacity = '0';
     };
 
-    const compare = (a: number, b: number, best: number | null, bestDiff: number) => {
+    const compare = (a: number, b: number, bestDiff: number) => {
       const diff = Math.abs(a - b);
       return diff < bestDiff ? { value: b, diff } : null;
     };
@@ -84,7 +84,7 @@ export function AlignGuides({ ctxRef }: AlignGuidesProps) {
 
         for (const x of dragXs) {
           for (const ax of anchorXs) {
-            const hit = compare(x, ax, bestV, bestVDiff);
+            const hit = compare(x, ax, bestVDiff);
             if (hit) {
               bestV = hit.value;
               bestVDiff = hit.diff;
@@ -95,7 +95,7 @@ export function AlignGuides({ ctxRef }: AlignGuidesProps) {
         }
         for (const y of dragYs) {
           for (const ay of anchorYs) {
-            const hit = compare(y, ay, bestH, bestHDiff);
+            const hit = compare(y, ay, bestHDiff);
             if (hit) {
               bestH = hit.value;
               bestHDiff = hit.diff;

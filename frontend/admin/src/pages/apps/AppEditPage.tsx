@@ -139,6 +139,8 @@ export default function AppEditPage() {
     streamingText?: string;
     trace?: Array<{ type: string; payload: Record<string, any> }>;
   }>>({});
+  // 右侧调试面板显隐：手动关闭后本次运行内不再自动弹出，重新试运行时恢复
+  const [nodeDebugPanelOpen, setNodeDebugPanelOpen] = useState(true);
   const [validationIssues, setValidationIssues] = useState<GraphValidationIssue[]>([]);
   const [validating, setValidating] = useState(false);
   const [versionDrawerOpen, setVersionDrawerOpen] = useState(false);
@@ -1136,6 +1138,7 @@ export default function AppEditPage() {
     setRunning(true);
     setRunLogs([]);
     setNodeDebugMap({});
+    setNodeDebugPanelOpen(true);
     clearAllRunStatus();
     // V2：试运行开始后自动展开右下角面板到"日志"Tab
     setPanelTab('logs');
@@ -1172,6 +1175,7 @@ export default function AppEditPage() {
     if (!ctx || !approvalState.payload) return;
     setApprovalState((prev) => ({ ...prev, open: false }));
     setRunning(true);
+    setNodeDebugPanelOpen(true);
     const appendLog = (text: string, level: 'info' | 'error' = 'info') => {
       const time = new Date().toLocaleTimeString();
       setRunLogs((prev) => [...prev, { time, text, level }]);
@@ -1673,7 +1677,9 @@ export default function AppEditPage() {
         <AlignGuides ctxRef={ctxRef} />
 
         {/* 右侧调试面板（B8） */}
-        <NodeDebugPanel debugMap={nodeDebugMap} />
+        {nodeDebugPanelOpen && (
+          <NodeDebugPanel debugMap={nodeDebugMap} onClose={() => setNodeDebugPanelOpen(false)} />
+        )}
       </div>
 
       <NodeConfigDrawer

@@ -47,9 +47,9 @@ const ICON_MAP: Record<string, { emoji: string; fallbackColor: string }> = {
 function hexToRgba(hex: string, alpha: number): string {
   const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
   if (!m) return `rgba(99,102,241,${alpha})`;
-  const r = parseInt(m[1], 16);
-  const g = parseInt(m[2], 16);
-  const b = parseInt(m[3], 16);
+  const r = parseInt(m[1]!, 16);
+  const g = parseInt(m[2]!, 16);
+  const b = parseInt(m[3]!, 16);
   return `rgba(${r},${g},${b},${alpha})`;
 }
 

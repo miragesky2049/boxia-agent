@@ -44,8 +44,6 @@ export default function TenantSettingsPage() {
     plugin_input: '',
   })
 
-  const catalogIdToKey = new Map<string, string>()
-  const keyToCatalogId = new Map<string, string>()
   // catalog 接口返回的是 model_id，不是 catalog.id；这里只能按 model_id 选择
   // 为了 T16 可用，前端先按 model_id 直选（后端 list_catalog 也返回 model_id 主键）
   // 后端 allowed_catalog_ids 存的是 catalog UUID；这里简化为：直接使用 model_id 字符串作为标识
