@@ -27,6 +27,7 @@ import { groupConfigFields } from './components/configSections';
 import { VariablesDrawer } from './components/VariablesDrawer';
 import { usePortTooltips } from './components/usePortTooltips';
 import { CanvasContextMenu } from './components/CanvasContextMenu';
+import { RunHistoryPanel } from './components/RunHistoryPanel';
 import { AddNodePopover } from './components/AddNodePopover';
 import { MiniMap } from './components/MiniMap';
 import { RefChipInput } from './components/RefChipInput';
@@ -1464,7 +1465,7 @@ export default function AppEditPage() {
   const manualSidebarExpandRef = useRef(false);
   // V1/V2：右下角校验/日志合并面板
   const [panelOpen, setPanelOpen] = useState(false);
-  const [panelTab, setPanelTab] = useState<'validation' | 'logs'>('logs');
+  const [panelTab, setPanelTab] = useState<'validation' | 'logs' | 'history'>('logs');
   usePortTooltips();
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null);
   const saveTimerRef = useRef<number | null>(null);
@@ -2925,6 +2926,15 @@ export default function AppEditPage() {
           >
             · 校验{validationIssues.length > 0 ? ` ${validationIssues.length}` : ''}
           </span>
+          <span
+            style={{ cursor: 'pointer', color: '#6b7280' }}
+            onClick={() => {
+              setPanelTab('history');
+              setPanelOpen(true);
+            }}
+          >
+            · 历史
+          </span>
         </div>
 
         {/* 发布按钮（顶部右侧，V5 配色 #7c3aed） */}
@@ -2969,6 +2979,11 @@ export default function AppEditPage() {
                 active={panelTab === 'logs'}
                 label={`日志${runLogs.length > 0 ? ` (${runLogs.length})` : ''}`}
                 onClick={() => setPanelTab('logs')}
+              />
+              <TabSwitch
+                active={panelTab === 'history'}
+                label="历史"
+                onClick={() => setPanelTab('history')}
               />
               <span style={{ marginLeft: 'auto', cursor: 'pointer', color: '#999' }} onClick={() => setPanelOpen(false)}>✕</span>
             </div>
@@ -3019,6 +3034,9 @@ export default function AppEditPage() {
                     ))}
                   </div>
                 )
+              )}
+              {panelTab === 'history' && (
+                <RunHistoryPanel applicationId={id} active={panelOpen && panelTab === 'history'} />
               )}
             </div>
           </div>

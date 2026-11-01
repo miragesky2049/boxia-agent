@@ -2420,7 +2420,7 @@ T9-01（人工，可与后续并行）
 | I6 | ReAct trace（prompt 原文 / tool 入参出参） | 有 | 有 | `tool_call_start/end` + `prompt_text` | ✅ | T15 |
 | I7 | 人工审批中断 → 抽屉批准 → resume | 有 | 有 | ApprovalInterruptPayload + resume API | ✅ | B11 / A5 |
 | I8 | 单节点试运行 | 有 | 有 | 无 | ⬜ | N9-03 |
-| I9 | 试运行历史列表 | 有 | 有 | 无 | ⬜ | N9-08 |
+| I9 | 试运行历史列表 | 有 | 有 | 状态栏「历史」+ 调试面板「历史」Tab，列出最近 20 次 run 并可展开节点执行详情 | 🟨 | N9-08 |
 
 #### J. 保存 / 校验 / 发布 / 打开
 
@@ -2472,7 +2472,7 @@ T9-01（人工，可与后续并行）
 |---|---|---|---|
 | **N9-06 导出菜单** | 浮条「导出」：导出 JSON（含 coze IR）/ 导出 PNG。PNG 需先做 0.5h 选型 spike（当前无 html-to-image 等依赖，新增依赖需用户确认） | `CanvasToolbar.tsx`、`package.json` | 两种格式可下载，PNG 含节点与连线 |
 | **N9-07 节点 hover「⋯」菜单** | 卡片 hover 显示「⋯」，聚合重命名 / 复制 / 删除 / 运行（运行项随 N9-03 接入） | `NodeCard.tsx`、`AppEditPage.tsx` | 菜单项均可用，不遮挡端口 |
-| **N9-08 试运行历史** | 调试面板加「历史」Tab，列出最近 N 次 run（时间/状态/耗时） | `AppEditPage.tsx`、runs API | 可点开查看当次节点输出 |
+| **N9-08 试运行历史** | 调试面板加「历史」Tab，列出最近 N 次 run（时间/状态/耗时），可展开节点执行详情 | `RunHistoryPanel.tsx`、runs API | 可点开查看当次节点输出 |
 | **N9-09 Esc / Ctrl+A** | Esc 清空选中并关闭浮层；Ctrl/Cmd+A 全选节点 | `AppEditPage.tsx` `onKeyDown` | 两个快捷键生效且不影响输入框 |
 | **N9-10 多选整体拖拽** | 验证 FlowGram 是否原生支持；不支持则自绘 | `AppEditPage.tsx` | 多选后拖任一节点，整体平移 |
 | **N9-11 抽屉窄屏自适应** | <900px 时抽屉宽度改 `min(480, 92vw)` | `AppEditPage.tsx` | 窄屏不溢出、字段不换行错乱 |
@@ -2480,7 +2480,7 @@ T9-01（人工，可与后续并行）
 | **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
 | **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
 
-**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON（PNG 待依赖确认）、N9-07 节点「⋯」菜单、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON（PNG 待依赖确认）、N9-07 节点「⋯」菜单、N9-08 试运行历史、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
 
 **N9-07 落地说明**：
 - `NodeCard` 新增 `actions` 入参，hover（或菜单展开中）在卡片右上角渲染「⋯」，菜单项由页面按能力声明构造，`comment`/`note` 便签不渲染该入口。
@@ -2496,6 +2496,8 @@ T9-01（人工，可与后续并行）
 - N9-11：配置抽屉、版本历史抽屉、审批抽屉统一 `width="min(480px, 92vw)"`，变量抽屉 `min(360px, 92vw)`。
 
 **N9-12 落地说明**：`AlignGuides` 改为 `[data-node-id]` 选择器（FlowGram 节点容器带 `data-node-id`），`pointerdown` 按下时缓存非选中节点 rect、排除多选批次，`pointermove` 用 rAF 节流只重算被拖节点；阈值按 `max(3px, 4 × zoom)` 换算屏幕像素；参考线改令牌色虚线并向两端各外延 12px；`pointerup` / `pointercancel` / `Esc` / 视口变化时隐藏。
+
+**N9-08 落地说明**：新增 `components/RunHistoryPanel.tsx`，复用既有 `listApplicationRuns` / `getRunDetail` 接口；调试面板增加「历史」Tab，顶部状态栏增加「历史」入口。切到该 Tab 才拉数据，列表显示状态 / 开始时间 / 耗时，展开后展示入参、出参、错误与各节点执行记录。
 
 **N9-06 落地说明**：浮条新增「导出」下拉，导出当前画布的 Coze IR JSON（`schema_version` 透传、子图转 blocks/edges）。PNG 导出需要引入 html-to-image 一类依赖，按约定须先经用户确认，本轮未加。
 
