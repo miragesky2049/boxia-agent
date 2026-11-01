@@ -17,6 +17,7 @@ class NodeType(str, Enum):
     API = "4"            # 插件 / 工具调用
     CODE = "5"           # 代码沙箱
     DATASET = "6"        # 知识库检索
+    NOTE = "7"           # 注释节点（无执行语义）
     IF = "8"             # 条件分支
     SUB_WORKFLOW = "9"   # 子图调用
     VARIABLE = "11"      # 旧版变量节点（废弃）

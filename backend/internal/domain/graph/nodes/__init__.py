@@ -56,4 +56,5 @@ from internal.domain.graph.nodes import (  # noqa: E402,F401
     agent_loop,
     api_plugin,
     comment,
+    note,
 )
