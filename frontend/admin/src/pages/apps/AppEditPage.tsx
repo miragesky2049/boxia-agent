@@ -55,11 +55,13 @@ import {
   getSelection,
   getViewport,
   getWorldPosFromMouseEvent,
+  getZoom,
   removeNode,
   redo,
   scrollToCanvasPoint,
   selectAllNodes,
   setScroll,
+  setZoom,
   subscribeHistory,
   subscribeSelection,
   subscribeViewport,
@@ -76,6 +78,7 @@ import {
   readSchemaVersion,
   toCozeIR,
 } from './canvas/adapters/cozeIR';
+import { downloadBlob, exportElementAsPng } from './canvas/exportImage';
 
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
@@ -1465,6 +1468,7 @@ export default function AppEditPage() {
   const manualSidebarExpandRef = useRef(false);
   // V1/V2：右下角校验/日志合并面板
   const [panelOpen, setPanelOpen] = useState(false);
+  const [exportingPng, setExportingPng] = useState(false);
   const [panelTab, setPanelTab] = useState<'validation' | 'logs' | 'history'>('logs');
   usePortTooltips();
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null);
@@ -1683,15 +1687,44 @@ export default function AppEditPage() {
       return;
     }
     const ir = toCozeIR(graph, keyToCozeType, graphSchemaVersionRef.current);
-    const blob = new Blob([JSON.stringify(ir, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = `${id || 'workflow'}.json`;
-    link.click();
-    URL.revokeObjectURL(url);
+    downloadBlob(
+      new Blob([JSON.stringify(ir, null, 2)], { type: 'application/json' }),
+      `${id || 'workflow'}.json`,
+    );
     message.success('已导出工作流 JSON');
   }, [keyToCozeType, id]);
+
+  // N9-06：导出画布 PNG（full = 适应视图后整图，viewport = 当前视口）
+  const handleExportPng = useCallback(async (mode: 'full' | 'viewport') => {
+    const ctx = ctxRef.current;
+    const playground = document.querySelector<HTMLElement>('.gedit-playground-container');
+    if (!ctx || !playground) {
+      message.error('画布未就绪，无法导出');
+      return;
+    }
+    setExportingPng(true);
+    const prevZoom = getZoom(ctx);
+    const prevScroll = getScroll(ctx);
+    try {
+      if (mode === 'full') {
+        await fitView(ctx, false);
+        // 等两帧，确保视口变换与节点位置已落定再截图
+        await new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        });
+      }
+      await exportElementAsPng(playground, `${id || 'workflow'}-${mode === 'full' ? 'full' : 'view'}.png`);
+      message.success('已导出画布 PNG');
+    } catch (err) {
+      message.error(err instanceof Error ? err.message : '导出 PNG 失败');
+    } finally {
+      if (mode === 'full') {
+        setScroll(ctx, prevScroll.x, prevScroll.y);
+        setZoom(ctx, prevZoom);
+      }
+      setExportingPng(false);
+    }
+  }, [id]);
   // onLoad 闭包会长期驻留，通过 ref 读取最新的节点元数据
   const keyToMetaRef = useRef<Record<string, NodeMeta>>(keyToMeta);
   keyToMetaRef.current = keyToMeta;
@@ -2792,6 +2825,8 @@ export default function AppEditPage() {
           }}
           onRun={handleRun}
           onExportJson={handleExportJson}
+          onExportPng={(mode) => { void handleExportPng(mode); }}
+          exportingPng={exportingPng}
         />
 
         {/* 多选提示浮条（N9-02）：叠在底部工具条上方 */}

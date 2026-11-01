@@ -2319,7 +2319,7 @@ T9-01（人工，可与后续并行）
 | C13 | 缩放 ± 与百分比 | 百分比下拉 | ± 按钮 | ± 按钮 + 百分比下拉（50% / 75% / 100% / 150% / 200% / 自适应） | ✅ | N9-01 |
 | C14 | 全屏 | 无 | 无 | 浮条「全屏」按钮 | ✅ | T9-07 前 |
 | C15 | 自动排版 | 右键「整理画布」 | 竖排工具栏「整理节点」 | 画布右键「自动排版」 | ✅ | CanvasContextMenu |
-| C16 | 导出图片 / 导出 JSON | 浮条导出菜单 | 竖排工具栏「导出图片」 | 浮条「导出」菜单已支持导出 Coze IR JSON；PNG 待引入截图依赖后接入 | 🟧 | N9-06 |
+| C16 | 导出图片 / 导出 JSON | 浮条导出菜单 | 竖排工具栏「导出图片」 | 浮条「导出」菜单：导出 Coze IR JSON / PNG（全部）/ PNG（当前视口，modern-screenshot） | 🟨 | N9-06 |
 | C17 | 空画布欢迎页 | 模板卡片 | 模板卡片 | 仅「从空白开始」，无模板 | ✅ | 7.4 已裁决 |
 | C18 | 画布右键菜单 | 添加节点/整理/适应 | 无 | 添加节点、复制、粘贴、删除、自动排版、适应视图 | ✅ | U-P2 |
 | C19 | 最小缩放 / 最大缩放钳制 | 有 | 有 | 浮条按钮 0.25–2.0 | ✅ | CanvasToolbar |
@@ -2480,7 +2480,7 @@ T9-01（人工，可与后续并行）
 | **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
 | **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
 
-**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON（PNG 待依赖确认）、N9-07 节点「⋯」菜单、N9-08 试运行历史、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON / PNG、N9-07 节点「⋯」菜单、N9-08 试运行历史、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
 
 **N9-07 落地说明**：
 - `NodeCard` 新增 `actions` 入参，hover（或菜单展开中）在卡片右上角渲染「⋯」，菜单项由页面按能力声明构造，`comment`/`note` 便签不渲染该入口。
@@ -2499,7 +2499,10 @@ T9-01（人工，可与后续并行）
 
 **N9-08 落地说明**：新增 `components/RunHistoryPanel.tsx`，复用既有 `listApplicationRuns` / `getRunDetail` 接口；调试面板增加「历史」Tab，顶部状态栏增加「历史」入口。切到该 Tab 才拉数据，列表显示状态 / 开始时间 / 耗时，展开后展示入参、出参、错误与各节点执行记录。
 
-**N9-06 落地说明**：浮条新增「导出」下拉，导出当前画布的 Coze IR JSON（`schema_version` 透传、子图转 blocks/edges）。PNG 导出需要引入 html-to-image 一类依赖，按约定须先经用户确认，本轮未加。
+**N9-06 落地说明**：浮条新增「导出」下拉：Coze IR JSON（`schema_version` 透传、子图转 blocks/edges）、PNG（全部）、PNG（当前视口）。
+- PNG 走 `modern-screenshot` 的 `domToBlob`（经用户确认引入，`^4.7.0`），只截 `.gedit-playground-container`，浮条/小地图/面板不在截取范围。
+- 「全部」先 `fitView` 再截图，截完恢复原缩放与滚动；`scale = clamp(devicePixelRatio, 2, 3)`，`maximumCanvasSize` 限制 16384px。
+- 导出逻辑收敛在 `canvas/exportImage.ts`（`downloadBlob` / `exportElementAsPng`）。
 
 **E4 落地说明**：新增 `canvas/metadata/capabilities.ts`，优先消费后端 `NodeMeta.capabilities`，本地 `CAPABILITY_FALLBACK` 仅在元数据未加载时兜底；`AppEditPage` 的复制、删除（右键 / `canDeleteNode` / 抽屉按钮）、子图双击、输出编辑器均已改为能力驱动，`start` 等特例不再散落 `typeKey === 'start'` 判断。N9-07（节点「⋯」菜单）依赖已解除。
 
