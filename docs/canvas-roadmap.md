@@ -2297,7 +2297,7 @@ T9-01（人工，可与后续并行）
 | B5 | 节点搜索 | 添加面板内搜索 | 左栏顶部搜索 | 添加面板内搜索 | ✅ | C8 / U-B2 |
 | B6 | 变量入口 | 设置分组 | 变量检查面板（底部） | 左栏「变量」→ VariablesDrawer | ✅ | L6 |
 | B7 | 版本历史 | 发布下拉 | 无 | 左栏「版本历史」→ 抽屉 + 回滚 | ✅ | B9 |
-| B8 | 会话管理 | 有 | 无 | 左栏入口存在但 disabled（开发中） | ⬜ | N9-05 |
+| B8 | 会话管理 | 有 | 无 | 左栏「会话管理」→ 会话/消息抽屉；平台管理员可切租户查看、删除会话与消息 | ✅ | N9-05 |
 | B9 | Dify 左侧竖排工具栏（指针/手/注释/整理/导出） | 无 | 有 | 无 | ⛔ | 13.7 额外发现 |
 
 #### C. 画布区（视图 / 平移 / 多选 / 辅助）
@@ -2311,7 +2311,7 @@ T9-01（人工，可与后续并行）
 | C5 | Shift+拖拽框选 | 有 | 无（普通拖拽框选） | `selectBox.canSelect = e.shiftKey` | ✅ | 13.5 #6 / T9-07 |
 | C6 | Shift+点击加选 | 有 | 有 | FlowGram 原生 `toggleSelect` | ✅ | T9-03 |
 | C7 | 框选数量提示 | 「已选中 N 个节点」 | 有 | 多选时工具条上方显示「已选中 N 个节点」+ 批量删除 | 🟨 | N9-02 |
-| C8 | 多选整体拖拽 | 有 | 有 | 未验证 | 🟨 | N9-10 |
+| C8 | 多选整体拖拽 | 有 | 有 | FlowGram 原生：Shift 框选后拖任一节点整体平移（实机验证两节点 Δx/Δy 一致） | ✅ | N9-10 |
 | C9 | 点空白清除选中 | 有 | 有 | 有；且会关闭配置抽屉 | ✅ | T9-03 |
 | C10 | 对齐辅助线 | 拖拽时显示 | 拖拽时显示 | 按 13.9.1 重构：`[data-node-id]`、缩放阈值、rect 缓存 + rAF、多选排除、令牌化虚线、两端外延 | 🟨 | U-N4 / N9-12 |
 | C11 | 小地图 + 点击导航 | 右下浮窗 | 右下浮窗 | `MiniMap` 绝对定位 right:16 bottom:16，点击改 scroll | ✅ | C2 |
@@ -2347,8 +2347,8 @@ T9-01（人工，可与后续并行）
 | E3 | hover 态 | 阴影 | 阴影 | 有 | ✅ | U-N1 |
 | E4 | 运行状态色 | 蓝呼吸/绿/红/黄 | 同左 | SSE 事件驱动节点着色 | ✅ | U-N5 / V2 |
 | E5 | 节点重命名 | 有 | 有 | 抽屉「节点标题」可编辑，卡片实时同步 | ✅ | T8-03 / U-S2 |
-| E6 | 卡片 hover「⋯」菜单 | 右上角操作 | 节点上方 ▶/⋯ | 右上角「⋯」聚合重命名/复制/删除（能力声明裁剪）；「运行」待 N9-03 | 🟨 | N9-07 |
-| E7 | 单节点试运行 | 抽屉底部试运行 | 节点上方 ▶ | 无（只有全图试运行） | ⬜ | N9-03 |
+| E6 | 卡片 hover「⋯」菜单 | 右上角操作 | 节点上方 ▶/⋯ | 右上角「⋯」聚合重命名/复制/删除（能力声明裁剪）；「运行」接口已就绪（N9-03），待接入菜单 | 🟨 | N9-07 |
+| E7 | 单节点试运行 | 抽屉底部试运行 | 节点上方 ▶ | 抽屉底部「试运行此节点」+ 成功/失败/耗时/错误/outputs 预览 | ✅ | N9-03 |
 | E8 | 双击打开配置 | 有 | 有 | 有，且区分拖拽（dragDistance 判定） | ✅ | B2 |
 | E9 | 删除节点二次确认 | 有 | 有 | Delete/Backspace → Modal 确认；START 不可删 | ✅ | T9-03 / U-S3 |
 | E10 | 右键菜单 | 复制/粘贴/重命名/删除 | 同左 | 复制、粘贴、删除（名称修改走抽屉） | 🟧 | U-P2 / N9-07 |
@@ -2392,7 +2392,7 @@ T9-01（人工，可与后续并行）
 | G12 | 知识库选择器下拉 | 有 | 有 | `datasetId` 字段 → Select（listDatasets） | ✅ | U-DS1 |
 | G13 | START 入参表格 | 有 | 有 | ParameterListEditor（B4） | ✅ | B4 |
 | G14 | 关闭抽屉保留选中态 | 有 | 有 | 抽屉开关与选中态解耦 | ✅ | T8 落地记录 |
-| G15 | 抽屉底部节点试运行 + 输出预览 | 有 | 有 | 无 | ⬜ | N9-03 |
+| G15 | 抽屉底部节点试运行 + 输出预览 | 有 | 有 | 有（失败态展示错误信息与耗时） | ✅ | N9-03 |
 | G16 | 窄屏抽屉宽度 | 自适应 | 自适应 | 抽屉宽度改 `min(480px, 92vw)`（变量抽屉 360px 同规则） | 🟨 | N9-11 |
 
 #### H. 快捷键
@@ -2419,7 +2419,7 @@ T9-01（人工，可与后续并行）
 | I5 | 节点调试面板（inputs/outputs/token/耗时） | 有 | 有 | 右侧调试面板 | ✅ | B8 |
 | I6 | ReAct trace（prompt 原文 / tool 入参出参） | 有 | 有 | `tool_call_start/end` + `prompt_text` | ✅ | T15 |
 | I7 | 人工审批中断 → 抽屉批准 → resume | 有 | 有 | ApprovalInterruptPayload + resume API | ✅ | B11 / A5 |
-| I8 | 单节点试运行 | 有 | 有 | 无 | ⬜ | N9-03 |
+| I8 | 单节点试运行 | 有 | 有 | 有（只执行当前节点，不写 run、不影响全图状态） | ✅ | N9-03 |
 | I9 | 试运行历史列表 | 有 | 有 | 状态栏「历史」+ 调试面板「历史」Tab，列出最近 20 次 run 并可展开节点执行详情 | 🟨 | N9-08 |
 
 #### J. 保存 / 校验 / 发布 / 打开
@@ -2480,7 +2480,7 @@ T9-01（人工，可与后续并行）
 | **N9-13 Note 节点（type=7）** | 后端 node_meta + no-op handler（B-N9-13）+ 前端图标/副标题/添加面板补齐；作为 E1「只改后端」试点 | `node_meta.py`、`domain/graph/nodes/`、`nodePresentation` | 添加面板可见、画布可渲染、试运行不报 KeyError |
 | **N9-14 端口 tooltip 修复** | `usePortTooltips` 选择器改 `[data-port-entity-id]`，类型取 `data-port-entity-type`，title 显示「字段名: 类型」 | `usePortTooltips.ts` | hover 输入/输出端口均出现 tooltip；控制台 0 error |
 
-**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-04 Space 平移、N9-06 导出 JSON / PNG、N9-07 节点「⋯」菜单、N9-08 试运行历史、N9-09 Esc / Ctrl+A、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
+**本轮（2026-11-01）已完成**：N9-01 缩放下拉、N9-02 多选提示、N9-03 单节点试运行、N9-04 Space 平移、N9-05 会话管理、N9-06 导出 JSON / PNG、N9-07 节点「⋯」菜单、N9-08 试运行历史、N9-09 Esc / Ctrl+A、N9-10 多选整体拖拽（原生验证）、N9-11 抽屉窄屏自适应、N9-12 对齐辅助线重构、N9-13 Note 节点、N9-14 端口 tooltip；可扩展性侧 E1 / E3 / E4 见 14.6。
 
 **N9-07 落地说明**：
 - `NodeCard` 新增 `actions` 入参，hover（或菜单展开中）在卡片右上角渲染「⋯」，菜单项由页面按能力声明构造，`comment`/`note` 便签不渲染该入口。
@@ -2498,6 +2498,14 @@ T9-01（人工，可与后续并行）
 **N9-12 落地说明**：`AlignGuides` 改为 `[data-node-id]` 选择器（FlowGram 节点容器带 `data-node-id`），`pointerdown` 按下时缓存非选中节点 rect、排除多选批次，`pointermove` 用 rAF 节流只重算被拖节点；阈值按 `max(3px, 4 × zoom)` 换算屏幕像素；参考线改令牌色虚线并向两端各外延 12px；`pointerup` / `pointercancel` / `Esc` / 视口变化时隐藏。
 
 **N9-08 落地说明**：新增 `components/RunHistoryPanel.tsx`，复用既有 `listApplicationRuns` / `getRunDetail` 接口；调试面板增加「历史」Tab，顶部状态栏增加「历史」入口。切到该 Tab 才拉数据，列表显示状态 / 开始时间 / 耗时，展开后展示入参、出参、错误与各节点执行记录。
+
+**N9-03 / N9-05 落地说明**：
+- N9-03：后端新增 `POST /admin/apps/debug/run/node`（`{graph, node_id, inputs}`）→ `GraphRuntime.invoke_node` → `Compiler.execute_node_only`。只执行目标节点，画布表达式按空上游求值后再用试运行表单覆盖（手动值优先），不写 run 记录、不发 SSE；构造运行时显式 `checkpointer=None`，避免单节点调试依赖 LangGraph 持久化（Windows Proactor 事件循环下否则会因 psycopg 异步连接报 500）。抽屉底部展示成功/失败 Tag、耗时、错误与 outputs。
+- N9-05：后端新增 `web/admin/routers/app_conversations.py`（会话列表 / 消息列表 / 删除会话 / 删除消息），默认租户取管理员自身、可显式 `tenant_id` 跨租户，越权与不存在统一 404；前端新增 `components/ConversationDrawer.tsx`，左栏入口启用，默认切到第一个业务租户。
+- 静态验证：后端 6 个新用例通过；前端 `tsc --noEmit`、`npm run build`、`vitest run src/pages/apps`（18 passed）。
+- 实机点验：`boxia_verify` 库 + 独立管理员，浏览器双击节点打开抽屉 → 点「试运行此节点」→ 接口 200 返回结构化结果（测试节点未配模型时正确显示「失败 / 21ms / LLM 调用失败: 模型未配置」）；左栏「会话管理」打开抽屉正常。
+
+**N9-10 验证结论**：FlowGram 原生支持多选整体拖拽，**无需自绘**。实机路径：Shift 框选 2 个节点（选中计数 2）→ 拖动其中一个 → 两个节点位移完全一致（Δx≈140 / Δy≈90，误差 <0.01px）；框选依赖 `selectBox.canSelect = e.shiftKey`。
 
 **N9-06 落地说明**：浮条新增「导出」下拉：Coze IR JSON（`schema_version` 透传、子图转 blocks/edges）、PNG（全部）、PNG（当前视口）。
 - PNG 走 `modern-screenshot` 的 `domToBlob`（经用户确认引入，`^4.7.0`），只截 `.gedit-playground-container`，浮条/小地图/面板不在截取范围。
@@ -2518,11 +2526,22 @@ T9-01（人工，可与后续并行）
 - 新增 `cozeIR.test.ts`（8 用例）：类型双向映射、schema_version 透传、子图 blocks/edges 递归、脏坐标重置、空图兜底。
 - 验收对账：`grep "ctx as any"` 仅命中 adapter；`AppEditPage.tsx` 3324 行（≤1800 留待 E2b）；tsc/build/单测通过。
 
+**E2b / E2c 落地说明**：
+- `AppEditPage.tsx` 由 3686 行降到 1777 行，只保留页面状态、事件编排与画布装配；拆出的组件：
+  - `canvas/fields/fieldControls.tsx`：`FIELD_CONTROLS` 注册表（E2c，新增字段类型只加一行）。
+  - `components/NodeConfigForm.tsx`：字段表单（分发到注册表）+ case/model/key_value/tool 编辑器 + outputs 编辑器 + trace 条目。
+  - `components/NodeConfigDrawer.tsx`：配置抽屉壳（标题、删除入口、单节点试运行区）。
+  - `components/nodeRenderer.tsx`：`makeNodeRenderer` + 卡片「⋯」菜单能力裁剪。
+  - `components/NodeDebugPanel.tsx`、`BottomStatusPanel.tsx`、`CanvasHeaderStatus.tsx`、`SubgraphBreadcrumb.tsx`、`CanvasStyles.tsx`。
+  - `components/NodeActionModals.tsx`、`RunInputsModal.tsx`、`VersionHistoryDrawer.tsx`、`ApprovalDrawer.tsx`。
+  - `canvas/adapters/canvasPan.ts`：`setupCanvasPan`（T9-07 左键平移 / Space 平移）。
+- 验收对账：`tsc -b`（项目引用模式，`tsc --noEmit` 在 references 配置下不产出检查）、`vitest run src/pages/apps`（18 用例）、`npm run build` 通过；Playwright 冒烟（登录 → 打开应用 → 双击节点开抽屉 → 关闭）无 console/page error。
+
 **E6 落地说明**：
 - 新增 `scripts/canvas-status.mjs`，直接解析 `docs/canvas-roadmap.md` §13.8 的七列表格，不引入第二份数据源。
 - 输出：总量与状态汇总、按 A–J 层级分项、未完成清单（⬜/🟧/🟨）；`--unfinished` 只列未完成，`--json` 输出机读结构。
 - 表格出现未知状态字符、或 13.8 未解析到任何行时退出码为 1，防止新增标记悄悄漏统计。
-- 当前基线：108 项（✅ 84 / 🟨 2 / 🟧 7 / ⬜ 8 / ⛔ 7），未完成 17 项。
+- 当前基线：108 项（✅ 89 / 🟨 11 / 🟧 1 / ⛔ 7），未完成 12 项。
 
 **编号说明**：`T9-xx` 为阶段 9 已收口任务；`N9-xx` 为阶段 9 复盘后产生的**阶段 10 增量**，沿用 N9 前缀以免推翻既有引用；后端配套任务以 `B-N9-xx` 标识。
 
@@ -2530,8 +2549,8 @@ T9-01（人工，可与后续并行）
 
 | 任务 | 内容 | 涉及 | 依赖方 | 预估 |
 |---|---|---|---|---|
-| **B-N9-03** 单节点试运行接口 | 新增 debug 单节点执行（或按单节点构造临时子图），返回该节点 outputs / 耗时 / 错误；不改既有全图执行语义 | `web/admin/routers/apps_admin.py`、`engine/runtime.py` | N9-03 | 4h |
-| **B-N9-05** 应用会话管理接口 | 会话列表 / 消息列表 / 删除；复用 `conversation_repository`，按 `application_id` + 租户过滤 | 新建 `web/admin/routers/app_conversations.py`、service | N9-05 | 5h |
+| **B-N9-03** 单节点试运行接口 | 新增 debug 单节点执行（或按单节点构造临时子图），返回该节点 outputs / 耗时 / 错误；不改既有全图执行语义 | `web/admin/routers/apps_admin.py`、`engine/runtime.py` | N9-03 | ✅ 已完成 |
+| **B-N9-05** 应用会话管理接口 | 会话列表 / 消息列表 / 删除；复用 `conversation_repository`，按 `application_id` + 租户过滤 | 新建 `web/admin/routers/app_conversations.py`、service | N9-05 | ✅ 已完成 |
 | **B-N9-13** Note 节点执行语义 | `node_meta.py` 增加 type=7 后，必须提供 no-op handler（或 compiler 跳过），否则 `nodes/__init__.py:27` 抛 `KeyError` | `domain/graph/nodes/` | N9-13 | 1h |
 
 #### 13.9.1 N9-12 对齐辅助线折中方案（评估结论）
@@ -2736,14 +2755,14 @@ E5 / E6 在下一轮跟随开始前完成；E7 已随 14.5 落地
 | H0 | 现有改动拆分提交 | P0 | ⬜ | 需用户授权 |
 | E1 | 后端元数据升格（仅静态部分） | P0 | ✅ 2026-11-01 完成（N9-13 试点通过） | — |
 | E2a | FlowGram / Coze IR adapter 抽离 | P0 | ✅ 2026-11-01 完成（tsc/build/单测通过） | — |
-| E2b | 拆分 AppEditPage + fieldControls 注册表 | P0 | ⬜ | E2a |
+| E2b | 拆分 AppEditPage + fieldControls 注册表 | P0 | ✅ 2026-11-01 完成（页面 1777 行，tsc/build/单测/冒烟通过） | E2a |
 | E3 | 设计令牌与样式集中 | P0 | ✅ 2026-11-01 完成（tsc/build 通过） | — |
 | E4 | 能力声明驱动交互 | P1 | ✅ 2026-11-01 完成（tsc/build 通过） | E1 |
 | E5 | 契约测试防漂移 | P1 | ✅ 2026-11-01 完成（12 后端 + 10 前端用例） | E1 |
 | E6 | 交互基线机读化（解析 13.8） | P1 | ✅ 2026-11-01 完成（108 项解析通过） | — |
 | E7 | 跟随流程固化 | P2 | ✅ | 14.5 已写入 |
-| N9-01 ~ N9-14 | 交互补全 | P1/P2 | 🟨 N9-01 / N9-13 / N9-14 已完成 | 见 13.9 |
-| B-N9-03 / 05 / 13 | 后端配套 | P1 | ⬜ | 见 13.9 |
+| N9-01 ~ N9-14 | 交互补全 | P1/P2 | 🟨 N9-01 / N9-03 / N9-05 / N9-10 / N9-13 / N9-14 已完成 | 见 13.9 |
+| B-N9-03 / 05 / 13 | 后端配套 | P1 | ✅ 已完成 | 见 13.9 |
 
 ### 14.7 完成判定（可扩展性验收）
 
