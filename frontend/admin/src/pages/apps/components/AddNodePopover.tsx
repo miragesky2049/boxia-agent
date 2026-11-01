@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Input, Empty } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
 
@@ -14,6 +14,8 @@ interface AddNodePopoverProps {
 export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopoverProps) {
   const [query, setQuery] = useState('');
   const [filtered, setFiltered] = useState<NodeMeta[]>(metas);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!query.trim()) {
@@ -32,13 +34,25 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
   }, [query, metas]);
 
   useEffect(() => {
-    const onClick = () => onClose();
-    document.addEventListener('click', onClick);
-    return () => document.removeEventListener('click', onClick);
-  }, [onClose]);
+    // 延迟绑定：避免触发 popover 的那个 click 事件冒泡到 document 时立即关闭它
+    let handler: ((e: MouseEvent) => void) | null = null;
+    const timer = setTimeout(() => {
+      handler = (e: MouseEvent) => {
+        const target = e.target as HTMLElement | null;
+        if (target?.closest('[data-add-node-popover]')) return;
+        onCloseRef.current();
+      };
+      document.addEventListener('click', handler);
+    }, 0);
+    return () => {
+      clearTimeout(timer);
+      if (handler) document.removeEventListener('click', handler);
+    };
+  }, []);
 
   return (
     <div
+      data-add-node-popover
       style={{
         position: 'fixed',
         left: x,

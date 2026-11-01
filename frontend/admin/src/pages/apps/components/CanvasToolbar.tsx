@@ -1,14 +1,20 @@
 import { Button, Tooltip } from 'antd';
-import { ZoomInOutlined, ZoomOutOutlined, CompressOutlined, FullscreenOutlined } from '@ant-design/icons';
+import {
+  ZoomInOutlined, ZoomOutOutlined, CompressOutlined, FullscreenOutlined,
+  PlusOutlined, CaretRightOutlined,
+} from '@ant-design/icons';
 import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor';
 
 interface CanvasToolbarProps {
   ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>;
   zoom: number;
+  onAddNode: () => void;
+  onRun: () => void;
+  running?: boolean;
 }
 
-// 画布顶部居中悬浮工具栏（与 Coze 对齐）：缩放 + 适应视图 + 全屏
-export function CanvasToolbar({ ctxRef, zoom }: CanvasToolbarProps) {
+// 画布底部居中浮条（V3，对齐 Coze）：缩放 / 适应 / 全屏 | +添加节点 | 试运行
+export function CanvasToolbar({ ctxRef, zoom, onAddNode, onRun, running }: CanvasToolbarProps) {
   const handleZoom = (delta: number) => {
     const ctx = ctxRef.current as any;
     if (!ctx?.viewport) return;
@@ -35,17 +41,17 @@ export function CanvasToolbar({ ctxRef, zoom }: CanvasToolbarProps) {
     <div
       style={{
         position: 'absolute',
-        top: 12,
+        bottom: 16,
         left: '50%',
         transform: 'translateX(-50%)',
         zIndex: 100,
         display: 'flex',
         alignItems: 'center',
         gap: 4,
-        padding: '4px 8px',
+        padding: '6px 12px',
         background: '#fff',
-        borderRadius: 8,
-        boxShadow: '0 2px 8px rgba(0,0,0,0.12)',
+        borderRadius: 12,
+        boxShadow: '0 4px 12px rgba(0,0,0,0.08)',
         border: '1px solid #e5e7eb',
       }}
     >
@@ -58,13 +64,42 @@ export function CanvasToolbar({ ctxRef, zoom }: CanvasToolbarProps) {
       <Tooltip title="放大">
         <Button size="small" type="text" icon={<ZoomInOutlined />} onClick={() => handleZoom(0.1)} />
       </Tooltip>
-      <div style={{ width: 1, height: 16, background: '#e5e7eb', margin: '0 4px' }} />
       <Tooltip title="适应视图">
         <Button size="small" type="text" icon={<CompressOutlined />} onClick={handleFit} />
       </Tooltip>
       <Tooltip title="全屏">
         <Button size="small" type="text" icon={<FullscreenOutlined />} onClick={handleFullscreen} />
       </Tooltip>
+
+      <div style={{ width: 1, height: 18, background: '#e5e7eb', margin: '0 8px' }} />
+
+      <Button
+        size="small"
+        icon={<PlusOutlined />}
+        onClick={onAddNode}
+        style={{
+          background: '#eef2ff', color: '#4f46e5', borderColor: '#eef2ff',
+          fontWeight: 500,
+        }}
+      >
+        添加节点
+      </Button>
+
+      <div style={{ width: 1, height: 18, background: '#e5e7eb', margin: '0 8px' }} />
+
+      <Button
+        size="small"
+        type="primary"
+        icon={<CaretRightOutlined />}
+        loading={running}
+        onClick={onRun}
+        style={{
+          background: '#10b981', borderColor: '#10b981',
+          fontWeight: 500,
+        }}
+      >
+        试运行
+      </Button>
     </div>
   );
 }

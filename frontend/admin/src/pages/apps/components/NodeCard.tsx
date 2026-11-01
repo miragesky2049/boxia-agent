@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { NodeIcon } from './NodeIcon';
 import { buildNodeSubtitle } from './nodeSubtitle';
 import type { RunNodeStatus } from './nodeStatus';
@@ -11,6 +12,7 @@ interface NodeCardProps {
   runStatus?: RunNodeStatus;
   width?: number;
   onDoubleClick?: () => void;
+  onAddNext?: () => void;
   children?: React.ReactNode;
 }
 
@@ -24,9 +26,11 @@ export function NodeCard({
   runStatus,
   width = 220,
   onDoubleClick,
+  onAddNext,
   children,
 }: NodeCardProps) {
   const subtitle = buildNodeSubtitle(typeKey, config);
+  const [hover, setHover] = useState(false);
 
   let borderColor = '#e5e7eb';
   let boxShadow = '0 1px 2px rgba(0,0,0,0.04)';
@@ -47,14 +51,17 @@ export function NodeCard({
   return (
     <div
       onDoubleClick={onDoubleClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
       style={{
+        position: 'relative',
         width,
         padding: '10px 12px',
         background: '#ffffff',
         border: `1px solid ${borderColor}`,
         borderRadius: 8,
         boxShadow,
-        cursor: 'pointer',
+        cursor: 'grab',
         userSelect: 'none',
         display: 'flex',
         alignItems: 'center',
@@ -63,6 +70,25 @@ export function NodeCard({
         animation: runStatus === 'running' ? 'boxia-node-pulse 1.2s ease-in-out infinite' : undefined,
       }}
     >
+      {/* V9：hover 时右上角显示 + 按钮，点击在节点下方弹出 AddNodePopover */}
+      {onAddNext && hover && (
+        <div
+          onClick={(e) => {
+            e.stopPropagation();
+            onAddNext();
+          }}
+          style={{
+            position: 'absolute', top: -10, right: -10,
+            width: 20, height: 20, borderRadius: '50%',
+            background: '#4f46e5', color: '#fff',
+            fontSize: 14, lineHeight: '20px', textAlign: 'center',
+            cursor: 'pointer', boxShadow: '0 2px 4px rgba(79,70,229,0.4)',
+            zIndex: 12,
+          }}
+        >
+          +
+        </div>
+      )}
       <NodeIcon typeKey={typeKey} color={color} size={30} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div

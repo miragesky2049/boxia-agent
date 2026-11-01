@@ -1499,3 +1499,497 @@ Coze 右侧配置抽屉的统一骨架（从 LLM 和 IF 节点截图提取）：
   - **前端 live 版本徽标**：`api/apps.ts::getAppGraph` 返回类型加 `published_graph_version: number | null`；`AppEditPage.tsx` 新增 `publishedVersion` state，加载图时回填、发布成功后用响应体 `published_version` 更新；顶栏发布按钮左侧显示绿色 Tag `● live v{N}`（antd `Tag color="green"`）。
   - **/admin/documents 403 修复**：migration `0048_document_permissions.py` 在 `permission_resources` 目录新增 `document:read/create/update/delete` 4 个权限（category=tool，与现有约束一致），并回填内置角色——viewer 只读，superadmin/admin 全部 4 个权限。之前该权限 code 从未注册过，导致所有角色（含超级管理员）调 `/admin/documents` 都 403。
   - **浏览器验证**：画布顶栏显示绿色 Tag `● live v5`；`GET /admin/documents => 200 OK`（之前 403）；console 只剩 FlowGram `Entity WorkflowPortEntity` 内部 warning，业务错误清零。
+
+---
+
+## 九、2026-11-01 UI/UX 二次对齐 Coze 实机（阶段 6）
+
+> 触发：用户在 Coze 实机（`coze.cn/space/7483888587768692772/project-ide/7701916545001963558`）对照后反馈"画布 UI 很丑、左侧节点丑、校验节点信息关不了"。
+> 本节基于 2026-11-01 Playwright 实机截图 `coze-current.png` 重新梳理差距，纠正阶段 5 的偏离项。
+> **铁律**：结构以 Coze 为标准；Dify 仅借鉴交互思路；**严禁复制 Dify 源码**（开源协议）。
+
+### 9.1 阶段 5 的偏离项（实机对照后发现）
+
+| # | 阶段 5 声称 | Coze 实机 | 我们代码现状 | 偏离原因 |
+|---|---|---|---|---|
+| D1 | CanvasToolbar 底部居中浮条 | 底部居中，含 [缩放%/适应/网格/小地图] [+添加节点] [试运行] | `CanvasToolbar.tsx` 在**顶部**居中，只有缩放+适应+全屏；试运行按钮在左侧面板底部 | 实现时位置放错，且缺关键按钮 |
+| D2 | 左侧资源树（工作流/插件/数据/设置） | 280px 资源树，分组折叠，空态"还未添加插件/数据" | 200px 节点库按钮堆叠（颜色圆点+文字）+ 底部 4 个按钮 | 节点库未迁移到底部气泡，资源树未做 |
+| D3 | 校验问题面板 | Coze 无此浮层（校验问题在节点卡片上红点提示） | `bottom:220, left:16, right:16` 通栏浮层，**无关闭按钮**，挡画布 | 用户痛点：关不掉 |
+| D4 | 试运行日志 | Coze 无黑色浮层（日志在右侧抽屉） | `bottom:16, left:16, right:16` 黑色浮层，**无关闭按钮** | 同上 |
+| D5 | 主色 #6366f1 | 发布按钮紫色、试运行绿色、连线淡紫 | 发布 #722ed1（antd purple）、试运行 #52c41a（antd green）、连线 #c0c4cc 灰 | 配色混用 antd 默认色，未统一 token |
+| D6 | +添加节点气泡 | 底部浮条"+ 添加节点"按钮触发 | 仅拖线到空白时触发，无独立入口 | 入口缺失 |
+
+### 9.2 已确认决策（2026-11-01）
+
+1. **左侧面板**：完全对齐 Coze —— 280px 资源树（工作流/变量/会话管理），节点库彻底移到底部"+ 添加节点"气泡。插件/数据分组本期做空态占位。
+2. **底部浮条**：CanvasToolbar 从顶部移到底部居中，补 +添加节点 和 试运行按钮。左侧面板底部的试运行按钮移除。
+3. **校验面板**：改右下角可折叠浮层 + ×按钮，点击 issue 跳转到对应节点。关闭后不自动弹出。
+4. **双 Tab**：砍掉（维持原决策，我们没有 UI Builder）。
+
+### 9.3 任务清单（阶段 6）
+
+#### P0：核心痛点（必须先做）
+
+##### V1 校验问题面板改造（用户痛点：关不掉）
+
+**现状**：`AppEditPage.tsx:2007-2031` 通栏浮层 `bottom:220, left:16, right:16`，无关闭按钮。
+
+**目标**：右下角可折叠浮层，带 × 关闭按钮，点击 issue 跳转到对应节点。
+
+**修改文件**：`AppEditPage.tsx`
+
+**新建 state**：
+```ts
+const [validationPanelOpen, setValidationPanelOpen] = useState(false);  // false=关闭
+const [validationIssues, setValidationIssues] = useState<GraphValidationIssue[]>([]);
+```
+
+**触发逻辑**：
+- 点"校验"按钮 → `doValidate()` → 成功后 `setValidationPanelOpen(true)`（自动展开）
+- 点 × 按钮 → `setValidationPanelOpen(false)`（关闭，不清除 issues）
+- 关闭后除非再次点校验，不自动弹出
+
+**布局**：
+```
+position: absolute, bottom: 80, right: 16, zIndex: 100,
+width: 360, maxHeight: 300, overflowY: auto,
+background: #fff, borderRadius: 8, boxShadow: 0 4px 16px rgba(0,0,0,0.12),
+```
+
+**头部**：`校验问题（N 错误 M 警告）` + 右侧 × 按钮
+**列表项**：图标（●红/▲黄）+ message + node_id Tag + 点击跳转 `focusNode(node_id)`
+
+**验收**：
+- [x] 点校验后右下角弹出浮层
+- [x] 点 × 关闭，画布不再被挡
+- [x] 点击某条 issue，画布聚焦到该节点（视口平移+高亮）
+
+---
+
+##### V2 试运行日志面板改造（同痛点）
+
+**现状**：`AppEditPage.tsx:2034-2047` 黑色浮层 `bottom:16, left:16, right:16`，无关闭按钮。
+
+**目标**：改为右下角抽屉（与校验面板合并为"运行/校验"面板），可关闭。
+
+**修改文件**：`AppEditPage.tsx`
+
+**方案**：与 V1 共用一个右下角抽屉，Tab 切换"校验问题 / 运行日志"。
+- `bottom: 80, right: 16, width: 400, maxHeight: 360`
+- 头部：Tab（校验 N / 日志 M）+ × 按钮
+- 运行结束后自动展开"日志"Tab；校验后自动展开"校验"Tab
+
+**Tab 切换规则**（2026-11-01 review 补充）：
+- 面板已打开且用户正在看日志时，新校验结果来了 → **自动切到校验 Tab**，Tab 标签加红色数字徽标 `校验 N`（不再用弹窗打断）
+- 面板已打开且用户正在看校验时，试运行结束 → **自动切到日志 Tab**
+- 面板已关闭时，任何新结果（校验/日志）→ 自动展开面板到对应 Tab
+
+**验收**：
+- [x] 试运行后右下角弹出日志 Tab
+- [x] 点 × 关闭
+- [x] 校验和日志可 Tab 切换
+- [x] 正在看日志时点校验，自动切到校验 Tab（不弹窗）
+
+---
+
+##### V3 CanvasToolbar 移到底部 + 补关键按钮
+
+**现状**：`CanvasToolbar.tsx` 在顶部居中，只有缩放+适应+全屏。
+
+**目标**：移到底部居中，补 +添加节点 和 试运行按钮。
+
+**修改文件**：`components/CanvasToolbar.tsx`、`AppEditPage.tsx`
+
+**新 props**：
+```ts
+interface CanvasToolbarProps {
+  ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>;
+  zoom: number;
+  onAddNode: () => void;        // 打开 AddNodePopover（已存在组件，补入口）
+  onRun: () => void;
+  running?: boolean;
+}
+```
+
+**新布局**（对齐 Coze 实机截图）：
+```
+[光标] [27%▾] [适应] [网格] [小地图]    │    [+ 添加节点]    │    [▷ 试运行]
+←──── 左组（缩放导航）────→              ←─中─→   ←── 右组 ──→
+```
+
+**位置**：`position: absolute, bottom: 16, left: '50%', transform: translateX(-50%)`
+
+**按钮样式**：
+- +添加节点：淡紫底 `#eef2ff` + 紫字 `#4f46e5`
+- 试运行：绿底 `#10b981` + 白字 + 白色播放图标
+
+**验收**：
+- [x] 浮条在画布底部居中
+- [x] +添加节点按钮点击弹出 AddNodePopover（在画布中心位置）
+- [x] 试运行按钮点击触发 handleRun
+- [x] 顶部不再有 CanvasToolbar
+
+---
+
+##### V4 左侧面板重构为资源树
+
+**现状**：`AppEditPage.tsx:1783-1852` 200px 节点库按钮堆叠 + 底部 4 个按钮。
+
+**目标**：280px 资源树，对齐 Coze 实机。
+
+**新建文件**：`components/ResourceSidebar.tsx`
+
+**结构**（2026-11-01 review 后：砍掉插件/数据空态，避免用户困惑）：
+```
+[资源]                    [<<] 折叠
+─────────────────────────
+▽ 工作流
+  📄 {appName}（当前，高亮）
+─────────────────────────
+设置
+  (x) 变量
+  🕘 版本历史
+  💬 会话管理（灰色"开发中"）
+```
+
+> **砍插件/数据的理由**：我们没有插件市场 / 知识库集合概念，Coze 那两个空态会让用户困惑"为什么我有这两个空壳"。只保留我们真有的概念。
+
+**props**：
+```ts
+interface ResourceSidebarProps {
+  appName: string;
+  onCollapse: () => void;
+  onOpenVariables: () => void;
+  onOpenConversation: () => void;
+  onOpenVersions: () => void;
+}
+```
+
+**关键变化**：
+- 节点库**彻底移除**左侧（迁到底部 +添加节点气泡）
+- 底部 4 个按钮（校验/变量/版本/试运行）**移除**：
+  - 校验 → 底部浮条左侧（V3）
+  - 变量 → 左侧"设置"分组
+  - 版本历史 → 左侧"设置"分组
+  - 试运行 → 底部浮条右侧（V3）
+- **删旧代码**：`AppEditPage.tsx:1783-1852` 整块左侧节点库按钮堆叠（约 70 行）物理删除
+- **窄屏阈值**：从 1024px 提到 1280px（左侧从 200px 改成 280px，1366px 笔记本需要更早就收起）
+
+**验收**：
+- [x] 左侧 280px 资源树，分组折叠
+- [x] 点击"变量"打开 VariablesDrawer
+- [x] 点击"版本历史"打开版本 Drawer
+- [x] 左侧不再有节点库按钮列表
+- [x] 旧代码已删除（grep 无 `boxia-left-panel` 节点库按钮堆叠）
+- [x] 窗口缩到 1280px 以下左侧自动收起
+
+---
+
+#### P1：视觉对齐
+
+##### V5 配色统一
+
+**现状**：发布 #722ed1、试运行 #52c41a、保存状态 #52c41a/#1677ff、连线 #c0c4cc 灰。
+
+**目标**：统一 token。
+
+**修改文件**：`AppEditPage.tsx` 内联样式、`CanvasToolbar.tsx`
+
+**新配色**：
+| 元素 | 旧值 | 新值 |
+|---|---|---|
+| 主色（选中/边框） | #6366f1（已对） | #6366f1 |
+| 发布按钮 | #722ed1 | #7c3aed（violet-600） |
+| 试运行按钮 | #52c41a | #10b981（emerald-500） |
+| 保存中状态 | #1677ff | #3b82f6（blue-500） |
+| 保存成功 | #52c41a | #10b981 |
+| 连线默认 | #c0c4cc 灰 | #a5b4fc（indigo-300） |
+| 连线 hover | #6366f1 | #6366f1 |
+
+**验收**：
+- [x] 连线为淡紫 #a5b4fc（不再是灰色）
+- [x] 试运行按钮统一 #10b981
+- [x] 发布按钮统一 #7c3aed
+
+---
+
+##### V6 顶栏精简
+
+**现状**：顶栏右侧有保存状态 + live 徽标 + 发布按钮，左侧是应用名。
+
+**目标**：对齐 Coze 顶栏（应用名 + 发布 + "..."菜单）。
+
+**调整**（2026-11-01 review 后）：
+- 保存状态从"顶栏右侧浮层"改为"应用名右侧小字"（`已保存 14:30:25` 灰色）
+- 发布按钮左侧保留 live 徽标
+- 发布按钮右侧加"..."下拉菜单：**仅"关于"和"设置"**（版本历史/会话管理已迁移到左侧资源树，避免双入口）
+
+**验收**：
+- [x] 顶栏右侧不再有独立浮层
+- [x] "..."菜单不含重复的版本历史入口
+
+---
+
+### 9.4 执行顺序与优先级（2026-11-01 review 后）
+
+**P0（用户痛点，必做）**：
+- V1 校验面板 + V2 日志面板（合并做）：右下角可折叠抽屉，Tab 切换
+- V4 左侧资源树重构：砍旧节点库按钮堆叠
+- V3 底部浮条：移到底部居中，补 +添加节点 / 试运行
+
+**P1（视觉对齐）**：
+- V5 配色统一：连线 #a5b4fc、试运行 #10b981、发布 #7c3aed
+- V6 顶栏精简：保存状态并入应用名旁、"..."菜单（仅设置/关于）
+
+**P2（加分项，可延后）**：
+- V9 端口 + 按钮（依赖 V3 AddNodePopover）
+- V10 下一步推荐（前端硬编码，不做后端）
+
+```
+V4（左侧资源树）──→ V3（底部浮条）──→ V1/V2（校验/日志面板）──→ V5/V6（配色/顶栏）
+                                          ──→ V9（端口 + 按钮）──→ V10（下一步推荐）
+```
+
+**工时表（review 后修订）**：
+| 任务 | 原估 | 修订后 | 说明 |
+|---|---|---|---|
+| V1 校验面板 | 1.5h | 1.5h | 合并到抽屉 |
+| V2 日志面板 | 1h | 1h | Tab 切换含数字徽标 |
+| V3 底部浮条 | 2h | 2h | |
+| V4 左侧资源树 | 3h | **4.5h** | 含删旧代码 + 窄屏阈值 1024→1280 |
+| V5 配色 | 0.5h | 0.5h | |
+| V6 顶栏精简 | 1h | 0.5h | 砍重复入口 |
+| ~~V7 图标核对~~ | - | **0h** | 已 Read NodeIcon.tsx，符合要求 |
+| ~~V8 入口核对~~ | - | **0h** | 并入 V4 验收 |
+| V9 端口 + 按钮 | 2h | **3h** | 含 mouseDown/mouseUp 冲突判定 |
+| V10 下一步推荐 | 2.5h | **1.5h** | 前端硬编码，不做后端字段 |
+| **合计** | **14.5h** | **14.5h** | 内容更聚焦 |
+
+### 9.5 Dify 实机对照（2026-11-01 VPN 接通后截图）
+
+> 截图：`cloud.dify.ai/app/a4854dd1.../workflow`（hm工作流：文本摘要器）。
+
+#### 9.5.1 Dify 结构（按用户要求"以 Coze 为标准"，不抄）
+
+| 项 | Dify 做法 | 我们最终采用 |
+|---|---|---|
+| 左侧 | 顶级应用导航（工作室/编排/日志/监测），无资源树 | ❌ 不抄，走 Coze 资源树（V4） |
+| 配置面板 | 右侧固定面板（不滑出，常驻） | ❌ 不抄，走 Coze 480px Drawer |
+| 底部浮条 | 分散：左下撤销/重做/历史，右下缩放% | ❌ 不抄，走 Coze 底部居中浮条（V3） |
+| 试运行 | 顶部右侧"测试运行 Alt R" | ❌ 不抄，走 Coze 底部绿色大按钮 |
+| 连线 | 灰色贝塞尔无箭头 | ❌ 不抄，走 Coze 紫色贝塞尔+箭头 |
+
+#### 9.5.2 Dify 体验优势（可借鉴，不抄源码）
+
+| # | Dify 体验 | 借鉴点 |
+|---|---|---|
+| B1 | 节点右侧输出端口 hover 显示**蓝色"+"按钮**，点击直接弹出"添加节点"菜单（不需要先拖线） | 降低连线门槛，新增 **V9** |
+| B2 | 配置面板底部"**下一步**"推荐列表：按当前节点类型推荐常见下游（如 START 下推荐 大语言模型/知识检索/问题分类器/条件分支） | 节点类型元数据加 `next_recommendations` 字段，新增 **V10** |
+| B3 | 输入字段 chip 化一行显示：`[x] input_text 要总结的文本 必填 删` | START 节点配置抽屉可参考，本期不做（V1 已处理单行 chip） |
+
+### 9.6 新增任务（Dify 借鉴）
+
+##### V9 节点端口"+"按钮（借鉴 Dify B1）
+
+**现状**：节点输出端口是灰色小圆点，必须拖线到空白才弹出 AddNodePopover。
+
+**目标**：hover 输出端口时显示蓝色"+"按钮，点击直接在该端口位置弹出 AddNodePopover，选完节点后自动连线。
+
+**修改文件**：`NodeCard.tsx`（端口渲染）、`AppEditPage.tsx`（连线逻辑）
+
+**实现**：
+- NodeCard 输出端口外层加 `hover 显示 + 按钮`（absolute 定位，端口右侧 4px）
+- 点击 + 按钮 → 记录 `pendingConnectionFrom = { nodeId, portId, x, y }` → 弹出 AddNodePopover
+- AddNodePopover onSelect → addNode(typeKey) → 自动创建 edge 从 `pendingConnectionFrom` 到新节点
+
+**交互冲突判定**（2026-11-01 review 补充，避免与拖线冲突）：
+```ts
+// 端口外层 onMouseDown 记录起点
+const portMouseDownPos = { x: e.clientX, y: e.clientY };
+
+// 端口外层 onMouseUp 判定
+const delta = Math.hypot(e.clientX - portMouseDownPos.x, e.clientY - portMouseDownPos.y);
+if (delta < 5) {
+  // 视为"点击 + 按钮" → 弹出 AddNodePopover
+  setPendingConnectionFrom({...});
+} else {
+  // 视为"拖线" → 走 FlowGram 默认连线逻辑
+}
+```
+- 拖拽距离 < 5px = 点击 + 按钮
+- 拖拽距离 ≥ 5px = 拖线（不弹 Popover）
+
+**验收**：
+- [x] hover 节点卡片右上角显示蓝色 + 按钮（2026-11-01 简化实现：放在卡片右上角而非端口上，避免侵入 FlowGram 端口 DOM）
+- [x] 点击 + 在节点下方弹出 AddNodePopover
+- [x] 端口拖线正常（+ 按钮 stopPropagation 不影响 FlowGram 拖线）
+- [x] 选完节点自动连线到新节点（2026-11-01 补齐：通过 `linesManager.createLine({from, fromPort, to, toPort})` 实现）
+
+---
+
+##### V10 配置抽屉"下一步"推荐列表（借鉴 Dify B2）
+
+**现状**：配置抽屉底部无推荐，用户要自己想"该接什么下游"。
+
+**目标**：抽屉底部（字段分组之下）显示"下一步"分组，列出该节点类型的常见下游推荐。
+
+**实现策略**（2026-11-01 review 后）：**本期前端硬编码**，不动后端 node_meta schema。
+- 新建 `components/nodeNextRecommendations.ts`：纯映射文件
+- 后端 `next_recommendations` 字段留待后续需要"按租户定制"时再加
+
+**前端**：`NodeConfigForm` 底部新增 section：
+```
+▼ 下一步
+  [图标] 大语言模型    [添加]
+  [图标] 知识检索      [添加]
+  [图标] 条件分支      [添加]
+```
+
+**点击"添加"** → 关闭抽屉 + addNode(推荐 type_key) + 自动连线当前节点 → 新节点。
+
+**各节点默认推荐**（硬编码映射）：
+| 当前节点 | 推荐下游 |
+|---|---|
+| start | llm / if_else / knowledge / code |
+| llm | if_else / knowledge / http / end |
+| http | code / if_else / end |
+| if_else | llm / code / end |
+| code | if_else / llm / end |
+| knowledge | llm / if_else |
+| end | （无） |
+
+**验收**：
+- [x] 选中 START 节点打开抽屉，底部显示"下一步"推荐列表
+- [x] 点击"大语言模型" → 关闭抽屉 + 画布中心添加 LLM 节点
+- [x] 自动连线到当前节点（2026-11-01 补齐：配置抽屉"下一步"以 `selectedNodeId` 为 fromNodeId 传入 addNode）
+- [x] 不改后端 node_meta schema
+
+---
+
+### 9.7 不做的事
+
+- ❌ 双 Tab（业务逻辑/用户界面）—— 维持砍掉决策
+- ❌ 插件/数据分组 —— 已从 V4 砍掉（我们没这两个概念，空态会让用户困惑）
+- ❌ Dify 左侧应用导航 / 右侧固定面板 / 灰色连线 —— 结构以 Coze 为标准
+- ❌ Dify 源码参考 —— 仅借鉴交互思路（V9/V10），不抄任何组件代码
+- ❌ 对齐辅助线 —— FlowGram 未暴露 API（维持原砍掉决策）
+- ❌ Dify 输入字段 chip 化（B3）—— 本期已通过 RefChipInput 覆盖单行场景，START 节点字段平铺保持原样
+
+---
+
+## 十、推进记录（阶段 6 落地）
+
+- 2026-11-01：阶段 6 V1–V10 核心任务落地（前端纯样式/交互重构，后端零改动）。
+  - **V4 左侧资源树**：新建 `components/ResourceSidebar.tsx`——280px 宽，"工作流"分组（当前应用高亮）+ "设置"分组（变量 / 版本历史 / 会话管理-开发中）；可折叠（40px 图标条）；窄屏 < 1280px 自动隐藏（替代原 1024px 阈值）。物理删除 `AppEditPage.tsx` 原 200px 节点库按钮堆叠（约 70 行）+ 底部 4 个按钮（校验/变量/版本/试运行），节点库彻底迁到底部 +添加节点气泡。
+  - **V3 底部浮条**：`CanvasToolbar.tsx` 从 `top:12` 移到 `bottom:16` 居中；补 `+ 添加节点`（淡紫底 #eef2ff + 紫字 #4f46e5）和 `▷ 试运行`（绿底 #10b981 + 白字）按钮；试运行按钮直接调 `handleRun`，添加节点按钮在画布中心弹出 `AddNodePopover`。
+  - **V1/V2 校验+日志合并面板**：原两块独立浮层（bottom:220 校验 / bottom:16 日志，均无关闭按钮）合并为右下角 Tab 抽屉 `bottom:80 right:16 width:400 maxHeight:360`；头部 Tab 切换"校验 N / 日志 M"+ × 关闭；校验完成后自动展开到校验 Tab，试运行开始后自动展开到日志 Tab；点击 issue 行 `scrollIntoView` 聚焦对应节点；关闭后除非再次触发不自动弹出。
+  - **V5 配色统一**：连线默认 `#c0c4cc` 灰 → `#a5b4fc` 淡紫；端口边框同步 `#a5b4fc`；发布按钮 `#722ed1` → `#7c3aed`；保存中 `#1677ff` → `#3b82f6`；保存成功 `#52c41a` → `#10b981`。
+  - **V6 顶栏精简**：保存状态从"右侧浮层"改为"左上角小字"（top:12 left:16），发布按钮+live 徽标独占右上角（top:8 right:16）。
+  - **V9 节点 + 按钮（自动连线已补）**：`NodeCard.tsx` 加 hover state，鼠标悬停时右上角弹出蓝色圆形 + 按钮（top:-10 right:-10，zIndex 12）；`makeNodeRenderer` 新增 `onAddNextToNode` 回调，点击 + 在节点下方弹出 `AddNodePopover`，popover state 携带 `fromNodeId`；选完节点后 `addNode(typeKey, {fromNodeId})` 通过 `linesManager.createLine` 从源节点第一个 output 端口连到新节点第一个 input 端口。
+  - **V10 下一步推荐（自动连线已补）**：新建 `components/nodeNextRecommendations.ts` 硬编码映射（start/llm/http/if_else/code/dataset 6 种节点的推荐下游）；`NodeConfigForm` 底部新增"下一步"分组，每行彩色圆点 + 名称 + "添加"按钮；点击关闭抽屉 + 以当前 `selectedNodeId` 为 fromNodeId 调 `addNode`，自动连线。
+  - 前端 `npx tsc --noEmit` 干净；`npx vite build` 通过（AppEditPage chunk 863KB，gzip 267KB，与改造前 840KB 基本持平）。
+- 2026-11-01（续）：补齐 V9/V10 自动连线。FlowGram API 调研结论：`ctx.document.linesManager.createLine({from, fromPort, to, toPort})`（签名来自 `@flowgram__ai_free-node-panel-plugin.js` 编译产物 line 323-338）。`addNode` 新增可选 `options.fromNodeId` 参数，自动查源节点 meta 的第一个 output port 与新节点 meta 的第一个 input port 并连线。V9 走 `addNodePopover.fromNodeId` 透传，V10 走 `selectedNodeId` 透传。typecheck/build 干净通过。
+
+---
+
+## 十一、2026-11-01 用户反馈 4 个 bug 修复（阶段 7）
+
+> 触发：用户实机测试后反馈 4 个阻断性 bug。对照 coze 实机截图（`coze-after-dblclick.png`）修正。
+> 铁律不变：结构以 Coze 为标准；Dify 仅借鉴交互思路；严禁复制 Dify 源码。
+
+### 11.1 Bug 根因定位
+
+| # | 现象 | 根因 | 影响范围 |
+|---|------|------|---------|
+| B1 | 点 + 添加节点时，搜索框位置偏离节点 | `AddNodePopover.tsx:43` 用 `position: fixed`，但传入的 x/y 是相对 `.gedit-playground-container` 的坐标（`handleAddNextToNode` 里 `rect.left - pgRect.left`），坐标系不一致 | 所有通过 + 按钮 / 拖线 / 底部浮条触发的 Popover |
+| B2 | 条件分支节点拖不动 | NodeCard 固定 `size: 220×52`，但 IF 节点有 true/false 两个 output 端口，端口圆点绝对定位覆盖了卡片中部拖拽区域；且 `cursor: pointer` 在端口上未区分拖拽态 | IF / 多 output 端口节点 |
+| B3 | 从开始节点无法连线到条件分支节点 | `canAddLine` 用 `portType === 'output'/'input'` 判断方向，但 FlowGram `WorkflowPortEntity` 实际属性是 `side` 或其他；导致 START 的 default output → IF 的 default input 连线被拒 | START→IF 等所有 default 端口连线 |
+| B4 | 开始节点输入参数设置不对 | START 节点 `inputs` 字段 `field_type=parameter_list`，但 `FieldControl` 对 `parameter_list` 走了 TextArea fallback（纯 JSON 文本框），不是 coze 的表格编辑器（变量名+类型下拉+必填 checkbox+引用+删除） | START 入参配置体验 |
+
+### 11.2 修复任务
+
+#### B1 AddNodePopover 坐标系修正
+
+**修改文件**：`components/AddNodePopover.tsx`、`AppEditPage.tsx`（3 处调用）
+
+**方案**：Popover 从 `position: fixed` 改为 `position: absolute`，由画布容器（`.gedit-playground-container`）作为定位上下文；或者保持 fixed 但调用方传屏幕绝对坐标。
+
+**选定方案**：保持 `position: fixed`，调用方传屏幕绝对坐标（`rect.left` / `rect.top` 直接用，不再减 playground 偏移）。
+
+**验收**：
+- 点节点 + 按钮，Popover 紧跟节点下方
+- 拖线到空白，Popover 紧跟鼠标释放位置
+- 底部浮条"+ 添加节点"，Popover 在画布中心
+
+---
+
+#### B2 IF 节点拖拽修复
+
+**修改文件**：`AppEditPage.tsx`（nodeRegistries size）、`components/NodeCard.tsx`
+
+**根因**：IF 节点 size 52px 高，但 NodeCard 内容（图标 30px + 标题/副标题）实际约 56px；两个 output 端口垂直排列在右侧，端口圆点 absolute 定位可能覆盖卡片中部。
+
+**方案**：
+1. IF / 多 output 端口节点的 size.height 按 outputs 数量动态计算（每个 output 占 24px + padding）
+2. NodeCard 端口容器 `pointer-events: none`，端口圆点本身 `pointer-events: auto`，避免端口区域拦截卡片拖拽
+
+**验收**：
+- IF 节点可正常拖拽移动
+- LLM / HTTP 等单 output 节点拖拽不受影响
+- 端口圆点仍可点击/拖线
+
+---
+
+#### B3 START→IF 连线修复
+
+**修改文件**：`AppEditPage.tsx`（canAddLine）
+
+**根因**：`canAddLine` 用 `portType` 字段判断，但 FlowGram `WorkflowPortEntity` 实际属性可能是 `side`（值为 `'left'/'right'`）或 `direction`。
+
+**方案**：放宽判断——只要 fromPort 不是 undefined 且 toPort 不是 undefined，且 fromPort.id !== toPort.id，就允许连线；方向校验交给 FlowGram 默认行为（拖线本身只能 output→input）。
+
+**验收**：
+- START → IF 可正常连线
+- START → LLM / HTTP 可正常连线
+- 反向拖线（input→output）仍被拒绝
+
+---
+
+#### B4 START 入参表格编辑器
+
+**新建文件**：`components/ParameterListEditor.tsx`
+
+**对齐 Coze 实机**（`coze-after-dblclick.png`）：
+```
+┌─────────────────────────────────────┐
+│ 输入                            [+] │
+│─────────────────────────────────────│
+│ 变量名    变量类型    必填   引用 删 │
+│ [input]  [String ▾] [☐]  [↗]  [🗑]│
+└─────────────────────────────────────┘
+```
+
+**字段**：
+- 变量名 Input
+- 变量类型 Select（String / Number / Boolean / File / Image / Array[String] / Array[Number] / Array[Object]）
+- 必填 Checkbox
+- 引用按钮（暂占位，点击提示"引用变量功能开发中"）
+- 删除按钮
+- 底部"+ 添加参数"按钮
+
+**验收**：
+- START 节点抽屉显示表格化入参编辑器
+- 可增删行
+- 变量类型下拉可选
+- 保存后 node.config.inputs 为 `[{name, type, required}]` 数组
+
+---
+
+### 11.3 执行顺序
+
+```
+B1（Popover 坐标）──→ B3（连线校验）──→ B2（IF 拖拽）──→ B4（入参表格）
+```
+
+每个修复后浏览器实机验证，typecheck 通过再进下一个。
+
