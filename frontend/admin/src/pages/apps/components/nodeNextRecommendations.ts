@@ -37,6 +37,65 @@ const NEXT_MAP: Record<string, NextRecommendation[]> = {
     { typeKey: 'llm', label: '大语言模型' },
     { typeKey: 'if_else', label: '条件分支' },
   ],
+  agent_loop: [
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  api_plugin: [
+    { typeKey: 'code', label: '代码' },
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  text_processor: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  json_stringify: [
+    { typeKey: 'code', label: '代码' },
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  json_parser: [
+    { typeKey: 'code', label: '代码' },
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  set_variable: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  variable_merge: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  human_approval: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  subworkflow: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  loop: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'if_else', label: '条件分支' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  batch: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  dataset_write: [
+    { typeKey: 'llm', label: '大语言模型' },
+    { typeKey: 'end', label: '结束' },
+  ],
+  create_conversation: [
+    { typeKey: 'create_message', label: '创建消息' },
+    { typeKey: 'end', label: '结束' },
+  ],
 };
 
 export function getNextRecommendations(typeKey: string): NextRecommendation[] {

@@ -22,7 +22,7 @@ from internal.domain.canvas.node_type import NodeType
 
 @dataclass(frozen=True)
 class ValidationIssue:
-    """校验问题。severity: error=阻塞保存 / warning=仅提示。"""
+    """校验问题。severity: error=阻塞发布（草稿保存允许中间态）/ warning=仅提示。"""
 
     severity: str
     code: str
@@ -79,9 +79,10 @@ def validate_graph(graph: CanvasGraph) -> list[ValidationIssue]:
             in_degree[edge.target] += 1
 
     for n in nodes:
+        # 草稿编辑时新节点通常是先落画布再连线，缺入边不阻塞保存，发布时再严格拦截
         if n.type != NodeType.START and in_degree[n.id] == 0:
             issues.append(ValidationIssue(
-                "error", "no_incoming_edge",
+                "warning", "no_incoming_edge",
                 f"节点 {n.meta.title or n.id} 没有入边",
                 n.id,
             ))

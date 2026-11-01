@@ -378,6 +378,10 @@ _NODE_METAS: list[NodeMeta] = [
                     {"value": "tool", "label": "工具"},
                 ],
             ),
+            ConfigFieldMeta(
+                name="content", label="消息内容", field_type="textarea",
+                placeholder="支持 {{node.output.field}} 变量",
+            ),
         ],
     ),
     NodeMeta(

@@ -19,6 +19,7 @@ import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
 import { listAvailableModels, type ModelCatalogItem } from '../../api/models';
 import { listDatasets, type DatasetItem } from '../../api/datasets';
 import { NodeCard } from './components/NodeCard';
+import { NodeIcon } from './components/NodeIcon';
 import { CanvasToolbar } from './components/CanvasToolbar';
 import { ResourceSidebar } from './components/ResourceSidebar';
 import { EmptyCanvasWelcome } from './components/EmptyCanvasWelcome';
@@ -33,6 +34,7 @@ import { CodeEditor } from './components/CodeEditor';
 import { getNextRecommendations } from './components/nodeNextRecommendations';
 import { AlignGuides } from './components/AlignGuides';
 import { ParameterListEditor } from './components/ParameterListEditor';
+import { ToolListEditor } from './components/ToolListEditor';
 
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
@@ -44,6 +46,13 @@ interface GraphNodeSummary {
   title: string;
   config: Record<string, any>;
   position?: { x: number; y: number };
+}
+
+// 抽屉「输入」区：按入边反查上游节点可引用字段
+interface UpstreamInputGroup {
+  nodeId: string;
+  nodeTitle: string;
+  fields: Array<{ name: string; label: string }>;
 }
 
 function buildPickerTreeData(
@@ -175,7 +184,20 @@ function makeNodeRenderer(
   onAddNextToNode?: (node: WorkflowNodeEntity) => void,
 ) {
   return function NodeRenderer({ node }: { node: WorkflowNodeEntity }) {
-    const nodeData = (node as unknown as { data?: Record<string, any> }).data || {};
+    // FlowGram 把节点 data 存在 extInfo 里（node.data 是空对象），且需订阅变更才能重渲染
+    const readExtInfo = useCallback(() => {
+      const entity = node as unknown as { getExtInfo?: () => Record<string, any> | undefined };
+      return entity.getExtInfo?.() || {};
+    }, [node]);
+    const [nodeData, setNodeData] = useState<Record<string, any>>(readExtInfo);
+    useEffect(() => {
+      const event = (node as unknown as { onExtInfoChange?: unknown }).onExtInfoChange as
+        | ((fn: (e: { newInfo?: Record<string, any> }) => void) => { dispose?: () => void })
+        | undefined;
+      if (!event) return;
+      const disposable = event((e) => setNodeData(e?.newInfo || readExtInfo()));
+      return () => disposable?.dispose?.();
+    }, [node, readExtInfo]);
     const title = nodeData.title || meta.title;
 
     // Comment 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
@@ -250,7 +272,7 @@ function FieldControl({
     name: string;
     label: string;
     field_type: string;
-    options: Array<{ value: string }>;
+    options: Array<{ value: string; label?: string }>;
     default: any;
     required: boolean;
     placeholder: string;
@@ -277,7 +299,7 @@ function FieldControl({
         <Select
           value={String(current || field.default || '')}
           onChange={(v) => onChange(field.name, v)}
-          options={field.options.map((o) => ({ value: o.value, label: o.value }))}
+          options={field.options.map((o) => ({ value: o.value, label: o.label || o.value }))}
           style={{ width: '100%' }}
         />
       );
@@ -308,8 +330,10 @@ function FieldControl({
           onChange={(next) => onChange(field.name, next)}
         />
       )
-    case 'textarea':
     case 'tool_list':
+      // tool_list 由 NodeConfigForm 外层用 ToolListEditor 渲染，FieldControl 不直接处理
+      return <Input.TextArea rows={3} value={String(current || '')} disabled />;
+    case 'textarea':
       return (
         <Space direction="vertical" size={4} style={{ width: '100%' }}>
           {picker}
@@ -941,6 +965,7 @@ function NodeConfigForm({
   outputs,
   onOutputsChange,
   datasetOptions,
+  upstreamInputs,
   onAddNext,
 }: {
   nodeMeta: NodeMeta;
@@ -952,6 +977,7 @@ function NodeConfigForm({
   outputs: OutputFieldItem[];
   onOutputsChange: (next: OutputFieldItem[]) => void;
   datasetOptions?: DatasetItem[];
+  upstreamInputs?: UpstreamInputGroup[];
   onAddNext?: (typeKey: string) => void;
 }) {
   const handleFieldChange = (name: string, value: any) => {
@@ -984,6 +1010,48 @@ function NodeConfigForm({
           placeholder="节点显示名"
         />
       </div>
+
+      <div>
+        <Typography.Text type="secondary">输入（来自上游）</Typography.Text>
+        <div style={{ marginTop: 6 }}>
+          {(upstreamInputs || []).length === 0 ? (
+            <div style={{
+              padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
+              fontSize: 12, color: '#9ca3af',
+            }}>
+              无上游输入，请先连接上游节点
+            </div>
+          ) : (
+            <Space direction="vertical" size={6} style={{ width: '100%' }}>
+              {(upstreamInputs || []).map((group) => (
+                <div key={group.nodeId} style={{
+                  padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
+                }}>
+                  <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+                    {group.nodeTitle}
+                  </div>
+                  <Space size={[4, 4]} wrap>
+                    {group.fields.map((f) => (
+                      <Tag key={f.name} style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}>
+                        {`{{${group.nodeId}.output.${f.name}}}`}
+                      </Tag>
+                    ))}
+                  </Space>
+                </div>
+              ))}
+            </Space>
+          )}
+        </div>
+      </div>
+
+      {nodeMeta.config_fields.length === 0 && (
+        <div style={{
+          padding: '10px 12px', background: '#f9fafb', borderRadius: 6,
+          fontSize: 12, color: '#6b7280', lineHeight: 1.6,
+        }}>
+          该节点无需额外配置：输入来自上游连线，输出字段见下方列表。
+        </div>
+      )}
 
       {groupConfigFields(nodeMeta.type_key, nodeMeta.config_fields).map((section) => (
         <div key={section.title} style={{ marginTop: 4 }}>
@@ -1023,6 +1091,11 @@ function NodeConfigForm({
                     nodes={pickerNodes}
                     currentNodeId={currentNodeId}
                     keyToMeta={keyToMeta}
+                  />
+                ) : field.field_type === 'tool_list' ? (
+                  <ToolListEditor
+                    value={values[field.name]}
+                    onChange={(next) => handleFieldChange(field.name, next)}
                   />
                 ) : (
                   <FieldControl
@@ -1094,6 +1167,7 @@ type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 export default function AppEditPage() {
   const { id } = useParams<{ id: string }>();
   const [initialData, setInitialData] = useState<WorkflowJSON | null>(null);
+  const [nodeMetaReady, setNodeMetaReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle');
   const [lastSavedAt, setLastSavedAt] = useState<Date | null>(null);
@@ -1101,6 +1175,7 @@ export default function AppEditPage() {
   const [selectedNodeMeta, setSelectedNodeMeta] = useState<NodeMeta | null>(null);
   const [configValues, setConfigValues] = useState<NodeConfigValues>({});
   const [nodeOutputs, setNodeOutputs] = useState<OutputFieldItem[]>([]);
+  const [upstreamInputs, setUpstreamInputs] = useState<UpstreamInputGroup[]>([]);
   const [running, setRunning] = useState(false);
   const [publishing, setPublishing] = useState(false);
   const [publishedVersion, setPublishedVersion] = useState<number | null>(null);
@@ -1133,8 +1208,12 @@ export default function AppEditPage() {
   const [nodeMetaCategories, setNodeMetaCategories] = useState<Record<string, NodeMeta[]>>({});
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
   const [canvasZoom, setCanvasZoom] = useState(1);
+  // 画布可视区域（画布坐标系），用于小地图相机框与缩放百分比
+  const [canvasViewport, setCanvasViewport] = useState<{ x: number; y: number; w: number; h: number; zoom: number } | null>(null);
   const [nodeCount, setNodeCount] = useState(0);
   const [deleteNodeOpen, setDeleteNodeOpen] = useState(false);
+  // 配置抽屉开关与"选中节点"分离：关闭抽屉后仍保留选中态，供右键复制/删除使用
+  const [configDrawerOpen, setConfigDrawerOpen] = useState(false);
   const [variablesDrawerOpen, setVariablesDrawerOpen] = useState(false);
   const [addNodePopover, setAddNodePopover] = useState<{ x: number; y: number; fromNodeId?: string } | null>(null);
   const [datasetOptions, setDatasetOptions] = useState<DatasetItem[]>([]);
@@ -1147,6 +1226,28 @@ export default function AppEditPage() {
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null);
   const saveTimerRef = useRef<number | null>(null);
   const nodeCounterRef = useRef<Record<string, number>>({});
+  // 节点复制剪贴板：内存优先，localStorage 兜底跨刷新
+  const nodeClipboardRef = useRef<{ typeKey: string; title?: string; config: Record<string, any>; outputs?: unknown[] } | null>(null);
+  // 画布缩放/滚动订阅句柄，切换子图重挂载编辑器时先释放旧订阅
+  const viewportDisposablesRef = useRef<Array<{ dispose?: () => void }>>([]);
+
+  // 同步画布缩放与可视区域：小地图相机框、底部工具栏缩放百分比都依赖它
+  const syncCanvasViewport = useCallback(() => {
+    const ctx = ctxRef.current as any;
+    const config = ctx?.playground?.config;
+    if (!config) return;
+    const zoom = config.zoom ?? 1;
+    setCanvasZoom(zoom);
+    const vp = config.getViewport?.();
+    if (vp) {
+      setCanvasViewport({ x: vp.x, y: vp.y, w: vp.width, h: vp.height, zoom });
+    }
+  }, []);
+
+  useEffect(() => () => {
+    viewportDisposablesRef.current.forEach((d) => d.dispose?.());
+    viewportDisposablesRef.current = [];
+  }, []);
 
   // ========== 子图导航（B6） ==========
   // rootGraphRef 持有完整嵌套 WorkflowJSON（每个子图节点的 data.subgraph）
@@ -1207,6 +1308,7 @@ export default function AppEditPage() {
       return nextStack;
     });
     setSelectedNodeId(null);
+    setConfigDrawerOpen(false);
   }, [persistCurrentEditor, resolveEditorData]);
 
   const exitSubgraph = useCallback((levels: number) => {
@@ -1219,6 +1321,7 @@ export default function AppEditPage() {
       return nextStack;
     });
     setSelectedNodeId(null);
+    setConfigDrawerOpen(false);
   }, [persistCurrentEditor, resolveEditorData]);
 
   // ========== 拉取节点元数据 ==========
@@ -1230,6 +1333,9 @@ export default function AppEditPage() {
         setNodeMetaCategories(resp.categories);
       } catch {
         message.error('加载节点库失败');
+      } finally {
+        // 节点类型注册表是画布渲染的前置条件：为空时渲染节点会得到 0 尺寸
+        setNodeMetaReady(true);
       }
     })();
     listDatasets()
@@ -1279,7 +1385,9 @@ export default function AppEditPage() {
 
   // ========== 加载图 ==========
   useEffect(() => {
-    if (!id) return;
+    // 必须等节点元数据就绪：cozeTypeToKey 为空时 fromCozeIR 无法把数字类型
+    // 转回注册表 key，节点会因找不到渲染器而变成 0 尺寸空白节点。
+    if (!id || !nodeMetaReady) return;
     let cancelled = false;
     (async () => {
       try {
@@ -1311,7 +1419,7 @@ export default function AppEditPage() {
       }
     })();
     return () => { cancelled = true; };
-  }, [id, cozeTypeToKey]);
+  }, [id, nodeMetaReady, cozeTypeToKey]);
 
   useEffect(() => {
     return () => {
@@ -1350,9 +1458,8 @@ export default function AppEditPage() {
       const result = await validateGraph(cozeIR as never);
       setValidationIssues(result.issues);
       collectIssuesForNodes(result.issues);
-      // V1：校验完成后自动展开右下角面板到"校验"Tab
-      setPanelTab('validation');
-      setPanelOpen(true);
+      // 自动保存触发的校验不再弹出右下角面板：面板会遮挡画布，导致新节点无法拖拽。
+      // 需要查看问题时点击顶部状态栏的“校验”入口。
       return result.issues;
     } catch {
       message.error('校验请求失败');
@@ -1368,12 +1475,9 @@ export default function AppEditPage() {
     setSaveStatus('saving');
     saveTimerRef.current = window.setTimeout(async () => {
       try {
-        const issues = await doValidate();
-        const hasError = issues.some((i) => i.severity === 'error');
-        if (hasError) {
-          setSaveStatus('error');
-          return;
-        }
+        // 校验只用于红框/问题提示，不阻塞草稿保存：
+        // 新增未连线节点、必填项未填都是编辑中间态，应允许随时落盘。
+        await doValidate();
         const flowgram = collectFullGraph();
         const cozeIR = toCozeIR(flowgram, keyToCozeType);
         await saveAppGraph(id, cozeIR as never);
@@ -1387,6 +1491,15 @@ export default function AppEditPage() {
 
   const handlePublish = useCallback(async () => {
     if (!id) return;
+    // 发布是运行态闸门：先做严格校验，有 error 不发布
+    const issues = await doValidate();
+    const errors = issues.filter((i) => i.severity === 'error');
+    if (errors.length > 0) {
+      setPanelTab('validation');
+      setPanelOpen(true);
+      message.error(`有 ${errors.length} 个校验问题，请先修复再发布`);
+      return;
+    }
     // 发布前先同步保存一次 draft，确保快照是最新的
     await new Promise<void>((resolve) => {
       scheduleSave();
@@ -1402,7 +1515,7 @@ export default function AppEditPage() {
     } finally {
       setPublishing(false);
     }
-  }, [id, scheduleSave]);
+  }, [id, doValidate, scheduleSave]);
 
   // ========== 添加节点 ==========
   const addNode = useCallback((typeKey: string, options?: { fromNodeId?: string; screenX?: number; screenY?: number }) => {
@@ -1413,7 +1526,7 @@ export default function AppEditPage() {
     nodeCounterRef.current[typeKey] = (nodeCounterRef.current[typeKey] ?? 0) + 1;
     const nodeId = `${typeKey}-${Date.now().toString(36)}-${nodeCounterRef.current[typeKey]}`;
 
-    // 从当前文档 JSON 读取节点位置（避免直接依赖 FlowGram 内部 TransformData）
+    // 从当前文档 JSON 读取节点位置（toJSON 的 meta.position 即真实 TransformData 位置）
     const docJson = ctx.document.toJSON() as unknown as WorkflowJSON;
     const allNodes = (docJson.nodes || []) as Array<{ id: string; meta?: { position?: { x: number; y: number } } }>;
 
@@ -1425,37 +1538,47 @@ export default function AppEditPage() {
     const startNode = allNodes.find((n) => String(n.type || n.id.split('-')[0]) === 'start' && n.meta?.position);
 
     if (options?.fromNodeId) {
-      // 从某节点 + 按钮弹出：放在源节点右侧 260px，同类型节点垂直错开
       const fromNode = allNodes.find((n) => n.id === options.fromNodeId);
       if (fromNode?.meta?.position) {
-        const sameTypeCount = allNodes.filter((n) => n.id.startsWith(typeKey)).length;
         posX = fromNode.meta.position.x + 260;
-        posY = fromNode.meta.position.y + sameTypeCount * 60 - 30;
+        posY = fromNode.meta.position.y;
       }
     } else if (startNode?.meta?.position) {
-      // 默认贴在 START 节点右侧 260px，同类型节点垂直错开
-      const sameTypeCount = allNodes.filter((n) => n.id.startsWith(typeKey)).length;
       posX = startNode.meta.position.x + 260;
-      posY = startNode.meta.position.y + sameTypeCount * 60 - 30;
+      posY = startNode.meta.position.y;
     } else {
-      // 兜底：级联错位
       const count = allNodes.length;
       posX = 300 + (count % 5) * 60;
       posY = 200 + (count % 4) * 70;
     }
 
-    const root = ctx.document.getNode('root');
-    ctx.document.addNode({
-      id: nodeId,
-      type: meta.type_key,
-      meta: { position: { x: posX, y: posY } },
-      data: { title: meta.title, config: {} },
-      parent: root,
-    });
+    // 位置避让：与已有节点重叠时逐格向下挪，避免新节点盖住老节点导致看不见
+    const NODE_BOX_WIDTH = 240;
+    const NODE_BOX_HEIGHT = 80;
+    const occupied = allNodes
+      .map((n) => n.meta?.position)
+      .filter((p): p is { x: number; y: number } => !!p);
+    const collides = (x: number, y: number) =>
+      occupied.some((p) => Math.abs(p.x - x) < NODE_BOX_WIDTH && Math.abs(p.y - y) < NODE_BOX_HEIGHT);
+    let attempts = 0;
+    while (collides(posX, posY) && attempts < 30) {
+      posY += NODE_BOX_HEIGHT + 16;
+      attempts += 1;
+    }
 
-    // 新节点添加后自动适应视图，确保用户能看到新节点
+    const root = ctx.document.getNode('root');
+    // 必须走 createWorkflowNodeByType：裸 addNode 不会初始化 TransformData，
+    // 节点会渲染在 (0,0) 且无法拖拽
+    ctx.document.createWorkflowNodeByType(
+      meta.type_key,
+      { x: posX, y: posY },
+      { id: nodeId, data: { title: meta.title, config: {} } },
+      root?.id,
+    );
+
+    // 新节点添加后自动适应视图，确保用户能看到新节点（WorkflowDocument.fitView）
     setTimeout(() => {
-      (ctx as any).viewport?.fitView?.();
+      ctx.document.fitView?.(true).catch(() => undefined);
     }, 100);
 
     // V9/V10：自动从 source 节点第一个 output 端口连线到新节点第一个 input 端口
@@ -1463,7 +1586,9 @@ export default function AppEditPage() {
       const fromNodeId = options.fromNodeId;
       const fromNode = ctx.document.getNode(fromNodeId) as any;
       if (fromNode) {
-        const fromMeta = keyToMeta[String(fromNode.type || fromNode.id.split('-')[0])];
+        // 实体上的 type 恒为 FlowNodeEntity，节点类型要用 flowNodeType
+        const fromTypeKey = String(fromNode.flowNodeType || fromNodeId.split('-')[0]);
+        const fromMeta = keyToMeta[fromTypeKey];
         const fromPortId = fromMeta?.outputs?.[0]?.name;
         const toPortId = meta.inputs?.[0]?.name;
         if (fromPortId) {
@@ -1479,6 +1604,76 @@ export default function AppEditPage() {
     }
     return nodeId;
   }, [keyToMeta]);
+
+  // ========== 节点复制 / 粘贴（右键菜单） ==========
+  const NODE_CLIPBOARD_KEY = 'boxia_node_clipboard';
+
+  const copyNode = useCallback(() => {
+    const ctx = ctxRef.current as any;
+    if (!ctx || !selectedNodeId) {
+      message.info('请先选中一个节点');
+      return;
+    }
+    const node = ctx.document?.getNode?.(selectedNodeId);
+    if (!node) {
+      message.error('未找到选中节点');
+      return;
+    }
+    const typeKey = String(node.flowNodeType || '');
+    const meta = keyToMeta[typeKey];
+    if (!meta) {
+      message.error('该节点不支持复制');
+      return;
+    }
+    const data = ((node.getExtInfo?.() || node.data || {}) as Record<string, any>);
+    const payload = {
+      typeKey,
+      title: data.title ? String(data.title) : meta.title,
+      config: (data.config || {}) as Record<string, any>,
+      outputs: Array.isArray(data.outputs) ? data.outputs : [],
+    };
+    nodeClipboardRef.current = payload;
+    try {
+      localStorage.setItem(NODE_CLIPBOARD_KEY, JSON.stringify(payload));
+    } catch {
+      // localStorage 写满时仅用内存剪贴板
+    }
+    message.success(`已复制「${payload.title}」`);
+  }, [selectedNodeId, keyToMeta]);
+
+  const pasteNode = useCallback(() => {
+    let payload = nodeClipboardRef.current;
+    if (!payload) {
+      try {
+        const raw = localStorage.getItem(NODE_CLIPBOARD_KEY);
+        if (raw) payload = JSON.parse(raw);
+      } catch {
+        payload = null;
+      }
+    }
+    if (!payload || !payload.typeKey) {
+      message.info('剪贴板为空，请先复制一个节点');
+      return;
+    }
+    const newId = addNode(payload.typeKey);
+    if (!newId) {
+      message.error('粘贴失败：未知节点类型');
+      return;
+    }
+    const ctx = ctxRef.current as any;
+    const node = ctx?.document?.getNode?.(newId);
+    if (node) {
+      node.updateExtInfo?.({
+        ...(node.getExtInfo?.() || node.data || {}),
+        title: payload.title ? `${payload.title} 副本` : keyToMeta[payload.typeKey]?.title,
+        config: JSON.parse(JSON.stringify(payload.config || {})),
+        outputs: JSON.parse(JSON.stringify(payload.outputs || [])),
+      });
+    }
+    message.success('节点已粘贴');
+    // 等新节点数据落盘后再触发保存
+    setTimeout(() => scheduleSave(), 100);
+  }, [addNode, keyToMeta, scheduleSave]);
 
   // ========== 双击节点打开配置 ==========
   const refreshPickerNodes = useCallback(() => {
@@ -1503,7 +1698,9 @@ export default function AppEditPage() {
   const handleNodeDoubleClick = useCallback((node: WorkflowNodeEntity) => {
     const prefix = node.id.split('-')[0];
     const nodeTypeKey = String(node.type || prefix || '');
-    const nodeData = ((node as unknown as { data?: { title?: string; config?: NodeConfigValues; outputs?: unknown[] } }).data || {});
+    const nodeData = ((node as unknown as { getExtInfo?: () => Record<string, any> }).getExtInfo?.()
+      || (node as unknown as { data?: Record<string, any> }).data
+      || {}) as { title?: string; config?: NodeConfigValues; outputs?: unknown[]; subgraph?: WorkflowJSON };
 
     // 子图节点：双击直接进入子图编辑
     if (SUBGRAPH_NODE_TYPES.has(nodeTypeKey)) {
@@ -1522,17 +1719,18 @@ export default function AppEditPage() {
           ],
           edges: [],
         };
-        // 同步回写到节点 data（让 persistCurrentEditor 能拿到）
-        (node as unknown as { data: Record<string, unknown> }).data = {
+        // 同步回写到节点 extInfo（FlowGram 的节点数据载体）
+        (node as unknown as { updateExtInfo?: (info: Record<string, any>) => void }).updateExtInfo?.({
           ...nodeData,
           subgraph: initSubgraph,
-        };
+        });
       }
       enterSubgraph(node.id, nodeData.title || nodeTypeKey);
       return;
     }
 
     setSelectedNodeId(node.id);
+    setConfigDrawerOpen(true);
     const meta = prefix ? keyToMeta[prefix] : undefined;
     if (meta) {
       setSelectedNodeMeta(meta);
@@ -1542,6 +1740,35 @@ export default function AppEditPage() {
       ...(nodeData.config || {}),
     });
     setNodeOutputs(parseOutputsValue(nodeData.outputs));
+
+    // 抽屉「输入」区：按入边反查上游可引用字段
+    const json = ctxRef.current?.document.toJSON() as unknown as WorkflowJSON | undefined;
+    const edges = ((json?.edges || []) as unknown as Array<{ source?: string; target?: string }>);
+    const groups: UpstreamInputGroup[] = [];
+    for (const edge of edges) {
+      if (String(edge.target) !== node.id) continue;
+      const srcId = String(edge.source || '');
+      const src = (json?.nodes || []).find((n) => String(n.id) === srcId);
+      if (!src) continue;
+      const srcData = (src.data || {}) as Record<string, any>;
+      const srcTypeKey = String(src.type || srcId.split('-')[0]);
+      const srcMeta = keyToMeta[srcTypeKey];
+      const fields = srcTypeKey === 'start'
+        ? (Array.isArray(srcData.config?.inputs)
+            ? srcData.config.inputs.map((inp: any) => ({ name: String(inp?.name || ''), label: '启动参数' }))
+            : [])
+        : (Array.isArray(srcData.outputs) && srcData.outputs.length > 0
+            ? srcData.outputs.map((o: any) => ({ name: String(o?.name || ''), label: String(o?.description || '') }))
+            : (srcMeta?.outputs || []).map((p) => ({ name: p.name, label: p.label || '' })));
+      const cleaned = fields.filter((f: { name: string }) => f.name);
+      if (cleaned.length === 0) continue;
+      groups.push({
+        nodeId: srcId,
+        nodeTitle: String(srcData.title || srcMeta?.title || srcId),
+        fields: cleaned,
+      });
+    }
+    setUpstreamInputs(groups);
     refreshPickerNodes();
   }, [keyToMeta, refreshPickerNodes, enterSubgraph]);
 
@@ -1565,6 +1792,7 @@ export default function AppEditPage() {
       message.error('删除节点失败');
     }
     setSelectedNodeId(null);
+    setConfigDrawerOpen(false);
     setDeleteNodeOpen(false);
     scheduleSave();
   }, [selectedNodeId, scheduleSave]);
@@ -1596,13 +1824,19 @@ export default function AppEditPage() {
       const next = { ...prev, ...patch };
       const ctx = ctxRef.current;
       if (ctx && selectedNodeId) {
-        const node = ctx.document.getNode(selectedNodeId) as unknown as { data?: Record<string, unknown> };
+        const node = ctx.document.getNode(selectedNodeId) as unknown as {
+          updateExtInfo?: (info: Record<string, any>) => void;
+          getExtInfo?: () => Record<string, any> | undefined;
+          data?: Record<string, unknown>;
+        };
         if (node) {
-          node.data = {
-            ...(node.data || {}),
-            title: next.title,
-            config: next,
-          };
+          // title 单独存放，避免混入 config 后被写进后端 inputs
+          const { title, ...configOnly } = next;
+          node.updateExtInfo?.({
+            ...(node.getExtInfo?.() || node.data || {}),
+            title,
+            config: configOnly,
+          });
         }
       }
       return next;
@@ -1613,16 +1847,20 @@ export default function AppEditPage() {
     setNodeOutputs(next);
     const ctx = ctxRef.current;
     if (ctx && selectedNodeId) {
-      const node = ctx.document.getNode(selectedNodeId) as unknown as { data?: Record<string, unknown> };
+      const node = ctx.document.getNode(selectedNodeId) as unknown as {
+        updateExtInfo?: (info: Record<string, any>) => void;
+        getExtInfo?: () => Record<string, any> | undefined;
+        data?: Record<string, unknown>;
+      };
       if (node) {
-        node.data = {
-          ...(node.data || {}),
+        node.updateExtInfo?.({
+          ...(node.getExtInfo?.() || node.data || {}),
           outputs: next.map((it) => ({
             name: it.name,
             type: it.type,
             ...(it.description ? { description: it.description } : {}),
           })),
-        };
+        });
       }
     }
   }, [selectedNodeId]);
@@ -1924,7 +2162,8 @@ export default function AppEditPage() {
   // ========== 渲染 ==========
   if (!id) return <div style={{ padding: 24 }}>缺少应用 ID</div>;
   if (loadError) return <div style={{ padding: 24, color: '#d4380d' }}>加载失败：{loadError}</div>;
-  if (!initialData) return <div style={{ padding: 24 }}>加载中…</div>;
+  // nodeMetas 未就绪时不要挂载编辑器：节点类型未注册会导致节点 0 尺寸、画布空白
+  if (!initialData || !nodeMetaReady) return <div style={{ padding: 24 }}>加载中…</div>;
 
   const categoryLabels: Record<string, string> = {
     control: '流程控制',
@@ -1990,12 +2229,11 @@ export default function AppEditPage() {
              FlowGram 端口 DOM：
              <div data-port-entity-id class="WorkflowPointStyle-xxx">  ← 外层 20x20 命中区
                <div class="bg-circle workflow-bg-circle"/>             ← 白色底圈
-               <div class="bg workflow-port-bg workflow-point-bg">    ← 紫色圆点（默认 scale(0.4)）
+               <div class="bg workflow-port-bg workflow-point-bg">    ← 紫色圆点
                <div class="focus-circle"/>
-             问题1：旧 CSS [class*='port'] 把紫点刷白 → 端口不可见
-             问题2：FlowGram 默认 transform: scale(0.4) 让圆点太小
-             修复：默认放大圆点到可见尺寸，保留命中区不设 pointer-events:none
-                   （否则拖线时 mouseup 检测不到目标端口） */
+             问题：.bg 默认是 position: relative 的流式元素，旧样式把它缩到 12x12 后
+                   仍贴在命中区左上角，圆心与白圈圆心差 4px（用户反馈的"端点未居中"）。
+             修复：改成绝对定位 + 50%/负 margin 居中，缩放不会破坏圆心位置。 */
           [data-port-entity-id] {
             width: 20px !important;
             height: 20px !important;
@@ -2008,14 +2246,20 @@ export default function AppEditPage() {
           [data-port-entity-id] > .workflow-bg-circle {
             width: 20px !important;
             height: 20px !important;
+            left: 0 !important;
+            top: 0 !important;
             background: #fff !important;
             transform: scale(1) !important;
           }
           [data-port-entity-id] > .bg,
           [data-port-entity-id] > .workflow-port-bg,
           [data-port-entity-id] > .workflow-point-bg {
+            position: absolute !important;
+            left: 50% !important;
+            top: 50% !important;
             width: 12px !important;
             height: 12px !important;
+            margin: -6px 0 0 -6px !important;
             background: #6366f1 !important;
             transform: scale(1) !important;
             border: 2px solid #fff !important;
@@ -2023,9 +2267,11 @@ export default function AppEditPage() {
             cursor: crosshair !important;
           }
           [data-port-entity-id]:hover > .bg,
-          [data-port-entity-id]:hover > .workflow-port-bg {
+          [data-port-entity-id]:hover > .workflow-port-bg,
+          [data-port-entity-id].hovered > .bg,
+          [data-port-entity-id].hovered > .workflow-port-bg {
             background: #4338ca !important;
-            transform: scale(1.2) !important;
+            transform: scale(1.15) !important;
           }
           [data-port-entity-id].linked > .bg,
           [data-port-entity-id].linked > .workflow-port-bg {
@@ -2069,14 +2315,14 @@ export default function AppEditPage() {
           onAutoLayout={() => message.info('自动排版功能待 FlowGram 插件支持')}
           onFitView={() => {
             const ctx = ctxRef.current as any;
-            ctx?.viewport?.fitView?.();
+            ctx?.document?.fitView?.(true);
           }}
           onDeleteSelected={() => {
             if (selectedNodeId) setDeleteNodeOpen(true);
             else message.info('请先选中一个节点');
           }}
-          onCopyNode={() => message.info('复制节点功能待实现')}
-          onPasteNode={() => message.info('粘贴节点功能待实现')}
+          onCopyNode={copyNode}
+          onPasteNode={pasteNode}
         />
 
         {/* 空白画布欢迎页 */}
@@ -2098,7 +2344,7 @@ export default function AppEditPage() {
           />
         )}
 
-        {/* 小地图（U-B3 简化版） */}
+        {/* 小地图（对齐 Coze）：节点缩略图 + 当前可视区域框 */}
         <MiniMap
           nodes={pickerNodes
             .filter((n) => n.position)
@@ -2108,9 +2354,11 @@ export default function AppEditPage() {
               y: n.position!.y,
               color: keyToMeta[n.typeKey]?.color,
             }))}
+          viewport={canvasViewport}
           onNavigate={(x, y) => {
-            const ctx = ctxRef.current as any;
-            ctx?.viewport?.scrollTo?.({ x, y });
+            // 点击小地图把相机中心移到对应画布坐标
+            const config = (ctxRef.current as any)?.playground?.config;
+            config?.scrollToView?.({ position: { x, y }, scrollToCenter: true, easing: true });
           }}
         />
 
@@ -2131,6 +2379,19 @@ export default function AppEditPage() {
           {!validating && saveStatus === 'saved' && lastSavedAt && `已保存 ${lastSavedAt.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}`}
           {!validating && saveStatus === 'saved' && !lastSavedAt && '已保存'}
           {!validating && saveStatus === 'error' && <span style={{ cursor: 'pointer' }} onClick={() => scheduleSave()}>保存失败，点击重试</span>}
+          <span
+            style={{
+              cursor: 'pointer',
+              color: validationIssues.some((i) => i.severity === 'error') ? '#ef4444' : '#6b7280',
+            }}
+            onClick={async () => {
+              await doValidate();
+              setPanelTab('validation');
+              setPanelOpen(true);
+            }}
+          >
+            · 校验{validationIssues.length > 0 ? ` ${validationIssues.length}` : ''}
+          </span>
         </div>
 
         {/* 发布按钮（顶部右侧，V5 配色 #7c3aed） */}
@@ -2277,6 +2538,25 @@ export default function AppEditPage() {
             const doc = ctx.document as any;
             if (doc?.nodes) setNodeCount(doc.nodes.length || 0);
             refreshPickerNodes();
+
+            // 订阅画布缩放/滚动：驱动小地图相机框和底部缩放百分比
+            viewportDisposablesRef.current.forEach((d) => d.dispose?.());
+            viewportDisposablesRef.current = [];
+            const playground = (ctx as any).playground;
+            const config = playground?.config;
+            if (config?.onConfigChanged) {
+              viewportDisposablesRef.current.push(config.onConfigChanged(() => syncCanvasViewport()));
+            }
+            if (playground?.onZoom) {
+              viewportDisposablesRef.current.push(playground.onZoom(() => syncCanvasViewport()));
+            }
+            if (playground?.onScroll) {
+              viewportDisposablesRef.current.push(playground.onScroll(() => syncCanvasViewport()));
+            }
+            syncCanvasViewport();
+
+            // 首次加载布局完成后适应视图，避免节点落在视口外
+            setTimeout(() => ctx.document.fitView?.(false).then(() => syncCanvasViewport()).catch(() => undefined), 100);
           }}
           onContentChange={() => {
             scheduleSave();
@@ -2392,10 +2672,27 @@ export default function AppEditPage() {
 
       {/* 节点配置抽屉 */}
       <Drawer
-        title={`配置节点 - ${selectedNodeMeta?.title || ''}`}
-        open={!!selectedNodeId}
-        onClose={() => setSelectedNodeId(null)}
-        width={420}
+        title={selectedNodeMeta ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <NodeIcon typeKey={selectedNodeMeta.type_key} color={selectedNodeMeta.color} size={28} />
+            <div style={{ minWidth: 0 }}>
+              <div style={{ fontSize: 15, fontWeight: 600, lineHeight: '20px' }}>
+                {selectedNodeMeta.title}
+              </div>
+              {selectedNodeMeta.description && (
+                <div style={{
+                  fontSize: 12, color: '#6b7280', fontWeight: 400, lineHeight: '16px',
+                  whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                }}>
+                  {selectedNodeMeta.description}
+                </div>
+              )}
+            </div>
+          </div>
+        ) : ''}
+        open={configDrawerOpen && !!selectedNodeId}
+        onClose={() => setConfigDrawerOpen(false)}
+        width={480}
         extra={
           selectedNodeId && selectedNodeMeta?.type_key !== 'start' ? (
             <Button danger size="small" onClick={() => setDeleteNodeOpen(true)}>
@@ -2415,10 +2712,12 @@ export default function AppEditPage() {
             outputs={nodeOutputs}
             onOutputsChange={handleOutputsChange}
             datasetOptions={datasetOptions}
+            upstreamInputs={upstreamInputs}
             onAddNext={(typeKey) => {
               // V10：配置抽屉里点"下一步"，以当前选中节点为 source 自动连线
               const fromNodeId = selectedNodeId;
               setSelectedNodeId(null);
+              setConfigDrawerOpen(false);
               addNode(typeKey, { fromNodeId });
             }}
           />

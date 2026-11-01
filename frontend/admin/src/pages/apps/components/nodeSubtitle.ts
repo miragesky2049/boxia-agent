@@ -1,81 +1,120 @@
 // 根据节点类型与配置生成节点卡片副标题（与 Coze 行为对齐）
-// 返回空字符串时不渲染副标题行
+// type_key 必须与后端 node_meta.py 一致；返回空字符串时不渲染副标题行
+
+function truncate(text: string, max = 32): string {
+  return text.length > max ? `${text.slice(0, max)}…` : text;
+}
 
 export function buildNodeSubtitle(
   typeKey: string,
   config: Record<string, any> | undefined,
 ): string {
-  if (!config) return '';
+  const cfg = config || {};
 
   switch (typeKey) {
+    case 'start': {
+      const inputs = Array.isArray(cfg.inputs) ? cfg.inputs.length : 0;
+      return inputs > 0 ? `${inputs} 个启动参数` : '工作流入口';
+    }
+    case 'end':
+      return '工作流出口';
+    case 'comment':
+      return '';
+
+    // ---- AI / 逻辑 ----
     case 'llm': {
-      const model = config.modleName || config.model || config.model_name || '';
-      return model ? `模型: ${model}` : '';
-    }
-    case 'http': {
-      const method = (config.method || 'GET').toString().toUpperCase();
-      const url = (config.url || '').toString();
-      if (!url) return method;
-      const short = url.length > 32 ? `${url.slice(0, 32)}…` : url;
-      return `${method} ${short}`;
-    }
-    case 'if_else': {
-      const cases = Array.isArray(config.cases) ? config.cases.length : 0;
-      return cases > 0 ? `${cases} 个条件` : '条件分支';
-    }
-    case 'code':
-      return '执行代码';
-    case 'dataset':
-    case 'dataset_write': {
-      const id = config.datasetId || config.dataset_id || '';
-      return id ? `知识库: ${id}` : '检索知识库';
-    }
-    case 'loop': {
-      const count = config.loopCount || config.count || '';
-      return count ? `循环 ${count} 次` : '循环';
-    }
-    case 'batch':
-      return '批量处理';
-    case 'subworkflow': {
-      const name = config.workflowName || config.workflow_name || config.subworkflow_id || '';
-      return name ? `子流程: ${name}` : '子流程';
-    }
-    case 'variable_set':
-      return '赋值变量';
-    case 'variable_merge':
-      return '合并变量';
-    case 'text_processor':
-      return '文本处理';
-    case 'json_tools':
-      return 'JSON 处理';
-    case 'conversation_create':
-      return '创建会话';
-    case 'conversation_update':
-      return '更新会话';
-    case 'conversation_list':
-      return '查询会话';
-    case 'conversation_history':
-      return '会话历史';
-    case 'message_create':
-      return '发送消息';
-    case 'message_update':
-      return '更新消息';
-    case 'message_list':
-      return '查询消息';
-    case 'message_delete':
-      return '删除消息';
-    case 'human_task':
-      return '人工审批';
-    case 'api_plugin': {
-      const name = config.pluginName || config.plugin_name || config.tool_name || '';
-      return name ? `插件: ${name}` : '插件';
+      const model = cfg.modleName || cfg.model || cfg.model_name || '';
+      return model ? `模型: ${truncate(String(model))}` : '调用大模型';
     }
     case 'agent_loop':
-      return 'Agent 循环';
-    case 'start':
-      return '工作流入口';
-    case 'end':
-      return '工作流结束';
+      return 'Agent 自主循环';
+    case 'http': {
+      const method = String(cfg.method || 'GET').toUpperCase();
+      const url = String(cfg.url || '');
+      return url ? `${method} ${truncate(url)}` : '调用外部接口';
+    }
+    case 'api_plugin': {
+      const name = cfg.pluginName || cfg.plugin_name || cfg.tool_name || '';
+      return name ? `插件: ${truncate(String(name))}` : '调用插件';
+    }
+    case 'code':
+      return cfg.code ? 'Python 代码' : '编写 Python 代码';
+    case 'if_else': {
+      const cases = Array.isArray(cfg.cases) ? cfg.cases.length : 0;
+      return cases > 0 ? `${cases} 个条件` : '条件分支';
+    }
+    case 'loop': {
+      const count = cfg.loopCount || cfg.count || '';
+      return count ? `循环 ${count} 次` : '循环执行';
+    }
+    case 'batch': {
+      const pc = cfg.parallelCount || '';
+      return pc ? `并发 ${pc}` : '批量处理';
+    }
+    case 'break':
+      return '跳出循环';
+    case 'continue':
+      return '跳过本次迭代';
+    case 'subworkflow': {
+      const id = cfg.workflowId || cfg.workflow_id || cfg.workflowName || '';
+      return id ? `子流程: ${truncate(String(id))}` : '调用子流程';
+    }
+    case 'human_approval': {
+      const role = cfg.assignee_role || '';
+      return role ? `审批人: ${truncate(String(role))}` : '等待人工审批';
+    }
+
+    // ---- 数据 ----
+    case 'dataset':
+    case 'dataset_write': {
+      const id = cfg.datasetId || cfg.dataset_id || '';
+      if (id) return `知识库: ${truncate(String(id))}`;
+      return typeKey === 'dataset_write' ? '写入知识库' : '检索知识库';
+    }
+    case 'text_processor': {
+      const op = cfg.operation || '';
+      const opLabel: Record<string, string> = { concat: '拼接', slice: '截取', replace: '替换' };
+      return op ? `文本${opLabel[op] || op}` : '文本处理';
+    }
+    case 'json_stringify':
+      return '对象转 JSON 字符串';
+    case 'json_parser':
+      return 'JSON 字符串转对象';
+
+    // ---- 变量 ----
+    case 'set_variable': {
+      const name = cfg.variableName || cfg.variable_name || '';
+      return name ? `设置 ${truncate(String(name))}` : '给变量赋值';
+    }
+    case 'variable_merge':
+      return '合并分支变量';
+
+    // ---- 会话 / 消息 ----
+    case 'create_conversation':
+      return cfg.title ? `会话: ${truncate(String(cfg.title))}` : '创建会话';
+    case 'update_conversation':
+      return cfg.title ? `新标题: ${truncate(String(cfg.title))}` : '更新会话';
+    case 'delete_conversation':
+      return '删除会话';
+    case 'query_conversation_list':
+      return '查询会话列表';
+    case 'query_conversation_history':
+      return cfg.limit ? `最近 ${cfg.limit} 条` : '查询会话历史';
+    case 'create_message': {
+      if (cfg.content) return truncate(String(cfg.content));
+      const roleLabels: Record<string, string> = {
+        user: '用户', assistant: '助手', system: '系统', tool: '工具',
+      };
+      const role = String(cfg.role || 'user');
+      return `角色: ${roleLabels[role] || role}`;
+    }
+    case 'update_message':
+      return '更新消息内容';
+    case 'delete_message':
+      return '删除消息';
+    case 'clear_context':
+      return '清空会话上下文';
+
     default:
       return '';
   }

@@ -17,14 +17,16 @@ interface CanvasToolbarProps {
 export function CanvasToolbar({ ctxRef, zoom, onAddNode, onRun, running }: CanvasToolbarProps) {
   const handleZoom = (delta: number) => {
     const ctx = ctxRef.current as any;
-    if (!ctx?.viewport) return;
-    const next = Math.max(0.25, Math.min(2, (ctx.viewport.zoom ?? 1) + delta));
-    ctx.viewport.zoomTo?.(next);
+    // 画布缩放服务挂在 playground.config 上，不是 ctx.viewport
+    const config = ctx?.playground?.config;
+    if (!config) return;
+    const next = Math.max(0.25, Math.min(2, (config.zoom ?? 1) + delta));
+    config.updateZoom?.(next, true);
   };
 
   const handleFit = () => {
     const ctx = ctxRef.current as any;
-    ctx?.viewport?.fitView?.();
+    ctx?.document?.fitView?.(true);
   };
 
   const handleFullscreen = () => {

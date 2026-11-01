@@ -1,33 +1,46 @@
+// 图标映射的 key 必须与后端 node_meta.py 的 type_key 完全一致，
+// 否则节点会退化成默认圆点图标。
 const ICON_MAP: Record<string, { emoji: string; fallbackColor: string }> = {
+  // 控制流
   start: { emoji: '▶', fallbackColor: '#3b82f6' },
   end: { emoji: '■', fallbackColor: '#ef4444' },
-  llm: { emoji: 'AI', fallbackColor: '#8b5cf6' },
-  http: { emoji: '🌐', fallbackColor: '#f59e0b' },
   if_else: { emoji: 'IF', fallbackColor: '#ec4899' },
-  code: { emoji: '{;}', fallbackColor: '#10b981' },
-  dataset: { emoji: 'DB', fallbackColor: '#6366f1' },
-  dataset_write: { emoji: '✎', fallbackColor: '#6366f1' },
   loop: { emoji: '↻', fallbackColor: '#eab308' },
   batch: { emoji: '≡', fallbackColor: '#eab308' },
-  subworkflow: { emoji: '▣', fallbackColor: '#64748b' },
-  variable_set: { emoji: 'ƒ', fallbackColor: '#a855f7' },
-  variable_merge: { emoji: '⋈', fallbackColor: '#a855f7' },
-  text_processor: { emoji: '¶', fallbackColor: '#ec4899' },
-  json_tools: { emoji: '{}', fallbackColor: '#64748b' },
-  conversation_create: { emoji: '✉', fallbackColor: '#10b981' },
-  conversation_update: { emoji: '✎', fallbackColor: '#10b981' },
-  conversation_list: { emoji: '☰', fallbackColor: '#10b981' },
-  conversation_history: { emoji: '☰', fallbackColor: '#10b981' },
-  message_create: { emoji: '↑', fallbackColor: '#10b981' },
-  message_update: { emoji: '✎', fallbackColor: '#10b981' },
-  message_list: { emoji: '☰', fallbackColor: '#10b981' },
-  message_delete: { emoji: '✕', fallbackColor: '#10b981' },
-  human_task: { emoji: '👤', fallbackColor: '#f97316' },
-  comment: { emoji: '✎', fallbackColor: '#eab308' },
-  api_plugin: { emoji: '⌗', fallbackColor: '#f59e0b' },
-  agent_loop: { emoji: '◉', fallbackColor: '#8b5cf6' },
   break: { emoji: '‖', fallbackColor: '#64748b' },
   continue: { emoji: '→', fallbackColor: '#64748b' },
+  human_approval: { emoji: '👤', fallbackColor: '#f97316' },
+  subworkflow: { emoji: '▣', fallbackColor: '#64748b' },
+  comment: { emoji: '✎', fallbackColor: '#eab308' },
+
+  // AI / 逻辑
+  llm: { emoji: 'AI', fallbackColor: '#8b5cf6' },
+  agent_loop: { emoji: '◉', fallbackColor: '#8b5cf6' },
+  http: { emoji: '🌐', fallbackColor: '#f59e0b' },
+  api_plugin: { emoji: '⌗', fallbackColor: '#f59e0b' },
+  code: { emoji: '{;}', fallbackColor: '#10b981' },
+
+  // 数据
+  dataset: { emoji: 'DB', fallbackColor: '#6366f1' },
+  dataset_write: { emoji: '✎', fallbackColor: '#6366f1' },
+  text_processor: { emoji: '¶', fallbackColor: '#ec4899' },
+  json_stringify: { emoji: '{}', fallbackColor: '#64748b' },
+  json_parser: { emoji: '{ }', fallbackColor: '#64748b' },
+
+  // 变量
+  set_variable: { emoji: 'ƒ', fallbackColor: '#a855f7' },
+  variable_merge: { emoji: '⋈', fallbackColor: '#a855f7' },
+
+  // 会话 / 消息
+  create_conversation: { emoji: '＋', fallbackColor: '#10b981' },
+  update_conversation: { emoji: '✎', fallbackColor: '#10b981' },
+  delete_conversation: { emoji: '✕', fallbackColor: '#10b981' },
+  query_conversation_list: { emoji: '☰', fallbackColor: '#10b981' },
+  query_conversation_history: { emoji: '☷', fallbackColor: '#10b981' },
+  create_message: { emoji: '↑', fallbackColor: '#10b981' },
+  update_message: { emoji: '✎', fallbackColor: '#10b981' },
+  delete_message: { emoji: '✕', fallbackColor: '#10b981' },
+  clear_context: { emoji: '⌫', fallbackColor: '#10b981' },
 };
 
 function hexToRgba(hex: string, alpha: number): string {

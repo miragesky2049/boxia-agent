@@ -1,6 +1,17 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Input, Empty } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
+import { NodeIcon } from './NodeIcon';
+
+// 与后端 node_meta.py 的 category 对齐，按顺序展示分组
+const CATEGORY_LABELS: Array<{ key: string; label: string }> = [
+  { key: 'control', label: '流程控制' },
+  { key: 'ai', label: 'AI 能力' },
+  { key: 'logic', label: '逻辑与工具' },
+  { key: 'data', label: '数据' },
+  { key: 'conversation', label: '会话与消息' },
+  { key: 'misc', label: '其他' },
+];
 
 interface AddNodePopoverProps {
   x: number;
@@ -33,6 +44,17 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
     }
   }, [query, metas]);
 
+  const groups = useMemo(() => {
+    const visible = filtered.filter((m) => m.type_key !== 'start');
+    return CATEGORY_LABELS
+      .map(({ key, label }) => ({
+        key,
+        label,
+        items: visible.filter((m) => m.category === key),
+      }))
+      .filter((g) => g.items.length > 0);
+  }, [filtered]);
+
   useEffect(() => {
     // 延迟绑定：避免触发 popover 的那个 click 事件冒泡到 document 时立即关闭它
     let handler: ((e: MouseEvent) => void) | null = null;
@@ -58,8 +80,8 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
         left: x,
         top: y,
         zIndex: 2000,
-        width: 280,
-        maxHeight: 400,
+        width: 320,
+        maxHeight: 460,
         overflowY: 'auto',
         background: '#fff',
         borderRadius: 8,
@@ -77,42 +99,53 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
         style={{ marginBottom: 8 }}
         autoFocus
       />
-      {filtered.length === 0 ? (
+      {groups.length === 0 ? (
         <Empty description="无匹配节点" image={Empty.PRESENTED_IMAGE_SIMPLE} />
       ) : (
-        filtered
-          .filter((m) => m.type_key !== 'start')
-          .map((m) => (
-            <div
-              key={m.type_key}
-              onClick={() => {
-                onSelect(m.type_key);
-                onClose();
-              }}
-              style={{
-                padding: '6px 8px',
-                borderRadius: 4,
-                cursor: 'pointer',
-                fontSize: 13,
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <span
-                style={{
-                  width: 8, height: 8, borderRadius: '50%',
-                  background: m.color, flexShrink: 0,
-                }}
-              />
-              <span style={{ fontWeight: 500 }}>{m.title}</span>
-              <span style={{ fontSize: 11, color: '#9ca3af', marginLeft: 'auto' }}>
-                {m.category}
-              </span>
+        groups.map((group) => (
+          <div key={group.key} style={{ marginBottom: 8 }}>
+            <div style={{
+              fontSize: 11, fontWeight: 600, color: '#9ca3af',
+              padding: '4px 8px', letterSpacing: 0.5,
+            }}>
+              {group.label}
             </div>
-          ))
+            {group.items.map((m) => (
+              <div
+                key={m.type_key}
+                onClick={() => {
+                  onSelect(m.type_key);
+                  onClose();
+                }}
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                }}
+                onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+              >
+                <NodeIcon typeKey={m.type_key} color={m.color} size={24} />
+                <div style={{ minWidth: 0, flex: 1 }}>
+                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
+                    {m.title}
+                  </div>
+                  {m.description && (
+                    <div style={{
+                      fontSize: 11, color: '#9ca3af',
+                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                    }}>
+                      {m.description}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        ))
       )}
     </div>
   );

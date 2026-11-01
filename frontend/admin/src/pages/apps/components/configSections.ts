@@ -8,6 +8,45 @@ export interface ConfigSection {
 }
 
 const SECTION_DEFS: Record<string, Array<{ title: string; match: (f: ConfigFieldMeta) => boolean }>> = {
+  start: [
+    { title: '启动参数', match: (f) => f.name === 'inputs' },
+  ],
+  end: [
+    { title: '输出设置', match: (f) => f.name === 'content' },
+  ],
+  comment: [
+    { title: '便签内容', match: (f) => f.name === 'content' },
+  ],
+  api_plugin: [
+    { title: '插件设置', match: (f) => ['pluginName', 'description'].includes(f.name) },
+  ],
+  text_processor: [
+    { title: '文本处理设置', match: (f) => ['operation', 'find', 'replaceWith'].includes(f.name) },
+  ],
+  set_variable: [
+    { title: '变量设置', match: (f) => ['variableName', 'value'].includes(f.name) },
+  ],
+  human_approval: [
+    { title: '审批设置', match: (f) => ['assignee_role', 'instructions'].includes(f.name) },
+  ],
+  create_conversation: [
+    { title: '会话设置', match: (f) => ['title', 'app_id'].includes(f.name) },
+  ],
+  update_conversation: [
+    { title: '会话设置', match: (f) => ['title'].includes(f.name) },
+  ],
+  query_conversation_list: [
+    { title: '查询设置', match: (f) => ['app_id', 'limit'].includes(f.name) },
+  ],
+  query_conversation_history: [
+    { title: '查询设置', match: (f) => ['limit'].includes(f.name) },
+  ],
+  create_message: [
+    { title: '消息设置', match: (f) => ['role', 'content'].includes(f.name) },
+  ],
+  update_message: [
+    { title: '消息设置', match: (f) => ['content'].includes(f.name) },
+  ],
   llm: [
     { title: '模型设置', match: (f) => ['modleName', 'temperature', 'maxTokens'].includes(f.name) },
     { title: '技能', match: (f) => f.name === 'tools' },
@@ -36,6 +75,9 @@ const SECTION_DEFS: Record<string, Array<{ title: string; match: (f: ConfigField
   ],
   loop: [
     { title: '循环设置', match: (f) => ['loopType', 'loopCount', 'parallel'].includes(f.name) },
+  ],
+  subworkflow: [
+    { title: '调用设置', match: (f) => ['workflowId'].includes(f.name) },
   ],
   batch: [
     { title: '批处理设置', match: (f) => ['parallelCount'].includes(f.name) },

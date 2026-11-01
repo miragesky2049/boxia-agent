@@ -42,6 +42,15 @@ def _infer_runtime_mode(graph: dict[str, Any]) -> str:
 
 GRAPH_CACHE_TTL_SECONDS = 300
 GRAPH_INVALIDATE_CHANNEL = "graph:invalidate"
+# 草稿保存只拦截会破坏图结构的致命错误。必填项为空、表达式语法错、新节点未连线等
+# 都是编辑中间态，允许保存；发布时再用全量校验拦截。
+DRAFT_BLOCKING_CODES = frozenset({
+    "missing_start",
+    "multiple_start",
+    "dangling_edge_source",
+    "dangling_edge_target",
+    "convert_failed",
+})
 # graph JSONB 超过该阈值时只存 URI（对象存储留给后续接入）
 GRAPH_INLINE_SIZE_THRESHOLD = 1024 * 1024  # 1MB
 
@@ -282,12 +291,15 @@ class ApplicationService:
         if not graph.get("nodes"):
             raise ValidationError("graph 至少需要一个节点")
 
-        # A11: 保存前结构校验，error 级问题阻塞保存
+        # A11: 保存前结构校验；草稿只拦截致命结构错误，其余问题留给发布校验
         issues = validate_raw_graph(graph)
-        errors = [i for i in issues if i.severity == "error"]
-        if errors:
-            detail = "; ".join(i.message for i in errors)
-            raise ValidationError(f"画布校验不通过：{detail}")
+        blocking = [
+            i for i in issues
+            if i.severity == "error" and i.code in DRAFT_BLOCKING_CODES
+        ]
+        if blocking:
+            detail = "; ".join(i.message for i in blocking)
+            raise ValidationError(f"画布结构不合法：{detail}")
 
         runtime_mode = _infer_runtime_mode(graph)
         latest = self._repo.get_latest_graph_version(application_id)
@@ -455,6 +467,14 @@ class ApplicationService:
         latest = self._repo.get_latest_graph_version(application_id)
         if latest is None:
             raise NotFoundError("graph 不存在，请先保存画布")
+
+        # 发布是运行态闸门：结构、必填项、表达式、未连线节点全部按 error 拦截
+        latest_graph = _parse_graph(latest.get("graph"), self._storage)
+        issues = validate_raw_graph(latest_graph if isinstance(latest_graph, dict) else {})
+        errors = [i for i in issues if i.severity == "error"]
+        if errors:
+            detail = "; ".join(i.message for i in errors[:5])
+            raise ValidationError(f"画布校验不通过，无法发布：{detail}")
 
         target_version = latest["version"]
         previous_version = app.get("published_graph_version")

@@ -1993,3 +1993,119 @@ B1（Popover 坐标）──→ B3（连线校验）──→ B2（IF 拖拽）�
 
 每个修复后浏览器实机验证，typecheck 通过再进下一个。
 
+
+---
+
+## 十二、2026-11-01 阶段 8：核心常用节点前端补全与逐层级操作链路
+
+> 目标：把「能画」升级为「能配、能改、能存、能查错」，节点元数据与后端 `node_meta.py` 完全对齐。
+> 约束：结构以 Coze 为标准；Dify 仅借鉴展示形式；严禁复制 Dify 源码。
+
+### 12.1 本轮已完成（baseline）
+
+| # | 项 | 文件 | 验证 |
+|---|----|------|------|
+| C1 | 连线端点蓝点居中 | `AppEditPage.tsx`（端口 CSS） | Playwright 几何：outer 圆点与 `.bg` 圆心一致 |
+| C2 | MiniMap 重写：等比例、节点包围盒、相机框、点击导航 | `components/MiniMap.tsx` | 250% 缩放相机框可见；点击改变 scroll |
+| C3 | 缩放/适应按钮改走 `playground.config.updateZoom` / `document.fitView` | `components/CanvasToolbar.tsx` | zoom 1→1.2，label 120% |
+| C4 | NodeIcon 覆盖后端 30 个 type_key | `components/NodeIcon.tsx` | 添加面板 6 分组图标全命中 |
+| C5 | nodeSubtitle 31 类副标题（model/url/dataset/role 中文映射） | `components/nodeSubtitle.ts` | tsc 编译后逐类断言 |
+| C6 | 配置分组补齐 start/end/comment/api_plugin/text_processor/set_variable/human_approval/subworkflow/会话/消息 | `components/configSections.ts` | 抽屉分组正确 |
+| C7 | 下一步推荐补齐 13 类节点 | `components/nodeNextRecommendations.ts` | 抽屉底部"下一步" |
+| C8 | 添加节点面板中文分类 + 图标 + 描述 + 搜索 | `components/AddNodePopover.tsx` | 6 分组 30 节点 |
+| C9 | select 选项显示中文 label | `AppEditPage.tsx` FieldControl | 角色下拉显示"用户/助手" |
+| C10 | 无配置节点提示"输入来自上游连线" | `AppEditPage.tsx` NodeConfigForm | JSON 解析节点 |
+| C11 | 抽屉头部 NodeIcon + 标题 + 描述，宽 480 | `AppEditPage.tsx` Drawer | 视觉对齐 Coze |
+
+### 12.2 逐层级操作链路（L0 → L6）
+
+| 层级 | 操作 | 入口 | 实现链路 | 现状 |
+|------|------|------|----------|------|
+| L0 应用级 | 进入画布 | `/apps` 列表 → `/apps/:id/edit` | 加载 app + `GET /apps/{id}/graph` → `GET /node-metas` | ✅ |
+| L1 画布级 | 初始化视图 | 页面 onLoad | `document.transform` 恢复 → `fitView` → `onConfigChanged/onZoom/onScroll` 同步 MiniMap | ✅ |
+| L1 画布级 | 缩放/适应/移动 | 底部浮条、滚轮、右键 | `updateZoom` / `fitView` / `scrollToView` + MiniMap 点击 | ✅ |
+| L2 节点库 | 添加节点（4 入口） | 底部「+ 添加节点」、节点 hover「+」、端口拖线到空白、画布右键 | `AddNodePopover` → `addNode(typeKey,{fromNodeId,position})` → `createWorkflowNodeByType` → `linesManager.createLine` 自动连线 | ✅ |
+| L3 节点卡 | 选中/拖拽/删除 | 单击、拖拽、Delete | `NodeCard` 选中/运行态描边、hover「+」；`deleteNode` 二次确认 | ✅ |
+| L3 节点卡 | 打开配置 | 双击 / 右键 | Drawer 480 + 头部元信息 | ✅ |
+| L4 配置层 | 字段编辑 | 抽屉内 | `configSections` 分组 → `FieldControl` 按 `field_type` 分发（tool_list 已结构化） | ✅ |
+| L4 配置层 | 输出字段 | 抽屉底部 | `OutputsEditor` → `node.data.outputs` | ✅ |
+| L4 配置层 | 下一步推荐 | 抽屉底部 | `getNextRecommendations` → 自动连线添加 | ✅ |
+| L5 保存/校验 | 自动保存 | 画布变更 | `PUT /apps/{id}/graph`；草稿仅拦致命结构错误 | ✅ |
+| L5 保存/校验 | 手动校验 | 底部浮条 | 全量 `validate` → 右下角 Tab 面板，点击 issue 聚焦节点 | ✅ |
+| L5 保存/校验 | 发布 | 右上角发布 | `POST /apps/{id}/publish`，发布前全量 error 拦截 | ✅ |
+| L5 保存/校验 | 试运行 | 底部「▷ 试运行」 | SSE 流式事件 → 节点状态着色 + 日志 Tab | ✅ |
+| L6 辅助 | 变量/资源 | 左侧栏 | `VariablesDrawer`、`ResourceSidebar` | ✅ |
+
+### 12.3 剩余任务清单
+
+#### T8-01（P0）tool_list 结构化编辑器
+
+- **问题**：LLM / agent_loop 的 `tools` 字段当前回落为 `Input.TextArea`，需手写结构，易错。
+- **修改文件**：新建 `components/ToolListEditor.tsx`；`AppEditPage.tsx` 的 `FieldControl` / `NodeConfigForm` 分发。
+- **方案**：工具行 = 名称 Input + 描述 Input + 删除；底部「+ 添加工具」；值统一 `[{name, description}]`，兼容旧字符串/对象。
+- **验收**：LLM 抽屉"技能"区可增删行；保存后 `config.tools` 为数组；旧 JSON 文本可回填。
+
+#### T8-02（P0）节点复制 / 粘贴
+
+- **问题**：右键「复制节点」当前只弹 `message.info('复制节点功能待实现')`。
+- **修改文件**：`AppEditPage.tsx`（copy/paste 回调）。
+- **方案**：复制时快照 `typeKey/title/config/outputs` 到 ref + `localStorage`；粘贴时 `createWorkflowNodeByType` 在偏移位置创建并回填 data。
+- **验收**：复制 LLM → 粘贴出现同配置副本，偏移 40px，不复制连线；可多次粘贴。
+
+#### T8-03（P1）节点重命名
+
+- **问题**：`NodeCard` 标题固定为节点类型名，无法像 Coze 一样改成业务语义。
+- **修改文件**：`AppEditPage.tsx`（Drawer 头部）、`components/NodeCard.tsx`。
+- **方案**：Drawer 头部标题改为可点击编辑（Input），写回 `node.data.title`；卡片优先展示自定义标题，未设置回落元数据 title。
+- **验收**：改名后卡片与抽屉同步；刷新保持；空值回落默认名。
+
+#### T8-04（P1）抽屉「输入」区展示上游变量引用
+
+- **问题**：Coze 节点抽屉顶部有"输入"列表；当前只能从端口 label 推断。
+- **修改文件**：`AppEditPage.tsx`（NodeConfigForm 顶部），可抽 `components/UpstreamInputs.tsx`。
+- **方案**：按入边反查上游节点 `outputs`（START 用 `config.inputs`），渲染 `name` + 来源节点；无上游显示"无上游输入"。
+- **验收**：START→LLM 时 LLM 抽屉显示上游字段；IF 分支分别显示对应来源。
+
+#### T8-05（P2）create_message 补 content 字段
+
+- **问题**：`node_meta.py` 的 `create_message` 只有 `role`，但消息需要内容。
+- **修改文件**：`backend/internal/domain/canvas/node_meta.py`（加 `content` textarea）；`nodeSubtitle.ts` 显示内容摘要。
+- **风险**：需确认执行器读取 `config.content`，否则仅作展示字段。
+- **验收**：抽屉显示"消息内容"；保存后 config 含 content；执行器行为不回退。
+
+#### T8-06（P0）端到端验证与临时文件清理
+
+- **验证脚本**：Playwright 拦截 `PUT **/graph`；添加「文本处理」→ 副标题与抽屉分组；添加「JSON 解析」→ 空配置提示；添加「LLM」→ tool_list 编辑器；复制粘贴节点数 +1；重命名后卡片标题变化。
+- **清理**：删除 `frontend/admin/.pw-*.cjs`、`.pw-*.png`、`.ref-coze.png`。
+- **验收**：`tsc --noEmit` EXIT:0；`vite build` 通过；控制台无 error。
+
+### 12.4 执行顺序
+
+```
+T8-01（tool_list）→ T8-02（复制粘贴）→ T8-03（重命名）→ T8-04（上游输入）
+→ T8-05（create_message，需确认）→ T8-06（E2E + 清理）
+```
+
+每个任务完成即 typecheck；P0 全部完成后统一跑一次 E2E。
+
+### 12.5 验证清单（阶段 8 收口）
+
+- [x] `tsc --noEmit` 通过
+- [x] `vite build` 通过
+- [x] 30 个节点在添加面板均有图标与中文分类
+- [x] 11 种 `field_type` 均有专用控件（含 tool_list）
+- [x] 四类添加入口都能自动连线
+- [x] 复制/粘贴、重命名、删除、撤销可用
+- [x] 草稿保存不再因必填为空被阻塞；发布仍严格拦截
+- [x] 控制台无 error/warning 泛滥
+
+### 12.6 落地记录（2026-11-01）
+
+- **T8-01 ToolListEditor**：新建 `components/ToolListEditor.tsx`，兼容字符串 / 对象数组 / JSON 字符串三种历史数据；LLM「技能」、Agent 循环「工具」改为表格化增删（名称 + 描述）。
+- **T8-02 节点复制/粘贴**：`copyNode` 快照 `typeKey/title/config/outputs` 到内存 ref + `localStorage(boxia_node_clipboard)`；`pasteNode` 通过 `addNode` 建节点后回填 extInfo，标题追加「副本」，位置自动避让，不复制连线。
+- **T8-03 节点重命名**：抽屉「节点标题」写回 extInfo；卡片标题实时同步。
+- **T8-04 抽屉输入区**：按入边反查上游节点，渲染 `{{nodeId.output.field}}` 变量标签；START 节点取 `config.inputs`，无上游时提示「无上游输入」。
+- **T8-05 create_message 内容字段**：`node_meta.py` 增补 `content` textarea（执行器 `CreateMessageNodeHandler` 已读取该字段）；卡片副标题优先显示内容摘要。
+- **关键修复（FlowGram 数据载体）**：节点数据存放在 `node.getExtInfo()` / `node.updateExtInfo()`，`node.data` 恒为空对象；此前的 `node.data = {...}` 写入全部无效，导致重命名、输出字段、子图初始化不生效。渲染器改为订阅 `node.onExtInfoChange` 后读取 extInfo，`handleConfigChange` / `handleOutputsChange` / 复制粘贴全部改走 `updateExtInfo`。
+- **顺带修复**：右键「适应视图」仍走已废弃的 `ctx.viewport`，改为 `ctx.document.fitView(true)`；`config` 不再混入 `title`；配置抽屉开关与选中态分离（关闭抽屉后仍可右键复制/删除）。
+- **验证**：`tsc --noEmit` EXIT:0；`vite build` 18.4s 通过（AppEditPage 863.83 kB / gzip 265.64 kB）；Playwright E2E 13/13 通过（添加/分组/上游输入/空配置提示/ToolList/重命名/复制粘贴），控制台 0 error。
