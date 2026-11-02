@@ -99,12 +99,20 @@ class ConversationRepository:
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict]:
-        """管理端视角：列出某应用下全部用户的会话（按 updated_at 倒序），附带所属用户信息。"""
+        """管理端视角：列出某应用下全部会话（按 updated_at 倒序），附带所属用户信息。
+
+        会话归属有两种用户：用户端会话（channel=api）对应 users，
+        画布试运行会话（channel=debug）对应 admin_users，因此两张表都要关联。
+        """
         rows = self._session.execute(
             text(
-                "SELECT c.id, c.tenant_id, c.user_id, c.application_id, c.title, "
-                "c.created_at, c.updated_at, u.username, u.display_name "
-                "FROM conversation c LEFT JOIN users u ON u.id = c.user_id "
+                "SELECT c.id, c.tenant_id, c.user_id, c.application_id, c.title, c.channel, "
+                "c.created_at, c.updated_at, "
+                "COALESCE(u.username, a.username) AS username, "
+                "COALESCE(u.display_name, a.display_name) AS display_name "
+                "FROM conversation c "
+                "LEFT JOIN users u ON u.id = c.user_id "
+                "LEFT JOIN admin_users a ON a.id = c.user_id "
                 "WHERE c.tenant_id = :tid AND c.application_id = :aid "
                 "ORDER BY c.updated_at DESC LIMIT :limit OFFSET :offset"
             ),

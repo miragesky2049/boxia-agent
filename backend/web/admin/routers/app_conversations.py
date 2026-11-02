@@ -48,6 +48,8 @@ def _conversation_to_dict(row: dict) -> dict:
         "username": row.get("username") or "",
         "display_name": row.get("display_name") or "",
         "title": row.get("title") or "",
+        # channel=debug 为画布试运行会话，归属管理员账号
+        "channel": row.get("channel") or "api",
         "created_at": _iso(row.get("created_at")),
         "updated_at": _iso(row.get("updated_at")),
     }

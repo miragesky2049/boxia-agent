@@ -21,6 +21,15 @@ async def get_checkpointer() -> Any:
     if _CHECKPOINTER is not None:
         return _CHECKPOINTER
 
+    # uvicorn 在 Windows 单进程（不带 --reload）时强制 ProactorEventLoop，
+    # psycopg async 在该循环上无法建连，这里提前给出可操作的报错
+    loop = asyncio.get_running_loop()
+    if type(loop).__name__ == "ProactorEventLoop":
+        raise RuntimeError(
+            "psycopg async 不支持 ProactorEventLoop：Windows 本地请用 "
+            "`python web/app_admin.py` 或 uvicorn --reload 启动后端"
+        )
+
     if _CHECKPOINTER_LOCK is None:
         _CHECKPOINTER_LOCK = asyncio.Lock()
 
