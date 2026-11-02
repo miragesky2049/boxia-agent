@@ -8,7 +8,7 @@
 
 from __future__ import annotations
 
-from internal.domain.canvas.lint import lint_graph
+from internal.domain.canvas.lint import lint_graph, lint_variable_refs
 from internal.domain.canvas.model import CanvasEdge, CanvasGraph, CanvasNode, PortSpec
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.canvas.validate import validate_raw_graph
@@ -203,6 +203,75 @@ def test_lint_combined_with_structural_validation():
     codes = [i.code for i in issues]
     assert "expression_syntax" in codes
     assert "required_config_empty" in codes
+
+
+def test_undeclared_variable_refs_are_warnings():
+    node = CanvasNode(
+        id="end_1",
+        type=NodeType.END,
+        config={
+            "content": "{{variables.missing}} {{variables.declared}} "
+                       "{{system.USER_INPUT}} {{system.UNKNOWN}}"
+        },
+    )
+    graph = CanvasGraph(nodes=[node], edges=[])
+
+    issues = lint_variable_refs(
+        graph,
+        variable_names={"declared"},
+        system_names={"USER_INPUT"},
+    )
+
+    assert all(i.severity == "warning" for i in issues)
+    assert len(issues) == 2
+    messages = " ".join(i.message for i in issues)
+    assert "variables.missing" in messages
+    assert "system.UNKNOWN" in messages
+    assert "variables.declared" not in messages
+    assert "system.USER_INPUT" not in messages
+
+
+def test_variable_refs_skip_check_without_declarations():
+    node = CanvasNode(
+        id="end_1",
+        type=NodeType.END,
+        config={"content": "{{variables.missing}} {{system.UNKNOWN}}"},
+    )
+    graph = CanvasGraph(nodes=[node], edges=[])
+
+    assert lint_variable_refs(graph) == []
+
+
+def test_variable_refs_support_index_syntax():
+    node = CanvasNode(
+        id="end_1",
+        type=NodeType.END,
+        config={"content": "{{variables['missing_key']}}"},
+    )
+    graph = CanvasGraph(nodes=[node], edges=[])
+
+    issues = lint_variable_refs(graph, variable_names=set())
+
+    assert len(issues) == 1
+    assert "missing_key" in issues[0].message
+
+
+def test_validate_raw_graph_passes_declared_variables():
+    raw = _make_raw_graph([
+        _start_node(),
+        _end_node(content="{{variables.app_1}} {{variables.unknown_var}}"),
+    ], edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}])
+
+    issues = validate_raw_graph(
+        raw,
+        variable_names={"app_1"},
+        system_names=set(),
+    )
+
+    undeclared = [i for i in issues if i.code == "undeclared_variable"]
+    assert len(undeclared) == 1
+    assert undeclared[0].severity == "warning"
+    assert "unknown_var" in undeclared[0].message
 
 
 def test_port_type_number_to_boolean_direct():

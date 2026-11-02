@@ -294,3 +294,104 @@ def test_runtime_initial_state_uses_default_globals():
 
     assert defaults["user_name"] == "alice"
     assert defaults["age"] == 18.0
+
+
+# ---------- 6. 表达式 variables / system 命名空间 ----------
+
+
+def test_expression_resolves_variables_namespace():
+    from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
+
+    ctx = EvalContext(
+        input={},
+        node_outputs={},
+        globals={"legacy": 1},
+        env={},
+        variables={"user_name": "bob"},
+        system={"USER_INPUT": "hello"},
+    )
+    template = ExpressionEvaluator().template
+    assert template.eval_expression("variables.user_name", ctx) == "bob"
+    assert template.eval_expression("variables.legacy", ctx) == 1
+    assert template.eval_expression("system.USER_INPUT", ctx) == "hello"
+    assert template.eval_template("你好 {{variables.user_name}}", ctx) == "你好 bob"
+
+
+def test_expression_bare_name_prefers_variables_then_system():
+    from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
+
+    ctx = EvalContext(
+        input={"USER_INPUT": "from-input"},
+        node_outputs={},
+        globals={"glb": "g"},
+        env={},
+        variables={"var": "v"},
+        system={"sys": "s"},
+    )
+    template = ExpressionEvaluator().template
+    assert template.eval_expression("var", ctx) == "v"
+    assert template.eval_expression("sys", ctx) == "s"
+    assert template.eval_expression("glb", ctx) == "g"
+
+
+# ---------- 7. Runtime 注入 variables / system 并回写用户变量 ----------
+
+
+def test_runtime_injects_variables_and_system_and_flushes_user_changes():
+    from internal.domain.graph.runtime import GraphRuntime
+
+    captured: dict[str, Any] = {}
+    persisted: dict[str, Any] = {}
+    runtime = GraphRuntime(
+        canvas_json={"nodes": [], "edges": []},
+        checkpointer=None,
+        thread_id="t-var-inject",
+        user_id=uuid4(),
+        variables={"plan": "free", "score": 1},
+        user_variable_keys={"score"},
+        on_user_variables_changed=lambda values: persisted.update(values),
+    )
+
+    async def _noop_compile() -> None:
+        return None
+
+    async def _fake_stream(initial_state: dict[str, Any]) -> dict[str, Any]:
+        captured.update(initial_state)
+        return {"output": {"ok": True}, "globals": {"plan": "free", "score": 9}}
+
+    runtime._ensure_compiled = _noop_compile  # type: ignore[method-assign]
+    runtime._stream_and_record = _fake_stream  # type: ignore[method-assign]
+
+    asyncio.run(runtime.invoke({"USER_INPUT": "hi"}))
+
+    assert captured["variables"] == {"plan": "free", "score": 1}
+    assert captured["globals"] == {"plan": "free", "score": 1}
+    assert captured["system"]["USER_INPUT"] == "hi"
+    assert captured["system"]["USER_ID"]
+    assert persisted == {"score": 9}
+
+
+def test_runtime_skips_persist_when_user_value_unchanged():
+    from internal.domain.graph.runtime import GraphRuntime
+
+    persisted: dict[str, Any] = {}
+    runtime = GraphRuntime(
+        canvas_json={"nodes": [], "edges": []},
+        checkpointer=None,
+        thread_id="t-var-nochange",
+        variables={"score": 3},
+        user_variable_keys={"score"},
+        on_user_variables_changed=lambda values: persisted.update(values),
+    )
+
+    async def _noop_compile() -> None:
+        return None
+
+    async def _fake_stream(_initial_state: dict[str, Any]) -> dict[str, Any]:
+        return {"output": {}, "globals": {"score": 3}}
+
+    runtime._ensure_compiled = _noop_compile  # type: ignore[method-assign]
+    runtime._stream_and_record = _fake_stream  # type: ignore[method-assign]
+
+    asyncio.run(runtime.invoke({}))
+    assert persisted == {}

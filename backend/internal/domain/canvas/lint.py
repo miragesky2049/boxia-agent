@@ -21,6 +21,10 @@ from internal.domain.canvas.validate import ValidationIssue
 
 _TEMPLATE_RE = re.compile(r"\{\{\s*(.+?)\s*\}\}")
 
+# 变量命名空间引用：{{variables.foo}} / {{system.USER_INPUT}}，兼容 variables['foo']
+_NAMESPACE_ATTR_RE = re.compile(r"\b(variables|system)\s*\.\s*([A-Za-z_][A-Za-z0-9_]*)")
+_NAMESPACE_INDEX_RE = re.compile(r"\b(variables|system)\s*\[\s*['\"]([^'\"]+)['\"]\s*\]")
+
 # 端口类型别名（normalize）
 _TYPE_ALIASES: dict[str, str] = {
     "int": "number",
@@ -180,7 +184,84 @@ def _is_empty(value: Any) -> bool:
     return False
 
 
-# ---------- 3. 端口类型匹配 ----------
+# ---------- 3. 未声明变量引用（warning） ----------
+def lint_variable_refs(
+    graph: CanvasGraph,
+    *,
+    variable_names: set[str] | None = None,
+    system_names: set[str] | None = None,
+) -> list[ValidationIssue]:
+    """检查 `{{variables.x}}` / `{{system.X}}` 是否引用了未声明变量。
+
+    只在调用方传入声明集合时检查，避免草稿态/离线校验误报。
+    严重级别固定为 warning，不阻断保存与发布。
+    """
+    if variable_names is None and system_names is None:
+        return []
+
+    declared_variables = set(variable_names or ()) | {v.name for v in graph.variables}
+    declared_system = set(system_names or ())
+
+    issues: list[ValidationIssue] = []
+    for node in _iter_nodes(graph):
+        seen: set[tuple[str, str]] = set()
+        texts = list(_iter_strings(node.config))
+        for expr in node.inputs.values():
+            if isinstance(expr, TemplatedString):
+                texts.append(expr.template)
+
+        for text in texts:
+            for namespace, name in _extract_namespace_refs(text):
+                key = (namespace, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                if namespace == "variables" and variable_names is not None and name not in declared_variables:
+                    issues.append(ValidationIssue(
+                        "warning", "undeclared_variable",
+                        f"节点 {node.meta.title or node.id} 引用了未声明的应用变量 "
+                        f"{{{{variables.{name}}}}}",
+                        node.id,
+                    ))
+                elif namespace == "system" and system_names is not None and name not in declared_system:
+                    issues.append(ValidationIssue(
+                        "warning", "undeclared_variable",
+                        f"节点 {node.meta.title or node.id} 引用了当前形态不支持的系统变量 "
+                        f"{{{{system.{name}}}}}",
+                        node.id,
+                    ))
+    return issues
+
+
+def _iter_nodes(graph: CanvasGraph):
+    """递归遍历节点（含 loop/batch/subworkflow 子图）。"""
+    for node in graph.nodes:
+        yield node
+        if node.subgraph is not None:
+            yield from _iter_nodes(node.subgraph)
+
+
+def _iter_strings(value: Any):
+    """递归产出 config 中的字符串。"""
+    if isinstance(value, TemplatedString):
+        yield value.template
+    elif isinstance(value, str):
+        yield value
+    elif isinstance(value, list):
+        for item in value:
+            yield from _iter_strings(item)
+    elif isinstance(value, dict):
+        for item in value.values():
+            yield from _iter_strings(item)
+
+
+def _extract_namespace_refs(text: str) -> list[tuple[str, str]]:
+    refs = [(m.group(1), m.group(2)) for m in _NAMESPACE_ATTR_RE.finditer(text)]
+    refs.extend((m.group(1), m.group(2)) for m in _NAMESPACE_INDEX_RE.finditer(text))
+    return refs
+
+
+# ---------- 4. 端口类型匹配 ----------
 def _lint_port_types(graph: CanvasGraph) -> list[ValidationIssue]:
     issues: list[ValidationIssue] = []
     node_map = {n.id: n for n in graph.nodes}

@@ -126,13 +126,19 @@ def _reachable_from(start_id: str, out_degree: dict[str, int], edges: list) -> s
     return visited
 
 
-def validate_raw_graph(raw: dict[str, Any]) -> list[ValidationIssue]:
+def validate_raw_graph(
+    raw: dict[str, Any],
+    *,
+    variable_names: set[str] | None = None,
+    system_names: set[str] | None = None,
+) -> list[ValidationIssue]:
     """对原始 dict graph 做校验：先 convert 成 IR，再 validate + lint。
 
     convert 失败时返回 error 级问题。用于 save_graph 前的快速校验。
+    variable_names / system_names 传入时，额外检查未声明的命名空间变量引用（warning）。
     """
     from internal.domain.canvas.convert import CanvasConvertError, convert_canvas
-    from internal.domain.canvas.lint import lint_graph
+    from internal.domain.canvas.lint import lint_graph, lint_variable_refs
 
     try:
         graph = convert_canvas(raw)
@@ -141,4 +147,12 @@ def validate_raw_graph(raw: dict[str, Any]) -> list[ValidationIssue]:
     except Exception as exc:  # noqa: BLE001
         return [ValidationIssue("error", "convert_failed", f"画布解析失败: {exc}")]
 
-    return validate_graph(graph) + lint_graph(graph)
+    return (
+        validate_graph(graph)
+        + lint_graph(graph)
+        + lint_variable_refs(
+            graph,
+            variable_names=variable_names,
+            system_names=system_names,
+        )
+    )

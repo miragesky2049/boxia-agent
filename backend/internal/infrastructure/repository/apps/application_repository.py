@@ -12,6 +12,27 @@ from sqlalchemy.orm import Session
 from internal.infrastructure.id.uuid7 import new_uuid
 
 
+def _load_json_array(raw: Any) -> list[dict[str, Any]]:
+    """JSONB 列 → list[dict]；兼容驱动返回字符串/None 的情况。"""
+    value = _load_json_value(raw)
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, dict)]
+    return []
+
+
+def _load_json_value(raw: Any) -> Any:
+    if raw is None:
+        return None
+    if isinstance(raw, (list, dict, int, float, bool)):
+        return raw
+    if isinstance(raw, str):
+        try:
+            return json.loads(raw)
+        except (json.JSONDecodeError, ValueError):
+            return raw
+    return raw
+
+
 class ApplicationRepository:
     """应用仓储，用原生 SQL 操作新表。"""
 
@@ -26,12 +47,14 @@ class ApplicationRepository:
         owner_id: UUID | None,
         description: str = "",
         created_by: UUID | None = None,
+        flow_type: str = "workflow",
     ) -> UUID:
         app_id = new_uuid()
         self._session.execute(
             text(
-                "INSERT INTO application (id, owner_type, owner_id, name, description, created_by) "
-                "VALUES (:id, :owner_type, :owner_id, :name, :description, :created_by)"
+                "INSERT INTO application "
+                "(id, owner_type, owner_id, name, description, created_by, flow_type) "
+                "VALUES (:id, :owner_type, :owner_id, :name, :description, :created_by, :flow_type)"
             ),
             {
                 "id": app_id,
@@ -40,6 +63,7 @@ class ApplicationRepository:
                 "name": name,
                 "description": description,
                 "created_by": created_by,
+                "flow_type": flow_type,
             },
         )
         return app_id
@@ -51,6 +75,7 @@ class ApplicationRepository:
         name: str | None = None,
         description: str | None = None,
         avatar_url: str | None = None,
+        flow_type: str | None = None,
     ) -> None:
         sets: list[str] = ["updated_at = NOW()"]
         params: dict[str, Any] = {"id": application_id}
@@ -63,6 +88,9 @@ class ApplicationRepository:
         if avatar_url is not None:
             sets.append("avatar_url = :avatar_url")
             params["avatar_url"] = avatar_url
+        if flow_type is not None:
+            sets.append("flow_type = :flow_type")
+            params["flow_type"] = flow_type
         self._session.execute(
             text(f"UPDATE application SET {', '.join(sets)} WHERE id = :id"),
             params,
@@ -167,13 +195,87 @@ class ApplicationRepository:
         row = self._session.execute(
             text(
                 "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-                "is_listed_in_market, visibility_mode, published_graph_version, "
+                "is_listed_in_market, visibility_mode, published_graph_version, flow_type, "
                 "created_by, created_at, updated_at "
                 "FROM application WHERE id = :aid"
             ),
             {"aid": application_id},
         ).first()
         return dict(row._mapping) if row else None
+
+    # ========== 变量体系 ==========
+    def get_application_variables(self, application_id: UUID) -> list[dict[str, Any]]:
+        """读取应用变量定义（name/type/default/scope）。"""
+        row = self._session.execute(
+            text("SELECT variables FROM application WHERE id = :aid"),
+            {"aid": application_id},
+        ).first()
+        if row is None:
+            return []
+        return _load_json_array(row[0])
+
+    def set_application_variables(
+        self,
+        application_id: UUID,
+        variables: list[dict[str, Any]],
+    ) -> None:
+        self._session.execute(
+            text(
+                "UPDATE application SET variables = CAST(:variables AS JSONB), updated_at = NOW() "
+                "WHERE id = :aid"
+            ),
+            {"aid": application_id, "variables": json.dumps(variables, ensure_ascii=False, default=str)},
+        )
+
+    def get_user_variables(self, application_id: UUID, user_id: UUID) -> dict[str, Any]:
+        """读取用户变量实际取值；缺失的键由调用方回退到定义默认值。"""
+        rows = self._session.execute(
+            text(
+                "SELECT variable_key, value FROM application_user_variable "
+                "WHERE application_id = :aid AND user_id = :uid"
+            ),
+            {"aid": application_id, "uid": user_id},
+        ).all()
+        return {str(row[0]): _load_json_value(row[1]) for row in rows}
+
+    def set_user_variables(
+        self,
+        application_id: UUID,
+        user_id: UUID,
+        values: dict[str, Any],
+    ) -> None:
+        """批量写入用户变量取值（UPSERT）。"""
+        for key, value in values.items():
+            self._session.execute(
+                text(
+                    "INSERT INTO application_user_variable "
+                    "(id, application_id, user_id, variable_key, value) "
+                    "VALUES (:id, :aid, :uid, :key, CAST(:value AS JSONB)) "
+                    "ON CONFLICT (application_id, user_id, variable_key) "
+                    "DO UPDATE SET value = EXCLUDED.value, updated_at = NOW()"
+                ),
+                {
+                    "id": new_uuid(),
+                    "aid": application_id,
+                    "uid": user_id,
+                    "key": str(key),
+                    "value": json.dumps(value, ensure_ascii=False, default=str),
+                },
+            )
+
+    def delete_user_variable(
+        self,
+        application_id: UUID,
+        user_id: UUID,
+        key: str,
+    ) -> None:
+        self._session.execute(
+            text(
+                "DELETE FROM application_user_variable "
+                "WHERE application_id = :aid AND user_id = :uid AND variable_key = :key"
+            ),
+            {"aid": application_id, "uid": user_id, "key": key},
+        )
 
     def set_published_graph_version(self, application_id: UUID, version: int) -> None:
         """把 application.published_graph_version 指向指定版本号（NULL → 未发布，回退 latest）。"""
@@ -193,7 +295,7 @@ class ApplicationRepository:
     ) -> list[dict]:
         sql = (
             "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-            "is_listed_in_market, created_at, updated_at FROM application"
+            "is_listed_in_market, flow_type, created_at, updated_at FROM application"
         )
         conditions: list[str] = []
         params: dict[str, Any] = {}

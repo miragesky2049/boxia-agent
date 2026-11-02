@@ -78,4 +78,14 @@ NODE_TYPE_MAP = {
     "57": "DELETE_MESSAGE",
     "58": "JSON_STRINGIFY",
     "59": "JSON_PARSER",
+    # 本地扩展段位（coze 未公开/依赖外部服务）
+    "211": "DATASET_DELETE",
+    "212": "ASYNC_TASK",
+    "213": "IMAGE_GENERATE",
+    "214": "IMAGE_CUTOUT",
+    "215": "PROMPT_OPTIMIZE",
+    "216": "IMAGE_ENHANCE",
+    "217": "VIDEO_GENERATE",
+    "218": "VIDEO_EXTRACT_AUDIO",
+    "219": "VIDEO_FRAME",
 }

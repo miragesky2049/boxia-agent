@@ -16,7 +16,7 @@ from __future__ import annotations
 import ast
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Callable, Literal
 
 
@@ -72,12 +72,16 @@ class EvalContext:
     """求值上下文：节点输出表、全局变量、环境变量。
 
     node_outputs 在运行时由 Runtime 逐节点填充：{block_id: {field: value}}。
+    variables 是应用变量作用域（默认值来自应用配置，运行期可被节点写入而更新）；
+    system 是只读系统变量（USER_INPUT / USER_ID / RUN_ID 等）。
     """
 
     input: dict[str, Any]
     node_outputs: dict[str, dict[str, Any]]
     globals: dict[str, Any]
     env: dict[str, Any]
+    variables: dict[str, Any] = field(default_factory=dict)
+    system: dict[str, Any] = field(default_factory=dict)
 
 
 # 内置函数白名单（不在此列表的 Python 内置函数不可调用）
@@ -194,7 +198,7 @@ class TemplateEvaluator:
         source, aliases = rewrite_template_refs(
             expr,
             node_ids=list(ctx.node_outputs),
-            name_keys=[*ctx.globals, *ctx.input],
+            name_keys=[*ctx.variables, *ctx.system, *ctx.globals, *ctx.input],
         )
         try:
             tree = ast.parse(source, mode="eval")
@@ -249,11 +253,22 @@ class TemplateEvaluator:
         raise _ExpressionError(f"不支持的表达式节点: {ast.dump(node)}")
 
     def _resolve_name(self, name: str, ctx: EvalContext, aliases: dict[str, str]) -> Any:
+        # 命名空间：{{variables.xxx}} / {{system.USER_INPUT}}
+        if name == "variables":
+            # 节点对应用变量的写入落在 globals，globals 覆盖默认值以体现运行期更新
+            return {**ctx.variables, **ctx.globals}
+        if name == "system":
+            return ctx.system
+
         # 别名映射：还原成原始节点 ID / 变量名后按输出表查找
         if name in aliases:
             key = aliases[name]
             if key in ctx.node_outputs:
                 return ctx.node_outputs[key]
+            if key in ctx.variables:
+                return ctx.variables[key]
+            if key in ctx.system:
+                return ctx.system[key]
             if key in ctx.globals:
                 return ctx.globals[key]
             if key in ctx.input:
@@ -267,12 +282,17 @@ class TemplateEvaluator:
             return False
         if name in ("null", "None"):
             return None
+        # 作用域顺序对齐 coze：node_outputs → variables → system → globals → input
+        if name in ctx.node_outputs:
+            return ctx.node_outputs[name]
+        if name in ctx.variables:
+            return ctx.variables[name]
+        if name in ctx.system:
+            return ctx.system[name]
         if name in ctx.globals:
             return ctx.globals[name]
         if name in ctx.input:
             return ctx.input[name]
-        if name in ctx.node_outputs:
-            return ctx.node_outputs[name]
         return None
 
 

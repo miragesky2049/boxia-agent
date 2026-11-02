@@ -18,6 +18,7 @@ class ConversationModel(Base):
     __tablename__ = "conversation"
     __table_args__ = (
         Index("ix_conversation_user", "tenant_id", "user_id", "updated_at"),
+        Index("ix_conversation_channel_user", "tenant_id", "user_id", "channel", "updated_at"),
     )
 
     id: Mapped[UuidPrimaryKey]
@@ -31,6 +32,7 @@ class ConversationModel(Base):
         Uuid(as_uuid=True), ForeignKey("application.id", ondelete="CASCADE"), nullable=False
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="")
+    channel: Mapped[str] = mapped_column(String(20), nullable=False, default="api")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

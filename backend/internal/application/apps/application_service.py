@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -18,10 +19,12 @@ from uuid import UUID
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
+from internal.domain.canvas.variable_types import coerce as coerce_variable
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.repository.protocols import UnitOfWork
 from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.cache.factory import get_kv_cache
+from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.postgres_audit_log_repository import PostgresAuditLogRepository
 from sqlalchemy import text
@@ -40,10 +43,162 @@ def _infer_runtime_mode(graph: dict[str, Any]) -> str:
             return "agent_loop"
     return "dag"
 
+FLOW_TYPE_WORKFLOW = "workflow"
+FLOW_TYPE_CHATFLOW = "chatflow"
+SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW})
+
+# ========== 变量体系（应用 / 用户 / 系统） ==========
+VARIABLE_TYPES = frozenset({"string", "number", "boolean", "object", "array"})
+VARIABLE_SCOPES = frozenset({"app", "user"})
+_VARIABLE_NAME_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+# 系统变量只读，禁止用户以同名声明普通变量
+SYSTEM_VARIABLE_DEFS: dict[str, list[dict[str, str]]] = {
+    FLOW_TYPE_WORKFLOW: [
+        {"name": "USER_ID", "label": "当前用户 ID"},
+        {"name": "RUN_ID", "label": "本次运行 ID"},
+    ],
+    FLOW_TYPE_CHATFLOW: [
+        {"name": "USER_INPUT", "label": "本轮用户输入"},
+        {"name": "CONVERSATION_NAME", "label": "会话名称"},
+        {"name": "CONVERSATION_ID", "label": "会话 ID"},
+        {"name": "USER_ID", "label": "当前用户 ID"},
+        {"name": "RUN_ID", "label": "本次运行 ID"},
+    ],
+}
+_RESERVED_VARIABLE_NAMES = frozenset(
+    item["name"] for items in SYSTEM_VARIABLE_DEFS.values() for item in items
+)
+
+
+def _normalize_variables(raw: Any) -> list[dict[str, Any]]:
+    """校验并规范化变量定义列表。"""
+    if raw is None:
+        return []
+    if not isinstance(raw, list):
+        raise ValidationError("variables 必须是数组")
+
+    normalized: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValidationError("每个变量定义必须是对象")
+        name = str(item.get("name") or "").strip()
+        if not name:
+            raise ValidationError("变量名不能为空")
+        if not _VARIABLE_NAME_RE.match(name):
+            raise ValidationError(f"变量名不合法：{name}（仅支持字母、数字、下划线，且不能以数字开头）")
+        if name in _RESERVED_VARIABLE_NAMES:
+            raise ValidationError(f"变量名 {name} 与系统变量冲突")
+        if name in seen:
+            raise ValidationError(f"变量名重复：{name}")
+        seen.add(name)
+
+        type_name = str(item.get("type") or "string").lower()
+        if type_name not in VARIABLE_TYPES:
+            raise ValidationError(f"变量 {name} 类型不合法：{type_name}")
+        scope = str(item.get("scope") or "app").lower()
+        if scope not in VARIABLE_SCOPES:
+            raise ValidationError(f"变量 {name} 作用域不合法：{scope}")
+
+        normalized.append({
+            "name": name,
+            "type": type_name,
+            "default": coerce_variable(item.get("default"), type_name),
+            "description": str(item.get("description") or ""),
+            "scope": scope,
+        })
+    return normalized
+
+
+def system_variables_for(flow_type: str) -> list[dict[str, str]]:
+    """返回当前流程类型可见的系统变量（只读）。"""
+    return list(SYSTEM_VARIABLE_DEFS.get(flow_type or FLOW_TYPE_WORKFLOW, []))
+
+def _assert_flow_type(flow_type: str) -> None:
+    """校验流程类型取值，避免脏值写入 CHECK 约束。"""
+    if flow_type not in SUPPORTED_FLOW_TYPES:
+        raise ValidationError(
+            f"flow_type 不合法：{flow_type}，可选 {'/'.join(sorted(SUPPORTED_FLOW_TYPES))}"
+        )
+
+
 GRAPH_CACHE_TTL_SECONDS = 300
 GRAPH_INVALIDATE_CHANNEL = "graph:invalidate"
 # 草稿保存只拦截会破坏图结构的致命错误。必填项为空、表达式语法错、新节点未连线等
 # 都是编辑中间态，允许保存；发布时再用全量校验拦截。
+def _literal(value: Any) -> dict[str, Any]:
+    """构造画布参数值：与前端保存的 {value:{type,content}} 结构一致。"""
+    return {"value": {"type": "literal", "content": value}}
+
+
+def _default_graph(flow_type: str) -> dict[str, Any]:
+    """按流程类型生成最小可运行画布。
+
+    workflow: 开始 -> 结束；
+    chatflow: 开始 -> 大模型 -> 输出 -> 结束（模型留空，由用户选择）。
+    """
+    nodes: list[dict[str, Any]] = [
+        {"id": "start_1", "type": "1", "data": {"inputs": {}, "outputs": []}},
+    ]
+    if flow_type == FLOW_TYPE_CHATFLOW:
+        nodes.extend([
+            {
+                "id": "llm_1",
+                "type": "3",
+                "data": {
+                    "inputs": {
+                        "modleName": _literal(get_settings().llm_model_id),
+                        "systemPrompt": _literal("你是一个乐于助人的助手。"),
+                        "prompt": _literal("{{start_1.output.USER_INPUT}}"),
+                    },
+                    "outputs": [],
+                },
+            },
+            {
+                "id": "output_1",
+                "type": "13",
+                "data": {
+                    "inputs": {"content": _literal("{{llm_1.output.output}}")},
+                    "outputs": [],
+                },
+            },
+            {
+                "id": "end_1",
+                "type": "2",
+                "data": {
+                    "inputs": {
+                        "returnType": _literal("text"),
+                        "content": _literal("{{llm_1.output.output}}"),
+                        # 输出节点已推送聊天气泡，结束节点不再重复输出
+                        "stream": _literal(False),
+                    },
+                    "outputs": [],
+                },
+            },
+        ])
+        node_ids = ["start_1", "llm_1", "output_1", "end_1"]
+    else:
+        nodes.append({
+            "id": "end_1",
+            "type": "2",
+            "data": {
+                "inputs": {
+                    "returnType": _literal("text"),
+                    "content": _literal("运行完成"),
+                },
+                "outputs": [],
+            },
+        })
+        node_ids = ["start_1", "end_1"]
+
+    edges = [
+        {"sourceNodeID": source, "targetNodeID": target, "sourcePortID": ""}
+        for source, target in zip(node_ids, node_ids[1:])
+    ]
+    return {"nodes": nodes, "edges": edges}
+
+
 DRAFT_BLOCKING_CODES = frozenset({
     "missing_start",
     "multiple_start",
@@ -189,15 +344,25 @@ class ApplicationService:
         name: str,
         description: str = "",
         created_by: UUID | None = None,
+        flow_type: str = "workflow",
     ) -> UUID:
         if not name.strip():
             raise ValidationError("应用名称不能为空")
+        _assert_flow_type(flow_type)
         app_id = self._repo.create_application(
             name=name.strip(),
             owner_type="platform",
             owner_id=None,
             description=description,
             created_by=created_by,
+            flow_type=flow_type,
+        )
+        # 新应用直接落一版可运行的最小画布，避免进编排页面对空白画布
+        self.save_graph(
+            app_id,
+            _default_graph(flow_type),
+            changelog="初始化画布",
+            actor_id=created_by,
         )
         self._uow.commit()
         return app_id
@@ -209,13 +374,177 @@ class ApplicationService:
         name: str | None = None,
         description: str | None = None,
         avatar_url: str | None = None,
+        flow_type: str | None = None,
     ) -> None:
-        if self._repo.get_application(application_id) is None:
+        app = self._repo.get_application(application_id)
+        if app is None:
             raise NotFoundError("应用不存在")
+        if flow_type is not None:
+            _assert_flow_type(flow_type)
+            if flow_type != app.get("flow_type"):
+                self._assert_flow_switch_allowed(application_id, flow_type)
         self._repo.update_application(
-            application_id, name=name, description=description, avatar_url=avatar_url
+            application_id,
+            name=name,
+            description=description,
+            avatar_url=avatar_url,
+            flow_type=flow_type,
         )
         self._uow.commit()
+
+    # ========== 变量设置 ==========
+    def get_variables(self, application_id: UUID) -> dict[str, Any]:
+        """读取应用变量定义 + 当前流程类型的只读系统变量。"""
+        app = self._repo.get_application(application_id)
+        if app is None:
+            raise NotFoundError("应用不存在")
+        variables = _normalize_variables(self._repo.get_application_variables(application_id))
+        return {
+            "variables": variables,
+            "system": system_variables_for(app.get("flow_type", FLOW_TYPE_WORKFLOW)),
+        }
+
+    def save_variables(
+        self,
+        application_id: UUID,
+        variables: Any,
+    ) -> dict[str, Any]:
+        """保存变量定义；名称/类型/作用域在服务层统一校验。"""
+        if self._repo.get_application(application_id) is None:
+            raise NotFoundError("应用不存在")
+        normalized = _normalize_variables(variables)
+        self._repo.set_application_variables(application_id, normalized)
+        self._uow.commit()
+        app = self._repo.get_application(application_id)
+        return {
+            "variables": normalized,
+            "system": system_variables_for(
+                (app or {}).get("flow_type", FLOW_TYPE_WORKFLOW)
+            ),
+        }
+
+    def get_user_variables(
+        self,
+        application_id: UUID,
+        user_id: UUID,
+    ) -> dict[str, Any]:
+        """读取当前用户的变量取值（缺失项回退默认值）。"""
+        defaults, _ = self.build_runtime_variables(application_id, user_id)
+        return defaults
+
+    def save_user_variables(
+        self,
+        application_id: UUID,
+        user_id: UUID,
+        values: dict[str, Any],
+    ) -> dict[str, Any]:
+        """写入用户变量实际取值；仅允许已声明为 user 作用域的变量。"""
+        definitions = _normalize_variables(
+            self._repo.get_application_variables(application_id)
+        )
+        user_defs = {item["name"]: item for item in definitions if item["scope"] == "user"}
+        unknown = sorted(set(values) - set(user_defs))
+        if unknown:
+            raise ValidationError("未声明的用户变量：" + "、".join(unknown))
+        coerced = {
+            name: coerce_variable(value, user_defs[name]["type"])
+            for name, value in values.items()
+        }
+        self._repo.set_user_variables(application_id, user_id, coerced)
+        self._uow.commit()
+        return self.get_user_variables(application_id, user_id)
+
+    def build_runtime_variables(
+        self,
+        application_id: UUID,
+        user_id: UUID | None,
+    ) -> tuple[dict[str, Any], set[str]]:
+        """计算运行时变量默认值池与用户变量键集合。
+
+        应用变量每次请求用默认值初始化；用户变量优先取当前用户已持久化的值，
+        缺失时回退定义默认值。运行期写入统一落在 state.globals，由 Runtime
+        在成功后把用户变量键的变化写回（见 GraphRuntime._flush_user_variables）。
+        """
+        definitions = _normalize_variables(
+            self._repo.get_application_variables(application_id)
+        )
+        stored_values: dict[str, Any] = {}
+        if user_id is not None:
+            try:
+                stored_values = self._repo.get_user_variables(application_id, user_id)
+            except Exception:  # noqa: BLE001
+                logger.exception("读取用户变量失败 application=%s", application_id)
+                stored_values = {}
+
+        values: dict[str, Any] = {}
+        user_keys: set[str] = set()
+        for item in definitions:
+            name = item["name"]
+            if item["scope"] == "user":
+                user_keys.add(name)
+                values[name] = (
+                    stored_values[name]
+                    if name in stored_values
+                    else coerce_variable(item.get("default"), item["type"])
+                )
+            else:
+                values[name] = coerce_variable(item.get("default"), item["type"])
+        return values, user_keys
+
+    def validation_variable_scope(
+        self,
+        application_id: UUID,
+    ) -> tuple[set[str], set[str]]:
+        """收集校验用的变量声明集合（应用变量 + 当前流程类型系统变量）。
+
+        校验链路只做未声明引用告警，读不到变量定义时降级为空集合，
+        避免因变量元数据异常阻断画布保存。
+        """
+        try:
+            info = self.get_variables(application_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("读取变量定义失败 application=%s", application_id)
+            return set(), set()
+
+        variable_names = {
+            str(item.get("name"))
+            for item in info.get("variables", [])
+            if item.get("name")
+        }
+        system_names = {
+            str(item.get("name"))
+            for item in info.get("system", [])
+            if item.get("name")
+        }
+        return variable_names, system_names
+
+    def _assert_flow_switch_allowed(
+        self,
+        application_id: UUID,
+        next_flow_type: str,
+    ) -> None:
+        """切换流程类型前校验当前最新画布的图结构。
+
+        两种形态共用同一套节点库，因此对话流 -> 工作流不因存在输出/问答/会话节点而拒绝；
+        工作流 -> 对话流仍要求图中已有开始和结束节点。
+        """
+        if next_flow_type != FLOW_TYPE_CHATFLOW:
+            return
+        latest = self._repo.get_latest_graph_version(application_id)
+        if latest is None:
+            return
+        graph = _parse_graph(latest["graph"], self._storage)
+        nodes = graph.get("nodes") or []
+        type_codes = {str(n.get("type")) for n in nodes}
+        missing = []
+        if "1" not in type_codes:
+            missing.append("开始")
+        if "2" not in type_codes:
+            missing.append("结束")
+        if missing:
+            raise ValidationError(
+                "当前画布缺少节点，无法切换为对话流：" + "、".join(missing)
+            )
 
     def set_listed_in_market(self, application_id: UUID, listed: bool) -> None:
         app = self._repo.get_application(application_id)
@@ -292,7 +621,12 @@ class ApplicationService:
             raise ValidationError("graph 至少需要一个节点")
 
         # A11: 保存前结构校验；草稿只拦截致命结构错误，其余问题留给发布校验
-        issues = validate_raw_graph(graph)
+        variable_names, system_names = self.validation_variable_scope(application_id)
+        issues = validate_raw_graph(
+            graph,
+            variable_names=variable_names,
+            system_names=system_names,
+        )
         blocking = [
             i for i in issues
             if i.severity == "error" and i.code in DRAFT_BLOCKING_CODES
@@ -379,6 +713,7 @@ class ApplicationService:
             "runtime_mode": latest.get("runtime_mode", "dag"),
             "graph_schema_version": latest.get("version", 1),
             "published_graph_version": app.get("published_graph_version") if app else None,
+            "flow_type": app.get("flow_type", "workflow") if app else "workflow",
         }
 
     def list_graph_versions(self, application_id: UUID, limit: int = 50) -> list[dict]:
@@ -470,7 +805,12 @@ class ApplicationService:
 
         # 发布是运行态闸门：结构、必填项、表达式、未连线节点全部按 error 拦截
         latest_graph = _parse_graph(latest.get("graph"), self._storage)
-        issues = validate_raw_graph(latest_graph if isinstance(latest_graph, dict) else {})
+        variable_names, system_names = self.validation_variable_scope(application_id)
+        issues = validate_raw_graph(
+            latest_graph if isinstance(latest_graph, dict) else {},
+            variable_names=variable_names,
+            system_names=system_names,
+        )
         errors = [i for i in issues if i.severity == "error"]
         if errors:
             detail = "; ".join(i.message for i in errors[:5])
@@ -609,7 +949,7 @@ class ApplicationService:
         rows = self._uow.session.execute(
             text(
                 f"""
-                SELECT a.id, a.name, a.avatar_url, a.description, a.is_enabled
+                SELECT a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type
                 FROM application a
                 WHERE a.is_enabled = true
                   AND (
@@ -646,7 +986,7 @@ class ApplicationService:
                     )
                   )
                   {kw_clause}
-                GROUP BY a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.updated_at
+                GROUP BY a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type, a.updated_at
                 ORDER BY a.updated_at DESC
                 """
             ),
@@ -659,6 +999,7 @@ class ApplicationService:
                 "avatar_url": r._mapping["avatar_url"] or "",
                 "description": r._mapping["description"] or "",
                 "is_enabled": r._mapping["is_enabled"],
+                "flow_type": r._mapping["flow_type"] or "workflow",
             }
             for r in rows
         ]
