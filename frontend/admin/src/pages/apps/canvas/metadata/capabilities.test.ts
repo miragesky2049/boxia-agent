@@ -42,7 +42,9 @@ describe('resolveCapabilities', () => {
 
   it('元数据缺失时使用本地兜底', () => {
     expect(canDelete(undefined, 'start')).toBe(false);
-    expect(canCopy(undefined, 'start')).toBe(true);
+    // start/end 为画布系统节点：start 不可复制，end 同样不可复制
+    expect(canCopy(undefined, 'start')).toBe(false);
+    expect(canCopy(undefined, 'end')).toBe(false);
     expect(resolveCapabilities(undefined, 'comment')).toMatchObject({ runnable: false, hasOutputs: false });
     expect(hasSubgraph(undefined, 'loop')).toBe(true);
     expect(hasSubgraph(undefined, 'batch')).toBe(true);

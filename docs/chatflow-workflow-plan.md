@@ -219,8 +219,8 @@
 
 - **已完成**：Phase 0 全部（迁移/仓储/服务/API/前端类型/卡片创建/类型筛选）；Phase 1 全部（Segmented、节点可见性、系统变量、切换删除确认、后端校验、按类型默认画布）；Phase 2 的 T2-1/T2-2/T2-3/T2-4/T2-6 主链路/T2-7 线程归属/T2-8 调试会话隔离（后端）；Phase 4 的 T4-1 对话流试运行面板、T4-6 SSE 事件扩展；Phase 5 全部（用户端 chatflow SSE 多轮对话、问答选项续跑、应用卡片类型徽标）。
 - **已完成（本轮补齐）**：T2-1 请求级预检前移到 `StreamingResponse` 之前（`prepare_chatflow_run`：应用类型、message/resume 组合、会话归属、thread_id 归属均返回 JSON 4xx）；T2-6 统一 `run_id` 审计字段、resume 复用中断 run、用户消息含 resume 回答落库一次、END 流式文本落库、中断/成功均更新 `conversation.updated_at`。
-- **未开始**：Phase 6 中依赖外部能力的跟踪项（admin vitest 历史用例修复）。
-- **验证**：后端全量 `pytest` 428 例通过；`alembic upgrade head` 到 `0050_conversation_channel`；admin/user `npm run typecheck` 通过；用户端 `npm run test` 6 例通过。admin `npm run test` 仍有 1 例历史用例 `capabilities.test.ts`（期望 start 可复制，实际已在 0373051 改为不可复制）与 2 个 lottie/jsdom 环境失败，均与本方案改动无关。
+- **已完成（测试环境修复）**：admin vitest 历史 `capabilities.test.ts` 已按 start/end 不可复制的现行规则修正；`setup.ts` 补齐 canvas 2d context 与 `getComputedStyle` 伪元素兜底，解决 lottie-web/antd 在 jsdom 下的加载与告警问题，并放宽 antd 表单用例超时。
+- **验证**：后端全量 `pytest` 428 例通过；`alembic upgrade head` 到 `0050_conversation_channel`；admin/user `npm run typecheck` 通过；用户端 `npm run test` 6 例通过；admin `npm run test` 35 例全通过。
 - **2026-11-02 二次实机补测（工作流编辑器）**：工作流节点库与对话流逐项比对一致；`知识库删除/变量赋值/长期记忆写入/长期记忆检索/画板` 需补元数据；当前版本无触发器节点分组。据此修订 §1.2、§1.5、§1.6、T1-2、T1-3、§3.2、§3.8 与验收清单——**不再按 flow_type 裁剪节点库**。
 - **2026-11-02 三轮已实施（变量体系 / 意图识别 / 禁用节点占位）**：① 变量三层落地——迁移 `0051_application_variables`、仓储/服务/admin API、`EvalContext` 新增 `variables/system` 命名空间、Runtime 注入并回写用户变量、admin 变量抽屉四 Tab；② 意图识别——`nodes/intent.py`、Compiler `INTENT` 条件边、元数据与前端意图列表编辑器/动态出口；③ 数据库 5 节点与长期记忆节点以 `available=False` 元数据 + 前端置灰占位，契约测试改为只强校验可用节点有 handler。验证：后端全量 `pytest` 396 例通过（`test_loop_parallel_break_continue` 并行取消用例存在偶发 flake，单跑通过），admin `typecheck` 通过。
 - **2026-11-02 本轮已实施**：① `flowCapabilities` 与类型切换逻辑改为全部节点可见、切换不删节点，后端切换校验只要求对话流具备开始/结束；② 节点分类整体对齐 coze 分组并同步契约测试白名单；③ 新增 `变量赋值（40）` 元数据、`查询消息列表（37）` 元数据与 handler；④ 输出节点落库消息补充 `run_id/node_id` 元数据；⑤ 移除输出节点多余的流式开关配置；⑥ 工作流执行入口拦截问答节点并给出可读错误；⑦ 上一轮问答未回答时直接发新消息，自动换子线程放弃旧中断，不再报错卡死。验证：后端全量 `pytest` 382 例通过，admin `typecheck` 通过（前端单测仍有 1 例历史 capabilities 用例与 lottie/jsdom 环境失败，与本次改动无关）。
@@ -417,7 +417,7 @@ coze 变量页分三层，本地只实现前两层 + 只读系统变量：
 ### Phase 6 测试与验收（P0，1.5 天）
 
 - 后端：`pytest` 全量（当前 428 用例通过），新增 flow_type/output/question/输入/知识库删除/变量告警/LLM reasoning/线程越权/入口类型校验/请求级预检/落库一致性用例。
-- 前端：`npm run typecheck`（已通过）+ `npm run test`（admin 遗留 1 例 capabilities 与 2 个 lottie/jsdom 环境失败，均与方案无关）。
+- 前端：`npm run typecheck`（已通过）+ `npm run test`（admin 35 例、user 6 例全通过）。
 - 手工 E2E：
   1. 新建工作流（卡片入口）→ 默认画布 → 执行 → 输出正确；
   2. 新建对话流（卡片入口）→ 默认画布 → 用户端多轮对话；
@@ -460,4 +460,4 @@ coze 变量页分三层，本地只实现前两层 + 只读系统变量：
 - [x] admin 调试会话不出现在用户会话列表
 - [x] 工作流原有功能全部回归通过
 - [x] `create_message` 不再出现 `{"error": "缺少 conversation_id"}`；无上下文时给出可操作错误
-- [ ] 后端全量测试、前端 typecheck/vitest 通过（含节点契约测试）：后端 428 例与前端 typecheck 已通过；admin vitest 仍有历史 capabilities 用例与 lottie/jsdom 环境失败，与本方案无关，待单独修复
+- [x] 后端全量测试、前端 typecheck/vitest 通过（含节点契约测试）：后端 428 例、admin 35 例、user 6 例与两端 typecheck 均通过
