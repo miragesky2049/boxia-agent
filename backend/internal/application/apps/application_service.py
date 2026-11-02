@@ -323,6 +323,14 @@ class ApplicationService:
     def list_my_apps(self, tenant_id: UUID) -> list[dict]:
         return self._repo.list_instances(tenant_id)
 
+    def get_marketplace_application(self, application_id: UUID) -> dict | None:
+        """市场应用详情（未上架/不存在返回 None；NotFoundError 语义由调用方决定）。"""
+        return self._repo.get_marketplace_application(application_id)
+
+    def get_tenant_instance(self, tenant_id: UUID, application_id: UUID) -> dict | None:
+        """租户已开通实例查询（未开通返回 None）。"""
+        return self._repo.get_instance(tenant_id, application_id)
+
     def list_applications(
         self,
         owner_type: str | None = None,

@@ -34,3 +34,25 @@ class RunnerFactory(Protocol):
         on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     ) -> GraphRuntime:
         """加载 runtime graph 并组装服务注册表，返回可执行的 GraphRuntime。"""
+
+
+class CanvasDebugRuntimeFactory(Protocol):
+    """装配画布试运行 GraphRuntime 的工厂端口（组合根 web/deps/graph.py 实现）。
+
+    与 RunnerFactory 的区别：试运行直接用前端传来的未保存 graph 装配
+    ServiceRegistry + 调试变量，不加载已发布版本；on_node_event 为应用层
+    编排（canvas_debug_service）的节点事件推送回调。
+    """
+
+    def __call__(
+        self,
+        *,
+        graph: dict[str, Any],
+        application_id: UUID,
+        variables_application_id: UUID | None,
+        run_id: UUID,
+        conversation_id: UUID | None,
+        thread_id: str | None,
+        on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]],
+    ) -> GraphRuntime:
+        """按调试上下文组装 ServiceRegistry 与变量池，返回可执行的 GraphRuntime。"""

@@ -12,11 +12,8 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query
 
-from internal.application.errors import NotFoundError, ValidationError
-from internal.infrastructure.repository.apps.conversation_repository import (
-    ConversationRepository,
-)
-from internal.infrastructure.repository.apps.message_repository import MessageRepository
+from internal.application.errors import ValidationError
+from web.deps.apps_services import make_conversation_admin_service
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 
@@ -70,18 +67,6 @@ def _message_to_dict(row: dict) -> dict:
     }
 
 
-def _load_conversation_in_scope(
-    repo: ConversationRepository,
-    conversation_id: UUID,
-    tenant_id: UUID,
-) -> dict:
-    """按租户校验会话归属，查不到或跨租户统一按不存在处理，避免暴露他人会话。"""
-    row = repo.get_conversation(conversation_id)
-    if row is None or row.get("tenant_id") != tenant_id:
-        raise NotFoundError("会话不存在")
-    return row
-
-
 @router.get("/{application_id}/conversations")
 def list_app_conversations(
     application_id: UUID,
@@ -93,7 +78,7 @@ def list_app_conversations(
 ) -> list[dict]:
     """列出应用下的会话（按最近活跃倒序，含所属用户）。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
-    rows = ConversationRepository(uow.session).list_conversations_by_application(
+    rows = make_conversation_admin_service(uow).list_app_conversations(
         tenant_id=scope_tenant,
         application_id=application_id,
         limit=limit,
@@ -112,11 +97,8 @@ def list_conversation_messages(
 ) -> list[dict]:
     """拉取会话历史消息（升序）。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
-    _load_conversation_in_scope(
-        ConversationRepository(uow.session), conversation_id, scope_tenant,
-    )
-    rows = MessageRepository(uow.session).list_messages_by_conversation(
-        conversation_id, limit=limit,
+    rows = make_conversation_admin_service(uow).list_messages(
+        conversation_id=conversation_id, tenant_id=scope_tenant, limit=limit,
     )
     return [_message_to_dict(row) for row in rows]
 
@@ -130,10 +112,9 @@ def delete_conversation(
 ) -> dict:
     """删除会话；该会话下的消息由外键 ON DELETE CASCADE 一并清理。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
-    repo = ConversationRepository(uow.session)
-    _load_conversation_in_scope(repo, conversation_id, scope_tenant)
-    repo.delete_conversation(conversation_id)
-    uow.commit()
+    make_conversation_admin_service(uow).delete_conversation(
+        conversation_id=conversation_id, tenant_id=scope_tenant,
+    )
     return {"ok": True}
 
 
@@ -147,13 +128,7 @@ def delete_conversation_message(
 ) -> dict:
     """删除会话内单条消息。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
-    _load_conversation_in_scope(
-        ConversationRepository(uow.session), conversation_id, scope_tenant,
+    make_conversation_admin_service(uow).delete_message(
+        conversation_id=conversation_id, message_id=message_id, tenant_id=scope_tenant,
     )
-    msg_repo = MessageRepository(uow.session)
-    row = msg_repo.get_message(message_id)
-    if row is None or row.get("conversation_id") != conversation_id:
-        raise NotFoundError("消息不存在")
-    msg_repo.delete_message(message_id)
-    uow.commit()
     return {"ok": True}

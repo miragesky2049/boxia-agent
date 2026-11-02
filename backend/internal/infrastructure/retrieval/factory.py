@@ -1,5 +1,8 @@
 """T2：把 embedding client + vector_store 组装成画布节点可直接消费的 service。
 
+原位于 domain/retrieval/services.py（DDD 五期迁入 infrastructure：本模块本质是
+按 settings 选择具体实现的基础设施装配，domain 不应依赖 settings/vector_store factory）。
+
 Dataset 节点（type=6）与 DatasetWrite 节点（type=27）期望从 `ctx.services` 拿到：
 - `embedding`: 实现 `async embed(texts) -> list[list[float]]` 的客户端
 - `vector_store`: 实现 `VectorStore` ABC 的实例
@@ -18,8 +21,12 @@ import logging
 import threading
 from typing import Any
 
-from internal.domain.retrieval.vector_store import VectorStore
 from internal.domain.retrieval.embedding import EmbeddingClient, OpenAICompatEmbeddingClient
+from internal.domain.retrieval.vector_store import VectorStore
+from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.vector_store.factory import (
+    build_vector_store as _build_vector_store_impl,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +45,6 @@ _bundle_lock = threading.Lock()
 
 def build_embedding_client() -> EmbeddingClient | None:
     """按 settings 构造 embedding 客户端；未配置 api_key 时返回 None。"""
-    from internal.infrastructure.config.settings import get_settings
-
     settings = get_settings()
     api_key = settings.embedding_api_key.get_secret_value()
     if not api_key:
@@ -55,12 +60,9 @@ def build_embedding_client() -> EmbeddingClient | None:
 
 def build_vector_store() -> VectorStore:
     """按 settings.vector_store_provider 构造向量库实现。"""
-    from internal.infrastructure.config.settings import get_settings
-    from internal.infrastructure.vector_store.factory import build_vector_store as _build
-
     settings = get_settings()
     provider = settings.vector_store_provider
-    return _build(
+    return _build_vector_store_impl(
         provider,
         uri=settings.milvus_uri,
         token=settings.milvus_token,

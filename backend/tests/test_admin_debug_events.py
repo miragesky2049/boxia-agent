@@ -3,11 +3,10 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import uuid
 
+from internal.application.apps.canvas_debug_service import CanvasDebugService
 from internal.domain.graph.runtime import GraphInterrupted
-from web.admin.routers.apps_admin import _push_interrupt
 
 
 class _FakeRuntime:
@@ -16,14 +15,13 @@ class _FakeRuntime:
         self.conversation_id = uuid.uuid4()
 
 
+_push_interrupt = CanvasDebugService._push_interrupt
+
+
 def _drain(queue: asyncio.Queue) -> list[tuple[str, dict]]:
     events: list[tuple[str, dict]] = []
     while not queue.empty():
-        frame = queue.get_nowait()
-        lines = [line for line in frame.splitlines() if line]
-        event = lines[0].split("event:", 1)[1].strip()
-        data = json.loads(lines[1].split("data:", 1)[1].strip())
-        events.append((event, data))
+        events.append(queue.get_nowait())
     return events
 
 

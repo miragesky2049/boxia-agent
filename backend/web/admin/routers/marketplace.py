@@ -13,9 +13,12 @@ from pydantic import BaseModel, Field
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.application.apps.application_service import ApplicationService
 from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
-from internal.domain.security.ssrf_guard import validate_outbound_url
-from internal.infrastructure.repository.apps.run_repository import RunRepository
-from web.deps.apps_services import make_application_service
+from web.deps.apps_services import (
+    make_application_service,
+    make_apply_service,
+    make_run_service,
+    make_webhook_service,
+)
 from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
 from web.deps.graph import build_runner
@@ -73,9 +76,7 @@ def get_marketplace_application(
     - my_latest_apply: 当前租户最近一条申请单（无则 null）
     - inputs: start 节点定义的输入变量（运行表单用）
     """
-    from internal.infrastructure.repository.apps.auth_repository import AuthRepository
-
-    app = service._repo.get_marketplace_application(application_id)  # noqa: SLF001
+    app = service.get_marketplace_application(application_id)
     if app is None:
         raise NotFoundError("应用不存在或未上架市场")
 
@@ -83,9 +84,8 @@ def get_marketplace_application(
     my_subscription = None
     my_latest_apply = None
     if tenant_id is not None:
-        auth_repo = AuthRepository(uow.session)
-        my_subscription = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
-        my_latest_apply = auth_repo.get_latest_apply(tenant_id, application_id)
+        my_subscription = service.get_tenant_instance(tenant_id, application_id)
+        my_latest_apply = make_apply_service(uow).get_latest_apply(tenant_id, application_id)
 
     graph = service.build_effective_graph_sync(application_id, tenant_id)
     # coze 标准 type="1" 为 START；兼容早期简化格式 type="start"
@@ -169,7 +169,7 @@ async def run_application(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+    instance = service.get_tenant_instance(tenant_id, application_id)
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
@@ -217,14 +217,11 @@ async def resume_application(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+    instance = service.get_tenant_instance(tenant_id, application_id)
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
-    run_repo = RunRepository(uow.session)
-    pending = run_repo.get_running_by_thread(tenant_id, application_id, thread_id)
-    if pending is None:
-        raise NotFoundError("没有等待审批的运行记录")
+    pending = make_run_service(uow).get_running_for_thread(tenant_id, application_id, thread_id)
 
     runner = await _build_runner(
         service, uow, context, tenant_id, application_id,
@@ -277,7 +274,7 @@ def list_runs(
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    return RunRepository(uow.session).list_runs(
+    return make_run_service(uow).list_runs(
         tenant_id, workflow_id=application_id, limit=limit
     )
 
@@ -293,7 +290,7 @@ def get_application_inputs(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service._repo.get_instance(tenant_id, application_id)  # noqa: SLF001
+    instance = service.get_tenant_instance(tenant_id, application_id)
     if instance is None:
         raise NotFoundError("该应用未开通或不存在")
 
@@ -318,14 +315,7 @@ def get_run_detail(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    run_repo = RunRepository(uow.session)
-    run = run_repo.get_run(run_id)
-    if run is None or run["tenant_id"] != tenant_id:
-        raise NotFoundError("运行记录不存在")
-    return {
-        "run": run,
-        "node_executions": run_repo.list_node_executions(run_id),
-    }
+    return make_run_service(uow).get_run_detail(run_id, tenant_id)
 
 
 @router.get("/runs/{run_id}/checkpoints")
@@ -340,10 +330,7 @@ async def list_run_checkpoints(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    run_repo = RunRepository(uow.session)
-    run = run_repo.get_run(run_id)
-    if run is None or run["tenant_id"] != tenant_id:
-        raise NotFoundError("运行记录不存在")
+    run = make_run_service(uow).get_run_owned(run_id, tenant_id)
 
     runner = await _build_runner(
         service, uow, context, tenant_id, run["workflow_id"],
@@ -372,10 +359,8 @@ async def fork_run(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    run_repo = RunRepository(uow.session)
-    run = run_repo.get_run(run_id)
-    if run is None or run["tenant_id"] != tenant_id:
-        raise NotFoundError("运行记录不存在")
+    run_service = make_run_service(uow)
+    run = run_service.get_run_owned(run_id, tenant_id)
 
     # 新 run_id，新 thread 由 runner 内部生成
     new_run_id = uuid.uuid4()
@@ -388,7 +373,7 @@ async def fork_run(
 
     # 先落一条新 run 记录（fork 用的 graph 直接复用 runner 加载的 graph）
     graph = runner.graph_snapshot if hasattr(runner, "graph_snapshot") else service.build_effective_graph_sync(run["workflow_id"], tenant_id)
-    run_repo.insert_run(
+    run_service.insert_run(
         run_id=new_run_id,
         tenant_id=tenant_id,
         workflow_id=run["workflow_id"],
@@ -439,7 +424,7 @@ def list_webhooks(
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    return WebhookRepository(uow.session).list_by_tenant(tenant_id)
+    return make_webhook_service(uow).list_by_tenant(tenant_id)
 
 
 @router.post("/webhooks")
@@ -448,19 +433,16 @@ def create_webhook(
     uow: UowDep,
     context: RequestContextDep,
 ) -> dict:
-    """创建 webhook 订阅。"""
+    """创建 webhook 订阅（SSRF 校验与提交收口在 WebhookService.create）。"""
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    # SSRF 防护：拒绝 loopback/链路本地/云元数据/组播/保留地址，校验 DNS 解析
-    validate_outbound_url(payload.url)
-    wid = WebhookRepository(uow.session).create(
+    wid = make_webhook_service(uow).create(
         tenant_id=tenant_id,
         event_type=payload.event_type,
         url=payload.url,
         application_id=payload.application_id,
     )
-    uow.commit()
     return {"id": str(wid)}
 
 
@@ -474,6 +456,5 @@ def delete_webhook(
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    WebhookRepository(uow.session).delete(webhook_id, tenant_id)
-    uow.commit()
+    make_webhook_service(uow).delete(webhook_id, tenant_id)
     return {"ok": True}

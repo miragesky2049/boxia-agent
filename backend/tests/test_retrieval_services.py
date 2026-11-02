@@ -17,8 +17,8 @@ import pytest
 
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.retrieval.vector_store import VectorStore
-from internal.domain.retrieval import services as retrieval_services
-from internal.domain.retrieval.services import (
+from internal.infrastructure.retrieval import factory as retrieval_services
+from internal.infrastructure.retrieval.factory import (
     build_embedding_client,
     build_vector_store,
     get_retrieval_bundle,
@@ -63,7 +63,7 @@ class _FakeSettings:
 def test_build_embedding_client_returns_none_when_no_api_key():
     settings = _FakeSettings(embedding_api_key="")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         assert build_embedding_client() is None
@@ -72,7 +72,7 @@ def test_build_embedding_client_returns_none_when_no_api_key():
 def test_build_embedding_client_returns_client_when_api_key_present():
     settings = _FakeSettings(embedding_api_key="sk-test")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         client = build_embedding_client()
@@ -83,7 +83,7 @@ def test_build_embedding_client_returns_client_when_api_key_present():
 def test_build_vector_store_memory_provider_returns_in_memory():
     settings = _FakeSettings(vector_store_provider="memory")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         store = build_vector_store()
@@ -93,7 +93,7 @@ def test_build_vector_store_memory_provider_returns_in_memory():
 def test_build_vector_store_unknown_provider_falls_back_to_in_memory():
     settings = _FakeSettings(vector_store_provider="redis")  # 未实现的 provider
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         store = build_vector_store()
@@ -103,7 +103,7 @@ def test_build_vector_store_unknown_provider_falls_back_to_in_memory():
 def test_register_services_skips_embedding_when_not_configured():
     settings = _FakeSettings(embedding_api_key="", vector_store_provider="memory")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         services = ServiceRegistry()
@@ -116,7 +116,7 @@ def test_register_services_skips_embedding_when_not_configured():
 def test_register_services_registers_both_when_embedding_configured():
     settings = _FakeSettings(embedding_api_key="sk-test", vector_store_provider="memory")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         services = ServiceRegistry()
@@ -129,7 +129,7 @@ def test_register_services_registers_both_when_embedding_configured():
 def test_bundle_is_process_singleton():
     settings = _FakeSettings(embedding_api_key="", vector_store_provider="memory")
     with patch(
-        "internal.infrastructure.config.settings.get_settings",
+        "internal.infrastructure.retrieval.factory.get_settings",
         return_value=settings,
     ):
         first = get_retrieval_bundle()

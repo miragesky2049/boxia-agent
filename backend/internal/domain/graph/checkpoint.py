@@ -1,6 +1,11 @@
 """AsyncPostgresSaver 单例：checkpoint 持久化到 PostgreSQL。
 
 从旧版 runner.py 搬过来，独立成模块。
+
+DDD 五期决策：本模块对 infrastructure.config.settings 的 lazy import 记为
+"已接受的基础设施对 domain 的用法"——checkpointer 是进程级连接单例，
+database_url 若改为注入需穿透所有 GraphRuntime 构造点（含 resume/fork 路径），
+改动风险大于收益，且不构成 domain→infra 的编译期依赖（函数内延迟解析）。
 """
 
 from __future__ import annotations

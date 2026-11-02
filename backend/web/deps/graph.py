@@ -21,8 +21,8 @@ from internal.domain.llm.adapter import (
     LLMServiceAdapter,
     build_model_resolver,
 )
-from internal.domain.retrieval.services import register_retrieval_services
 from internal.domain.agent.tool_executor import ToolExecutorService
+from internal.infrastructure.retrieval.factory import register_retrieval_services
 from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.run_repository import RunRepository
@@ -157,6 +157,52 @@ def load_debug_variables(
         repo.set_user_variables(application_id, principal.user_id, values)
 
     return variables, user_keys, _persist
+
+
+def make_canvas_debug_runtime(
+    uow: Any,
+    principal: Any,
+    *,
+    graph: dict[str, Any],
+    application_id: UUID,
+    variables_application_id: UUID | None,
+    run_id: UUID,
+    conversation_id: UUID | None,
+    thread_id: str | None,
+    on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]],
+) -> GraphRuntime:
+    """画布试运行 GraphRuntime 装配（CanvasDebugRuntimeFactory 端口的组合根实现）。
+
+    与迁移前 apps_admin router 内联装配逐参数等价：直接用前端未保存 graph，
+    conversation/message 挂 debug 应用 ID，变量按 variables_application_id（可空）加载。
+    """
+    services = ServiceRegistry()
+    register_llm_and_http(services, uow, principal.tenant_id)
+    register_conversation_services(
+        services, uow,
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        application_id=application_id,
+        run_id=run_id,
+    )
+    register_subgraph_loader(services, make_application_service(uow), principal.tenant_id)
+    debug_variables, debug_user_keys, debug_persist = load_debug_variables(
+        uow, variables_application_id, principal,
+    )
+    return GraphRuntime(
+        canvas_json=graph,
+        services=services,
+        run_id=run_id,
+        tenant_id=principal.tenant_id,
+        user_id=principal.user_id,
+        application_id=application_id,
+        conversation_id=conversation_id,
+        thread_id=thread_id,
+        on_node_event=on_node_event,
+        variables=debug_variables,
+        user_variable_keys=debug_user_keys,
+        on_user_variables_changed=debug_persist,
+    )
 
 
 async def build_runner(

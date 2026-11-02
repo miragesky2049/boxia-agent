@@ -202,3 +202,28 @@ class ApplyService:
                 "audit_msg": audit_msg,
             },
         })
+
+    # ========== 只读查询透传（五期从 applies / marketplace router 直构仓储收口） ==========
+    def list_apply_by_tenant(self, tenant_id: UUID) -> list[dict]:
+        """租户查看自己的申请记录。"""
+        return self._repo.list_apply_by_tenant(tenant_id)
+
+    def list_pass_pending_apply(self) -> list[dict]:
+        """运营查看待开通（PASS 状态）的申请单。"""
+        return self._repo.list_pass_pending_apply()
+
+    def list_apply_by_sales(self, sales_user_id: UUID) -> list[dict]:
+        """销售查看归属自己的申请单。"""
+        return self._repo.list_apply_by_sales(sales_user_id)
+
+    def list_pending_applies(self) -> list[dict]:
+        """运营工作台待审核队列（SUBMITTED/HANDLING），按提交时间升序。"""
+        return self._repo.list_pending_applies()
+
+    def ops_dashboard_stats(self) -> dict[str, Any]:
+        """运营工作台仪表盘：各状态申请数 + 授权数统计。"""
+        return self._repo.ops_dashboard_stats()
+
+    def get_latest_apply(self, tenant_id: UUID, application_id: UUID) -> dict | None:
+        """租户对某应用的最近一条申请单（市场详情页状态卡片用）。"""
+        return self._repo.get_latest_apply(tenant_id, application_id)

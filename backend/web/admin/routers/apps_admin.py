@@ -2,21 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 import logging
 import uuid
+from collections.abc import AsyncIterator
+from functools import partial
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
 from internal.application.apps.application_service import ApplicationService
-from internal.application.errors import AppError, ValidationError
+from internal.application.apps.canvas_debug_service import CanvasDebugService
+from internal.application.errors import ValidationError
 from internal.domain.graph.node_base import ServiceRegistry
-from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
-from internal.infrastructure.repository.apps.conversation_repository import (
-    ConversationRepository as SyncConversationRepository,
-)
+from internal.domain.graph.runtime import GraphRuntime
 from web.admin.schemas.apps import (
     AppCreatePayload,
     AppUpdatePayload,
@@ -35,11 +35,11 @@ from web.admin.schemas.apps import (
     VariablesPayload,
     VisibilityPayload,
 )
-from web.deps.apps_services import make_application_service
+from web.deps.apps_services import make_application_service, make_conversation_admin_service
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.graph import (
-    load_debug_variables,
+    make_canvas_debug_runtime,
     register_conversation_services,
     register_llm_and_http,
     register_subgraph_loader,
@@ -370,28 +370,19 @@ def replace_app_visibility(
     )
 
 
-async def _push_interrupt(
-    queue: asyncio.Queue[str | None],
-    exc: GraphInterrupted,
-    runtime: GraphRuntime,
-) -> None:
-    """把中断翻译成 SSE：问答节点发 question，人审节点发 interrupted。"""
-    payload = exc.interrupt_payload or {}
-    common = {
-        "thread_id": exc.thread_id,
-        "run_id": str(runtime.run_id),
-        "conversation_id": str(runtime.conversation_id) if runtime.conversation_id else None,
-    }
-    if payload.get("type") == "question":
-        await queue.put(sse_event("question", {
-            **common,
-            "node_id": payload.get("node_id"),
-            "node_title": payload.get("node_title"),
-            "question": payload.get("question") or "",
-            "options": payload.get("options") or [],
-        }))
-    else:
-        await queue.put(sse_event("interrupted", {**common, "approval": payload}))
+async def _sse_frames(
+    stream: AsyncIterator[tuple[str, dict[str, Any]]],
+) -> AsyncIterator[str]:
+    """把应用层 (event_name, payload) 元组流格式化为 SSE 帧。"""
+    async for name, data in stream:
+        yield sse_event(name, data)
+
+
+def _make_debug_service(uow: UowDep, principal: Any) -> CanvasDebugService:
+    """组合根注入：试运行 runtime 装配闭包 uow/principal，应用层只见调试参数。"""
+    return CanvasDebugService(
+        runtime_factory=partial(make_canvas_debug_runtime, uow, principal),
+    )
 
 
 @router.post("/debug/run/stream")
@@ -405,87 +396,18 @@ async def debug_run_stream(
     不依赖已保存的应用，直接用画布 graph 跑（前端编辑中实时试运行）。
     仅平台管理员可用；节点数上限保护试运行不被滥用。
     人审中断（human_approval 节点）会发 `interrupted` 事件，前端拿到 thread_id 后调 /debug/run/stream/resume 续跑。
+    编排下沉 CanvasDebugService：校验/装配错误在流外（本协程内）抛出，与迁移前一致。
     """
-    nodes = payload.graph.get("nodes") or []
-    if not isinstance(nodes, list) or len(nodes) > 50:
-        raise ValidationError("graph 节点数必须在 1-50 之间")
-
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    services = ServiceRegistry()
-    register_llm_and_http(services, uow, _principal.tenant_id)
-
-    run_id = uuid.uuid4()
-    debug_app_id = payload.application_id or DEBUG_APPLICATION_ID
-    register_conversation_services(
-        services, uow,
-        tenant_id=_principal.tenant_id,
-        user_id=_principal.user_id,
-        application_id=debug_app_id,
-        run_id=run_id,
-    )
-    register_subgraph_loader(services, make_application_service(uow), _principal.tenant_id)
-
-    async def _push_node_event(etype: str, evt_payload: dict) -> None:
-        await queue.put(sse_event(etype, evt_payload))
-
-    debug_variables, debug_user_keys, debug_persist = load_debug_variables(
-        uow, payload.application_id, _principal,
-    )
-    runtime = GraphRuntime(
-        canvas_json=payload.graph,
-        services=services,
-        run_id=run_id,
-        tenant_id=_principal.tenant_id,
-        user_id=_principal.user_id,
-        application_id=debug_app_id,
+    stream = await _make_debug_service(uow, _principal).open_run(
+        graph=payload.graph,
+        inputs=payload.inputs,
+        application_id=payload.application_id or DEBUG_APPLICATION_ID,
+        variables_application_id=payload.application_id,
         conversation_id=payload.conversation_id,
         thread_id=payload.thread_id,
-        on_node_event=_push_node_event,
-        variables=debug_variables,
-        user_variable_keys=debug_user_keys,
-        on_user_variables_changed=debug_persist,
     )
-    # 与用户端对话流一致：先发 run_start，前端据此拿到 thread/run/conversation
-    await queue.put(sse_event("run_start", {
-        "conversation_id": str(payload.conversation_id) if payload.conversation_id else None,
-        "thread_id": runtime.thread_id,
-        "run_id": str(runtime.run_id),
-    }))
-
-    async def runner_task() -> None:
-        try:
-            output = await runtime.invoke(payload.inputs)
-            await queue.put(sse_event("result", {"outputs": output}))
-        except GraphInterrupted as exc:
-            await _push_interrupt(queue, exc, runtime)
-        except AppError as exc:
-            await queue.put(sse_event("error", {"message": exc.message, "code": exc.status_code}))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("debug stream failed")
-            await queue.put(sse_event("error", {"message": str(exc), "code": 500}))
-        finally:
-            await queue.put(None)
-
-    task = asyncio.create_task(runner_task())
-
-    async def event_stream():
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-        finally:
-            if not task.done():
-                task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
-
     return StreamingResponse(
-        event_stream(),
+        _sse_frames(stream),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
@@ -545,14 +467,12 @@ def create_debug_conversation(
     """为画布对话流试运行创建会话（channel=debug，不进入用户端会话列表）。"""
     if principal.tenant_id is None or principal.user_id is None:
         raise ValidationError("无法识别租户或用户")
-    conversation_id = SyncConversationRepository(uow.session).insert_conversation(
+    conversation_id = make_conversation_admin_service(uow).create_debug_conversation(
         tenant_id=principal.tenant_id,
         user_id=principal.user_id,
         application_id=payload.application_id,
         title=payload.title,
-        channel="debug",
     )
-    uow.commit()
     return {"conversation_id": str(conversation_id)}
 
 
@@ -563,88 +483,21 @@ async def debug_run_stream_resume(
     _principal: PlatformAdminDep,
 ) -> StreamingResponse:
     """人审 / 问答续跑：用 thread_id + Command(resume=...) 从 interrupt 点继续。"""
-    nodes = payload.graph.get("nodes") or []
-    if not isinstance(nodes, list) or len(nodes) > 50:
-        raise ValidationError("graph 节点数必须在 1-50 之间")
     resume_value = payload.resume if payload.resume is not None else payload.approval
     if resume_value is None:
         raise ValidationError("续跑载荷不能为空")
 
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    services = ServiceRegistry()
-    register_llm_and_http(services, uow, _principal.tenant_id)
-
-    run_id = uuid.UUID(payload.run_id) if payload.run_id else uuid.uuid4()
-    debug_app_id = payload.application_id or DEBUG_APPLICATION_ID
-    register_conversation_services(
-        services, uow,
-        tenant_id=_principal.tenant_id,
-        user_id=_principal.user_id,
-        application_id=debug_app_id,
-        run_id=run_id,
-    )
-    register_subgraph_loader(services, make_application_service(uow), _principal.tenant_id)
-
-    async def _push_node_event(etype: str, evt_payload: dict) -> None:
-        await queue.put(sse_event(etype, evt_payload))
-
-    debug_variables, debug_user_keys, debug_persist = load_debug_variables(
-        uow, payload.application_id, _principal,
-    )
-    runtime = GraphRuntime(
-        canvas_json=payload.graph,
-        services=services,
-        thread_id=payload.thread_id,
-        run_id=run_id,
-        tenant_id=_principal.tenant_id,
-        user_id=_principal.user_id,
-        application_id=debug_app_id,
+    stream = await _make_debug_service(uow, _principal).open_resume(
+        graph=payload.graph,
+        resume_value=resume_value,
+        run_id=uuid.UUID(payload.run_id) if payload.run_id else uuid.uuid4(),
+        application_id=payload.application_id or DEBUG_APPLICATION_ID,
+        variables_application_id=payload.application_id,
         conversation_id=payload.conversation_id,
-        on_node_event=_push_node_event,
-        variables=debug_variables,
-        user_variable_keys=debug_user_keys,
-        on_user_variables_changed=debug_persist,
+        thread_id=payload.thread_id,
     )
-    await queue.put(sse_event("run_start", {
-        "conversation_id": str(payload.conversation_id) if payload.conversation_id else None,
-        "thread_id": runtime.thread_id,
-        "run_id": str(runtime.run_id),
-    }))
-
-    async def runner_task() -> None:
-        try:
-            output = await runtime.resume(resume_value)
-            await queue.put(sse_event("result", {"outputs": output}))
-        except GraphInterrupted as exc:
-            await _push_interrupt(queue, exc, runtime)
-        except AppError as exc:
-            await queue.put(sse_event("error", {"message": exc.message, "code": exc.status_code}))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("debug resume stream failed")
-            await queue.put(sse_event("error", {"message": str(exc), "code": 500}))
-        finally:
-            await queue.put(None)
-
-    task = asyncio.create_task(runner_task())
-
-    async def event_stream():
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-        finally:
-            if not task.done():
-                task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
-
     return StreamingResponse(
-        event_stream(),
+        _sse_frames(stream),
         media_type="text/event-stream",
         headers=SSE_HEADERS,
     )
