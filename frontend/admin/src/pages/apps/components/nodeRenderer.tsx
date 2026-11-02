@@ -3,6 +3,7 @@ import { WorkflowNodeRenderer } from '@flowgram.ai/free-layout-editor';
 import type { WorkflowNodeEntity } from '@flowgram.ai/free-layout-editor';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import { resolveCapabilities } from '../canvas/metadata/capabilities';
+import { listStartInputParams, useFlowType } from '../canvas/metadata/chatflowStart';
 import { NodeCard, type NodeCardAction, type DynamicOutputPort } from './NodeCard';
 import { parseCasesValue, parseIntentsValue } from './NodeConfigForm';
 
@@ -30,6 +31,8 @@ export function makeNodeRenderer(
   cardActions?: NodeCardActions,
 ) {
   return function NodeRenderer({ node }: { node: WorkflowNodeEntity }) {
+    // 画布形态从外部 store 读取：注册表以闭包捕获的 prop 在切换后不会刷新已挂载节点
+    const liveFlowType = useFlowType();
     // FlowGram 把节点 data 存在 extInfo 里（node.data 是空对象），且需订阅变更才能重渲染
     const readExtInfo = useCallback(() => {
       const entity = node as unknown as { getExtInfo?: () => Record<string, any> | undefined };
@@ -45,6 +48,12 @@ export function makeNodeRenderer(
       return () => disposable?.dispose?.();
     }, [node, readExtInfo]);
     const title = nodeData.title || meta.title;
+
+    // 对话流开始节点：卡片显示「输入」芯片行（内置 USER_INPUT/CONVERSATION_NAME + 兼容导入图残留的手动同名参数）
+    const inputChips = useMemo<Array<{ type: string; name: string }> | undefined>(() => {
+      if (meta.type_key !== 'start' || liveFlowType !== 'chatflow') return undefined;
+      return listStartInputParams(nodeData.config?.inputs, liveFlowType).map((p) => ({ type: p.type, name: p.name }));
+    }, [meta.type_key, liveFlowType, nodeData.config?.inputs]);
 
     // 分支节点：根据配置动态生成出口端口
     // - if_else：每个 case 一个出口 + 否则出口
@@ -150,6 +159,8 @@ export function makeNodeRenderer(
           onAddNext={!isDynamicBranchNode && onAddNextToNode ? () => onAddNextToNode(node) : undefined}
           actions={actions}
           dynamicOutputs={dynamicOutputs}
+          inputChips={inputChips}
+          flowType={liveFlowType}
         />
       </WorkflowNodeRenderer>
     );

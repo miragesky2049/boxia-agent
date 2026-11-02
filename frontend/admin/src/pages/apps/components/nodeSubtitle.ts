@@ -1,6 +1,8 @@
 // 根据节点类型与配置生成节点卡片副标题（与 Coze 行为对齐）
 // type_key 必须与后端 node_meta.py 一致；返回空字符串时不渲染副标题行
 
+import type { FlowType } from '../../../api/apps';
+
 function truncate(text: string, max = 32): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -8,11 +10,14 @@ function truncate(text: string, max = 32): string {
 export function buildNodeSubtitle(
   typeKey: string,
   config: Record<string, any> | undefined,
+  flowType?: FlowType,
 ): string {
   const cfg = config || {};
 
   switch (typeKey) {
     case 'start': {
+      // 对话流开始节点由「输入」芯片行展示内置 USER_INPUT/CONVERSATION_NAME，不再显示副标题
+      if (flowType === 'chatflow') return '';
       const inputs = Array.isArray(cfg.inputs) ? cfg.inputs.length : 0;
       return inputs > 0 ? `${inputs} 个启动参数` : '工作流入口';
     }

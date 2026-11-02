@@ -3,7 +3,7 @@ import type { DatasetItem } from '../../../../api/datasets';
 import { CANVAS_TOKENS } from '../tokens';
 import { RefChipInput } from '../../components/RefChipInput';
 import { CodeEditor } from '../../components/CodeEditor';
-import { ParameterListEditor } from '../../components/ParameterListEditor';
+import { ParameterListEditor, type ParameterItem } from '../../components/ParameterListEditor';
 
 // ========== 字段控件注册表（E2c） ==========
 // 新增基础字段类型只需在此加一行，不再改 NodeConfigForm 的分支。
@@ -24,6 +24,9 @@ interface FieldControlProps {
   onChange: (name: string, value: any) => void;
   picker?: React.ReactNode;
   datasetOptions?: DatasetItem[];
+  // parameter_list 专用：内置锁定行（不写入 value）与是否允许添加
+  lockedParams?: ParameterItem[];
+  allowAdd?: boolean;
 }
 
 type FieldRenderer = (props: FieldControlProps) => React.ReactNode;
@@ -71,8 +74,13 @@ const FIELD_CONTROLS: Record<string, FieldRenderer> = {
       />
     </Space>
   ),
-  parameter_list: ({ field, value, onChange }) => (
-    <ParameterListEditor value={value} onChange={(next) => onChange(field.name, next)} />
+  parameter_list: ({ field, value, onChange, lockedParams, allowAdd }) => (
+    <ParameterListEditor
+      value={value}
+      onChange={(next) => onChange(field.name, next)}
+      lockedItems={lockedParams}
+      allowAdd={allowAdd}
+    />
   ),
   textarea: ({ field, value, onChange, picker }) => (
     <Space direction="vertical" size={4} style={{ width: '100%' }}>

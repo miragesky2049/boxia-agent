@@ -9,6 +9,7 @@ import type { NodeMeta } from '../../../api/nodeMeta';
 import type { FlowType } from '../../../api/apps';
 import { hasOutputs } from '../canvas/metadata/capabilities';
 import { isNodeAvailable } from '../canvas/metadata/flowCapabilities';
+import { CHATFLOW_START_BUILTIN_PARAMS, listStartInputParams } from '../canvas/metadata/chatflowStart';
 import { FieldControl } from '../canvas/fields/fieldControls';
 import { ToolListEditor } from './ToolListEditor';
 import { groupConfigFields } from './configSections';
@@ -35,6 +36,7 @@ function buildPickerTreeData(
   nodes: GraphNodeSummary[],
   currentNodeId: string | null,
   keyToMeta: Record<string, NodeMeta>,
+  flowType?: FlowType,
 ): NonNullable<TreeProps['treeData']> {
   return nodes
     .filter((n) => n.id !== currentNodeId)
@@ -45,10 +47,10 @@ function buildPickerTreeData(
         title: p.label || p.name,
         isLeaf: true,
       }));
-      // START 节点的 inputParameters 作为虚拟输出
+      // START 节点的启动参数（对话流含内置 USER_INPUT/CONVERSATION_NAME）作为虚拟输出
       const startInputs =
-        node.typeKey === 'start' && Array.isArray(node.config?.inputs)
-          ? (node.config.inputs as Array<{ name: string }>).map((inp) => ({
+        node.typeKey === 'start'
+          ? listStartInputParams(node.config?.inputs, flowType).map((inp) => ({
               key: `${node.id}.output.${inp.name}`,
               title: `入参: ${inp.name}`,
               isLeaf: true,
@@ -67,6 +69,7 @@ function buildLeftValueOptions(
   nodes: GraphNodeSummary[],
   currentNodeId: string | null,
   keyToMeta: Record<string, NodeMeta>,
+  flowType?: FlowType,
 ): { value: string; label: React.ReactNode }[] {
   const options: { value: string; label: React.ReactNode }[] = [];
   for (const node of nodes) {
@@ -87,8 +90,8 @@ function buildLeftValueOptions(
         ),
       });
     }
-    if (node.typeKey === 'start' && Array.isArray(node.config?.inputs)) {
-      for (const inp of node.config.inputs as Array<{ name: string }>) {
+    if (node.typeKey === 'start') {
+      for (const inp of listStartInputParams(node.config?.inputs, flowType)) {
         const ref = `{{${node.id}.output.${inp.name}}}`;
         options.push({
           value: ref,
@@ -110,17 +113,19 @@ function RefPickerButton({
   nodes,
   currentNodeId,
   keyToMeta,
+  flowType,
   onPick,
 }: {
   nodes: GraphNodeSummary[];
   currentNodeId: string | null;
   keyToMeta: Record<string, NodeMeta>;
+  flowType?: FlowType;
   onPick: (ref: string) => void;
 }) {
   const [open, setOpen] = useState(false);
   const treeData = useMemo(
-    () => buildPickerTreeData(nodes, currentNodeId, keyToMeta),
-    [nodes, currentNodeId, keyToMeta],
+    () => buildPickerTreeData(nodes, currentNodeId, keyToMeta, flowType),
+    [nodes, currentNodeId, keyToMeta, flowType],
   );
   return (
     <Popover
@@ -199,17 +204,19 @@ function CaseListEditor({
   nodes,
   currentNodeId,
   keyToMeta,
+  flowType,
 }: {
   value: any;
   onChange: (next: CaseItem[]) => void;
   nodes: GraphNodeSummary[];
   currentNodeId: string | null;
   keyToMeta: Record<string, NodeMeta>;
+  flowType?: FlowType;
 }) {
   const cases = useMemo(() => parseCasesValue(value), [value]);
   const leftValueOptions = useMemo(
-    () => buildLeftValueOptions(nodes, currentNodeId, keyToMeta),
-    [nodes, currentNodeId, keyToMeta],
+    () => buildLeftValueOptions(nodes, currentNodeId, keyToMeta, flowType),
+    [nodes, currentNodeId, keyToMeta, flowType],
   );
 
   const updateCase = (idx: number, patch: Partial<CaseItem>) => {
@@ -279,6 +286,7 @@ function CaseListEditor({
                     nodes={nodes}
                     currentNodeId={currentNodeId}
                     keyToMeta={keyToMeta}
+                    flowType={flowType}
                     onPick={(ref) => updateCase(idx, { right: ref })}
                   />
                 }
@@ -578,12 +586,14 @@ function KeyValueListEditor({
   nodes,
   currentNodeId,
   keyToMeta,
+  flowType,
 }: {
   value: any;
   onChange: (next: KeyValueItem[]) => void;
   nodes: GraphNodeSummary[];
   currentNodeId: string | null;
   keyToMeta: Record<string, NodeMeta>;
+  flowType?: FlowType;
 }) {
   const items = useMemo(() => parseKvValue(value), [value]);
 
@@ -635,6 +645,7 @@ function KeyValueListEditor({
                 nodes={nodes}
                 currentNodeId={currentNodeId}
                 keyToMeta={keyToMeta}
+                flowType={flowType}
                 onPick={(ref) => updateItem(idx, { value: it.value ? `${it.value} ${ref}` : ref })}
               />
             }
@@ -915,6 +926,9 @@ export function NodeConfigForm({
     [nodeMeta.type_key, keyToMeta, flowType],
   );
 
+  // 对话流开始节点：启动参数为内置锁定行，不允许添加/删除
+  const isChatflowStart = nodeMeta.type_key === 'start' && flowType === 'chatflow';
+
   const buildPicker = (fieldName: string): React.ReactNode => {
     // 只有文本类字段才挂变量引用选择器
     return (
@@ -922,6 +936,7 @@ export function NodeConfigForm({
         nodes={pickerNodes}
         currentNodeId={currentNodeId}
         keyToMeta={keyToMeta}
+        flowType={flowType}
         onPick={(ref) => {
           const prev = String(values[fieldName] ?? '');
           const next = prev ? `${prev}${prev.endsWith(' ') ? '' : ' '}${ref}` : ref;
@@ -1012,6 +1027,7 @@ export function NodeConfigForm({
                     nodes={pickerNodes}
                     currentNodeId={currentNodeId}
                     keyToMeta={keyToMeta}
+                    flowType={flowType}
                   />
                 ) : field.field_type === 'intent_list' ? (
                   <IntentListEditor
@@ -1030,6 +1046,7 @@ export function NodeConfigForm({
                     nodes={pickerNodes}
                     currentNodeId={currentNodeId}
                     keyToMeta={keyToMeta}
+                    flowType={flowType}
                   />
                 ) : field.field_type === 'tool_list' ? (
                   <ToolListEditor
@@ -1043,6 +1060,8 @@ export function NodeConfigForm({
                     onChange={handleFieldChange}
                     picker={buildPicker(field.name)}
                     datasetOptions={datasetOptions}
+                    lockedParams={isChatflowStart ? CHATFLOW_START_BUILTIN_PARAMS : undefined}
+                    allowAdd={!isChatflowStart}
                   />
                 )}
               </div>

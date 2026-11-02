@@ -10,12 +10,19 @@ import type {
 import '@flowgram.ai/free-layout-editor/index.css';
 import { useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, Modal, Segmented, Tooltip, message } from 'antd';
+import { Button, Modal, message } from 'antd';
+import { ExclamationCircleFilled } from '@ant-design/icons';
 import { getAppGraph, saveAppGraph, updateApp, createDebugConversation, debugRunAppStream, debugRunAppStreamResume, debugRunNode, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type FlowType, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload, type NodeDebugRunResult } from '../../api/apps';
 import { ApiError } from '../../api/client';
 import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
 import { listDatasets, type DatasetItem } from '../../api/datasets';
 import { makeNodeRenderer, type NodeCardActions } from './components/nodeRenderer';
+import {
+  listStartInputParams,
+  filterBuiltinStartParams,
+  isChatflowBuiltinParamName,
+  flowTypeStore,
+} from './canvas/metadata/chatflowStart';
 import { CanvasToolbar } from './components/CanvasToolbar';
 import { ResourceSidebar } from './components/ResourceSidebar';
 import { EmptyCanvasWelcome } from './components/EmptyCanvasWelcome';
@@ -154,6 +161,8 @@ export default function AppEditPage() {
   const [nodeDebugRunning, setNodeDebugRunning] = useState(false);
   const [nodeDebugResult, setNodeDebugResult] = useState<NodeDebugRunResult | null>(null);
   const [nodeOutputs, setNodeOutputs] = useState<OutputFieldItem[]>([]);
+  // 工作流形态下隐藏的对话流专属输出行，保存时原样回填（非破坏性）
+  const hiddenStartOutputsRef = useRef<Array<Record<string, unknown>>>([]);
   const [upstreamInputs, setUpstreamInputs] = useState<UpstreamInputGroup[]>([]);
   const [running, setRunning] = useState(false);
   const [publishing, setPublishing] = useState(false);
@@ -197,6 +206,11 @@ export default function AppEditPage() {
   // 画布形态：工作流 / 对话流。后端为事实源，切换后落库
   const [flowType, setFlowType] = useState<FlowType>('workflow');
   const [flowTypeSwitching, setFlowTypeSwitching] = useState(false);
+  // 节点卡片渲染器从外部 store 读形态：FlowGram 注册表闭包捕获的 prop 切换后
+  // 不会刷新已挂载节点，这里同步 store 驱动芯片行/副标题即时更新
+  useEffect(() => {
+    flowTypeStore.set(flowType);
+  }, [flowType]);
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
   // 画布上是否已有 end 节点：start 永远只允许一个（初始化时就有，且 deletable=false），
   // end 同样只允许一个；节点面板据此隐藏对应类型，避免出现多个开始/结束节点
@@ -651,6 +665,9 @@ export default function AppEditPage() {
       try {
         await updateApp(id, { flow_type: next });
         setFlowType(next);
+        // 配置抽屉的参数/输出列表按形态渲染，切换后关闭避免残留旧形态内容
+        setConfigDrawerOpen(false);
+        hiddenStartOutputsRef.current = [];
         if (next === 'workflow') {
           // 工作流没有聊天试运行语义，关闭面板并清空会话上下文
           setChatPanelOpen(false);
@@ -668,15 +685,34 @@ export default function AppEditPage() {
         setFlowTypeSwitching(false);
       }
     };
-    if (warnings.length === 0) {
-      void apply();
-      return;
+    // 形态切换会改变执行语义并落库，属高风险操作：任何方向均需二次确认
+    const isToWorkflow = next === 'workflow';
+    const impacts = isToWorkflow
+      ? [
+          '画布将改为单次执行模式，不再支持多轮会话与中间消息输出。',
+          '试运行聊天面板将关闭，当前会话上下文将被清空。',
+        ]
+      : [
+          '画布将改为多轮会话模式，支持中间消息输出与问答节点。',
+          '试运行将改为聊天方式，单次执行调试面板不再适用。',
+        ];
+    if (warnings.length > 0) {
+      impacts.push(`图中包含问答节点：${warnings.join('、')}。工作流执行到该节点会中断且没有恢复通道，节点本身会保留。`);
     }
+    impacts.push('切换会立即保存到服务端，已发布的运行入口不受影响。');
     Modal.confirm({
-      title: '切换为工作流？',
-      content: `图中包含问答节点：${warnings.join('、')}。工作流执行到该节点会中断且没有恢复通道，节点本身会保留。`,
-      okText: '保留节点并切换',
-      cancelText: '取消切换',
+      title: isToWorkflow ? '切换为工作流？' : '切换为对话流？',
+      icon: <ExclamationCircleFilled style={{ color: '#faad14' }} />,
+      content: (
+        <div>
+          <p style={{ marginTop: 0 }}>切换形态会改变画布的执行语义，请确认以下影响：</p>
+          <ul style={{ paddingLeft: 20, marginBottom: 0 }}>
+            {impacts.map((t) => <li key={t}>{t}</li>)}
+          </ul>
+        </div>
+      ),
+      okText: isToWorkflow ? '我已了解，切换为工作流' : '我已了解，切换为对话流',
+      cancelText: '保持当前形态',
       onOk: () => apply(),
     });
   }, [
@@ -989,7 +1025,13 @@ export default function AppEditPage() {
       title: nodeData.title,
       ...(nodeData.config || {}),
     });
-    setNodeOutputs(parseOutputsValue(nodeData.outputs));
+    // 工作流形态隐藏导入图残留的对话流专属输出行（USER_INPUT/CONVERSATION_NAME），保存时回填
+    const parsedOutputs = parseOutputsValue(nodeData.outputs);
+    hiddenStartOutputsRef.current = nodeTypeKey === 'start' && flowType !== 'chatflow'
+      ? (Array.isArray(nodeData.outputs) ? nodeData.outputs as Array<Record<string, unknown>> : [])
+        .filter((o) => isChatflowBuiltinParamName(o?.name))
+      : [];
+    setNodeOutputs(nodeTypeKey === 'start' ? filterBuiltinStartParams(parsedOutputs, flowType) : parsedOutputs);
 
     // 抽屉「输入」区：按入边反查上游可引用字段
     const json = toWorkflowJSON(ctxRef.current);
@@ -1005,9 +1047,10 @@ export default function AppEditPage() {
       const srcTypeKey = String(src.type || srcId.split('-')[0]);
       const srcMeta = keyToMeta[srcTypeKey];
       const fields = srcTypeKey === 'start'
-        ? (Array.isArray(srcData.config?.inputs)
-            ? srcData.config.inputs.map((inp: any) => ({ name: String(inp?.name || ''), label: '启动参数' }))
-            : [])
+        ? listStartInputParams(srcData.config?.inputs, flowType).map((inp) => ({
+            name: inp.name,
+            label: inp.builtin ? '内置启动参数' : '启动参数',
+          }))
         : (Array.isArray(srcData.outputs) && srcData.outputs.length > 0
             ? srcData.outputs.map((o: any) => ({ name: String(o?.name || ''), label: String(o?.description || '') }))
             : (srcMeta?.outputs || []).map((p) => ({ name: p.name, label: p.label || '' })));
@@ -1021,7 +1064,7 @@ export default function AppEditPage() {
     }
     setUpstreamInputs(groups);
     refreshPickerNodes();
-  }, [keyToMeta, refreshPickerNodes, enterSubgraph]);
+  }, [keyToMeta, refreshPickerNodes, enterSubgraph, flowType]);
 
   // ========== 删除节点（U-S3） ==========
   const confirmDeleteNode = useCallback(() => {
@@ -1084,6 +1127,7 @@ export default function AppEditPage() {
         makeNodeRenderer(meta, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions) as unknown as React.ComponentType<any>,
       ]),
     ) as Record<string, React.ComponentType<any>>;
+    // 形态切换不重建注册表：卡片内部通过 flowTypeStore 自行响应
   }, [nodeMetas, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions]);
 
   // ========== 抽屉配置变更 ==========
@@ -1109,12 +1153,16 @@ export default function AppEditPage() {
     if (ctx && selectedNodeId) {
       const node = getNode(ctx, selectedNodeId);
       if (node) {
+        // 工作流形态下界面上隐藏的对话流专属输出行原样回填，避免编辑其它行时把它们抹掉
         updateNodeExtInfo(node, {
-          outputs: next.map((it) => ({
-            name: it.name,
-            type: it.type,
-            ...(it.description ? { description: it.description } : {}),
-          })),
+          outputs: [
+            ...next.map((it) => ({
+              name: it.name,
+              type: it.type,
+              ...(it.description ? { description: it.description } : {}),
+            })),
+            ...hiddenStartOutputsRef.current,
+          ],
         });
       }
     }
@@ -1167,14 +1215,16 @@ export default function AppEditPage() {
   }, []);
 
   // ========== 试运行 ==========
-  const extractStartParams = useCallback((): Array<{ name: string; type?: string }> => {
+  const extractStartParams = useCallback((flowType: FlowType): Array<{ name: string; type?: string }> => {
     const ctx = ctxRef.current;
     if (!ctx) return [];
     const flowgram = toWorkflowJSON(ctx);
     const startNode = (flowgram.nodes || []).find((n) => n.type === 'start');
     if (!startNode) return [];
     const data = (startNode.data || {}) as { config?: { inputs?: Array<{ name: string; type?: string }> } };
-    return Array.isArray(data?.config?.inputs) ? data.config.inputs : [];
+    const inputs = Array.isArray(data?.config?.inputs) ? data.config.inputs : [];
+    // 工作流形态隐藏导入图残留的对话流专属启动参数
+    return filterBuiltinStartParams(inputs, flowType);
   }, []);
 
   const appendChatMessage = useCallback((
@@ -1504,7 +1554,7 @@ export default function AppEditPage() {
 
   const handleRun = useCallback(() => {
     if (!id || running) return;
-    const params = extractStartParams();
+    const params = extractStartParams(flowType);
     const chatflow = flowType === 'chatflow';
     if (params.length > 0) {
       setStartParams(params);
@@ -1692,6 +1742,9 @@ export default function AppEditPage() {
       <ResourceSidebar
         appName={id || ''}
         collapsed={sidebarCollapsed}
+        flowType={flowType}
+        flowTypeSwitching={flowTypeSwitching}
+        onSwitchFlowType={handleFlowTypeChange}
         onToggleCollapse={() =>
           setSidebarCollapsed((v) => {
             const next = !v;
@@ -1708,27 +1761,6 @@ export default function AppEditPage() {
       {/* 画布区域 */}
       <div style={{ flex: 1, position: 'relative' }}>
         <CanvasStyles />
-
-        {/* 顶部居中：工作流 / 对话流形态切换，切换后落库 */}
-        <div style={{
-          position: 'absolute',
-          top: 12,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          zIndex: CANVAS_TOKENS.z.toolbar,
-        }}>
-          <Tooltip title="对话流支持多轮会话、中间消息输出与问答节点；工作流单次执行返回结果">
-            <Segmented
-              value={flowType}
-              disabled={flowTypeSwitching}
-              onChange={(value) => handleFlowTypeChange(value as FlowType)}
-              options={[
-                { label: '工作流', value: 'workflow' },
-                { label: '对话流', value: 'chatflow' },
-              ]}
-            />
-          </Tooltip>
-        </div>
 
         {/* 底部居中浮条（V3）：缩放 + 适应 + 全屏 | +添加节点 | 试运行 */}
         <CanvasToolbar

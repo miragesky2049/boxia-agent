@@ -14,6 +14,7 @@ import {
   type SystemVariable,
 } from '../../../api/apps';
 import type { NodeMeta } from '../../../api/nodeMeta';
+import { listStartInputParams } from '../canvas/metadata/chatflowStart';
 
 const VARIABLE_TYPE_OPTIONS: Array<{ value: AppVariableType; label: string }> = [
   { value: 'string', label: 'String' },
@@ -163,8 +164,8 @@ export function VariablesDrawer({
         isLeaf: true,
       }));
       const startInputs =
-        node.typeKey === 'start' && Array.isArray(node.config?.inputs)
-          ? (node.config.inputs as Array<{ name: string }>).map((inp) => ({
+        node.typeKey === 'start'
+          ? listStartInputParams(node.config?.inputs, flowType).map((inp) => ({
               key: `${node.id}.output.${inp.name}`,
               title: (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -190,7 +191,7 @@ export function VariablesDrawer({
         children: [...outputs, ...startInputs],
       };
     });
-  }, [nodes, keyToMeta]);
+  }, [nodes, keyToMeta, flowType]);
 
   const noApplication = !applicationId;
 

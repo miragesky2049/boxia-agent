@@ -5,6 +5,8 @@ import { NodeIcon } from './NodeIcon';
 import { buildNodeSubtitle } from './nodeSubtitle';
 import type { RunNodeStatus } from './nodeStatus';
 import { CANVAS_TOKENS } from '../canvas/tokens';
+import { typeShortLabel } from '../canvas/metadata/chatflowStart';
+import type { FlowType } from '../../../api/apps';
 
 export interface NodeCardAction {
   key: string;
@@ -34,6 +36,9 @@ interface NodeCardProps {
   actions?: NodeCardAction[];
   children?: React.ReactNode;
   dynamicOutputs?: DynamicOutputPort[];
+  // 对话流开始节点的「输入」芯片行（对齐 Coze：str:USER_INPUT / str:CONVERSATION_NAME）
+  inputChips?: Array<{ type: string; name: string }>;
+  flowType?: FlowType;
 }
 
 // 与 Coze 对齐的白卡节点样式：白底 + 细边框 + 图标 + 标题/副标题
@@ -52,9 +57,13 @@ export function NodeCard({
   actions,
   children,
   dynamicOutputs,
+  inputChips,
+  flowType,
 }: NodeCardProps) {
-  // 动态副标题优先，后端 subtitle_hint 仅作静态兜底
-  const subtitle = buildNodeSubtitle(typeKey, config) || subtitleHint || '';
+  // 动态副标题优先，后端 subtitle_hint 仅作静态兜底；
+  // 对话流开始节点用「输入」芯片行表达，不兜底显示「工作流入口」
+  const dynamicSubtitle = buildNodeSubtitle(typeKey, config, flowType);
+  const subtitle = inputChips?.length ? dynamicSubtitle : (dynamicSubtitle || subtitleHint || '');
   const [hover, setHover] = useState(false);
   // 菜单展开期间保持触发按钮可见，避免鼠标移入弹出层时按钮闪烁
   const [menuOpen, setMenuOpen] = useState(false);
@@ -181,6 +190,28 @@ export function NodeCard({
             }}
           >
             {subtitle}
+          </div>
+        )}
+        {/* 输入芯片行（对话流开始节点，对齐 Coze：输入 str:USER_INPUT str:CONVERSATION_NAME） */}
+        {inputChips && inputChips.length > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginTop: 4, flexWrap: 'wrap' }}>
+            <span style={{ fontSize: 11, color: '#9ca3af', flexShrink: 0 }}>输入</span>
+            {inputChips.map((chip) => (
+              <span
+                key={chip.name}
+                style={{
+                  fontSize: 11,
+                  fontFamily: 'monospace',
+                  background: '#f3f4f6',
+                  color: '#374151',
+                  borderRadius: 4,
+                  padding: '1px 6px',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {typeShortLabel(chip.type)}:{chip.name}
+              </span>
+            ))}
           </div>
         )}
         {/* if_else 动态出口：每行一个 [data-port-id] 元素，FlowGram 会自动在该位置渲染端口圆点
