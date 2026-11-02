@@ -147,7 +147,7 @@ class McpTool(Tool):
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 server_url")
         # SSRF 防护：与 HttpTool 一致，拒绝 loopback / 云元数据 / link-local 等
         from internal.domain.errors import ValidationError
-        from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+        from internal.domain.security.ssrf_guard import validate_outbound_url
         from internal.domain.agent.mcp_client import call_tool
 
         try:

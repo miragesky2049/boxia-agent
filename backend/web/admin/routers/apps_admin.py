@@ -10,7 +10,6 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
 
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
@@ -33,6 +32,24 @@ from internal.infrastructure.repository.apps.message_repository import (
     MessageRepository as SyncMessageRepository,
 )
 from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
+from web.admin.schemas.apps import (
+    AppCreatePayload,
+    AppUpdatePayload,
+    DebugConversationPayload,
+    DebugNodeRunPayload,
+    DebugResumePayload,
+    DebugRunPayload,
+    EnabledPayload,
+    GraphPayload,
+    ListingPayload,
+    PinGraphVersionPayload,
+    RollbackGraphPayload,
+    TenantConfigPayload,
+    UserVariablesPayload,
+    ValidateGraphPayload,
+    VariablesPayload,
+    VisibilityPayload,
+)
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.sse import SSE_HEADERS, sse_event
@@ -154,55 +171,6 @@ def _register_subgraph_loader(
     services.register("subgraph_loader", _loader)
 
 
-class AppCreatePayload(BaseModel):
-    name: str = Field(..., max_length=200)
-    description: str = Field("", max_length=2000)
-    # workflow（工作流） / chatflow（对话流）
-    flow_type: str = Field("workflow", pattern="^(workflow|chatflow)$")
-
-
-class AppUpdatePayload(BaseModel):
-    name: str | None = Field(None, max_length=200)
-    description: str | None = Field(None, max_length=2000)
-    avatar_url: str | None = Field(None, max_length=500)
-    flow_type: str | None = Field(None, pattern="^(workflow|chatflow)$")
-
-
-class GraphPayload(BaseModel):
-    graph: dict[str, Any]
-    changelog: str = ""
-
-
-class ListingPayload(BaseModel):
-    listed: bool
-
-
-class EnabledPayload(BaseModel):
-    enabled: bool
-
-
-class VisibilityDepartmentItem(BaseModel):
-    department_id: UUID
-    include_subtree: bool = True
-
-
-class VisibilityPayload(BaseModel):
-    mode: str = Field(..., pattern="^(all|custom)$")
-    departments: list[VisibilityDepartmentItem] = Field(default_factory=list)
-    users: list[UUID] = Field(default_factory=list)
-
-
-class DebugRunPayload(BaseModel):
-    graph: dict[str, Any]
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    # 对话流会话上下文：消息类节点回退使用；不传则由「创建会话」节点产出
-    conversation_id: UUID | None = None
-    # 多轮试运行时复用同一个 thread，保证 checkpoint / 历史消息连续
-    thread_id: str | None = None
-    # 真实应用 ID：对话流试运行会把消息落到该应用下（channel=debug）
-    application_id: UUID | None = None
-
-
 @router.get("")
 def list_apps(
     owner_type: str | None = None,
@@ -228,13 +196,6 @@ def create_app(
         flow_type=payload.flow_type,
     )
     return {"application_id": app_id}
-
-
-class ValidateGraphPayload(BaseModel):
-    """试运行前的结构校验请求体。"""
-
-    graph: dict[str, Any]
-    application_id: UUID | None = None
 
 
 @router.post("/validate-graph")
@@ -304,14 +265,6 @@ def update_app(
         flow_type=payload.flow_type,
     )
     return {"ok": True}
-
-
-class VariablesPayload(BaseModel):
-    variables: list[dict[str, Any]] = Field(default_factory=list)
-
-
-class UserVariablesPayload(BaseModel):
-    values: dict[str, Any] = Field(default_factory=dict)
 
 
 @router.get("/{application_id}/variables")
@@ -402,10 +355,6 @@ def list_graph_versions(
     return service.list_graph_versions(application_id)
 
 
-class RollbackGraphPayload(BaseModel):
-    version: int
-
-
 @router.post("/{application_id}/graph-rollback")
 def rollback_graph(
     application_id: UUID,
@@ -436,12 +385,6 @@ def publish_app_graph(
     )
 
 
-class TenantConfigPayload(BaseModel):
-    tenant_id: UUID
-    config_key: str
-    config_value: Any
-
-
 @router.post("/{application_id}/tenant-config", status_code=status.HTTP_201_CREATED)
 def set_tenant_config(
     application_id: UUID,
@@ -468,11 +411,6 @@ def delete_tenant_config(
     """删除租户级 config 覆盖。"""
     service.delete_tenant_config(tenant_id, application_id, config_key)
     return {"ok": True}
-
-
-class PinGraphVersionPayload(BaseModel):
-    tenant_id: UUID
-    version: int | None = None
 
 
 @router.post("/{application_id}/graph-pin")
@@ -659,15 +597,6 @@ async def debug_run_stream(
     )
 
 
-class DebugNodeRunPayload(BaseModel):
-    """单节点试运行请求体。"""
-
-    graph: dict[str, Any]
-    node_id: str = Field(..., min_length=1)
-    inputs: dict[str, Any] = Field(default_factory=dict)
-    conversation_id: UUID | None = None
-
-
 @router.post("/debug/run/node")
 async def debug_run_node(
     payload: DebugNodeRunPayload,
@@ -715,13 +644,6 @@ async def debug_run_node(
         raise ValidationError(str(exc)) from exc
 
 
-class DebugConversationPayload(BaseModel):
-    """画布对话流试运行：创建一个 debug 会话。"""
-
-    application_id: UUID
-    title: str = Field("画布试运行", max_length=200)
-
-
 @router.post("/debug/conversations", status_code=status.HTTP_201_CREATED)
 def create_debug_conversation(
     payload: DebugConversationPayload,
@@ -740,20 +662,6 @@ def create_debug_conversation(
     )
     uow.commit()
     return {"conversation_id": str(conversation_id)}
-
-
-class DebugResumePayload(BaseModel):
-    """人审 / 问答续跑请求体。"""
-
-    graph: dict[str, Any]
-    thread_id: str
-    run_id: str | None = None
-    conversation_id: UUID | None = None
-    application_id: UUID | None = None
-    # 人审批复：{"approved": bool, "comment": str, "approver": str}
-    approval: dict[str, Any] | None = None
-    # 问答节点回答等自由载荷：{"answer": "..."}
-    resume: dict[str, Any] | None = None
 
 
 @router.post("/debug/run/stream/resume")

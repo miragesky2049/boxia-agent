@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from internal.application.errors import ValidationError
-from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+from internal.domain.security.ssrf_guard import validate_outbound_url
 
 
 def test_accepts_public_http_url() -> None:

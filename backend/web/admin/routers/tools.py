@@ -13,7 +13,7 @@ from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.agent.run_context import AgentRunContext
 from internal.domain.agent.mcp_client import McpClientError, list_tools as mcp_list_tools
 from internal.domain.agent.tools import ToolExecutionError, build_tools
-from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+from internal.domain.security.ssrf_guard import validate_outbound_url
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.resource import ToolOut, ToolPayload
 from web.deps.auth import AdminAuthDep, require_permission

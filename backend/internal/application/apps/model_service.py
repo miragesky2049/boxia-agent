@@ -10,9 +10,9 @@ from sqlalchemy.orm import Session
 
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.llm.client import LLMClient, OpenAICompatLLMClient
+from internal.domain.security.ssrf_guard import validate_outbound_url
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.repository.apps.model_repository import ModelRepository
-from internal.infrastructure.security.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)
 

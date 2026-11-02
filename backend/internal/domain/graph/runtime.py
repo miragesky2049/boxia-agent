@@ -670,7 +670,7 @@ class GraphRuntime:
 
         import httpx
 
-        from internal.infrastructure.security.ssrf_guard import validate_outbound_url
+        from internal.domain.security.ssrf_guard import validate_outbound_url
 
         async def _send(wh: dict[str, Any]) -> None:
             url = wh["url"]
