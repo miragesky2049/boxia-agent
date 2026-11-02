@@ -450,13 +450,15 @@ export default function AppEditPage() {
       const height = meta.type_key === 'comment' || meta.type_key === 'note'
         ? 100
         : baseHeight + outputPortHeight;
+      // if_else 节点：启用 useDynamicPort，输出端口通过 DOM [data-port-id] 动态渲染
+      const isIfElse = meta.type_key === 'if_else';
       return {
         type: meta.type_key,
         meta: {
           defaultPorts: [
             ...meta.inputs.map((p) => ({ portID: p.name, type: 'input' as const })),
-            ...meta.outputs.map((p) => ({ portID: p.name, type: 'output' as const })),
           ],
+          useDynamicPort: isIfElse ? true : undefined,
           size: { width: 220, height },
           renderKey: meta.type_key,
         },
@@ -1000,11 +1002,13 @@ export default function AppEditPage() {
     // 不做端口方向校验（FlowGram 拖线本身只能从 output 发起）。
     // 端口 id 仅为端口名（如 "default"/"true"/"false"），不是全局唯一，
     // 因此不能用 fromPort.id === toPort.id 判重（START.default → IF.default 会被误拒）。
-    // 只防止同节点自连。
     if (!fromPort || !toPort) return false;
     const fromNodeId = (fromPort as unknown as { node?: { id?: string } }).node?.id;
     const toNodeId = (toPort as unknown as { node?: { id?: string } }).node?.id;
     if (fromNodeId && fromNodeId === toNodeId) return false;
+    // 出口端口已连出一条线后，不允许再从该端口拖出新线（对齐 coze：一个分支一条出线）
+    const existingLines = (fromPort as unknown as { allLines?: unknown[] }).allLines;
+    if (existingLines && existingLines.length > 0) return false;
     return true;
   }, []);
 

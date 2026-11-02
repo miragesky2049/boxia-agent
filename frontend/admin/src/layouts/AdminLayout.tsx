@@ -8,6 +8,8 @@ import {
   IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
+  MenuFoldOutlined,
+  MenuUnfoldOutlined,
   SafetyCertificateOutlined,
   SafetyOutlined,
   ShopOutlined,
@@ -16,9 +18,9 @@ import {
   UserOutlined,
   UserSwitchOutlined,
 } from '@ant-design/icons'
-import { Avatar, Dropdown, Layout, Menu, Tag } from 'antd'
+import { Avatar, Dropdown, Layout, Menu, Tag, Tooltip } from 'antd'
 import type { MenuProps } from 'antd'
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
@@ -64,11 +66,28 @@ const ENV_LABELS = {
   prod: '线上',
 } as const
 
+const SIDER_WIDTH = 224
+const SIDER_COLLAPSED_WIDTH = 64
+const SIDER_COLLAPSE_KEY = 'admin:sider:collapsed'
+
 export default function AdminLayout() {
   const navigate = useNavigate()
   const location = useLocation()
   const { user, signOut, roleName, menus, mustChangePassword } = useAuth()
   const { platformName, scopeLabel, isPlatform, context } = useTenant()
+
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    return window.localStorage.getItem(SIDER_COLLAPSE_KEY) === '1'
+  })
+
+  const toggleCollapsed = () => {
+    setCollapsed((prev) => {
+      const next = !prev
+      window.localStorage.setItem(SIDER_COLLAPSE_KEY, next ? '1' : '0')
+      return next
+    })
+  }
 
   useEffect(() => {
     if (mustChangePassword) {
@@ -138,16 +157,29 @@ export default function AdminLayout() {
 
   return (
     <Layout className="admin-layout">
-      <Sider width={224} theme="light" className="admin-sider">
-        <div className="admin-sider__brand" onClick={() => navigate('/apps')}>
+      <Sider
+        width={SIDER_WIDTH}
+        collapsedWidth={SIDER_COLLAPSED_WIDTH}
+        collapsed={collapsed}
+        theme="light"
+        className="admin-sider"
+        trigger={null}
+      >
+        <div
+          className="admin-sider__brand"
+          onClick={() => navigate('/apps')}
+          title={collapsed ? platformName : undefined}
+        >
           <span className="admin-sider__logo">B</span>
-          <span className="admin-sider__title">
-            {platformName}
-            <small>
-              {scopeLabel}
-              {context && context.app_env !== 'prod' ? ` · ${ENV_LABELS[context.app_env]}环境` : ''}
-            </small>
-          </span>
+          {!collapsed && (
+            <span className="admin-sider__title">
+              {platformName}
+              <small>
+                {scopeLabel}
+                {context && context.app_env !== 'prod' ? ` · ${ENV_LABELS[context.app_env]}环境` : ''}
+              </small>
+            </span>
+          )}
         </div>
         <Menu
           mode="inline"
@@ -155,7 +187,18 @@ export default function AdminLayout() {
           selectedKeys={[selectedKey]}
           onClick={({ key }) => navigate(key)}
           className="admin-sider__menu"
+          inlineCollapsed={collapsed}
         />
+        <Tooltip title={collapsed ? '展开导航' : '收起导航'} placement="right">
+          <button
+            type="button"
+            className="admin-sider__trigger"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? '展开导航' : '收起导航'}
+          >
+            {collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />}
+          </button>
+        </Tooltip>
       </Sider>
 
       <Layout>

@@ -151,7 +151,7 @@ function RefPickerButton({
 }
 
 // ========== IF case 可视化编辑器（T7） ==========
-interface CaseItem {
+export interface CaseItem {
   case_id: string;
   left: string;
   operator: string;
@@ -171,7 +171,7 @@ const CASE_OPERATORS: Array<{ value: string; label: string }> = [
   { value: 'is_not_empty', label: '不为空' },
 ];
 
-function parseCasesValue(raw: any): CaseItem[] {
+export function parseCasesValue(raw: any): CaseItem[] {
   if (Array.isArray(raw)) {
     return raw.map((c, idx) => ({
       case_id: String(c?.case_id || c?.id || `case_${idx + 1}`),

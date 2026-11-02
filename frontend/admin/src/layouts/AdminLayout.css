@@ -6,6 +6,11 @@
   border-right: 1px solid #edf0f5;
 }
 
+.admin-sider {
+  position: relative;
+  transition: width 0.2s ease;
+}
+
 .admin-sider .ant-layout-sider-children {
   display: flex;
   flex-direction: column;
@@ -19,10 +24,19 @@
   height: 56px;
   padding: 0 20px;
   cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.admin-sider.ant-layout-sider-collapsed .admin-sider__brand {
+  justify-content: center;
+  padding: 0;
+  gap: 0;
 }
 
 .admin-sider__logo {
   display: flex;
+  flex-shrink: 0;
   width: 32px;
   height: 32px;
   align-items: center;
@@ -41,6 +55,8 @@
   font-size: 15px;
   font-weight: 600;
   line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .admin-sider__title small {
@@ -53,9 +69,15 @@
   flex: 1;
   border-inline-end: none;
   padding: 8px 8px 0;
+  overflow-x: hidden;
 }
 
-.admin-sider__menu .ant-menu-item {
+.admin-sider.ant-layout-sider-collapsed .admin-sider__menu {
+  padding: 8px 0;
+}
+
+.admin-sider__menu .ant-menu-item,
+.admin-sider__menu .ant-menu-submenu-title {
   height: 42px;
   border-radius: 10px;
   color: #4e5969;
@@ -63,6 +85,29 @@
 
 .admin-sider__menu .ant-menu-item-selected {
   font-weight: 600;
+}
+
+.admin-sider__trigger {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  margin: 8px 12px 12px;
+  border: 1px solid #edf0f5;
+  border-radius: 8px;
+  background: #fff;
+  color: #4e5969;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+
+.admin-sider__trigger:hover {
+  background: #f2f5fa;
+  color: #1d2129;
+}
+
+.admin-sider.ant-layout-sider-collapsed .admin-sider__trigger {
+  margin: 8px 8px 12px;
 }
 
 .admin-header {

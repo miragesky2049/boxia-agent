@@ -122,7 +122,8 @@ class IfElseNodeHandler(NodeHandler):
 
     def _eval_multi_cases(self, ctx: NodeContext, cases: list[Any]) -> NodeResult:
         """多 case：逐个求值 expression，第一个为真的 case_id 作为 route。"""
-        else_port = str(ctx.config.get("else_port") or "false")
+        # 否则出口端口名默认 "else"（与前端动态端口渲染一致）；旧图兼容 "false"
+        else_port = str(ctx.config.get("else_port") or "else")
         outputs: dict[str, Any] = {}
         for case in cases:
             if not isinstance(case, dict):

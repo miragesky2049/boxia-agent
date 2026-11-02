@@ -329,15 +329,27 @@ class Compiler:
         source_id: str,
         out_edges: list,
     ) -> None:
-        """IF 节点：按 route（case_id / "true" / "false"）路由到目标节点。"""
+        """IF 节点：按 route（case_id / "else"）路由到目标节点。
+
+        兼容旧图：旧版前端静态端口是 "true"/"false"，route_map 里可能仍是 "false"。
+        新图前端动态端口是 case_id / "else"，后端 if_else.py 默认返回 "else"。
+        router 查找时按 route → "else" → "false" 的顺序兜底。
+        """
         route_map: dict[str, str] = {}
         for edge in out_edges:
-            port = edge.source_port or "true"
+            port = edge.source_port or "else"
             route_map[port] = edge.target
 
         def router(state: dict) -> str:
             node_out = state.get("node_outputs", {}).get(source_id, {})
-            route = node_out.get("route") or "false"
-            return route_map.get(route, route_map.get("false", END))
+            route = node_out.get("route") or "else"
+            if route in route_map:
+                return route_map[route]
+            # 兼容旧图：route="else" 但 route_map 只有 "false" key
+            if "else" in route_map:
+                return route_map["else"]
+            if "false" in route_map:
+                return route_map["false"]
+            return END
 
         sg.add_conditional_edges(source_id, router, route_map)

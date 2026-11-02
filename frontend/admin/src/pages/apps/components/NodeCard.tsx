@@ -14,6 +14,11 @@ export interface NodeCardAction {
   onClick: () => void;
 }
 
+export interface DynamicOutputPort {
+  portID: string;
+  label: string;
+}
+
 interface NodeCardProps {
   typeKey: string;
   color: string;
@@ -28,6 +33,7 @@ interface NodeCardProps {
   onAddNext?: () => void;
   actions?: NodeCardAction[];
   children?: React.ReactNode;
+  dynamicOutputs?: DynamicOutputPort[];
 }
 
 // 与 Coze 对齐的白卡节点样式：白底 + 细边框 + 图标 + 标题/副标题
@@ -45,6 +51,7 @@ export function NodeCard({
   onAddNext,
   actions,
   children,
+  dynamicOutputs,
 }: NodeCardProps) {
   // 动态副标题优先，后端 subtitle_hint 仅作静态兜底
   const subtitle = buildNodeSubtitle(typeKey, config) || subtitleHint || '';
@@ -174,6 +181,53 @@ export function NodeCard({
             }}
           >
             {subtitle}
+          </div>
+        )}
+        {/* if_else 动态出口：每行一个 [data-port-id] 元素，FlowGram 会自动在该位置渲染端口圆点
+            WorkflowPointStyle 是 position:absolute; left:50%; top:50%; margin:-10px，
+            portal 进 targetElement 后以其为 containing block 居中，因此 targetElement 必须
+            自身 position:absolute 贴在每行右缘，圆点才会居中到各分支行高度
+            视觉参考 coze：浅灰圆角文本块承载条件标签，圆点紧贴文本块右缘 */}
+        {dynamicOutputs && dynamicOutputs.length > 0 && (
+          <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {dynamicOutputs.map((port) => (
+              <div
+                key={port.portID}
+                style={{
+                  position: 'relative',
+                  display: 'flex',
+                  alignItems: 'center',
+                }}
+              >
+                <div
+                  style={{
+                    flex: 1,
+                    background: '#f3f4f6',
+                    borderRadius: 4,
+                    padding: '3px 8px',
+                    fontSize: 11,
+                    color: '#374151',
+                    lineHeight: '16px',
+                    whiteSpace: 'nowrap',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                  }}
+                >
+                  {port.label}
+                </div>
+                <div
+                  data-port-id={port.portID}
+                  data-port-type="output"
+                  style={{
+                    position: 'absolute',
+                    right: -9,
+                    top: 0,
+                    bottom: 0,
+                    width: 1,
+                  }}
+                />
+              </div>
+            ))}
           </div>
         )}
       </div>
