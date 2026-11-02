@@ -53,10 +53,9 @@ class FakeModelRepo:
 
 def _make_service(catalogs: set[str] | None = None) -> tuple[TenantSettingsService, FakeSettingsRepo]:
     session = MagicMock()
-    service = TenantSettingsService(session)
     repo = FakeSettingsRepo()
-    service._repo = repo  # type: ignore[assignment]
-    service._model_repo = FakeModelRepo(catalogs or set())  # type: ignore[assignment]
+    # DDD 四期：仓储改由构造参数注入
+    service = TenantSettingsService(repo, FakeModelRepo(catalogs or set()), session)  # type: ignore[call-arg]
     return service, repo
 
 

@@ -12,7 +12,6 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from internal.application.apps.application_service import ApplicationService
-from internal.application.apps.model_service import ModelService
 from internal.application.retrieval_service import RetrievalService
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.graph.node_base import ServiceRegistry
@@ -45,6 +44,7 @@ from internal.infrastructure.repository.postgres_audit_log_repository import (
 from internal.infrastructure.repository.postgres_resource_repository import (
     PostgresToolRepository,
 )
+from web.deps.apps_services import make_application_service, make_model_service
 
 logger = logging.getLogger(__name__)
 
@@ -54,7 +54,7 @@ def register_llm_and_http(services: ServiceRegistry, uow: Any, tenant_id: Any) -
 
     tenant_id 允许为 None：与迁移前 apps_admin debug 端点的直传行为保持一致。
     """
-    model_service = ModelService(uow.session)
+    model_service = make_model_service(uow.session)
     services.register(
         "llm",
         LLMServiceAdapter(build_model_resolver(model_service, tenant_id)),
@@ -145,7 +145,7 @@ def load_debug_variables(
     if application_id is None or principal.user_id is None:
         return {}, set(), None
     try:
-        variables, user_keys = ApplicationService(uow).build_runtime_variables(
+        variables, user_keys = make_application_service(uow).build_runtime_variables(
             application_id, principal.user_id,
         )
     except Exception:  # noqa: BLE001

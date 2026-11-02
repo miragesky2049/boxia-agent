@@ -560,3 +560,75 @@ class ApplicationRepository:
         sql += " ORDER BY updated_at DESC LIMIT :lim"
         rows = self._session.execute(text(sql), params).all()
         return [dict(r._mapping) for r in rows]
+
+    # ========== user 端可见应用（DDD 四期从 ApplicationService 下沉） ==========
+    def list_visible_for_user(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        keyword: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """当前用户可见应用 = 本租户自建 + 已开通的产品级实例，叠加 visibility 白名单/部门过滤。"""
+        params: dict[str, Any] = {"tid": str(tenant_id), "uid": str(user_id)}
+        kw_clause = ""
+        if keyword:
+            kw_clause = " AND a.name ILIKE :kw"
+            params["kw"] = f"%{keyword}%"
+
+        rows = self._session.execute(
+            text(
+                f"""
+                SELECT a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type
+                FROM application a
+                WHERE a.is_enabled = true
+                  AND (
+                    a.owner_type = 'tenant' AND a.owner_id = :tid
+                    OR a.id IN (
+                        SELECT application_id FROM tenant_application_instance
+                        WHERE tenant_id = :tid AND status = 'active'
+                    )
+                  )
+                  AND (
+                    a.visibility_mode = 'all'
+                    OR a.id IN (
+                        SELECT application_id FROM application_visibility_users
+                        WHERE user_id = :uid
+                    )
+                    OR a.id IN (
+                        SELECT avd.application_id
+                        FROM application_visibility_departments avd
+                        JOIN user_employments ue ON ue.tenant_id = :tid
+                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
+                        WHERE ue.user_id = :uid
+                          AND ue.is_current = true
+                          AND avd.department_id = ue.department_id
+                        UNION
+                        SELECT avd.application_id
+                        FROM application_visibility_departments avd
+                        JOIN departments target_d ON target_d.id = avd.department_id
+                        JOIN user_employments ue ON ue.tenant_id = :tid
+                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
+                        WHERE ue.user_id = :uid
+                          AND ue.is_current = true
+                          AND avd.include_subtree = true
+                          AND d.path LIKE '/' || target_d.id::text || '/%'
+                    )
+                  )
+                  {kw_clause}
+                GROUP BY a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type, a.updated_at
+                ORDER BY a.updated_at DESC
+                """
+            ),
+            params,
+        ).all()
+        return [
+            {
+                "id": str(r._mapping["id"]),
+                "name": r._mapping["name"],
+                "avatar_url": r._mapping["avatar_url"] or "",
+                "description": r._mapping["description"] or "",
+                "is_enabled": r._mapping["is_enabled"],
+                "flow_type": r._mapping["flow_type"] or "workflow",
+            }
+            for r in rows
+        ]

@@ -70,6 +70,8 @@ class FakeAppRepo:
 class FakeUow:
     def __init__(self) -> None:
         self.session = MagicMock()
+        # DDD 四期：save/publish 审计走 uow.audit_logs
+        self.audit_logs = MagicMock()
         self.committed = False
 
     def commit(self) -> None:
@@ -83,9 +85,11 @@ def _make_service() -> tuple[ApplicationService, UUID, FakeAppRepo]:
     cache.set = AsyncMock(return_value=None)
     cache.delete = AsyncMock(return_value=None)
     cache.publish = AsyncMock(return_value=None)
-    service = ApplicationService(uow, cache=cache, object_storage=None)
     repo = FakeAppRepo()
-    service._repo = repo  # type: ignore[assignment]
+    # DDD 四期：fake 仓储改由构造参数注入
+    service = ApplicationService(
+        uow, repo, cache=cache, object_storage=None, default_llm_model_id="test-model",
+    )
     app_id = uuid4()
     repo.applications[str(app_id)] = {
         "id": str(app_id),

@@ -15,14 +15,14 @@ from internal.domain.graph.runtime import GraphRuntime
 
 @pytest.mark.parametrize("flow_type", ["workflow", "chatflow"])
 def test_default_graph_is_valid(flow_type):
-    graph = _default_graph(flow_type)
+    graph = _default_graph(flow_type, "test-model")
     errors = [i for i in validate_raw_graph(graph) if i.severity == "error"]
     assert errors == []
 
 
 def test_workflow_default_graph_runs():
     runtime = GraphRuntime(
-        canvas_json=_default_graph("workflow"),
+        canvas_json=_default_graph("workflow", "test-model"),
         tenant_id=uuid4(),
         checkpointer=InMemorySaver(),
     )
@@ -32,7 +32,7 @@ def test_workflow_default_graph_runs():
 
 def test_chatflow_default_graph_runs_with_stub_llm():
     runtime = GraphRuntime(
-        canvas_json=_default_graph("chatflow"),
+        canvas_json=_default_graph("chatflow", "test-model"),
         tenant_id=uuid4(),
         checkpointer=InMemorySaver(),
         conversation_id=uuid4(),

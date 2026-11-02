@@ -21,13 +21,9 @@ from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.canvas.variable_types import coerce as coerce_variable
 from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.repository.apps_protocols import ApplicationRepositoryProtocol
 from internal.domain.repository.protocols import UnitOfWork
 from internal.domain.storage.object_storage import ObjectStorage
-from internal.infrastructure.cache.factory import get_kv_cache
-from internal.infrastructure.config.settings import get_settings
-from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
-from internal.infrastructure.repository.postgres_audit_log_repository import PostgresAuditLogRepository
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
 
@@ -132,8 +128,8 @@ def _literal(value: Any) -> dict[str, Any]:
     return {"value": {"type": "literal", "content": value}}
 
 
-def _default_graph(flow_type: str) -> dict[str, Any]:
-    """按流程类型生成最小可运行画布。
+def _default_graph(flow_type: str, llm_model_id: str) -> dict[str, Any]:
+    """按流程类型生成最小可运行画布；默认模型 ID 由组合根显式传入。
 
     workflow: 开始 -> 结束；
     chatflow: 开始 -> 大模型 -> 输出 -> 结束（模型留空，由用户选择）。
@@ -148,7 +144,7 @@ def _default_graph(flow_type: str) -> dict[str, Any]:
                 "type": "3",
                 "data": {
                     "inputs": {
-                        "modleName": _literal(get_settings().llm_model_id),
+                        "modleName": _literal(llm_model_id),
                         "systemPrompt": _literal("你是一个乐于助人的助手。"),
                         "prompt": _literal("{{start_1.output.USER_INPUT}}"),
                     },
@@ -274,19 +270,19 @@ class ApplicationService:
     def __init__(
         self,
         uow: UnitOfWork,
-        cache: KvCache | None = None,
+        app_repo: ApplicationRepositoryProtocol,
+        cache: KvCache,
         object_storage: ObjectStorage | None = None,
+        *,
+        default_llm_model_id: str,
     ):
+        """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。"""
         self._uow = uow
-        self._repo = ApplicationRepository(uow.session)
-        self._cache = cache or get_kv_cache()
-        # A12：对象存储（可选）；未注入时从全局 factory 拿，再没有就降级为 None
-        if object_storage is not None:
-            self._storage = object_storage
-        else:
-            from internal.infrastructure.storage.factory import get_object_storage
-
-            self._storage = get_object_storage()
+        self._repo: ApplicationRepositoryProtocol = app_repo
+        self._cache = cache
+        # A12：对象存储（可选）；未配置时为 None，大画布降级内联存 DB
+        self._storage = object_storage
+        self._default_llm_model_id = default_llm_model_id
 
     # ========== 缓存 key ==========
     @staticmethod
@@ -360,7 +356,7 @@ class ApplicationService:
         # 新应用直接落一版可运行的最小画布，避免进编排页面对空白画布
         self.save_graph(
             app_id,
-            _default_graph(flow_type),
+            _default_graph(flow_type, self._default_llm_model_id),
             changelog="初始化画布",
             actor_id=created_by,
         )
@@ -677,8 +673,7 @@ class ApplicationService:
         self._repo.update_graph(application_id, graph_to_persist, runtime_mode)
 
         # P2-7: 写审计日志（平台级操作使用 PLATFORM_TENANT_ID，audit_logs.tenant_id 不允许 NULL）
-        audit_repo = PostgresAuditLogRepository(self._uow.session)
-        audit_repo.record({
+        self._uow.audit_logs.record({
             "actor_id": actor_id,
             "actor_username": actor_username,
             "action": "GRAPH_SAVE",
@@ -821,8 +816,7 @@ class ApplicationService:
 
         self._repo.set_published_graph_version(application_id, target_version)
 
-        audit_repo = PostgresAuditLogRepository(self._uow.session)
-        audit_repo.record({
+        self._uow.audit_logs.record({
             "actor_id": actor_id,
             "actor_username": actor_username,
             "action": "GRAPH_PUBLISH",
@@ -940,69 +934,7 @@ class ApplicationService:
         keyword: str | None = None,
     ) -> list[dict]:
         """当前用户可见应用 = 本租户自建 + 已开通的产品级实例，叠加 visibility 白名单/部门过滤。"""
-        params: dict[str, Any] = {"tid": str(tenant_id), "uid": str(user_id)}
-        kw_clause = ""
-        if keyword:
-            kw_clause = " AND a.name ILIKE :kw"
-            params["kw"] = f"%{keyword}%"
-
-        rows = self._uow.session.execute(
-            text(
-                f"""
-                SELECT a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type
-                FROM application a
-                WHERE a.is_enabled = true
-                  AND (
-                    a.owner_type = 'tenant' AND a.owner_id = :tid
-                    OR a.id IN (
-                        SELECT application_id FROM tenant_application_instance
-                        WHERE tenant_id = :tid AND status = 'active'
-                    )
-                  )
-                  AND (
-                    a.visibility_mode = 'all'
-                    OR a.id IN (
-                        SELECT application_id FROM application_visibility_users
-                        WHERE user_id = :uid
-                    )
-                    OR a.id IN (
-                        SELECT avd.application_id
-                        FROM application_visibility_departments avd
-                        JOIN user_employments ue ON ue.tenant_id = :tid
-                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                        WHERE ue.user_id = :uid
-                          AND ue.is_current = true
-                          AND avd.department_id = ue.department_id
-                        UNION
-                        SELECT avd.application_id
-                        FROM application_visibility_departments avd
-                        JOIN departments target_d ON target_d.id = avd.department_id
-                        JOIN user_employments ue ON ue.tenant_id = :tid
-                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                        WHERE ue.user_id = :uid
-                          AND ue.is_current = true
-                          AND avd.include_subtree = true
-                          AND d.path LIKE '/' || target_d.id::text || '/%'
-                    )
-                  )
-                  {kw_clause}
-                GROUP BY a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type, a.updated_at
-                ORDER BY a.updated_at DESC
-                """
-            ),
-            params,
-        ).all()
-        return [
-            {
-                "id": str(r._mapping["id"]),
-                "name": r._mapping["name"],
-                "avatar_url": r._mapping["avatar_url"] or "",
-                "description": r._mapping["description"] or "",
-                "is_enabled": r._mapping["is_enabled"],
-                "flow_type": r._mapping["flow_type"] or "workflow",
-            }
-            for r in rows
-        ]
+        return self._repo.list_visible_for_user(tenant_id, user_id, keyword)
 
     def get_visible_app_for_user(
         self,
@@ -1047,8 +979,3 @@ class ApplicationService:
                 logging.getLogger(__name__).warning("graph cache invalidate failed: %s", exc)
             return
         loop.create_task(_run())
-
-
-def build_effective_graph_compat(uow: UnitOfWork, application_id: UUID, tenant_id: UUID | None) -> dict[str, Any]:
-    """兼容旧调用点（router 里同步调用）：走 build_effective_graph_sync。"""
-    return ApplicationService(uow).build_effective_graph_sync(application_id, tenant_id)

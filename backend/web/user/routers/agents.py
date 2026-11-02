@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query
 
 from internal.application.apps.application_service import ApplicationService
 from internal.application.errors import NotFoundError
+from web.deps.apps_services import make_application_service
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
 
@@ -16,7 +17,7 @@ router = APIRouter(prefix="/agents", tags=["user-agents"])
 
 
 def get_app_service(uow: UowDep) -> ApplicationService:
-    return ApplicationService(uow)
+    return make_application_service(uow)
 
 
 AppServiceDep = Annotated[ApplicationService, Depends(get_app_service)]

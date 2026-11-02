@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, status
 from pydantic import BaseModel, Field
 
 from internal.application.apps.model_service import ModelService
+from web.deps.apps_services import make_model_service
 from web.deps.auth import require_platform_admin
 from web.deps.db import UowDep
 
@@ -21,7 +22,7 @@ router = APIRouter(
 
 
 def get_model_service(uow: UowDep) -> ModelService:
-    return ModelService(uow.session)
+    return make_model_service(uow.session)
 
 
 ModelServiceDep = Depends(get_model_service)

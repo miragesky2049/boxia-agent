@@ -13,6 +13,7 @@ from web.admin.schemas.tenant import (
     TenantOut,
     TenantUpdateRequest,
 )
+from web.deps.apps_services import make_tenant_settings_service
 from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.services import TenantServiceDep
@@ -124,7 +125,7 @@ class TenantSettingsUpdateRequest(BaseModel):
 
 
 def _get_settings_service(uow: UowDep) -> TenantSettingsService:
-    return TenantSettingsService(uow.session)
+    return make_tenant_settings_service(uow.session)
 
 
 @router.get(

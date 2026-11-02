@@ -7,7 +7,6 @@ from types import SimpleNamespace
 from typing import Any
 from uuid import uuid4
 
-import internal.application.apps.chat_service as chat_module
 import web.deps.graph as graph_deps
 from internal.application.apps.chat_service import ChatflowPreparedRun, ChatService
 from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
@@ -189,7 +188,7 @@ class _FakeRunner:
         return self.output
 
 
-def _service(runner_factory=None) -> ChatService:
+def _service(runner_factory=None, run_repo=None) -> ChatService:
     service = object.__new__(ChatService)
     service._tenant_id = uuid4()
     service._user_id = uuid4()
@@ -200,6 +199,11 @@ def _service(runner_factory=None) -> ChatService:
     service._conv_repo = _FakeConvRepo()
     service._msg_repo = _FakeMessageRepo()
     service._runner_factory = runner_factory
+    # DDD 四期：run 仓储与默认模型改为构造注入，测试里直接赋值等价属性
+    service._run_repo = run_repo if run_repo is not None else _FakeRunRepo()
+    service._model_service = SimpleNamespace()
+    service._resource_service = SimpleNamespace()
+    service._default_llm_model_id = "test-model"
     return service
 
 
@@ -233,14 +237,13 @@ def _collect(service, prepared) -> list[tuple[str, dict]]:
     return asyncio.run(run())
 
 
-def test_run_chatflow_persists_user_and_final_message(monkeypatch):
+def test_run_chatflow_persists_user_and_final_message():
     application_id = uuid4()
     run_id = uuid4()
     runner = _FakeRunner(
         run_id, "conv-1", application_id, output={"output": "最终回答"},
     )
     _, factory = _make_runner_factory(runner)
-    monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
     service = _service(factory)
     prepared = _prepared(application_id)
 
@@ -260,7 +263,7 @@ def test_run_chatflow_persists_user_and_final_message(monkeypatch):
     assert [name for name, _ in events] == ["run_start", "result", "final"]
 
 
-def test_run_chatflow_does_not_duplicate_emitted_output(monkeypatch):
+def test_run_chatflow_does_not_duplicate_emitted_output():
     application_id = uuid4()
     runner = _FakeRunner(
         uuid4(),
@@ -270,7 +273,6 @@ def test_run_chatflow_does_not_duplicate_emitted_output(monkeypatch):
         emitted_text="最终回答",
     )
     _, factory = _make_runner_factory(runner)
-    monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
     service = _service(factory)
 
     _collect(service, _prepared(application_id))
@@ -279,7 +281,7 @@ def test_run_chatflow_does_not_duplicate_emitted_output(monkeypatch):
     assert assistant_messages == []
 
 
-def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer(monkeypatch):
+def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer():
     application_id = uuid4()
     interrupted_run_id = uuid4()
     run_repo = _FakeRunRepo({interrupted_run_id})
@@ -288,8 +290,7 @@ def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer(monkeypa
         interrupted_run_id, "conv-1", application_id, output={"output": "续跑完成"},
     )
     seen, factory = _make_runner_factory(runner)
-    monkeypatch.setattr(chat_module, "RunRepository", lambda session: run_repo)
-    service = _service(factory)
+    service = _service(factory, run_repo)
     prepared = _prepared(application_id, message="", resume=resume)
 
     _collect(service, prepared)
@@ -303,7 +304,7 @@ def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer(monkeypa
     assert user_messages[0]["run_id"] == interrupted_run_id
 
 
-def test_run_chatflow_interrupt_persists_question_and_touches_conversation(monkeypatch):
+def test_run_chatflow_interrupt_persists_question_and_touches_conversation():
     application_id = uuid4()
     run_id = uuid4()
     runner = _FakeRunner(
@@ -316,7 +317,6 @@ def test_run_chatflow_interrupt_persists_question_and_touches_conversation(monke
         ),
     )
     _, factory = _make_runner_factory(runner)
-    monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
     service = _service(factory)
     prepared = _prepared(application_id)
 

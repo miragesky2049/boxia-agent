@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 
 from internal.application.errors import ValidationError
 from internal.application.apps.resource_service import AppResourceService
+from web.deps.apps_services import make_app_resource_service
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
@@ -26,7 +27,7 @@ tenant_router = APIRouter(prefix="/my-resources", tags=["resource-tenant"])
 
 
 def get_resource_service(uow: UowDep) -> AppResourceService:
-    return AppResourceService(uow.session)
+    return make_app_resource_service(uow.session)
 
 
 ResourceServiceDep = Depends(get_resource_service)

@@ -86,11 +86,12 @@ def ensure_model_catalog() -> None:
     只在不存在时插入，不覆盖管理员在 admin 端改过的凭证。
     """
     from internal.application.apps.model_service import ModelService
+    from internal.infrastructure.repository.apps.model_repository import ModelRepository
 
     session_factory = get_session_factory()
     session = session_factory()
     try:
-        ModelService(session).seed_from_settings()
+        ModelService(ModelRepository(session)).seed_from_settings()
         session.commit()
     except Exception:
         logger.exception("模型目录 seed 失败")

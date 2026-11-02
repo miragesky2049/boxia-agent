@@ -20,13 +20,12 @@ from internal.application.apps.ports import RunnerFactory
 from internal.application.apps.resource_service import AppResourceService
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.domain.llm.client import LLMResponse, LLMToolSpec
-from internal.domain.repository.protocols import UnitOfWork
-from internal.infrastructure.config.settings import get_settings
-from internal.infrastructure.repository.apps.conversation_repository import (
-    ConversationRepository,
+from internal.domain.repository.apps_protocols import (
+    ConversationRepositoryProtocol,
+    MessageRepositoryProtocol,
+    RunRepositoryProtocol,
 )
-from internal.infrastructure.repository.apps.message_repository import MessageRepository
-from internal.infrastructure.repository.apps.run_repository import RunRepository
+from internal.domain.repository.protocols import UnitOfWork
 
 logger = logging.getLogger(__name__)
 
@@ -84,19 +83,30 @@ class ChatService:
         context: Any,
         principal: Any,
         runner_factory: RunnerFactory,
+        *,
+        app_service: ApplicationService,
+        model_service: ModelService,
+        resource_service: AppResourceService,
+        conv_repo: ConversationRepositoryProtocol,
+        msg_repo: MessageRepositoryProtocol,
+        run_repo: RunRepositoryProtocol,
+        default_llm_model_id: str,
     ) -> None:
-        """runner_factory 由组合根注入（web.deps.graph.build_runner），避免应用层反向 import web。"""
+        """runner_factory 与各服务/仓储由组合根注入（web.deps.graph / apps_services），
+        应用层不自行构造 infra 具体类，也不反向 import web。"""
         self._uow = uow
         self._context = context
         self._principal = principal
         self._runner_factory = runner_factory
         self._tenant_id = principal.tenant_id
         self._user_id = principal.user_id
-        self._app_service = ApplicationService(uow)
-        self._model_service = ModelService(uow.session)
-        self._resource_service = AppResourceService(uow.session)
-        self._conv_repo = ConversationRepository(uow.session)
-        self._msg_repo = MessageRepository(uow.session)
+        self._app_service = app_service
+        self._model_service = model_service
+        self._resource_service = resource_service
+        self._conv_repo: ConversationRepositoryProtocol = conv_repo
+        self._msg_repo: MessageRepositoryProtocol = msg_repo
+        self._run_repo: RunRepositoryProtocol = run_repo
+        self._default_llm_model_id = default_llm_model_id
 
     # ========== chat SSE ==========
     async def run_agent_stream(
@@ -161,8 +171,7 @@ class ChatService:
                 node_cfg.get("system_prompt")
                 or f"你是{app_card['name']}。{app_card.get('description') or ''}".strip()
             )
-            settings = get_settings()
-            model_id = node_cfg.get("model_id") or settings.llm_model_id
+            model_id = node_cfg.get("model_id") or self._default_llm_model_id
             tool_resource_ids = node_cfg.get("tool_resource_ids") or []
             max_rounds = int(node_cfg.get("max_tool_rounds") or MAX_TOOL_ROUNDS)
 
@@ -552,7 +561,7 @@ class ChatService:
         from internal.domain.graph.runtime import GraphInterrupted
 
         bound_thread_id = prepared.thread_id
-        run_repo = RunRepository(self._uow.session)
+        run_repo = self._run_repo
 
         queue: asyncio.Queue[tuple[str, Any]] = asyncio.Queue()
 

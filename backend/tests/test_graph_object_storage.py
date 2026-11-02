@@ -73,6 +73,8 @@ class FakeApplicationRepository:
 class FakeUow:
     def __init__(self) -> None:
         self.session = MagicMock()
+        # DDD 四期：save_graph 审计走 uow.audit_logs
+        self.audit_logs = MagicMock()
 
     def commit(self) -> None:
         pass
@@ -80,12 +82,14 @@ class FakeUow:
 
 def _make_service(storage: ObjectStorage | None = None) -> ApplicationService:
     uow = FakeUow()
-    service = ApplicationService(uow, cache=MagicMock(), object_storage=storage)
-    # 替换 repo 为 fake
-    service._repo = FakeApplicationRepository()
+    # DDD 四期：fake 仓储改由构造参数注入
+    repo = FakeApplicationRepository()
+    service = ApplicationService(
+        uow, repo, cache=MagicMock(), object_storage=storage, default_llm_model_id="test-model",
+    )
     # 预置一个应用
     app_id = uuid4()
-    service._repo.applications[str(app_id)] = {"id": str(app_id), "name": "test", "owner_type": "platform"}
+    repo.applications[str(app_id)] = {"id": str(app_id), "name": "test", "owner_type": "platform"}
     return service, app_id
 
 

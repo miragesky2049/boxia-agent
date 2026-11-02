@@ -9,19 +9,25 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from internal.application.errors import NotFoundError
-from internal.infrastructure.repository.apps.model_repository import ModelRepository
-from internal.infrastructure.repository.apps.tenant_settings_repository import (
-    TenantSettingsRepository,
+from internal.domain.repository.apps_protocols import (
+    ModelRepositoryProtocol,
+    TenantSettingsRepositoryProtocol,
 )
 
 
 class TenantSettingsService:
     """提供给 admin 页面读写租户运行时配置。"""
 
-    def __init__(self, session: Session) -> None:
+    def __init__(
+        self,
+        settings_repo: TenantSettingsRepositoryProtocol,
+        model_repo: ModelRepositoryProtocol,
+        session: Session,
+    ) -> None:
+        """仓储由组合根构造注入；session 仅用于提交事务（session-per-service 风格）。"""
         self._session = session
-        self._repo = TenantSettingsRepository(session)
-        self._model_repo = ModelRepository(session)
+        self._repo: TenantSettingsRepositoryProtocol = settings_repo
+        self._model_repo: ModelRepositoryProtocol = model_repo
 
     def get(self, tenant_id: UUID) -> dict[str, Any]:
         """读租户配置；未配置时返回默认空结构。"""

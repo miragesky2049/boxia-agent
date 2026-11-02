@@ -35,6 +35,7 @@ from web.admin.schemas.apps import (
     VariablesPayload,
     VisibilityPayload,
 )
+from web.deps.apps_services import make_application_service
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.graph import (
@@ -60,7 +61,7 @@ router = APIRouter(
 
 
 def get_app_service(uow: UowDep) -> ApplicationService:
-    return ApplicationService(uow)
+    return make_application_service(uow)
 
 
 AppServiceDep = Depends(get_app_service)
@@ -423,7 +424,7 @@ async def debug_run_stream(
         application_id=debug_app_id,
         run_id=run_id,
     )
-    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
+    register_subgraph_loader(services, make_application_service(uow), _principal.tenant_id)
 
     async def _push_node_event(etype: str, evt_payload: dict) -> None:
         await queue.put(sse_event(etype, evt_payload))
@@ -516,7 +517,7 @@ async def debug_run_node(
         application_id=DEBUG_APPLICATION_ID,
         run_id=run_id,
     )
-    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
+    register_subgraph_loader(services, make_application_service(uow), _principal.tenant_id)
 
     runtime = GraphRuntime(
         canvas_json=payload.graph,
@@ -583,7 +584,7 @@ async def debug_run_stream_resume(
         application_id=debug_app_id,
         run_id=run_id,
     )
-    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
+    register_subgraph_loader(services, make_application_service(uow), _principal.tenant_id)
 
     async def _push_node_event(etype: str, evt_payload: dict) -> None:
         await queue.put(sse_event(etype, evt_payload))

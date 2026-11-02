@@ -5,10 +5,8 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
 from internal.application.errors import NotFoundError, ValidationError
-from internal.infrastructure.repository.apps.resource_repository import AppResourceRepository
+from internal.domain.repository.apps_protocols import AppResourceRepositoryProtocol
 
 _VALID_TYPES = {"tool", "prompt", "skill", "knowledge"}
 
@@ -16,8 +14,9 @@ _VALID_TYPES = {"tool", "prompt", "skill", "knowledge"}
 class AppResourceService:
     """统一资源服务。"""
 
-    def __init__(self, session: Session):
-        self._repo = AppResourceRepository(session)
+    def __init__(self, repo: AppResourceRepositoryProtocol):
+        """仓储由组合根（web/deps/apps_services.py）构造注入。"""
+        self._repo: AppResourceRepositoryProtocol = repo
 
     # ========== admin / 租户自建 CRUD ==========
     def create_resource(

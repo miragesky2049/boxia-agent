@@ -15,6 +15,7 @@ from internal.application.apps.application_service import ApplicationService
 from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
 from internal.domain.security.ssrf_guard import validate_outbound_url
 from internal.infrastructure.repository.apps.run_repository import RunRepository
+from web.deps.apps_services import make_application_service
 from web.deps.auth import AdminAuthDep
 from web.deps.db import UowDep
 from web.deps.graph import build_runner
@@ -39,7 +40,7 @@ class ResumePayload(BaseModel):
 
 
 def get_app_service(uow: UowDep) -> ApplicationService:
-    return ApplicationService(uow)
+    return make_application_service(uow)
 
 
 AppServiceDep = Annotated[ApplicationService, Depends(get_app_service)]

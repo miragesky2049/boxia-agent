@@ -18,6 +18,15 @@ from pydantic import BaseModel, Field
 
 from internal.application.apps.chat_service import ChatService
 from internal.application.errors import AppError
+from internal.infrastructure.config.settings import get_settings
+from web.deps.apps_services import (
+    make_app_resource_service,
+    make_application_service,
+    make_conversation_repository,
+    make_message_repository,
+    make_model_service,
+    make_run_repository,
+)
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
 from web.deps.graph import build_runner
@@ -63,7 +72,17 @@ def get_chat_service(
     principal: UserAuthDep,
 ) -> ChatService:
     return ChatService(
-        uow=uow, context=context, principal=principal, runner_factory=build_runner,
+        uow=uow,
+        context=context,
+        principal=principal,
+        runner_factory=build_runner,
+        app_service=make_application_service(uow),
+        model_service=make_model_service(uow.session),
+        resource_service=make_app_resource_service(uow.session),
+        conv_repo=make_conversation_repository(uow.session),
+        msg_repo=make_message_repository(uow.session),
+        run_repo=make_run_repository(uow.session),
+        default_llm_model_id=get_settings().llm_model_id,
     )
 
 

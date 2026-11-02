@@ -6,13 +6,11 @@ import logging
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy.orm import Session
-
 from internal.application.errors import NotFoundError, ValidationError
 from internal.domain.llm.client import LLMClient, OpenAICompatLLMClient
+from internal.domain.repository.apps_protocols import ModelRepositoryProtocol
 from internal.domain.security.ssrf_guard import validate_outbound_url
 from internal.infrastructure.config.settings import get_settings
-from internal.infrastructure.repository.apps.model_repository import ModelRepository
 
 logger = logging.getLogger(__name__)
 
@@ -23,8 +21,9 @@ class ModelService:
     # 进程内缓存：(base_url, api_key) -> LLMClient，避免重复建连
     _client_cache: dict[tuple[str, str], LLMClient] = {}
 
-    def __init__(self, session: Session):
-        self._repo = ModelRepository(session)
+    def __init__(self, repo: ModelRepositoryProtocol):
+        """仓储由组合根（web/deps/apps_services.py）构造注入；settings 读取保留在本服务。"""
+        self._repo: ModelRepositoryProtocol = repo
 
     # ========== 运行时解析 ==========
     def list_catalog(self) -> list[dict]:
