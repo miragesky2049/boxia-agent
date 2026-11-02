@@ -15,8 +15,13 @@ import { Link, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getAgent } from '../api/agents'
-import { runAgentStream } from '../api/agentRun'
-import type { AgentStreamEvent, ChatHistoryItem, ToolCallTrace } from '../api/agentRun'
+import { runAgentStream, runChatflowStream } from '../api/agentRun'
+import type {
+  AgentStreamEvent,
+  ChatflowStreamEvent,
+  ChatHistoryItem,
+  ToolCallTrace,
+} from '../api/agentRun'
 import {
   listConversationMessages,
   listConversations,
@@ -31,6 +36,9 @@ interface Message {
   toolTraces?: ToolCallTrace[]
   loading?: boolean
   error?: string
+  /** 问答节点中断时可选回答项 */
+  options?: string[]
+  kind?: 'question' | 'notice'
 }
 
 const SUGGESTED_PROMPTS = [
@@ -84,6 +92,14 @@ export default function ChatPage() {
   const [input, setInput] = useState('')
   const [sending, setSending] = useState(false)
   const [conversationId, setConversationId] = useState('')
+  // 对话流：服务端返回的 thread，用于多轮与问答续跑
+  const [chatThreadId, setChatThreadId] = useState('')
+  const [pendingQuestion, setPendingQuestion] = useState<{
+    question: string
+    options: string[]
+    threadId: string
+    runId: string
+  } | null>(null)
 
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
   const [conversationsLoading, setConversationsLoading] = useState(false)
@@ -125,6 +141,8 @@ export default function ChatPage() {
         }))
       setMessages(restored)
       setConversationId(cid)
+      setChatThreadId('')
+      setPendingQuestion(null)
       setSidebarOpen(false)
     } catch (err) {
       console.error('加载历史消息失败', err)
@@ -136,6 +154,8 @@ export default function ChatPage() {
   const handleNewConversation = () => {
     setMessages([])
     setConversationId('')
+    setChatThreadId('')
+    setPendingQuestion(null)
     setInput('')
     setSidebarOpen(false)
   }
@@ -185,7 +205,122 @@ export default function ChatPage() {
       .map((m) => ({ role: m.role as 'user' | 'assistant', content: m.content }))
   }, [messages])
 
+  const appendMessage = (msg: Omit<Message, 'id'>) => {
+    setMessages((prev) => [...prev, { id: nextMessageId(), ...msg }])
+  }
+
+  const extractOutputText = (outputs: unknown): string => {
+    if (!outputs) return ''
+    if (typeof outputs === 'string') return outputs
+    if (typeof outputs === 'object') {
+      const values = outputs as Record<string, unknown>
+      const candidate = values.output ?? values.content
+      if (typeof candidate === 'string') return candidate
+    }
+    return ''
+  }
+
+  // 对话流：普通轮次发 message，问答中断后用 resume 续跑
+  const handleChatflowSend = async (raw?: string) => {
+    const text = (raw ?? input).trim()
+    if (!text || sending || !agentId) return
+    const answering = pendingQuestion !== null
+    appendMessage({ role: 'user', content: text })
+    setInput('')
+    setSending(true)
+    if (answering) setPendingQuestion(null)
+
+    let emitted = 0
+    let knownConversationId = conversationId
+
+    try {
+      await runChatflowStream(
+        agentId,
+        {
+          message: answering ? '' : text,
+          conversation_id: conversationId || undefined,
+          thread_id: chatThreadId || undefined,
+          resume: answering ? { answer: text } : undefined,
+        },
+        (evt: ChatflowStreamEvent) => {
+          switch (evt.event) {
+            case 'run_start':
+              if (evt.data.conversation_id) {
+                knownConversationId = evt.data.conversation_id
+                if (!conversationId) {
+                  setConversationId(evt.data.conversation_id)
+                  void refreshConversations(evt.data.conversation_id)
+                }
+              }
+              if (evt.data.thread_id) setChatThreadId(evt.data.thread_id)
+              break
+            case 'output_message': {
+              const content = String(evt.data.content || '')
+              if (content) {
+                emitted += 1
+                appendMessage({ role: 'assistant', content })
+              }
+              break
+            }
+            case 'question': {
+              const question = String(evt.data.question || '请回答以下问题')
+              const options = Array.isArray(evt.data.options)
+                ? evt.data.options.map((item) => String(item))
+                : []
+              setPendingQuestion({
+                question,
+                options,
+                threadId: String(evt.data.thread_id || ''),
+                runId: String(evt.data.run_id || ''),
+              })
+              appendMessage({ role: 'assistant', content: question, kind: 'question', options })
+              break
+            }
+            case 'result': {
+              // 未配置输出节点时，用结束节点的返回文本兜底
+              if (emitted === 0) {
+                const content = extractOutputText(evt.data.outputs)
+                if (content) appendMessage({ role: 'assistant', content })
+              }
+              if (!knownConversationId) void refreshConversations()
+              break
+            }
+            case 'interrupted':
+              appendMessage({
+                role: 'assistant',
+                content: '流程等待人工审批，请联系管理员处理后再继续。',
+                kind: 'notice',
+              })
+              break
+            case 'error':
+              appendMessage({
+                role: 'assistant',
+                content: evt.data.message || '对话流运行失败',
+                error: evt.data.message || '对话流运行失败',
+              })
+              break
+            default:
+              // node_start / node_end / final 不直接渲染
+              break
+          }
+        },
+      )
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : '调用对话流失败'
+      appendMessage({ role: 'assistant', content: msg, error: msg })
+    } finally {
+      setSending(false)
+      requestAnimationFrame(() => textareaRef.current?.focus())
+    }
+  }
+
   const handleSend = async (raw?: string) => {
+    // 对话流使用多轮 SSE + 问答中断协议，和工作流/普通智能体不同
+    if (agent?.flow_type === 'chatflow') {
+      await handleChatflowSend(raw)
+      return
+    }
+
     const text = (raw ?? input).trim()
     if (!text || sending || !agentId) return
 
@@ -538,6 +673,33 @@ export default function ChatPage() {
                               {m.content}
                             </ReactMarkdown>
                           </div>
+                          {m.options && m.options.length > 0 && (
+                            <div
+                              style={{
+                                display: 'flex',
+                                flexWrap: 'wrap',
+                                gap: 8,
+                                marginTop: 10,
+                              }}
+                            >
+                              {m.options.map((opt) => (
+                                <button
+                                  key={opt}
+                                  type="button"
+                                  className="chat-suggest-chip"
+                                  onClick={() => void handleSend(opt)}
+                                  // 只允许回答当前待回复的问题
+                                  disabled={
+                                    sending ||
+                                    pendingQuestion === null ||
+                                    pendingQuestion.question !== m.content
+                                  }
+                                >
+                                  {opt}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                           {m.toolTraces && m.toolTraces.length > 0 && renderToolTraces(m.toolTraces)}
                         </>
                       )}

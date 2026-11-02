@@ -36,6 +36,7 @@ export interface UserAgentSummary {
   avatar_url: string
   description: string
   is_enabled: boolean
+  flow_type: 'workflow' | 'chatflow'
 }
 
 export interface UserSkill {

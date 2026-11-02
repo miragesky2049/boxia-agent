@@ -49,6 +49,8 @@ export type AgentStreamEvent =
         content: string
         tool_calls: Array<{ id: string; name: string; arguments: string }>
         usage: Record<string, number>
+        /** 增量 token 是否已通过 llm_token 推送 */
+        usage_streamed?: boolean
       }
     }
   | { event: 'llm_token'; data: { delta: string } }
@@ -64,18 +66,65 @@ export type AgentStreamEvent =
   | { event: 'result'; data: AgentRunResponse }
   | { event: 'error'; data: { message: string; code: number } }
 
+/** 对话流 SSE 事件：中间消息与问答中断由流程节点驱动。 */
+export type ChatflowStreamEvent =
+  | {
+      event: 'run_start'
+      data: { conversation_id: string; thread_id: string; run_id: string }
+    }
+  | { event: 'node_start'; data: { node_id: string; node_type?: string; inputs?: unknown } }
+  | {
+      event: 'node_end'
+      data: {
+        node_id: string
+        status?: string
+        outputs?: unknown
+        duration_ms?: number
+        error?: string
+      }
+    }
+  | { event: 'output_message'; data: { content: string; role?: string; stream?: boolean } }
+  | {
+      event: 'question'
+      data: {
+        node_id: string
+        question: string
+        options: string[]
+        conversation_id: string
+        thread_id: string
+        run_id: string
+      }
+    }
+  | {
+      event: 'interrupted'
+      data: {
+        approval: Record<string, unknown>
+        conversation_id?: string
+        thread_id?: string
+        run_id?: string
+      }
+    }
+  | { event: 'result'; data: { outputs?: Record<string, unknown> } }
+  | { event: 'error'; data: { message: string; code?: string | number } }
+  | { event: 'final'; data: Record<string, unknown> }
+
+export interface ChatflowRunBody {
+  message?: string
+  conversation_id?: string
+  thread_id?: string
+  inputs?: Record<string, unknown>
+  resume?: Record<string, unknown>
+}
+
 interface StreamOptions {
   signal?: AbortSignal
 }
 
-/**
- * 以 SSE 方式运行 agent。EventSource 不支持 POST，这里用 fetch + ReadableStream 解析。
- * 调用方通过 onEvent 回调消费每个事件；拿到 result 事件后可终止循环。
- */
-export async function runAgentStream(
-  agentId: string,
-  body: { query: string; conversation_id?: string; history?: ChatHistoryItem[] },
-  onEvent: (evt: AgentStreamEvent) => void,
+/** 以 SSE 方式发起 POST：EventSource 不支持 POST，这里用 fetch + ReadableStream 解析。 */
+async function postSseStream<TEvent>(
+  url: string,
+  body: unknown,
+  onEvent: (evt: TEvent) => void,
   options: StreamOptions = {},
 ): Promise<void> {
   const baseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
@@ -89,14 +138,10 @@ export async function runAgentStream(
   if (token) headers.Authorization = `Bearer ${token}`
   if (tenantCode) headers['X-Tenant-Code'] = tenantCode
 
-  const response = await fetch(`${baseUrl}/user/agents/${agentId}/run/stream`, {
+  const response = await fetch(`${baseUrl}${url}`, {
     method: 'POST',
     headers,
-    body: JSON.stringify({
-      query: body.query,
-      conversation_id: body.conversation_id ?? '',
-      history: body.history ?? [],
-    }),
+    body: JSON.stringify(body),
     signal: options.signal,
   })
 
@@ -131,7 +176,7 @@ export async function runAgentStream(
     if (!dataLine) return
     try {
       const data = JSON.parse(dataLine) as Record<string, unknown>
-      onEvent({ event: eventName, data } as AgentStreamEvent)
+      onEvent({ event: eventName, data } as TEvent)
     } catch {
       // 忽略解析失败的帧
     }
@@ -149,4 +194,47 @@ export async function runAgentStream(
     }
   }
   if (buffer.trim()) handleFrame(buffer)
+}
+
+/**
+ * 以 SSE 方式运行 agent。调用方通过 onEvent 消费每个事件；
+ * 拿到 result 事件后可终止循环。
+ */
+export async function runAgentStream(
+  agentId: string,
+  body: { query: string; conversation_id?: string; history?: ChatHistoryItem[] },
+  onEvent: (evt: AgentStreamEvent) => void,
+  options: StreamOptions = {},
+): Promise<void> {
+  return postSseStream<AgentStreamEvent>(
+    `/user/agents/${agentId}/run/stream`,
+    {
+      query: body.query,
+      conversation_id: body.conversation_id ?? '',
+      history: body.history ?? [],
+    },
+    onEvent,
+    options,
+  )
+}
+
+/** 以 SSE 方式运行对话流；message 与 resume 二选一。 */
+export async function runChatflowStream(
+  agentId: string,
+  body: ChatflowRunBody,
+  onEvent: (evt: ChatflowStreamEvent) => void,
+  options: StreamOptions = {},
+): Promise<void> {
+  return postSseStream<ChatflowStreamEvent>(
+    `/user/agents/${agentId}/chatflow/run/stream`,
+    {
+      message: body.message ?? '',
+      conversation_id: body.conversation_id || undefined,
+      thread_id: body.thread_id || undefined,
+      inputs: body.inputs ?? {},
+      resume: body.resume ?? undefined,
+    },
+    onEvent,
+    options,
+  )
 }

@@ -1,5 +1,5 @@
 import { MessageOutlined, RightOutlined } from '@ant-design/icons'
-import { Alert, Card, Col, Empty, Input, Pagination, Row, Skeleton, Typography } from 'antd'
+import { Alert, Card, Col, Empty, Input, Pagination, Row, Skeleton, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { listAgents } from '../api/agents'
@@ -34,6 +34,12 @@ function AgentCard({ agent }: { agent: UserAgentSummary }) {
             <Typography.Title level={5} style={{ margin: 0 }}>
               {agent.name}
             </Typography.Title>
+            <Tag
+              color={agent.flow_type === 'chatflow' ? 'purple' : 'blue'}
+              style={{ marginInlineStart: 'auto', marginInlineEnd: 0 }}
+            >
+              {agent.flow_type === 'chatflow' ? '对话流' : '工作流'}
+            </Tag>
           </div>
           <Typography.Paragraph
             ellipsis={{ rows: 2 }}
