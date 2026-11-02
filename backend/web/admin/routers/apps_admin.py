@@ -31,6 +31,9 @@ from internal.infrastructure.repository.apps.conversation_repository import (
 from internal.infrastructure.repository.apps.message_repository import (
     MessageRepository as SyncMessageRepository,
 )
+from internal.infrastructure.repository.postgres_resource_repository import (
+    PostgresToolRepository,
+)
 from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from web.admin.schemas.apps import (
     AppCreatePayload,
@@ -111,7 +114,11 @@ def _register_conversation_services(
     services.register(
         "tool_executor",
         ToolExecutorService(
-            uow.session,
+            PostgresToolRepository(
+                uow.session,
+                tenant_id=tenant_id,
+                apply_role_filter=False,
+            ),
             tenant_id=tenant_id,
             user_id=principal.user_id,
             application_id=application_id,

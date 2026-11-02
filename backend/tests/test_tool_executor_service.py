@@ -53,10 +53,17 @@ class FakeTool(Tool):
         return self._payload
 
 
-def _make_executor() -> ToolExecutorService:
+class _EmptyCatalog:
+    """满足 ToolCatalog 端口的空目录：list_page 不返回任何工具。"""
+
+    def list_page(self, **_kwargs):  # noqa: ANN003
+        return [], 0
+
+
+def _make_executor(catalog: _EmptyCatalog | None = None) -> ToolExecutorService:
     """构造 executor，但绕过 _ensure_loaded，直接塞 fake 工具集。"""
     executor = ToolExecutorService(
-        session=None,  # noqa: S106 - 测试场景不依赖 session
+        catalog or _EmptyCatalog(),
         tenant_id=uuid4(),
         user_id=uuid4(),
         application_id=uuid4(),
@@ -114,18 +121,9 @@ def test_unexpected_exception_converted_to_text():
     assert "boom" in observation
 
 
-def test_echo_tool_available_by_default(monkeypatch):
-    """当数据库加载不到任何工具时，内置 echo 仍可用。"""
-    executor = _make_executor()
-
-    class _EmptyRepo:
-        def list_page(self, **_kwargs):  # noqa: ANN003
-            return [], 0
-
-    monkeypatch.setattr(
-        "internal.domain.agent.tool_executor.PostgresToolRepository",
-        lambda *args, **kwargs: _EmptyRepo(),
-    )
+def test_echo_tool_available_by_default():
+    """当工具目录加载不到任何工具时，内置 echo 仍可用。"""
+    executor = _make_executor(_EmptyCatalog())
 
     observation = asyncio.run(executor("echo", {"text": "hi"}))
 

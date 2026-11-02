@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from internal.domain.llm.observer import LlmCallRecord, configure_llm_observer
 from internal.infrastructure.model.database import get_engine
 
 LOGIN_SUCCESS = Counter("boxia_login_success_total", "登录成功次数")
@@ -109,6 +110,29 @@ class MetricsMiddleware:
             HTTP_DURATION.labels(method=method, route=route_path).observe(
                 time.perf_counter() - started
             )
+
+
+class PrometheusLlmCallObserver:
+    """把 LLM 调用汇总记入 Prometheus（实现 domain 的 LlmCallObserver 端口）。"""
+
+    def observe(self, record: LlmCallRecord) -> None:
+        """记录耗时；tokens 为 None 表示失败路径，不写 0 值序列。"""
+        LLM_DURATION.labels(
+            tenant=record.tenant, model=record.model, status=record.status
+        ).observe(record.duration_seconds)
+        if record.prompt_tokens is not None:
+            LLM_TOKENS.labels(
+                tenant=record.tenant, model=record.model, type="prompt"
+            ).inc(record.prompt_tokens)
+        if record.completion_tokens is not None:
+            LLM_TOKENS.labels(
+                tenant=record.tenant, model=record.model, type="completion"
+            ).inc(record.completion_tokens)
+
+
+# 本模块被导入（= 应用装配了 Prometheus）时注册观测实现；
+# 未导入的进程（纯脚本/单测）走 domain 默认 no-op，行为与原 client 直连指标等价。
+configure_llm_observer(PrometheusLlmCallObserver())
 
 
 def setup_metrics(app: FastAPI) -> None:

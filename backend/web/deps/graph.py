@@ -42,6 +42,9 @@ from internal.infrastructure.repository.apps.message_repository import (
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
+from internal.infrastructure.repository.postgres_resource_repository import (
+    PostgresToolRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -104,7 +107,11 @@ async def build_runner(
     services.register(
         "tool_executor",
         ToolExecutorService(
-            uow.session,
+            PostgresToolRepository(
+                uow.session,
+                tenant_id=tenant_id,
+                apply_role_filter=False,
+            ),
             tenant_id=tenant_id,
             user_id=current_user_id,
             application_id=application_id,

@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.agent.run_context import AgentRunContext
 from internal.domain.llm.messages import AssistantMessage, ToolCall, ToolCallFunction
-from internal.infrastructure.observability.metrics import LLM_DURATION, LLM_TOKENS
+from internal.domain.llm.observer import LlmCallRecord, llm_call_observer
 
 logger = logging.getLogger(__name__)
 
@@ -314,14 +314,14 @@ class OpenAICompatLLMClient(LLMClient):
                     raise
         finally:
             duration = time.perf_counter() - started
-            LLM_DURATION.labels(tenant=tenant, model=self._model, status=status).observe(duration)
-            if result is not None:
-                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="prompt").inc(
-                    result.usage.prompt_tokens
-                )
-                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="completion").inc(
-                    result.usage.completion_tokens
-                )
+            llm_call_observer().observe(LlmCallRecord(
+                tenant=tenant,
+                model=self._model,
+                status=status,
+                duration_seconds=duration,
+                prompt_tokens=result.usage.prompt_tokens if result is not None else None,
+                completion_tokens=result.usage.completion_tokens if result is not None else None,
+            ))
 
         # 理论上不会走到这里（要么 return 要么 raise）
         if last_exc is not None:
@@ -476,15 +476,14 @@ class OpenAICompatLLMClient(LLMClient):
             raise
         finally:
             duration = time.perf_counter() - started
-            LLM_DURATION.labels(tenant=tenant, model=self._model, status=status).observe(duration)
-            if usage.prompt_tokens:
-                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="prompt").inc(
-                    usage.prompt_tokens
-                )
-            if usage.completion_tokens:
-                LLM_TOKENS.labels(tenant=tenant, model=self._model, type="completion").inc(
-                    usage.completion_tokens
-                )
+            llm_call_observer().observe(LlmCallRecord(
+                tenant=tenant,
+                model=self._model,
+                status=status,
+                duration_seconds=duration,
+                prompt_tokens=usage.prompt_tokens or None,
+                completion_tokens=usage.completion_tokens or None,
+            ))
 
 
 def assistant_message_from_response(response: LLMResponse) -> AssistantMessage:
