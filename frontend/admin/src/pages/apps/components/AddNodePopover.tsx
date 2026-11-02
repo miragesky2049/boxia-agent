@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Input, Empty } from 'antd';
+import { Input, Empty, Tooltip } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import { NodeIcon } from './NodeIcon';
 import { buildCategoryGroups } from '../canvas/metadata/nodePresentation';
@@ -97,40 +97,55 @@ export function AddNodePopover({ x, y, metas, forbiddenTypeKeys, onSelect, onClo
             }}>
               {group.label}
             </div>
-            {group.items.map((m) => (
-              <div
+            {group.items.map((m) => {
+              const disabled = m.available === false;
+              return (
+              <Tooltip
                 key={m.type_key}
-                onClick={() => {
-                  onSelect(m.type_key);
-                  onClose();
-                }}
-                style={{
-                  padding: '6px 8px',
-                  borderRadius: 6,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                }}
-                onMouseEnter={(e) => { e.currentTarget.style.background = '#f3f4f6'; }}
-                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                title={disabled ? m.unavailable_reason : undefined}
+                placement="right"
               >
-                <NodeIcon typeKey={m.type_key} color={m.color} icon={m.icon} size={24} />
-                <div style={{ minWidth: 0, flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
-                    {m.title}
-                  </div>
-                  {m.description && (
-                    <div style={{
-                      fontSize: 11, color: '#9ca3af',
-                      whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
-                    }}>
-                      {m.description}
+                <div
+                  onClick={() => {
+                    if (disabled) return;
+                    onSelect(m.type_key);
+                    onClose();
+                  }}
+                  style={{
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    cursor: disabled ? 'not-allowed' : 'pointer',
+                    opacity: disabled ? 0.45 : 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                  }}
+                  onMouseEnter={(e) => {
+                    if (!disabled) e.currentTarget.style.background = '#f3f4f6';
+                  }}
+                  onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <NodeIcon typeKey={m.type_key} color={m.color} icon={m.icon} size={24} />
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 500, color: '#111827' }}>
+                      {m.title}
+                      {disabled && (
+                        <span style={{ fontSize: 10, color: '#9ca3af', marginLeft: 6 }}>未启用</span>
+                      )}
                     </div>
-                  )}
+                    {m.description && (
+                      <div style={{
+                        fontSize: 11, color: '#9ca3af',
+                        whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }}>
+                        {m.description}
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              </Tooltip>
+              );
+            })}
           </div>
         ))
       )}

@@ -4,7 +4,7 @@ import type { WorkflowNodeEntity } from '@flowgram.ai/free-layout-editor';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import { resolveCapabilities } from '../canvas/metadata/capabilities';
 import { NodeCard, type NodeCardAction, type DynamicOutputPort } from './NodeCard';
-import { parseCasesValue } from './NodeConfigForm';
+import { parseCasesValue, parseIntentsValue } from './NodeConfigForm';
 
 // 卡片「⋯」菜单回调：按节点粒度操作，不依赖画布当前选中态
 export interface NodeCardActions {
@@ -52,24 +52,38 @@ export function makeNodeRenderer(
     }, [node, readExtInfo]);
     const title = nodeData.title || meta.title;
 
-    // if_else 节点：根据 config.cases 动态生成出口端口（每个 case 一个出口 + 否则出口）
+    // 分支节点：根据配置动态生成出口端口
+    // - if_else：每个 case 一个出口 + 否则出口
+    // - intent：每个意图一个出口 + 其他出口
     // FlowGram 的 useDynamicPort 机制会扫描节点 DOM 中的 [data-port-id] 元素，自动注册为可拖拽端口
+    const isDynamicBranchNode = meta.type_key === 'if_else' || meta.type_key === 'intent';
     const dynamicOutputs = useMemo<DynamicOutputPort[] | undefined>(() => {
-      if (meta.type_key !== 'if_else') return undefined;
-      const cases = parseCasesValue(nodeData.config?.cases);
-      const ports: DynamicOutputPort[] = cases.map((c, idx) => ({
-        portID: c.case_id,
-        label: idx === 0 ? '如果 1' : `否则，如果 ${idx + 1}`,
-      }));
-      ports.push({ portID: 'else', label: '否则' });
-      return ports;
-    }, [nodeData.config?.cases]);
+      if (meta.type_key === 'if_else') {
+        const cases = parseCasesValue(nodeData.config?.cases);
+        const ports: DynamicOutputPort[] = cases.map((c, idx) => ({
+          portID: c.case_id,
+          label: idx === 0 ? '如果 1' : `否则，如果 ${idx + 1}`,
+        }));
+        ports.push({ portID: 'else', label: '否则' });
+        return ports;
+      }
+      if (meta.type_key === 'intent') {
+        const intents = parseIntentsValue(nodeData.config?.intents);
+        const ports: DynamicOutputPort[] = intents.map((it, idx) => ({
+          portID: String(it.id),
+          label: it.name || `意图 ${idx + 1}`,
+        }));
+        ports.push({ portID: '0', label: '其他' });
+        return ports;
+      }
+      return undefined;
+    }, [meta.type_key, nodeData.config?.cases, nodeData.config?.intents]);
 
     // if_else 节点：cases 变化时触发 FlowGram 重新扫描 DOM 中的 [data-port-id] 端口
     // useDynamicPort 模式下，FlowGram 只在 SizeData.onDataChange 时自动调用 updateDynamicPorts
     // 我们需要手动触发，确保新增/删除 case 后端口位置立刻更新
     useEffect(() => {
-      if (meta.type_key !== 'if_else' || !dynamicOutputs) return;
+      if (!isDynamicBranchNode || !dynamicOutputs) return;
       const timer = window.setTimeout(() => {
         // 遍历 dataManager 找到 WorkflowNodePortsData 实例
         // FlowGram 的 dataManager 是 Map，key 是 Registry.type 字符串
@@ -89,7 +103,7 @@ export function makeNodeRenderer(
         });
       }, DYNAMIC_PORT_RESCAN_DELAY_MS);
       return () => window.clearTimeout(timer);
-    }, [dynamicOutputs, node]);
+    }, [dynamicOutputs, node, isDynamicBranchNode]);
 
     // Comment / Note 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
     if (meta.type_key === 'comment' || meta.type_key === 'note') {
@@ -134,8 +148,7 @@ export function makeNodeRenderer(
       actions.push({ key: 'delete', label: '删除', danger: true, onClick: () => cardActions.onDelete(node) });
     }
 
-    // if_else 节点：不渲染统一的「在后面加节点」+ 按钮，分支已由各自端口独立连线
-    const isIfElseNode = meta.type_key === 'if_else';
+    // 分支节点：不渲染统一的「在后面加节点」+ 按钮，分支已由各自端口独立连线
     return (
       <WorkflowNodeRenderer node={node}>
         <NodeCard
@@ -146,7 +159,7 @@ export function makeNodeRenderer(
           config={nodeData.config}
           subtitleHint={meta.subtitle_hint}
           onDoubleClick={() => onNodeDoubleClick(node)}
-          onAddNext={!isIfElseNode && onAddNextToNode ? () => onAddNextToNode(node) : undefined}
+          onAddNext={!isDynamicBranchNode && onAddNextToNode ? () => onAddNextToNode(node) : undefined}
           actions={actions}
           dynamicOutputs={dynamicOutputs}
         />

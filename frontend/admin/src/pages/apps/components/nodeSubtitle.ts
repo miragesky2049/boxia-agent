@@ -43,6 +43,10 @@ export function buildNodeSubtitle(
       const cases = Array.isArray(cfg.cases) ? cfg.cases.length : 0;
       return cases > 0 ? `${cases} 个条件` : '条件分支';
     }
+    case 'intent': {
+      const intents = Array.isArray(cfg.intents) ? cfg.intents.length : 0;
+      return intents > 0 ? `${intents} 个意图` : '意图分类路由';
+    }
     case 'loop': {
       const count = cfg.loopCount || cfg.count || '';
       return count ? `循环 ${count} 次` : '循环执行';
@@ -66,10 +70,13 @@ export function buildNodeSubtitle(
 
     // ---- 数据 ----
     case 'dataset':
-    case 'dataset_write': {
+    case 'dataset_write':
+    case 'dataset_delete': {
       const id = cfg.datasetId || cfg.dataset_id || '';
       if (id) return `知识库: ${truncate(String(id))}`;
-      return typeKey === 'dataset_write' ? '写入知识库' : '检索知识库';
+      if (typeKey === 'dataset_write') return '写入知识库';
+      if (typeKey === 'dataset_delete') return '删除知识库文档';
+      return '检索知识库';
     }
     case 'text_processor': {
       const op = cfg.operation || '';
@@ -114,6 +121,20 @@ export function buildNodeSubtitle(
       return '删除消息';
     case 'clear_context':
       return '清空会话上下文';
+
+    // ---- 输入 / 输出 ----
+    case 'input': {
+      const prompt = cfg.prompt || cfg.question || '';
+      return prompt ? truncate(String(prompt)) : '等待用户输入';
+    }
+    case 'question': {
+      const prompt = cfg.question || '';
+      return prompt ? truncate(String(prompt)) : '等待用户回答';
+    }
+    case 'output': {
+      const content = cfg.content || '';
+      return content ? truncate(String(content)) : '输出消息';
+    }
 
     default:
       return '';

@@ -6,7 +6,9 @@ import type { TreeProps } from 'antd';
 import { listAvailableModels, type ModelCatalogItem } from '../../../api/models';
 import type { DatasetItem } from '../../../api/datasets';
 import type { NodeMeta } from '../../../api/nodeMeta';
+import type { FlowType } from '../../../api/apps';
 import { hasOutputs } from '../canvas/metadata/capabilities';
+import { isNodeAvailable } from '../canvas/metadata/flowCapabilities';
 import { FieldControl } from '../canvas/fields/fieldControls';
 import { ToolListEditor } from './ToolListEditor';
 import { groupConfigFields } from './configSections';
@@ -305,6 +307,112 @@ function CaseListEditor({
       </div>
       <Button size="small" onClick={addCase} style={{ alignSelf: 'flex-start' }} type="dashed">
         + 添加条件
+      </Button>
+    </div>
+  );
+}
+
+// ========== 意图列表编辑器（意图识别节点） ==========
+export interface IntentItem {
+  id: number;
+  name: string;
+  description: string;
+}
+
+export function parseIntentsValue(raw: any): IntentItem[] {
+  if (!Array.isArray(raw)) return [];
+  const items: IntentItem[] = [];
+  raw.forEach((item, idx) => {
+    const name = typeof item === 'string'
+      ? item.trim()
+      : String(item?.name ?? item?.intent ?? '').trim();
+    if (!name) return;
+    const parsedId = Number(item?.id);
+    items.push({
+      id: Number.isFinite(parsedId) && parsedId > 0 ? parsedId : idx + 1,
+      name,
+      description: typeof item === 'object' && item ? String(item.description ?? '') : '',
+    });
+  });
+  return items;
+}
+
+function IntentListEditor({
+  value,
+  onChange,
+}: {
+  value: any;
+  onChange: (next: IntentItem[]) => void;
+}) {
+  const items = useMemo(() => parseIntentsValue(value), [value]);
+
+  const updateItem = (idx: number, patch: Partial<IntentItem>) => {
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
+  };
+
+  const removeItem = (idx: number) => {
+    onChange(items.filter((_, i) => i !== idx));
+  };
+
+  const addItem = () => {
+    const nextId = items.reduce((max, it) => Math.max(max, it.id), 0) + 1;
+    onChange([...items, { id: nextId, name: '', description: '' }]);
+  };
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {items.length === 0 && (
+        <div style={{ fontSize: 12, color: '#999' }}>暂无意图，点击下方按钮添加</div>
+      )}
+      {items.map((it, idx) => (
+        <div
+          key={it.id}
+          style={{
+            padding: 8,
+            background: '#fafafa',
+            borderRadius: 6,
+            border: '1px solid #f0f0f0',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+            <span style={{ fontSize: 11, color: '#9ca3af', width: 46 }}>出口 {idx + 1}</span>
+            <Input
+              size="small"
+              style={{ width: 150 }}
+              placeholder="意图名称"
+              value={it.name}
+              onChange={(e) => updateItem(idx, { name: e.target.value })}
+            />
+            <Input
+              size="small"
+              style={{ flex: 1 }}
+              placeholder="意图描述（帮助模型判断）"
+              value={it.description}
+              onChange={(e) => updateItem(idx, { description: e.target.value })}
+            />
+            <Button
+              size="small"
+              type="text"
+              danger
+              onClick={() => removeItem(idx)}
+              aria-label="删除意图"
+            >
+              删除
+            </Button>
+          </div>
+        </div>
+      ))}
+      <div style={{
+        padding: '6px 8px', background: '#f9fafb', borderRadius: 6,
+        fontSize: 12, color: '#9ca3af',
+      }}>
+        其他（未命中任何意图时的兜底出口）
+      </div>
+      <Button size="small" onClick={addItem} style={{ alignSelf: 'flex-start' }} type="dashed">
+        + 添加意图
       </Button>
     </div>
   );
@@ -775,6 +883,7 @@ export function NodeConfigForm({
   datasetOptions,
   upstreamInputs,
   onAddNext,
+  flowType,
 }: {
   nodeMeta: NodeMeta;
   values: NodeConfigValues;
@@ -787,10 +896,18 @@ export function NodeConfigForm({
   datasetOptions?: DatasetItem[];
   upstreamInputs?: UpstreamInputGroup[];
   onAddNext?: (typeKey: string) => void;
+  flowType?: FlowType;
 }) {
   const handleFieldChange = (name: string, value: any) => {
     onChange({ [name]: value });
   };
+
+  // 推荐下游节点按当前流程形态过滤，避免工作流里出现对话流专属节点
+  const nextRecommendations = useMemo(
+    () => getNextRecommendations(nodeMeta.type_key, keyToMeta)
+      .filter((rec) => !flowType || isNodeAvailable(rec.typeKey, flowType)),
+    [nodeMeta.type_key, keyToMeta, flowType],
+  );
 
   const buildPicker = (fieldName: string): React.ReactNode => {
     // 只有文本类字段才挂变量引用选择器
@@ -890,6 +1007,11 @@ export function NodeConfigForm({
                     currentNodeId={currentNodeId}
                     keyToMeta={keyToMeta}
                   />
+                ) : field.field_type === 'intent_list' ? (
+                  <IntentListEditor
+                    value={values[field.name]}
+                    onChange={(next) => handleFieldChange(field.name, next)}
+                  />
                 ) : field.field_type === 'model_picker' ? (
                   <ModelPicker
                     value={values[field.name]}
@@ -934,7 +1056,7 @@ export function NodeConfigForm({
       )}
 
       {/* V10：下一步推荐 */}
-      {onAddNext && getNextRecommendations(nodeMeta.type_key, keyToMeta).length > 0 && (
+      {onAddNext && nextRecommendations.length > 0 && (
         <div style={{
           marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0',
         }}>
@@ -944,7 +1066,7 @@ export function NodeConfigForm({
             下一步
           </div>
           <Space direction="vertical" style={{ width: '100%' }} size={6}>
-            {getNextRecommendations(nodeMeta.type_key, keyToMeta).map((rec) => {
+            {nextRecommendations.map((rec) => {
               const meta = keyToMeta[rec.typeKey];
               return (
                 <div

@@ -41,6 +41,9 @@ export interface NodeMeta {
   inputs: PortMeta[]
   outputs: PortMeta[]
   config_fields: ConfigFieldMeta[]
+  // 占位节点：available=false 时前端置灰，hover 显示 unavailable_reason
+  available?: boolean
+  unavailable_reason?: string
 }
 
 export interface NodeMetaResponse {

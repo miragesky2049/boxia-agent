@@ -1,7 +1,7 @@
 import { Button, Drawer, Tag, Typography } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import type { DatasetItem } from '../../../api/datasets';
-import type { NodeDebugRunResult } from '../../../api/apps';
+import type { FlowType, NodeDebugRunResult } from '../../../api/apps';
 import { canDelete } from '../canvas/metadata/capabilities';
 import { CANVAS_TOKENS } from '../canvas/tokens';
 import { NodeIcon } from './NodeIcon';
@@ -32,6 +32,7 @@ export function NodeConfigDrawer({
   debugRunning,
   debugResult,
   onDebug,
+  flowType,
 }: {
   open: boolean;
   nodeId: string | null;
@@ -50,6 +51,7 @@ export function NodeConfigDrawer({
   debugRunning: boolean;
   debugResult: NodeDebugRunResult | null;
   onDebug: () => void;
+  flowType?: FlowType;
 }) {
   return (
     <Drawer
@@ -109,6 +111,7 @@ export function NodeConfigDrawer({
           datasetOptions={datasetOptions}
           upstreamInputs={upstreamInputs}
           onAddNext={onAddNext}
+          flowType={flowType}
         />
       )}
       <div style={{ marginTop: 16, borderTop: `1px solid ${CANVAS_TOKENS.border}`, paddingTop: 12 }}>

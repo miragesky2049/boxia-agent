@@ -22,6 +22,8 @@ export interface Graph {
   edges: GraphEdge[]
 }
 
+export type FlowType = 'workflow' | 'chatflow'
+
 export interface Application {
   id: string
   owner_type: 'platform' | 'tenant'
@@ -32,6 +34,7 @@ export interface Application {
   is_enabled: boolean
   is_listed_in_market: boolean
   visibility_mode: 'all' | 'custom'
+  flow_type: FlowType
   created_by: string | null
   created_at: string
   updated_at: string
@@ -254,6 +257,62 @@ export async function getApplicationInputs(
   return data.inputs ?? []
 }
 
+// ========== 应用变量体系（应用 / 用户 / 系统） ==========
+export type AppVariableType = 'string' | 'number' | 'boolean' | 'object' | 'array'
+export type AppVariableScope = 'app' | 'user'
+
+export interface AppVariable {
+  name: string
+  type: AppVariableType
+  scope: AppVariableScope
+  default: unknown
+  description: string
+}
+
+export interface SystemVariable {
+  name: string
+  label: string
+}
+
+export interface AppVariablesResponse {
+  variables: AppVariable[]
+  system: SystemVariable[]
+}
+
+export async function getAppVariables(applicationId: string): Promise<AppVariablesResponse> {
+  return request<AppVariablesResponse>(`/admin/apps/${applicationId}/variables`)
+}
+
+export async function saveAppVariables(
+  applicationId: string,
+  variables: AppVariable[],
+): Promise<AppVariablesResponse> {
+  return request<AppVariablesResponse>(`/admin/apps/${applicationId}/variables`, {
+    method: 'PUT',
+    body: JSON.stringify({ variables }),
+  })
+}
+
+export async function getUserVariables(
+  applicationId: string,
+): Promise<Record<string, unknown>> {
+  const data = await request<{ values: Record<string, unknown> }>(
+    `/admin/apps/${applicationId}/user-variables`,
+  )
+  return data.values ?? {}
+}
+
+export async function saveUserVariables(
+  applicationId: string,
+  values: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const data = await request<{ values: Record<string, unknown> }>(
+    `/admin/apps/${applicationId}/user-variables`,
+    { method: 'PUT', body: JSON.stringify({ values }) },
+  )
+  return data.values ?? {}
+}
+
 // ========== 统一资源（tool / prompt / skill / knowledge） ==========
 export type ResourceType = 'tool' | 'prompt' | 'skill' | 'knowledge'
 
@@ -360,6 +419,7 @@ export async function listApps(params: {
 export async function createApp(payload: {
   name: string
   description?: string
+  flow_type?: FlowType
 }): Promise<{ application_id: string }> {
   return request<{ application_id: string }>('/admin/apps', {
     method: 'POST',
@@ -373,7 +433,12 @@ export async function getApp(applicationId: string): Promise<Application> {
 
 export async function updateApp(
   applicationId: string,
-  payload: { name?: string; description?: string; avatar_url?: string | null },
+  payload: {
+    name?: string
+    description?: string
+    avatar_url?: string | null
+    flow_type?: FlowType
+  },
 ): Promise<void> {
   await request<void>(`/admin/apps/${applicationId}`, {
     method: 'PATCH',
@@ -386,12 +451,14 @@ export async function getAppGraph(applicationId: string): Promise<{
   runtime_mode: 'dag' | 'agent_loop'
   graph_schema_version: number
   published_graph_version: number | null
+  flow_type: FlowType
 }> {
   return request<{
     graph: Graph
     runtime_mode: 'dag' | 'agent_loop'
     graph_schema_version: number
     published_graph_version: number | null
+    flow_type: FlowType
   }>(`/admin/apps/${applicationId}/graph`)
 }
 
@@ -590,7 +657,19 @@ export interface DebugNodeState {
 }
 
 export interface DebugStreamEvent {
-  event: 'node_start' | 'node_end' | 'result' | 'error' | 'interrupted'
+  event:
+    | 'run_start'
+    | 'node_start'
+    | 'node_end'
+    | 'llm_token'
+    | 'prompt_text'
+    | 'tool_call_start'
+    | 'tool_call_end'
+    | 'output_message'
+    | 'question'
+    | 'result'
+    | 'error'
+    | 'interrupted'
   data: Record<string, unknown>
 }
 
@@ -616,10 +695,13 @@ export interface GraphValidationResult {
   issues: GraphValidationIssue[]
 }
 
-export async function validateGraph(graph: Graph): Promise<GraphValidationResult> {
+export async function validateGraph(
+  graph: Graph,
+  applicationId?: string,
+): Promise<GraphValidationResult> {
   return request<GraphValidationResult>('/admin/apps/validate-graph', {
     method: 'POST',
-    body: JSON.stringify({ graph }),
+    body: JSON.stringify({ graph, application_id: applicationId }),
   })
 }
 
@@ -628,7 +710,13 @@ export async function validateGraph(graph: Graph): Promise<GraphValidationResult
  * 复用 workflows 的 fetch + ReadableStream 手写 SSE 解析。
  */
 export async function debugRunAppStream(
-  payload: { graph: Graph; inputs: Record<string, unknown> },
+  payload: {
+    graph: Graph
+    inputs: Record<string, unknown>
+    conversation_id?: string
+    thread_id?: string
+    application_id?: string
+  },
   onEvent: (event: DebugStreamEvent) => void,
 ): Promise<void> {
   const response = await fetch('/api/v1/admin/apps/debug/run/stream', {
@@ -811,9 +899,23 @@ export async function debugRunAppStreamResume(
     graph: Graph
     thread_id: string
     run_id?: string
-    approval: { approved: boolean; comment: string; approver: string }
+    conversation_id?: string
+    application_id?: string
+    approval?: { approved: boolean; comment: string; approver: string }
+    resume?: Record<string, unknown>
   },
   onEvent: (event: DebugStreamEvent) => void,
 ): Promise<void> {
   return _postSse('/api/v1/admin/apps/debug/run/stream/resume', payload, onEvent)
+}
+
+/** 画布对话流试运行：创建一个 debug 会话，消息不进入用户端会话列表。 */
+export async function createDebugConversation(
+  applicationId: string,
+  title = '画布试运行',
+): Promise<{ conversation_id: string }> {
+  return request<{ conversation_id: string }>('/admin/apps/debug/conversations', {
+    method: 'POST',
+    body: JSON.stringify({ application_id: applicationId, title }),
+  })
 }

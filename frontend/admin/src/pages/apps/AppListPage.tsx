@@ -1,4 +1,19 @@
-import { App, Button, Col, Empty, Input, Modal, Row, Select, Spin, Switch, Table, Typography } from 'antd'
+import {
+  App,
+  Button,
+  Card,
+  Col,
+  Empty,
+  Input,
+  Modal,
+  Row,
+  Segmented,
+  Spin,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -7,18 +22,35 @@ import {
   setAppEnabled,
   setAppListing,
   type Application,
+  type FlowType,
 } from '../../api/apps'
 
-type AppTemplate = 'workflow' | 'chatbot' | 'agent'
+type TypeFilter = 'all' | FlowType
 
-const TEMPLATE_OPTIONS: Array<{
-  value: AppTemplate
+const FLOW_TYPE_OPTIONS: Array<{
+  value: FlowType
   label: string
   desc: string
+  nodes: string
+  trial: string
+  color: string
 }> = [
-  { value: 'workflow', label: '工作流应用', desc: '多节点编排，适合固定流程自动化' },
-  { value: 'chatbot', label: '对话应用', desc: '单轮/多轮对话，适合客服与问答' },
-  { value: 'agent', label: '智能体', desc: '自主规划工具调用，适合复杂任务' },
+  {
+    value: 'workflow',
+    label: '工作流',
+    desc: '一次输入、一次输出，适合批处理与固定流程自动化',
+    nodes: '开始 → 结束',
+    trial: '表单试运行',
+    color: '#1677ff',
+  },
+  {
+    value: 'chatflow',
+    label: '对话流',
+    desc: '多轮对话、中间输出与问答中断，适合客服与问答场景',
+    nodes: '开始 → 大模型 → 输出 → 结束',
+    trial: '聊天试运行',
+    color: '#722ed1',
+  },
 ]
 
 export default function AppListPage() {
@@ -27,12 +59,13 @@ export default function AppListPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Application[]>([])
   const [keyword, setKeyword] = useState('')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
 
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
-  const [newTemplate, setNewTemplate] = useState<AppTemplate>('workflow')
+  const [newFlowType, setNewFlowType] = useState<FlowType>('workflow')
 
   const load = async () => {
     setLoading(true)
@@ -51,14 +84,17 @@ export default function AppListPage() {
   }, [])
 
   const filtered = useMemo(() => {
-    if (!keyword.trim()) return data
-    return data.filter((item) => item.name.toLowerCase().includes(keyword.trim().toLowerCase()))
-  }, [data, keyword])
+    const kw = keyword.trim().toLowerCase()
+    return data.filter((item) => {
+      if (typeFilter !== 'all' && item.flow_type !== typeFilter) return false
+      return !kw || item.name.toLowerCase().includes(kw)
+    })
+  }, [data, keyword, typeFilter])
 
   const resetCreateForm = () => {
     setNewName('')
     setNewDesc('')
-    setNewTemplate('workflow')
+    setNewFlowType('workflow')
   }
 
   const handleCreate = async (enterCanvas: boolean) => {
@@ -68,7 +104,11 @@ export default function AppListPage() {
     }
     setCreating(true)
     try {
-      const result = await createApp({ name: newName.trim(), description: newDesc.trim() })
+      const result = await createApp({
+        name: newName.trim(),
+        description: newDesc.trim(),
+        flow_type: newFlowType,
+      })
       message.success('应用已创建')
       resetCreateForm()
       setCreateOpen(false)
@@ -130,13 +170,28 @@ export default function AppListPage() {
         </Col>
       </Row>
 
-      <Input
-        placeholder="按名称过滤"
-        value={keyword}
-        onChange={(e) => setKeyword(e.target.value)}
-        allowClear
-        style={{ width: 260, marginBottom: 16 }}
-      />
+      <Row gutter={12} style={{ marginBottom: 16 }}>
+        <Col>
+          <Segmented
+            value={typeFilter}
+            onChange={(value) => setTypeFilter(value as TypeFilter)}
+            options={[
+              { label: '全部', value: 'all' },
+              { label: '工作流', value: 'workflow' },
+              { label: '对话流', value: 'chatflow' },
+            ]}
+          />
+        </Col>
+        <Col flex="auto">
+          <Input
+            placeholder="按名称过滤"
+            value={keyword}
+            onChange={(e) => setKeyword(e.target.value)}
+            allowClear
+            style={{ width: 260 }}
+          />
+        </Col>
+      </Row>
 
       {filtered.length === 0 ? (
         <Empty description="暂无应用，点击右上角「新建应用」开始" />
@@ -156,6 +211,16 @@ export default function AppListPage() {
                 >
                   {name}
                 </a>
+              ),
+            },
+            {
+              title: '类型',
+              dataIndex: 'flow_type',
+              width: 110,
+              render: (flowType: FlowType) => (
+                <Tag color={flowType === 'chatflow' ? 'purple' : 'blue'}>
+                  {flowType === 'chatflow' ? '对话流' : '工作流'}
+                </Tag>
               ),
             },
             { title: '描述', dataIndex: 'description', ellipsis: true },
@@ -220,21 +285,39 @@ export default function AppListPage() {
       >
         <div style={{ marginBottom: 16 }}>
           <Typography.Text strong>应用类型</Typography.Text>
-          <Select
-            value={newTemplate}
-            onChange={(value) => setNewTemplate(value)}
-            style={{ width: '100%', marginTop: 8 }}
-            options={TEMPLATE_OPTIONS.map((opt) => ({ value: opt.value, label: opt.label }))}
-            optionRender={(option) => {
-              const opt = TEMPLATE_OPTIONS.find((item) => item.value === option.value)
+          <Row gutter={12} style={{ marginTop: 8 }}>
+            {FLOW_TYPE_OPTIONS.map((opt) => {
+              const selected = newFlowType === opt.value
               return (
-                <div>
-                  <div>{opt?.label}</div>
-                  <div style={{ fontSize: 12, color: '#8c8c8c' }}>{opt?.desc}</div>
-                </div>
+                <Col span={12} key={opt.value}>
+                  <Card
+                    size="small"
+                    hoverable
+                    onClick={() => setNewFlowType(opt.value)}
+                    style={{
+                      borderColor: selected ? opt.color : undefined,
+                      boxShadow: selected ? `0 0 0 1px ${opt.color}` : undefined,
+                      cursor: 'pointer',
+                      height: '100%',
+                    }}
+                  >
+                    <div style={{ fontWeight: 600, color: selected ? opt.color : undefined }}>
+                      {opt.label}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#595959', marginTop: 4, minHeight: 36 }}>
+                      {opt.desc}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 8 }}>
+                      初始画布：{opt.nodes}
+                    </div>
+                    <div style={{ fontSize: 12, color: '#8c8c8c' }}>
+                      试运行：{opt.trial}
+                    </div>
+                  </Card>
+                </Col>
               )
-            }}
-          />
+            })}
+          </Row>
         </div>
         <div style={{ marginBottom: 16 }}>
           <Typography.Text strong>

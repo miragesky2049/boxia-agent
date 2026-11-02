@@ -19,14 +19,30 @@ export interface CategoryGroup {
   items: NodeMeta[];
 }
 
-export const CATEGORY_ORDER = ['control', 'ai', 'logic', 'data', 'conversation', 'misc'] as const;
+// 与 coze「添加节点」面板分组保持一致；basic/control 是本地补充的节点分组
+export const CATEGORY_ORDER = [
+  'basic', 'ai', 'plugin', 'workflow', 'logic', 'io', 'control',
+  'knowledge', 'component', 'conversation', 'history', 'message',
+  'database', 'memory', 'image', 'media', 'misc',
+] as const;
 
 const CATEGORY_LABELS: Record<string, string> = {
+  basic: '基础节点',
+  ai: '大模型',
+  plugin: '插件',
+  workflow: '工作流',
+  logic: '业务逻辑',
+  io: '输入&输出',
   control: '流程控制',
-  ai: 'AI 能力',
-  logic: '逻辑与工具',
-  data: '数据',
-  conversation: '会话与消息',
+  knowledge: '知识库&数据',
+  component: '组件',
+  conversation: '会话管理',
+  history: '会话历史',
+  message: '消息',
+  database: '数据库（未启用）',
+  memory: '长期记忆（未启用）',
+  image: '图像处理（未启用）',
+  media: '音视频处理（未启用）',
   misc: '其他',
 };
 

@@ -10,8 +10,8 @@ import type {
 import '@flowgram.ai/free-layout-editor/index.css';
 import { useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Button, message } from 'antd';
-import { getAppGraph, saveAppGraph, debugRunAppStream, debugRunAppStreamResume, debugRunNode, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload, type NodeDebugRunResult } from '../../api/apps';
+import { Button, Modal, Segmented, Tooltip, message } from 'antd';
+import { getAppGraph, saveAppGraph, updateApp, createDebugConversation, debugRunAppStream, debugRunAppStreamResume, debugRunNode, validateGraph, listGraphVersions, rollbackGraph, publishGraph, type FlowType, type GraphValidationIssue, type GraphVersionItem, type ApprovalInterruptPayload, type NodeDebugRunResult } from '../../api/apps';
 import { ApiError } from '../../api/client';
 import { getNodeMeta, type NodeMeta } from '../../api/nodeMeta';
 import { listDatasets, type DatasetItem } from '../../api/datasets';
@@ -26,10 +26,19 @@ import { ConversationDrawer } from './components/ConversationDrawer';
 import { AddNodePopover } from './components/AddNodePopover';
 import { MiniMap } from './components/MiniMap';
 import { canCopy, canDelete, hasSubgraph } from './canvas/metadata/capabilities';
+import {
+  filterNodeMetasByFlow,
+  findFlowWarnings,
+} from './canvas/metadata/flowCapabilities';
 import { AlignGuides } from './components/AlignGuides';
 import { CanvasStyles } from './components/CanvasStyles';
 import { BottomStatusPanel } from './components/BottomStatusPanel';
 import { NodeDebugPanel } from './components/NodeDebugPanel';
+import {
+  ChatflowDebugPanel,
+  type ChatflowChatMessage,
+  type ChatflowPendingQuestion,
+} from './components/ChatflowDebugPanel';
 import { NodeConfigDrawer } from './components/NodeConfigDrawer';
 import { RenameNodeModal, DeleteNodeModal } from './components/NodeActionModals';
 import { RunInputsModal } from './components/RunInputsModal';
@@ -113,6 +122,22 @@ function collectDebugInputs(config: Record<string, any>): Record<string, unknown
 
 
 
+// 递归收集整图（含子图）的节点类型，用于流程形态切换的兼容性检查
+function collectGraphTypeKeys(graph: WorkflowJSON): Array<{ typeKey: string }> {
+  const result: Array<{ typeKey: string }> = [];
+  const walk = (current: WorkflowJSON) => {
+    (current.nodes || []).forEach((node) => {
+      const typeKey = (node as unknown as { type?: string }).type;
+      if (typeKey) result.push({ typeKey });
+      const subgraph = (node as unknown as { data?: { subgraph?: WorkflowJSON } }).data?.subgraph;
+      if (subgraph) walk(subgraph);
+    });
+  };
+  walk(graph);
+  return result;
+}
+
+
 // ========== 页面组件 ==========
 
 export default function AppEditPage() {
@@ -136,6 +161,14 @@ export default function AppEditPage() {
   const [runModalOpen, setRunModalOpen] = useState(false);
   const [startParams, setStartParams] = useState<Array<{ name: string; type?: string }>>([]);
   const [runInputs, setRunInputs] = useState<Record<string, any>>({});
+  // 对话流试运行：多轮消息 + 会话上下文
+  const [chatPanelOpen, setChatPanelOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<ChatflowChatMessage[]>([]);
+  const [chatConversationId, setChatConversationId] = useState<string | null>(null);
+  const [chatThreadId, setChatThreadId] = useState<string | null>(null);
+  const [chatRunId, setChatRunId] = useState<string | null>(null);
+  const [chatPendingQuestion, setChatPendingQuestion] = useState<ChatflowPendingQuestion | null>(null);
+  const chatInputsRef = useRef<Record<string, any>>({});
   const [nodeDebugMap, setNodeDebugMap] = useState<Record<string, {
     status: RunNodeStatus;
     inputs?: any;
@@ -160,6 +193,9 @@ export default function AppEditPage() {
   const [approvalComment, setApprovalComment] = useState('');
   const [approvalApprover, setApprovalApprover] = useState('');
   const [nodeMetas, setNodeMetas] = useState<NodeMeta[]>([]);
+  // 画布形态：工作流 / 对话流。后端为事实源，切换后落库
+  const [flowType, setFlowType] = useState<FlowType>('workflow');
+  const [flowTypeSwitching, setFlowTypeSwitching] = useState(false);
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
   // 画布上是否已有 end 节点：start 永远只允许一个（初始化时就有，且 deletable=false），
   // end 同样只允许一个；节点面板据此隐藏对应类型，避免出现多个开始/结束节点
@@ -405,6 +441,12 @@ export default function AppEditPage() {
     return map;
   }, [nodeMetas]);
 
+  // 节点库只展示当前形态可新增的节点；已存在的节点仍由全量注册表渲染
+  const addableNodeMetas = useMemo(
+    () => filterNodeMetasByFlow(nodeMetas, flowType),
+    [nodeMetas, flowType],
+  );
+
   // N9-06：导出当前工作流为 Coze IR JSON
   const handleExportJson = useCallback(() => {
     const graph = toWorkflowJSON(ctxRef.current);
@@ -464,9 +506,9 @@ export default function AppEditPage() {
       const height = meta.type_key === 'comment' || meta.type_key === 'note'
         ? 100
         : baseHeight + outputPortHeight;
-      // if_else 节点：启用 useDynamicPort，输出端口通过 DOM [data-port-id] 动态渲染，
-      // 不注册静态 outputs（避免动态端口之外多出残留的 true/false 端点）
-      const isIfElse = meta.type_key === 'if_else';
+      // 分支节点（if_else / intent）：启用 useDynamicPort，输出端口通过 DOM [data-port-id]
+      // 动态渲染，不注册静态 outputs（避免动态端口之外多出残留端点）
+      const isDynamicBranch = meta.type_key === 'if_else' || meta.type_key === 'intent';
       return {
         type: meta.type_key,
         meta: {
@@ -474,11 +516,11 @@ export default function AppEditPage() {
             ...meta.inputs.map((p) => ({ portID: p.name, type: 'input' as const })),
             // 非 if_else 节点：把后端声明的 outputs 注册为静态输出端口，
             // 否则新节点（无 edge 反序列化）不会有 output 端口，无法拖线到下游
-            ...(isIfElse
+            ...(isDynamicBranch
               ? []
               : meta.outputs.map((p) => ({ portID: p.name, type: 'output' as const }))),
           ],
-          useDynamicPort: isIfElse ? true : undefined,
+          useDynamicPort: isDynamicBranch ? true : undefined,
           size: { width: 220, height },
           renderKey: meta.type_key,
         },
@@ -497,6 +539,7 @@ export default function AppEditPage() {
         try {
           const resp = await getAppGraph(id);
           if (cancelled) return;
+          setFlowType(resp.flow_type ?? 'workflow');
           setPublishedVersion(resp.published_graph_version ?? null);
           graphSchemaVersionRef.current = resp.graph_schema_version ?? readSchemaVersion(resp.graph);
           const graph = fromCozeIR(resp.graph, cozeTypeToKey);
@@ -559,7 +602,7 @@ export default function AppEditPage() {
     try {
       const flowgram = collectFullGraph();
       const cozeIR = toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current);
-      const result = await validateGraph(cozeIR as never);
+      const result = await validateGraph(cozeIR as never, id ?? undefined);
       setValidationIssues(result.issues);
       collectIssuesForNodes(result.issues);
       // 自动保存触发的校验不再弹出右下角面板：面板会遮挡画布，导致新节点无法拖拽。
@@ -571,7 +614,7 @@ export default function AppEditPage() {
     } finally {
       setValidating(false);
     }
-  }, [keyToCozeType, collectIssuesForNodes, collectFullGraph]);
+  }, [id, keyToCozeType, collectIssuesForNodes, collectFullGraph]);
 
   const scheduleSave = useCallback(() => {
     if (!ctxRef.current || !id) return;
@@ -592,6 +635,56 @@ export default function AppEditPage() {
       }
     }, 800);
   }, [id, keyToCozeType, doValidate, collectFullGraph]);
+
+  // 切换画布形态：节点库保持一致，仅做非破坏性提示，不删除任何节点
+  const handleFlowTypeChange = useCallback((next: FlowType) => {
+    if (!id || next === flowType || flowTypeSwitching) return;
+    persistCurrentEditor();
+    const warnings = findFlowWarnings(
+      collectGraphTypeKeys(rootGraphRef.current),
+      next,
+      keyToMeta,
+    );
+    const apply = async () => {
+      setFlowTypeSwitching(true);
+      try {
+        await updateApp(id, { flow_type: next });
+        setFlowType(next);
+        if (next === 'workflow') {
+          // 工作流没有聊天试运行语义，关闭面板并清空会话上下文
+          setChatPanelOpen(false);
+          setChatMessages([]);
+          setChatPendingQuestion(null);
+          setChatConversationId(null);
+          setChatThreadId(null);
+          setChatRunId(null);
+          chatInputsRef.current = {};
+        }
+        message.success(next === 'chatflow' ? '已切换为对话流' : '已切换为工作流');
+      } catch (err) {
+        message.error(err instanceof Error ? err.message : '切换流程类型失败');
+      } finally {
+        setFlowTypeSwitching(false);
+      }
+    };
+    if (warnings.length === 0) {
+      void apply();
+      return;
+    }
+    Modal.confirm({
+      title: '切换为工作流？',
+      content: `图中包含问答节点：${warnings.join('、')}。工作流执行到该节点会中断且没有恢复通道，节点本身会保留。`,
+      okText: '保留节点并切换',
+      cancelText: '取消切换',
+      onOk: () => apply(),
+    });
+  }, [
+    id,
+    flowType,
+    flowTypeSwitching,
+    persistCurrentEditor,
+    keyToMeta,
+  ]);
 
   const handlePublish = useCallback(async () => {
     if (!id) return;
@@ -1077,6 +1170,18 @@ export default function AppEditPage() {
     return Array.isArray(data?.config?.inputs) ? data.config.inputs : [];
   }, []);
 
+  const appendChatMessage = useCallback((
+    role: ChatflowChatMessage['role'],
+    content: string,
+    kind?: ChatflowChatMessage['kind'],
+  ) => {
+    if (!content) return;
+    setChatMessages((prev) => [
+      ...prev,
+      { id: `${Date.now()}-${Math.random().toString(16).slice(2)}`, role, content, kind },
+    ]);
+  }, []);
+
   // 共用的 SSE 事件处理器（初次 + resume 复用）
   const handleRunEvent = useCallback((
     event: { event: string; data: Record<string, any> },
@@ -1144,6 +1249,30 @@ export default function AppEditPage() {
           },
         }));
       }
+    } else if (event.event === 'run_start') {
+      // 对话流：后端回传实际使用的会话 / 线程，后续轮次复用
+      const conversationId = String(event.data.conversation_id || '');
+      const threadId = String(event.data.thread_id || '');
+      const runId = String(event.data.run_id || '');
+      if (conversationId) setChatConversationId(conversationId);
+      if (threadId) setChatThreadId(threadId);
+      if (runId) setChatRunId(runId);
+    } else if (event.event === 'output_message') {
+      // 输出节点 / 结束节点的中间消息，直接渲染为助手气泡
+      appendChatMessage('assistant', String(event.data.content || ''));
+    } else if (event.event === 'question') {
+      // 问答节点中断：显示问题与选项，回答后走 resume
+      const question: ChatflowPendingQuestion = {
+        nodeId: String(event.data.node_id || ''),
+        question: String(event.data.question || ''),
+        options: Array.isArray(event.data.options)
+          ? event.data.options.map((item: unknown) => String(item))
+          : [],
+        threadId: String(event.data.thread_id || ''),
+        runId: String(event.data.run_id || ''),
+      };
+      setChatPendingQuestion(question);
+      appendChatMessage('assistant', question.question || '请回答该问题', 'question');
     } else if (event.event === 'interrupted') {
       // 人审中断：弹审批抽屉
       const approval = event.data.approval as ApprovalInterruptPayload;
@@ -1158,10 +1287,27 @@ export default function AppEditPage() {
     } else if (event.event === 'error') {
       appendLog(`✗ 错误：${event.data.message || event.data.error}`, 'error');
     }
-  }, [setNodeRunStatus]);
+  }, [setNodeRunStatus, appendChatMessage]);
 
   const doRun = useCallback(async (inputs: Record<string, any>) => {
     if (!id) return;
+    // 试运行是运行态入口：先校验，有 error 直接阻断并定位到第一个问题节点
+    const issues = await doValidate();
+    const errors = issues.filter((i) => i.severity === 'error');
+    if (errors.length > 0) {
+      setPanelTab('validation');
+      setPanelOpen(true);
+      message.error(`有 ${errors.length} 个校验问题，请先修复再试运行`);
+      const firstNodeId = errors.find((i) => i.node_id)?.node_id;
+      if (firstNodeId) {
+        document.getElementById(firstNodeId)?.scrollIntoView({
+          behavior: 'smooth',
+          block: 'center',
+          inline: 'center',
+        });
+      }
+      return;
+    }
     setRunning(true);
     setRunLogs([]);
     setNodeDebugMap({});
@@ -1194,7 +1340,122 @@ export default function AppEditPage() {
     } finally {
       setRunning(false);
     }
-  }, [id, clearAllRunStatus, keyToCozeType, handleRunEvent]);
+  }, [id, doValidate, clearAllRunStatus, keyToCozeType, handleRunEvent]);
+
+  const resetChatSession = useCallback(() => {
+    setChatMessages([]);
+    setChatPendingQuestion(null);
+    setChatConversationId(null);
+    setChatThreadId(null);
+    setChatRunId(null);
+    chatInputsRef.current = {};
+  }, []);
+
+  // 打开对话试运行面板：起始参数只在本次会话内复用
+  const startChatSession = useCallback((inputs: Record<string, any>) => {
+    resetChatSession();
+    chatInputsRef.current = inputs;
+    setChatPanelOpen(true);
+    setRunLogs([]);
+    setNodeDebugMap({});
+    setNodeDebugRunning(false);
+    clearAllRunStatus();
+  }, [resetChatSession, clearAllRunStatus]);
+
+  const buildDebugGraph = useCallback(() => {
+    const ctx = ctxRef.current;
+    if (!ctx) return null;
+    const flowgram = toWorkflowJSON(ctx);
+    return toCozeIR(flowgram, keyToCozeType, graphSchemaVersionRef.current) as never;
+  }, [keyToCozeType]);
+
+  // 对话流首轮 / 后续轮：复用同一个 conversation 与 thread
+  const sendChatMessage = useCallback(async (text: string) => {
+    if (!id || running || !text.trim()) return;
+    appendChatMessage('user', text);
+    setRunning(true);
+    setNodeDebugPanelOpen(true);
+    setPanelTab('logs');
+    setPanelOpen(true);
+    const appendLog = (logText: string, level: 'info' | 'error' = 'info') => {
+      const time = new Date().toLocaleTimeString();
+      setRunLogs((prev) => [...prev, { time, text: logText, level }]);
+    };
+    try {
+      let conversationId = chatConversationId;
+      if (!conversationId) {
+        const created = await createDebugConversation(id);
+        conversationId = created.conversation_id;
+        setChatConversationId(conversationId);
+      }
+      const graph = buildDebugGraph();
+      if (!graph) return;
+      const threadId = chatThreadId ?? conversationId;
+      appendLog(`对话试运行：${text}`);
+      await debugRunAppStream(
+        {
+          graph,
+          inputs: { ...chatInputsRef.current, USER_INPUT: text },
+          conversation_id: conversationId,
+          thread_id: threadId,
+          application_id: id,
+        },
+        (event) => handleRunEvent(event, appendLog),
+      );
+      appendLog('本轮运行结束');
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : String(err);
+      appendChatMessage('system', `运行失败：${messageText}`, 'error');
+      appendLog(`试运行失败：${messageText}`, 'error');
+    } finally {
+      setRunning(false);
+    }
+  }, [
+    id, running, chatConversationId, chatThreadId, appendChatMessage,
+    buildDebugGraph, handleRunEvent,
+  ]);
+
+  // 问答节点回答：以 {answer} 续跑同一个 thread
+  const answerChatQuestion = useCallback(async (text: string) => {
+    const pending = chatPendingQuestion;
+    if (!id || running || !pending || !text.trim()) return;
+    appendChatMessage('user', text);
+    setChatPendingQuestion(null);
+    setRunning(true);
+    setNodeDebugPanelOpen(true);
+    setPanelTab('logs');
+    setPanelOpen(true);
+    const appendLog = (logText: string, level: 'info' | 'error' = 'info') => {
+      const time = new Date().toLocaleTimeString();
+      setRunLogs((prev) => [...prev, { time, text: logText, level }]);
+    };
+    try {
+      const graph = buildDebugGraph();
+      if (!graph) return;
+      appendLog(`回答提问：${text}`);
+      await debugRunAppStreamResume(
+        {
+          graph,
+          thread_id: pending.threadId || chatThreadId || '',
+          run_id: pending.runId || chatRunId || undefined,
+          conversation_id: chatConversationId ?? undefined,
+          application_id: id,
+          resume: { answer: text },
+        },
+        (event) => handleRunEvent(event, appendLog),
+      );
+      appendLog('本轮运行结束');
+    } catch (err) {
+      const messageText = err instanceof Error ? err.message : String(err);
+      appendChatMessage('system', `续跑失败：${messageText}`, 'error');
+      appendLog(`续跑失败：${messageText}`, 'error');
+    } finally {
+      setRunning(false);
+    }
+  }, [
+    id, running, chatPendingQuestion, chatThreadId, chatRunId, chatConversationId,
+    appendChatMessage, buildDebugGraph, handleRunEvent,
+  ]);
 
   // 人审批复后续跑
   const handleApprovalSubmit = useCallback(async (approved: boolean) => {
@@ -1216,6 +1477,8 @@ export default function AppEditPage() {
           graph: graph as never,
           thread_id: approvalState.threadId,
           run_id: approvalState.runId || undefined,
+          conversation_id: chatConversationId ?? undefined,
+          application_id: id,
           approval: {
             approved,
             comment: approvalComment,
@@ -1230,21 +1493,23 @@ export default function AppEditPage() {
     } finally {
       setRunning(false);
     }
-  }, [approvalState, approvalComment, approvalApprover, handleRunEvent, keyToCozeType]);
+  }, [approvalState, approvalComment, approvalApprover, handleRunEvent, keyToCozeType, chatConversationId, id]);
 
   const handleRun = useCallback(() => {
     if (!id || running) return;
     const params = extractStartParams();
+    const chatflow = flowType === 'chatflow';
     if (params.length > 0) {
       setStartParams(params);
       const initInputs: Record<string, any> = {};
       params.forEach((p) => { initInputs[p.name] = ''; });
       setRunInputs(initInputs);
       setRunModalOpen(true);
-    } else {
-      doRun({});
+      return;
     }
-  }, [id, running, extractStartParams, doRun]);
+    if (chatflow) startChatSession({});
+    else doRun({});
+  }, [id, running, extractStartParams, doRun, flowType, startChatSession]);
 
   // 单节点试运行（N9-03）：只跑当前节点，不写运行历史、不改变画布状态
   const handleDebugNode = useCallback(async () => {
@@ -1437,6 +1702,27 @@ export default function AppEditPage() {
       <div style={{ flex: 1, position: 'relative' }}>
         <CanvasStyles />
 
+        {/* 顶部居中：工作流 / 对话流形态切换，切换后落库 */}
+        <div style={{
+          position: 'absolute',
+          top: 12,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          zIndex: CANVAS_TOKENS.z.toolbar,
+        }}>
+          <Tooltip title="对话流支持多轮会话、中间消息输出与问答节点；工作流单次执行返回结果">
+            <Segmented
+              value={flowType}
+              disabled={flowTypeSwitching}
+              onChange={(value) => handleFlowTypeChange(value as FlowType)}
+              options={[
+                { label: '工作流', value: 'workflow' },
+                { label: '对话流', value: 'chatflow' },
+              ]}
+            />
+          </Tooltip>
+        </div>
+
         {/* 底部居中浮条（V3）：缩放 + 适应 + 全屏 | +添加节点 | 试运行 */}
         <CanvasToolbar
           ctxRef={ctxRef}
@@ -1535,7 +1821,7 @@ export default function AppEditPage() {
           <AddNodePopover
             x={addNodePopover.x}
             y={addNodePopover.y}
-            metas={nodeMetas}
+            metas={addableNodeMetas}
             forbiddenTypeKeys={forbiddenNodeTypeKeys}
             onSelect={(typeKey) => {
               // 有 fromNodeId：从源节点 + 按钮弹出，自动贴源节点右侧；
@@ -1704,10 +1990,22 @@ export default function AppEditPage() {
         {/* U-N4 对齐辅助线：拖拽节点时显示对齐参考线（只提示不吸附） */}
         <AlignGuides ctxRef={ctxRef} />
 
-        {/* 右侧调试面板（B8） */}
-        {nodeDebugPanelOpen && (
+        {/* 右侧调试面板（B8）；对话流试运行时让位给聊天面板 */}
+        {nodeDebugPanelOpen && !chatPanelOpen && (
           <NodeDebugPanel debugMap={nodeDebugMap} onClose={() => setNodeDebugPanelOpen(false)} />
         )}
+
+        <ChatflowDebugPanel
+          open={chatPanelOpen && flowType === 'chatflow'}
+          running={running}
+          messages={chatMessages}
+          conversationId={chatConversationId}
+          pendingQuestion={chatPendingQuestion}
+          onClose={() => setChatPanelOpen(false)}
+          onNewSession={() => startChatSession(chatInputsRef.current)}
+          onSend={(text) => void sendChatMessage(text)}
+          onAnswer={(text) => void answerChatQuestion(text)}
+        />
       </div>
 
       <NodeConfigDrawer
@@ -1737,6 +2035,7 @@ export default function AppEditPage() {
         debugRunning={nodeDebugRunning}
         debugResult={nodeDebugResult}
         onDebug={() => void handleDebugNode()}
+        flowType={flowType}
       />
 
       <RenameNodeModal
@@ -1763,7 +2062,8 @@ export default function AppEditPage() {
         onCancel={() => setRunModalOpen(false)}
         onOk={() => {
           setRunModalOpen(false);
-          doRun(runInputs);
+          if (flowType === 'chatflow') startChatSession(runInputs);
+          else doRun(runInputs);
         }}
       />
 
@@ -1771,8 +2071,10 @@ export default function AppEditPage() {
       <VariablesDrawer
         open={variablesDrawerOpen}
         onClose={() => setVariablesDrawerOpen(false)}
+        applicationId={id}
         nodes={pickerNodes}
         keyToMeta={keyToMeta}
+        flowType={flowType}
       />
 
       {/* 会话管理抽屉（N9-05） */}
