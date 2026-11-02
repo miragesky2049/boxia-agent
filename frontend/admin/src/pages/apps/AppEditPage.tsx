@@ -155,6 +155,15 @@ export default function AppEditPage() {
   const [approvalApprover, setApprovalApprover] = useState('');
   const [nodeMetas, setNodeMetas] = useState<NodeMeta[]>([]);
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
+  // 画布上是否已有 start / end 节点：start 永远只允许一个（初始化时就有，且 deletable=false），
+  // end 同样只允许一个；节点面板据此隐藏对应类型，避免出现多个开始/结束节点
+  const hasStartNode = pickerNodes.some((n) => n.typeKey === 'start');
+  const hasEndNode = pickerNodes.some((n) => n.typeKey === 'end');
+  const forbiddenNodeTypeKeys = useMemo(() => {
+    const set = new Set<string>(['start']);
+    if (hasEndNode) set.add('end');
+    return set;
+  }, [hasEndNode]);
   const [canvasZoom, setCanvasZoom] = useState(1);
   // 画布可视区域（画布坐标系），用于小地图相机框与缩放百分比
   const [canvasViewport, setCanvasViewport] = useState<{ x: number; y: number; w: number; h: number; zoom: number } | null>(null);
@@ -607,6 +616,15 @@ export default function AppEditPage() {
     if (!ctx) return null;
     const meta = keyToMeta[typeKey];
     if (!meta) return null;
+    // 防御：start 永远不允许手动添加（画布初始化时已自带一个）；end 在画布已有 end 时不再允许添加
+    if (typeKey === 'start') {
+      message.warning('画布上只能有一个开始节点');
+      return null;
+    }
+    if (typeKey === 'end' && pickerNodes.some((n) => n.typeKey === 'end')) {
+      message.warning('画布上只能有一个结束节点，请先删除已有的结束节点');
+      return null;
+    }
     nodeCounterRef.current[typeKey] = (nodeCounterRef.current[typeKey] ?? 0) + 1;
     const nodeId = `${typeKey}-${Date.now().toString(36)}-${nodeCounterRef.current[typeKey]}`;
 
@@ -679,7 +697,7 @@ export default function AppEditPage() {
       }
     }
     return nodeId;
-  }, [keyToMeta]);
+  }, [keyToMeta, pickerNodes]);
 
   // ========== 节点复制 / 粘贴（右键菜单） ==========
   const NODE_CLIPBOARD_KEY = 'boxia_node_clipboard';
@@ -734,7 +752,7 @@ export default function AppEditPage() {
     }
     const newId = addNode(payload.typeKey);
     if (!newId) {
-      message.error('粘贴失败：未知节点类型');
+      // addNode 内部已对 start/end 限制给出提示，这里不再重复报错
       return;
     }
     const node = getNode(ctxRef.current, newId);
@@ -1513,6 +1531,7 @@ export default function AppEditPage() {
             x={addNodePopover.x}
             y={addNodePopover.y}
             metas={nodeMetas}
+            forbiddenTypeKeys={forbiddenNodeTypeKeys}
             onSelect={(typeKey) => {
               // 有 fromNodeId：从源节点 + 按钮弹出，自动贴源节点右侧；
               // 无 fromNodeId：走"默认贴 START 右侧"逻辑（不再用屏幕坐标反算，避免 zoom 不准导致节点飞出视口）

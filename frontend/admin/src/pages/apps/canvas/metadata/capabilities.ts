@@ -21,7 +21,9 @@ const DEFAULT_CAPABILITIES: NodeCapabilitiesView = {
 
 // 仅在后端元数据未加载时使用
 const CAPABILITY_FALLBACK: Record<string, Partial<NodeCapabilitiesView>> = {
-  start: { deletable: false },
+  // start / end 是画布系统节点：start 永远只有一个（不可删不可复制），end 也只允许一个（可删但不可复制）
+  start: { deletable: false, copyable: false },
+  end: { copyable: false },
   comment: { runnable: false, hasOutputs: false },
   note: { runnable: false, hasOutputs: false },
   break: { hasOutputs: false },

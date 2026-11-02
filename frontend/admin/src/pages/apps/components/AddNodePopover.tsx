@@ -8,12 +8,14 @@ interface AddNodePopoverProps {
   x: number;
   y: number;
   metas: NodeMeta[];
+  // 这些 type_key 不在面板中展示（如 start 永远隐藏；end 在画布已有 end 时隐藏）
+  forbiddenTypeKeys?: Set<string>;
   onSelect: (typeKey: string) => void;
   onClose: () => void;
 }
 
 // 连线端点弹出节点面板（U-B2）：从端口拖线到空白处时弹出
-export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopoverProps) {
+export function AddNodePopover({ x, y, metas, forbiddenTypeKeys, onSelect, onClose }: AddNodePopoverProps) {
   const [query, setQuery] = useState('');
   const [filtered, setFiltered] = useState<NodeMeta[]>(metas);
   const onCloseRef = useRef(onClose);
@@ -36,8 +38,8 @@ export function AddNodePopover({ x, y, metas, onSelect, onClose }: AddNodePopove
   }, [query, metas]);
 
   const groups = useMemo(
-    () => buildCategoryGroups(filtered, (m) => m.type_key !== 'start'),
-    [filtered],
+    () => buildCategoryGroups(filtered, (m) => !forbiddenTypeKeys?.has(m.type_key)),
+    [filtered, forbiddenTypeKeys],
   );
 
   useEffect(() => {
