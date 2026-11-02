@@ -19,23 +19,25 @@ export function NodeDebugPanel({ debugMap, onClose }: {
 }) {
   if (Object.keys(debugMap).length === 0) return null;
   return (
+    <div style={{
+      position: 'absolute', top: 48, right: 16, zIndex: 100,
+      width: 320, maxHeight: 'calc(100% - 120px)',
+      background: '#fff', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+      display: 'flex', flexDirection: 'column', overflow: 'hidden',
+    }}>
       <div style={{
-        position: 'absolute', top: 48, right: 16, zIndex: 100,
-        width: 320, maxHeight: 'calc(100% - 120px)', overflowY: 'auto',
-        background: '#fff', borderRadius: 8, boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
-        padding: 12,
+        display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        fontSize: 13, fontWeight: 600, flexShrink: 0,
+        padding: '12px 12px 8px',
       }}>
-        <div style={{
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          fontSize: 13, fontWeight: 600, marginBottom: 8,
-        }}>
-          <span>节点调试</span>
-          <CloseOutlined
-            aria-label="关闭节点调试"
-            onClick={onClose}
-            style={{ fontSize: 12, color: '#999', cursor: 'pointer' }}
-          />
-        </div>
+        <span>节点调试</span>
+        <CloseOutlined
+          aria-label="关闭节点调试"
+          onClick={onClose}
+          style={{ fontSize: 12, color: '#999', cursor: 'pointer' }}
+        />
+      </div>
+      <div style={{ overflowY: 'auto', padding: '0 12px 12px' }}>
         <Collapse
           size="small"
           items={Object.entries(debugMap).map(([nodeId, info]) => {
@@ -97,5 +99,6 @@ export function NodeDebugPanel({ debugMap, onClose }: {
           })}
         />
       </div>
+    </div>
   );
 }

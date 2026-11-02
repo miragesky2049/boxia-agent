@@ -91,6 +91,12 @@ import { setupCanvasPan } from './canvas/adapters/canvasPan';
 // ========== 运行时节点状态（用于高亮） ==========
 type RunNodeStatus = 'running' | 'success' | 'error';
 
+const NODE_SHADOW: Record<RunNodeStatus, string> = {
+  running: '0 0 0 3px rgba(139,92,246,0.35)',
+  success: '0 0 0 3px rgba(16,185,129,0.35)',
+  error: '0 0 0 3px rgba(239,68,68,0.35)',
+};
+
 
 
 // 单节点试运行只带字面量入参；引用值等由后端按空上游求值，不阻断运行
@@ -155,9 +161,8 @@ export default function AppEditPage() {
   const [approvalApprover, setApprovalApprover] = useState('');
   const [nodeMetas, setNodeMetas] = useState<NodeMeta[]>([]);
   const [pickerNodes, setPickerNodes] = useState<GraphNodeSummary[]>([]);
-  // 画布上是否已有 start / end 节点：start 永远只允许一个（初始化时就有，且 deletable=false），
+  // 画布上是否已有 end 节点：start 永远只允许一个（初始化时就有，且 deletable=false），
   // end 同样只允许一个；节点面板据此隐藏对应类型，避免出现多个开始/结束节点
-  const hasStartNode = pickerNodes.some((n) => n.typeKey === 'start');
   const hasEndNode = pickerNodes.some((n) => n.typeKey === 'end');
   const forbiddenNodeTypeKeys = useMemo(() => {
     const set = new Set<string>(['start']);
@@ -976,7 +981,7 @@ export default function AppEditPage() {
     return Object.fromEntries(
       nodeMetas.map((meta) => [
         meta.type_key,
-        makeNodeRenderer(meta, ctxRef, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions) as unknown as React.ComponentType<any>,
+        makeNodeRenderer(meta, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions) as unknown as React.ComponentType<any>,
       ]),
     ) as Record<string, React.ComponentType<any>>;
   }, [nodeMetas, handleNodeDoubleClick, handleAddNextToNode, nodeCardActions]);
@@ -1037,12 +1042,6 @@ export default function AppEditPage() {
   }, []);
 
   // ========== 运行时高亮（直接操作 DOM，绕过 FlowGram 响应式） ==========
-  const NODE_SHADOW: Record<RunNodeStatus, string> = {
-    running: '0 0 0 3px rgba(139,92,246,0.35)',
-    success: '0 0 0 3px rgba(16,185,129,0.35)',
-    error: '0 0 0 3px rgba(239,68,68,0.35)',
-  };
-
   const setNodeRunStatus = useCallback((nodeId: string, status: RunNodeStatus | undefined) => {
     const el = document.getElementById(nodeId);
     if (!el) return;
@@ -1195,7 +1194,7 @@ export default function AppEditPage() {
     } finally {
       setRunning(false);
     }
-  }, [id, clearAllRunStatus, setNodeRunStatus, keyToCozeType, handleRunEvent]);
+  }, [id, clearAllRunStatus, keyToCozeType, handleRunEvent]);
 
   // 人审批复后续跑
   const handleApprovalSubmit = useCallback(async (approved: boolean) => {

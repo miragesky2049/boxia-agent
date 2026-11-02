@@ -1,4 +1,4 @@
-import { Button, Drawer, Tag } from 'antd';
+import { Button, Drawer, Tag, Typography } from 'antd';
 import type { NodeMeta } from '../../../api/nodeMeta';
 import type { DatasetItem } from '../../../api/datasets';
 import type { NodeDebugRunResult } from '../../../api/apps';
@@ -73,6 +73,15 @@ export function NodeConfigDrawer({
                 {meta.description}
               </div>
             )}
+            {nodeId && (
+              <Typography.Text
+                type="secondary"
+                style={{ fontSize: 12, fontFamily: 'monospace', lineHeight: '16px' }}
+                copyable={{ text: nodeId, tooltips: ['复制节点 ID', '已复制'] }}
+              >
+                <span style={{ color: '#9ca3af' }}>ID </span>{nodeId}
+              </Typography.Text>
+            )}
           </div>
         </div>
       ) : ''}
@@ -136,10 +145,6 @@ export function NodeConfigDrawer({
             </pre>
           </div>
         )}
-      </div>
-
-      <div style={{ marginTop: 16 }}>
-        <Tag color="blue">节点 ID：{nodeId}</Tag>
       </div>
     </Drawer>
   );

@@ -352,4 +352,5 @@ class Compiler:
                 return route_map["false"]
             return END
 
-        sg.add_conditional_edges(source_id, router, route_map)
+        # 不传 path_map：router 直接返回目标节点 ID，由 LangGraph 直接跳转
+        sg.add_conditional_edges(source_id, router)
