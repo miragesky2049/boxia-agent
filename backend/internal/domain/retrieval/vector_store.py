@@ -38,6 +38,15 @@ class VectorStore(ABC):
         """按 chunk_id 批量删除。"""
 
     @abstractmethod
+    async def delete_by_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+        tenant_id: str = "",
+    ) -> None:
+        """删除某个文档下的全部 chunk（知识库删除节点使用）。"""
+
+    @abstractmethod
     async def search(
         self,
         dataset_id: str,

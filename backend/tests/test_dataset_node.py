@@ -8,7 +8,9 @@ from uuid import uuid4
 
 from internal.domain.graph.node_base import NodeContext, NodeResult, RuntimeEnv, ServiceRegistry
 from internal.domain.graph.nodes.dataset import DatasetNodeHandler
+from internal.domain.graph.nodes.dataset_delete import DatasetDeleteNodeHandler
 from internal.domain.graph.nodes.dataset_write import DatasetWriteNodeHandler
+from internal.domain.retrieval.model import Chunk
 from internal.infrastructure.vector_store.in_memory_store import InMemoryVectorStore
 
 
@@ -43,6 +45,7 @@ def test_dataset_node_stub_when_no_services():
     result: NodeResult = asyncio.run(handler.run(ctx))
     assert "stub" in result.outputs
     assert result.outputs["chunks"] == []
+    assert result.outputs["outputList"] == []
 
 
 def test_dataset_write_then_search_roundtrip():
@@ -75,3 +78,75 @@ def test_dataset_write_then_search_roundtrip():
     search_result = asyncio.run(search_handler.run(search_ctx))
     assert search_result.outputs["count"] >= 1
     assert "boxia" in search_result.outputs["chunks"][0]["content"]
+    # outputList 与 chunks 对齐，供 coze 风格下游引用
+    assert search_result.outputs["outputList"] == search_result.outputs["chunks"]
+
+
+def test_dataset_write_keeps_document_id_and_sets_is_success():
+    store = InMemoryVectorStore()
+    services = ServiceRegistry({"vector_store": store, "embedding": FakeEmbedding()})
+
+    ctx = NodeContext(
+        node_id="dw_1",
+        node_type="27",
+        inputs={
+            "content": "带文档 ID 的片段",
+            "documentId": "doc-1",
+            "metadata": {"tag": "intro"},
+        },
+        config={"datasetId": "demo_ds"},
+        env=_make_env(),
+        services=services,
+    )
+
+    result = asyncio.run(DatasetWriteNodeHandler().run(ctx))
+
+    assert result.outputs["isSuccess"] is True
+    assert result.outputs["success"] is True
+    chunk = next(iter(store._chunks["demo_ds"].values()))
+    assert chunk.document_id == "doc-1"
+
+
+def test_dataset_delete_removes_chunks_by_document_id():
+    store = InMemoryVectorStore()
+    services = ServiceRegistry({"vector_store": store})
+
+    async def _seed() -> None:
+        await store.upsert([
+            Chunk(chunk_id="c1", content="a", dataset_id="ds", document_id="doc-1", vector=[1.0]),
+            Chunk(chunk_id="c2", content="b", dataset_id="ds", document_id="doc-2", vector=[1.0]),
+            Chunk(chunk_id="c3", content="c", dataset_id="ds", document_id="", vector=[1.0],
+                  metadata={"document_id": "doc-1"}),
+        ])
+
+    asyncio.run(_seed())
+
+    ctx = NodeContext(
+        node_id="del_1",
+        node_type="211",
+        inputs={"documentID": "doc-1"},
+        config={"datasetId": "ds"},
+        env=_make_env(),
+        services=services,
+    )
+
+    result = asyncio.run(DatasetDeleteNodeHandler().run(ctx))
+
+    assert result.outputs["isSuccess"] is True
+    assert set(store._chunks["ds"]) == {"c2"}
+
+
+def test_dataset_delete_missing_document_id_returns_failure():
+    ctx = NodeContext(
+        node_id="del_1",
+        node_type="211",
+        inputs={},
+        config={"datasetId": "ds"},
+        env=_make_env(),
+        services=ServiceRegistry(),
+    )
+
+    result = asyncio.run(DatasetDeleteNodeHandler().run(ctx))
+
+    assert result.outputs["isSuccess"] is False
+    assert "documentID" in result.outputs["error"]

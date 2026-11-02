@@ -35,6 +35,12 @@ class RuntimeEnv:
     run_id: UUID
     thread_id: str
     application_id: UUID
+    # 对话流上下文：消息/会话类节点在未显式连接 conversation_id 时回退到当前会话
+    conversation_id: UUID | None = None
+    # 应用变量默认值池（每次请求初始化，运行期可被节点写入 globals 覆盖）
+    variables: dict[str, Any] = field(default_factory=dict)
+    # 只读系统变量（USER_INPUT / USER_ID / RUN_ID 等）
+    system: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

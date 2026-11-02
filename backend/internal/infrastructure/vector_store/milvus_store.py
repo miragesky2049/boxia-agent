@@ -107,6 +107,21 @@ class MilvusVectorStore(VectorStore):
         expr = f'chunk_id in {chunk_ids!r}'
         collection.delete(expr)
 
+    async def delete_by_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+        tenant_id: str = "",
+    ) -> None:
+        if not document_id:
+            return
+        import json
+
+        self._ensure_connected()
+        name = self._collection_name(dataset_id, tenant_id)
+        collection = self._collections.get(name) or await self._load_collection(name)
+        collection.delete(f"document_id == {json.dumps(document_id)}")
+
     async def search(
         self,
         dataset_id: str,

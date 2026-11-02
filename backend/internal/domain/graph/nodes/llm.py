@@ -68,6 +68,7 @@ class LLMNodeHandler(NodeHandler):
         max_rounds = _to_int(_pick("maxToolRounds")) or DEFAULT_MAX_TOOL_ROUNDS
         need_history = _to_bool(_pick("needHistory"), default=False)
         history_limit = _to_int(_pick("historyLimit")) or DEFAULT_HISTORY_LIMIT
+        stream_enabled = _to_bool(_pick("stream"), default=True)
 
         user_input = ctx.inputs.get("input")
 
@@ -115,7 +116,11 @@ class LLMNodeHandler(NodeHandler):
 
         temperature = _to_float(temperature_raw, 0.7)
         max_tokens = _to_int(max_tokens_raw)
-        response_format = {"type": "json_object"} if str(response_format_raw) == "2" else None
+        response_format = (
+            {"type": "json_object"}
+            if str(response_format_raw).lower() in ("2", "json", "json_object")
+            else None
+        )
 
         # ReAct 循环：调 LLM → 若返回 tool_calls 则执行 → 把结果回灌 → 再调
         aggregated_usage: dict[str, int] = {
@@ -124,6 +129,7 @@ class LLMNodeHandler(NodeHandler):
             "total_tokens": 0,
         }
         final_content = ""
+        final_reasoning = ""
         tool_call_log: list[dict[str, Any]] = []
 
         chat_kwargs: dict[str, Any] = {
@@ -137,9 +143,9 @@ class LLMNodeHandler(NodeHandler):
             chat_kwargs["tools"] = tool_specs
 
         try:
-            # 走流式路径：无 tools + 有 SSE emit_event 通道时，逐 token 推 llm_token 事件
-            if not tool_specs and ctx.emit_event is not None:
-                final_content = await _run_streaming(
+            # 走流式路径：开启流式 + 无 tools + 有 SSE emit_event 通道时，逐 token 推 llm_token 事件
+            if stream_enabled and not tool_specs and ctx.emit_event is not None:
+                final_content, final_reasoning = await _run_streaming(
                     llm_service=llm_service,
                     ctx=ctx,
                     messages=messages,
@@ -157,6 +163,7 @@ class LLMNodeHandler(NodeHandler):
                     tool_calls = list(getattr(resp, "tool_calls", None) or [])
                     if not tool_calls:
                         final_content = getattr(resp, "content", "") or ""
+                        final_reasoning = getattr(resp, "reasoning_content", "") or ""
                         break
 
                     # 把 assistant 的 tool_calls 追加进 messages
@@ -201,6 +208,8 @@ class LLMNodeHandler(NodeHandler):
             "output": final_content,
             "model": model_id,
         }
+        if final_reasoning:
+            outputs["reasoning_content"] = final_reasoning
         if tool_call_log:
             outputs["tool_calls"] = tool_call_log
 
@@ -291,14 +300,15 @@ async def _run_streaming(
     max_tokens: int | None,
     response_format: dict[str, Any] | None,
     aggregated_usage: dict[str, int],
-) -> str:
-    """流式 LLM 调用：逐 chunk emit llm_token 事件，聚合完整 content 返回。
+) -> tuple[str, str]:
+    """流式 LLM 调用：逐 chunk emit llm_token 事件，聚合完整 content / reasoning 返回。
 
     仅用于无 tools 的纯生成场景。stream 结束时若服务端返回 usage，回灌到 aggregated_usage。
     """
     assert ctx.emit_event is not None  # 调用方已保证
 
     chunks: list[str] = []
+    reasoning_chunks: list[str] = []
     stream_kwargs: dict[str, Any] = {
         "messages": messages,
         "model": model_id,
@@ -316,10 +326,13 @@ async def _run_streaming(
                 "node_id": ctx.node_id,
                 "delta": delta,
             })
+        reasoning_delta = getattr(chunk, "reasoning_content", "") or ""
+        if reasoning_delta:
+            reasoning_chunks.append(reasoning_delta)
         # 收尾 chunk 带 usage（content 为空）
         _accumulate_usage(aggregated_usage, chunk)
 
-    return "".join(chunks)
+    return "".join(chunks), "".join(reasoning_chunks)
 
 
 def _to_str(value: Any) -> str:

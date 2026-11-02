@@ -37,11 +37,16 @@ class DatasetNodeHandler(NodeHandler):
         if not dataset_id:
             return NodeResult(outputs={"error": "dataset 节点缺少 datasetId"})
         if query is None:
-            return NodeResult(outputs={"chunks": [], "error": "dataset 节点缺少 query"})
+            return NodeResult(outputs={
+                "outputList": [],
+                "chunks": [],
+                "error": "dataset 节点缺少 query",
+            })
 
         if not ctx.services.has("vector_store") or not ctx.services.has("embedding"):
             # 开发态 stub
             return NodeResult(outputs={
+                "outputList": [],
                 "chunks": [],
                 "stub": f"[Dataset stub] dataset={dataset_id} query={str(query)[:80]}",
             })
@@ -71,7 +76,12 @@ class DatasetNodeHandler(NodeHandler):
             }
             for r in results
         ]
-        return NodeResult(outputs={"chunks": chunks, "count": len(chunks)})
+        # outputList 对齐 coze 输出字段；chunks 保留给历史画布引用
+        return NodeResult(outputs={
+            "outputList": chunks,
+            "chunks": chunks,
+            "count": len(chunks),
+        })
 
     async def _embed_one(self, embedding_service: Any, text: str) -> list[float]:
         vectors = await embedding_service.embed([text])

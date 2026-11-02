@@ -37,6 +37,17 @@ class InMemoryVectorStore(VectorStore):
         for cid in chunk_ids:
             bucket.pop(cid, None)
 
+    async def delete_by_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+        tenant_id: str = "",
+    ) -> None:
+        bucket = self._chunks.get(dataset_id, {})
+        for cid, chunk in list(bucket.items()):
+            if chunk.document_id == document_id or chunk.metadata.get("document_id") == document_id:
+                bucket.pop(cid, None)
+
     async def search(
         self,
         dataset_id: str,

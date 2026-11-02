@@ -35,15 +35,22 @@ class DatasetWriteNodeHandler(NodeHandler):
         content = ctx.inputs.get("content")
         metadata = ctx.inputs.get("metadata") or {}
         chunk_id = str(ctx.inputs.get("chunkId") or uuid.uuid4())
+        document_id = str(
+            ctx.inputs.get("documentId")
+            or ctx.inputs.get("document_id")
+            or metadata.get("document_id")
+            or ""
+        )
 
         if not dataset_id:
-            return NodeResult(outputs={"error": "dataset_write 节点缺少 datasetId"})
+            return NodeResult(outputs={"isSuccess": False, "error": "dataset_write 节点缺少 datasetId"})
         if content is None:
-            return NodeResult(outputs={"error": "dataset_write 节点缺少 content"})
+            return NodeResult(outputs={"isSuccess": False, "error": "dataset_write 节点缺少 content"})
 
         if not ctx.services.has("vector_store") or not ctx.services.has("embedding"):
             return NodeResult(outputs={
                 "chunkId": chunk_id,
+                "isSuccess": True,
                 "stub": f"[DatasetWrite stub] dataset={dataset_id}",
             })
 
@@ -58,6 +65,7 @@ class DatasetWriteNodeHandler(NodeHandler):
             chunk_id=chunk_id,
             content=str(content),
             dataset_id=dataset_id,
+            document_id=document_id,
             metadata={**metadata, "_tenant_id": str(ctx.env.tenant_id)},
             vector=vector,
         )
@@ -68,7 +76,7 @@ class DatasetWriteNodeHandler(NodeHandler):
             logger.exception("DatasetWrite 写入失败: dataset=%s", dataset_id)
             raise RuntimeError(f"知识库写入失败: {exc}") from exc
 
-        return NodeResult(outputs={"chunkId": chunk_id, "success": True})
+        return NodeResult(outputs={"chunkId": chunk_id, "isSuccess": True, "success": True})
 
     async def _embed_one(self, embedding_service: Any, text: str) -> list[float]:
         vectors = await embedding_service.embed([text])

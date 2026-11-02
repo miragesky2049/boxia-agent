@@ -131,6 +131,62 @@ def test_llm_node_streaming_emits_tokens_and_aggregates_output() -> None:
     }
 
 
+def test_llm_node_streaming_collects_reasoning_content() -> None:
+    events: list[tuple[str, dict]] = []
+
+    async def _emit(event_type: str, payload: dict) -> None:
+        events.append((event_type, payload))
+
+    class _ReasoningLLM:
+        async def chat_stream(self, *, messages, model, **kwargs):
+            yield LLMResponse(content="", reasoning_content="先分析", model=model)
+            yield LLMResponse(content="", reasoning_content="再回答", model=model)
+            yield LLMResponse(content="最终答案", finish_reason="stop", model=model)
+
+    ctx = _make_ctx(
+        ServiceRegistry({"llm": _ReasoningLLM()}),
+        config={"modleName": "test-model", "prompt": "{{input}}"},
+        emit_event=_emit,
+    )
+
+    result = asyncio.run(LLMNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "最终答案"
+    assert result.outputs["reasoning_content"] == "先分析再回答"
+    assert [e[1]["delta"] for e in events if e[0] == "llm_token"] == ["最终答案"]
+
+
+def test_llm_node_stream_false_uses_chat_and_outputs_reasoning() -> None:
+    class _NonStreamingReasoningLLM:
+        def __init__(self) -> None:
+            self.chat_calls = 0
+
+        async def chat(self, **kwargs) -> LLMResponse:
+            self.chat_calls += 1
+            return LLMResponse(
+                content="非流式回复",
+                reasoning_content="非流式思考",
+                model="test-model",
+            )
+
+    mock = _NonStreamingReasoningLLM()
+    ctx = _make_ctx(
+        ServiceRegistry({"llm": mock}),
+        config={
+            "modleName": "test-model",
+            "prompt": "{{input}}",
+            "stream": False,
+        },
+        emit_event=lambda et, p: asyncio.sleep(0),
+    )
+
+    result = asyncio.run(LLMNodeHandler().run(ctx))
+
+    assert mock.chat_calls == 1
+    assert result.outputs["output"] == "非流式回复"
+    assert result.outputs["reasoning_content"] == "非流式思考"
+
+
 def test_llm_node_falls_back_to_chat_when_no_emit_event() -> None:
     """无 emit_event 通道时，即使无 tools 也走非流式 chat 路径。"""
 

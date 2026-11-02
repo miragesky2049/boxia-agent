@@ -116,6 +116,24 @@ class PGVectorStore(VectorStore):
             )
             session.commit()
 
+    async def delete_by_document(
+        self,
+        dataset_id: str,
+        document_id: str,
+        tenant_id: str = "",
+    ) -> None:
+        if not document_id:
+            return
+        table = self._table_name(dataset_id)
+        where = "document_id = :document_id"
+        params: dict[str, Any] = {"document_id": document_id}
+        if tenant_id:
+            where += " AND tenant_id = :tenant_id"
+            params["tenant_id"] = str(tenant_id)
+        with self._session_factory() as session:
+            session.execute(text(f"DELETE FROM {table} WHERE {where}"), params)
+            session.commit()
+
     async def search(
         self,
         dataset_id: str,

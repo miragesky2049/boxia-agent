@@ -113,6 +113,8 @@ class LLMResponse(BaseModel):
     """LLM 单轮响应。"""
 
     content: str = ""
+    # 推理模型（如 DeepSeek-R1）返回的思考过程；普通模型为空
+    reasoning_content: str = ""
     tool_calls: list[ToolCall] = Field(default_factory=list)
     finish_reason: str = "stop"
     usage: LLMUsage = Field(default_factory=LLMUsage)
@@ -353,6 +355,7 @@ class OpenAICompatLLMClient(LLMClient):
         )
         return LLMResponse(
             content=message.get("content") or "",
+            reasoning_content=message.get("reasoning_content") or "",
             tool_calls=tool_calls,
             finish_reason=choice.get("finish_reason") or "stop",
             usage=usage,
@@ -453,13 +456,16 @@ class OpenAICompatLLMClient(LLMClient):
                     if not choices:
                         continue
                     choice = choices[0]
-                    delta = (choice.get("delta") or {}).get("content") or ""
+                    delta_obj = choice.get("delta") or {}
+                    delta = delta_obj.get("content") or ""
+                    reasoning_delta = delta_obj.get("reasoning_content") or ""
                     reason = choice.get("finish_reason")
                     if reason:
                         finish_reason = reason
-                    if delta:
+                    if delta or reasoning_delta:
                         yield LLMResponse(
                             content=delta,
+                            reasoning_content=reasoning_delta,
                             finish_reason=finish_reason,
                             model=model,
                         )

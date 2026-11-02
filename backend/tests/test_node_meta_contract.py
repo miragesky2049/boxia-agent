@@ -22,26 +22,20 @@ from internal.domain.graph.nodes import get_node_handler, list_registered_types
 LEGACY_ENUM_WITHOUT_META: frozenset[str] = frozenset(
     {
         "11",  # VARIABLE 旧版变量节点
-        "12",  # DATABASE 已砍掉
-        "13",  # OUTPUT
-        "18",  # QUESTION
-        "22",  # INTENT
-        "26",  # LTM
-        "30",  # INPUT
         "37",  # QUERY_MESSAGE_LIST
         "40",  # VARIABLE_ASSIGN，保留 handler 兼容历史画布但不在节点库展示
-        "42",  # DATABASE_UPDATE
-        "43",  # DATABASE_QUERY
-        "44",  # DATABASE_DELETE
-        "46",  # DATABASE_CREATE
     }
 )
 
 # 已注册 handler 但不需要在节点库展示的类型。
-LEGACY_HANDLER_WITHOUT_META: frozenset[str] = frozenset({"40"})
+LEGACY_HANDLER_WITHOUT_META: frozenset[str] = frozenset()
 
 ALLOWED_CATEGORIES: frozenset[str] = frozenset(
-    {"control", "ai", "data", "logic", "conversation", "misc"}
+    {
+        "basic", "ai", "plugin", "workflow", "logic", "io", "control",
+        "knowledge", "component", "conversation", "history", "message", "misc",
+        "database", "memory", "image", "media",
+    }
 )
 
 # 与 AppEditPage FieldControl 的 switch 分支保持一致。
@@ -58,6 +52,7 @@ ALLOWED_FIELD_TYPES: frozenset[str] = frozenset(
         "case_list",
         "model_picker",
         "key_value_list",
+        "intent_list",
     }
 )
 
@@ -86,10 +81,18 @@ def test_every_enum_type_is_exposed_or_whitelisted() -> None:
     assert not missing, f"新增枚举未登记元数据，也未加入 LEGACY_ENUM_WITHOUT_META: {missing}"
 
 
-def test_every_exposed_type_has_handler() -> None:
+def test_every_available_type_has_handler() -> None:
     handlers = set(list_registered_types())
-    missing = sorted({m.type_code for m in _metas()} - handlers)
-    assert not missing, f"节点库会展示但未注册 handler，试运行将抛 KeyError: {missing}"
+    missing = sorted({m.type_code for m in _metas() if m.available} - handlers)
+    assert not missing, f"可用节点未注册 handler，试运行将抛 KeyError: {missing}"
+
+
+def test_unavailable_nodes_explain_reason() -> None:
+    for meta in _metas():
+        if not meta.available:
+            assert meta.unavailable_reason, (
+                f"{meta.type_key} 标记为不可用但未填写 unavailable_reason"
+            )
 
 
 def test_every_handler_is_exposed_or_whitelisted() -> None:

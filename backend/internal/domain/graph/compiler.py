@@ -112,8 +112,8 @@ class Compiler:
         # 注册边
         for source_id, out_edges in edges_by_source.items():
             source_node = graph.node_by_id(source_id)
-            # IF 节点：conditional_edges，按 route 路由
-            if source_node.type == NodeType.IF:
+            # IF / 意图识别：conditional_edges，按 route 路由
+            if source_node.type in (NodeType.IF, NodeType.INTENT):
                 self._add_conditional_edges(sg, source_id, out_edges)
             else:
                 for edge in out_edges:
@@ -136,6 +136,8 @@ class Compiler:
         env: RuntimeEnv,
         input_data: dict[str, Any],
         globals_pool: dict[str, Any] | None = None,
+        variables_pool: dict[str, Any] | None = None,
+        system_vars: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """单节点试运行：只执行指定节点，不做图调度、不写 run 记录。
 
@@ -156,11 +158,16 @@ class Compiler:
             input=input_data,
             node_outputs={},
             globals=globals_pool or {},
+            variables=variables_pool or {},
+            system=system_vars or {},
             env={
                 "tenant_id": str(env.tenant_id),
                 "user_id": str(env.user_id) if env.user_id else None,
                 "run_id": str(env.run_id),
                 "thread_id": env.thread_id,
+                "conversation_id": (
+                    str(env.conversation_id) if env.conversation_id else None
+                ),
             },
         )
         evaluated_inputs = self._evaluator.eval_dict(canvas_node.inputs, eval_context)
@@ -222,6 +229,8 @@ class Compiler:
                 input=state.get("input", {}),
                 node_outputs=state.get("node_outputs", {}),
                 globals=state.get("globals", {}),
+                variables=state.get("variables", {}),
+                system=state.get("system", {}),
                 env=state.get("env", {}),
             )
 
@@ -329,11 +338,11 @@ class Compiler:
         source_id: str,
         out_edges: list,
     ) -> None:
-        """IF 节点：按 route（case_id / "else"）路由到目标节点。
+        """IF / 意图识别节点：按 route 路由到目标节点。
 
-        兼容旧图：旧版前端静态端口是 "true"/"false"，route_map 里可能仍是 "false"。
-        新图前端动态端口是 case_id / "else"，后端 if_else.py 默认返回 "else"。
-        router 查找时按 route → "else" → "false" 的顺序兜底。
+        IF：route 为 case_id / "else"，兼容旧图 "true"/"false"。
+        意图识别：route 为分类 ID 字符串（"1"/"2"...），未命中走 "0"（其他）。
+        router 查找时按 route → 业务兜底端口顺序查找。
         """
         route_map: dict[str, str] = {}
         for edge in out_edges:
@@ -342,9 +351,15 @@ class Compiler:
 
         def router(state: dict) -> str:
             node_out = state.get("node_outputs", {}).get(source_id, {})
-            route = node_out.get("route") or "else"
+            route = str(node_out.get("route") or "else")
             if route in route_map:
                 return route_map[route]
+            # 意图识别：其他/兜底端口
+            if route not in ("else", "false"):
+                for fallback in ("0", "other", "else", "false"):
+                    if fallback in route_map:
+                        return route_map[fallback]
+                return END
             # 兼容旧图：route="else" 但 route_map 只有 "false" key
             if "else" in route_map:
                 return route_map["else"]

@@ -29,6 +29,7 @@ class NodeType(str, Enum):
     SET_VARIABLE = "20"
     LOOP = "21"
     INTENT = "22"
+    IMAGE_CANVAS = "23"  # 画板（依赖外部图像服务，当前仅占位）
     LTM = "26"           # 长期记忆
     DATASET_WRITE = "27"
     BATCH = "28"
@@ -60,11 +61,23 @@ class NodeType(str, Enum):
     # 走 plan/execute/reflect 三阶段协议，非 DAG 执行
     AGENT_LOOP = "100"
 
+    # 本地扩展：coze 未公开数字编码或依赖外部服务的节点，使用 200+ 段位避免冲突
+    DATASET_DELETE = "211"       # 知识库删除
+    ASYNC_TASK = "212"           # 异步任务（依赖任务中心）
+    IMAGE_GENERATE = "213"       # 图像生成
+    IMAGE_CUTOUT = "214"         # 抠图
+    PROMPT_OPTIMIZE = "215"      # 提示词优化
+    IMAGE_ENHANCE = "216"        # 画质提升
+    VIDEO_GENERATE = "217"       # 视频生成
+    VIDEO_EXTRACT_AUDIO = "218"  # 视频提取音频
+    VIDEO_FRAME = "219"          # 视频抽帧
+
 
 # 本项目当前阶段不实现的节点类型（convert 时显式报错）
 # 数据库类已决策砍掉，用 HTTP 节点调自己的 API 替代。
-# Question / Intent / LTM 等留待后续阶段。
+# LTM 等留待后续阶段；Intent(22) 已接入 LLM 分类 handler。
 # Dataset(6) / DatasetWrite(27) 已恢复，走向量库抽象层（Milvus / PGVector）。
+# Output(13) / Question(18) 已在对话流中实现。
 UNSUPPORTED_TYPES: frozenset[NodeType] = frozenset(
     {
         NodeType.DATABASE,
@@ -72,10 +85,17 @@ UNSUPPORTED_TYPES: frozenset[NodeType] = frozenset(
         NodeType.DATABASE_QUERY,
         NodeType.DATABASE_DELETE,
         NodeType.DATABASE_CREATE,
-        NodeType.OUTPUT,
-        NodeType.INTENT,
         NodeType.LTM,
         NodeType.VARIABLE,
-        NodeType.QUESTION,
+        # 依赖外部生成服务/任务中心，仅提供禁用态元数据
+        NodeType.ASYNC_TASK,
+        NodeType.IMAGE_CANVAS,
+        NodeType.IMAGE_GENERATE,
+        NodeType.IMAGE_CUTOUT,
+        NodeType.PROMPT_OPTIMIZE,
+        NodeType.IMAGE_ENHANCE,
+        NodeType.VIDEO_GENERATE,
+        NodeType.VIDEO_EXTRACT_AUDIO,
+        NodeType.VIDEO_FRAME,
     }
 )

@@ -25,6 +25,8 @@ class WorkflowState(TypedDict, total=False):
     - input: 工作流入参（START 节点定义的 inputParameters）
     - node_outputs: 每个节点的输出 {block_id: {field: value}}
     - globals: 全局变量（VariableAssign 写入）
+    - variables: 应用变量作用域（运行期写入仍合并进 globals，见 EvalContext）
+    - system: 只读系统变量（USER_INPUT / USER_ID / RUN_ID 等）
     - env: 运行时环境（tenant_id / user_id / run_id / thread_id）
     - output: 最终输出（END 节点写入）
     - errors: 节点错误收集（settingOnError 时写入）
@@ -33,6 +35,8 @@ class WorkflowState(TypedDict, total=False):
     input: dict[str, Any]
     node_outputs: dict[str, dict[str, Any]]
     globals: dict[str, Any]
+    variables: dict[str, Any]
+    system: dict[str, Any]
     env: dict[str, Any]
     output: dict[str, Any]
     errors: dict[str, str]
