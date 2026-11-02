@@ -459,13 +459,19 @@ export default function AppEditPage() {
       const height = meta.type_key === 'comment' || meta.type_key === 'note'
         ? 100
         : baseHeight + outputPortHeight;
-      // if_else 节点：启用 useDynamicPort，输出端口通过 DOM [data-port-id] 动态渲染
+      // if_else 节点：启用 useDynamicPort，输出端口通过 DOM [data-port-id] 动态渲染，
+      // 不注册静态 outputs（避免动态端口之外多出残留的 true/false 端点）
       const isIfElse = meta.type_key === 'if_else';
       return {
         type: meta.type_key,
         meta: {
           defaultPorts: [
             ...meta.inputs.map((p) => ({ portID: p.name, type: 'input' as const })),
+            // 非 if_else 节点：把后端声明的 outputs 注册为静态输出端口，
+            // 否则新节点（无 edge 反序列化）不会有 output 端口，无法拖线到下游
+            ...(isIfElse
+              ? []
+              : meta.outputs.map((p) => ({ portID: p.name, type: 'output' as const }))),
           ],
           useDynamicPort: isIfElse ? true : undefined,
           size: { width: 220, height },
