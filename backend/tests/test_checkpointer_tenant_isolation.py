@@ -2,7 +2,8 @@
 
 验证：
 1. 同一业务 thread_id 在不同租户下落到不同 checkpoint key（前缀隔离）。
-2. GraphRuntime 构造时若传入带"别的租户前缀"的 thread_id，直接拒绝。
+2. 带"别的租户前缀"的 thread_id 不剥离前缀，作为业务 ID 原样使用；
+   checkpointer key 仍以当前租户开头，因此不会跨租户读取。
 3. 传入带"自己租户前缀"的 thread_id 能正确剥前缀，等价于裸 thread_id。
 4. list_state_history 能返回 checkpoint 快照列表。
 """
@@ -14,7 +15,6 @@ import json
 from pathlib import Path
 from uuid import uuid4
 
-import pytest
 from langgraph.checkpoint.memory import InMemorySaver
 
 from internal.domain.graph.runtime import GraphRuntime, make_checkpoint_thread_id
@@ -43,16 +43,21 @@ def test_runtime_strips_own_tenant_prefix():
     assert runtime.thread_id == "biz-thread-1"
 
 
-def test_runtime_rejects_other_tenant_prefix():
+def test_runtime_keeps_other_tenant_prefix_as_business_id():
     tenant_a = uuid4()
     tenant_b = uuid4()
-    with pytest.raises(RuntimeError, match="租户不匹配"):
-        GraphRuntime(
-            canvas_json={"nodes": [], "edges": []},
-            tenant_id=tenant_a,
-            thread_id=f"{tenant_b}:biz-thread-1",
-            checkpointer=None,
-        )
+    foreign_thread = f"{tenant_b}:biz-thread-1"
+    runtime = GraphRuntime(
+        canvas_json={"nodes": [], "edges": []},
+        tenant_id=tenant_a,
+        thread_id=foreign_thread,
+        checkpointer=None,
+    )
+    # 外租户前缀不剥离：checkpoint key 仍以当前租户为前缀，无法与 B 租户的真实 key 冲突
+    assert runtime.thread_id == foreign_thread
+    assert make_checkpoint_thread_id(tenant_a, foreign_thread) != make_checkpoint_thread_id(
+        tenant_b, "biz-thread-1"
+    )
 
 
 def test_same_biz_thread_id_across_tenants_lands_in_different_checkpoint_keys():

@@ -9,9 +9,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any
-from uuid import UUID
-
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -45,6 +42,18 @@ class RunStreamRequest(BaseModel):
 class WorkflowRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     thread_id: str | None = None
+    # 对话流运行上下文：消息/会话类节点未显式连线会话 ID 时回退使用
+    conversation_id: UUID | None = None
+
+
+class ChatflowRunRequest(BaseModel):
+    # 纯续跑（resume）时允许为空；message 与 resume 至少提供一个是服务层校验
+    message: str = Field("", max_length=8000)
+    conversation_id: UUID | None = None
+    thread_id: str | None = None
+    inputs: dict[str, Any] = Field(default_factory=dict)
+    # 问答节点/人审中断后的续跑载荷，如 {"answer": "用户回答"}
+    resume: dict[str, Any] | None = None
 
 
 def get_chat_service(
@@ -146,6 +155,62 @@ async def run_agent(
     return result or {"content": ""}
 
 
+@router.post("/{application_id}/chatflow/run/stream")
+async def run_chatflow_stream(
+    application_id: UUID,
+    payload: ChatflowRunRequest,
+    service: ChatServiceDep,
+) -> StreamingResponse:
+    """对话流 SSE 运行：推送 run_start / node_* / output_message / question / result / final。"""
+    # 鉴权、参数组合、会话/线程归属必须在返回 StreamingResponse 之前校验，
+    # 这些错误走 JSON 4xx，而不是 SSE error 事件。
+    prepared = service.prepare_chatflow_run(
+        application_id,
+        message=payload.message,
+        conversation_id=payload.conversation_id,
+        resume=payload.resume,
+        thread_id=payload.thread_id,
+    )
+    queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+    async def producer() -> None:
+        try:
+            async for event_name, data in service.run_chatflow_stream(
+                prepared,
+                inputs=payload.inputs,
+            ):
+                await queue.put(sse_event(event_name, data))
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("chatflow producer failed")
+            await queue.put(sse_event("error", {"message": str(exc), "code": "chatflow_failed"}))
+            await queue.put(sse_event("final", {}))
+        finally:
+            await queue.put(None)
+
+    task = asyncio.create_task(producer())
+
+    async def event_stream():
+        try:
+            while True:
+                item = await queue.get()
+                if item is None:
+                    break
+                yield item
+        finally:
+            if not task.done():
+                task.cancel()
+            try:
+                await task
+            except (asyncio.CancelledError, Exception):  # noqa: BLE001
+                pass
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers=SSE_HEADERS,
+    )
+
+
 @router.post("/{application_id}/workflow/run")
 async def run_workflow(
     application_id: UUID,
@@ -157,6 +222,7 @@ async def run_workflow(
         application_id=application_id,
         inputs=payload.inputs,
         thread_id=payload.thread_id,
+        conversation_id=payload.conversation_id,
     )
 
 

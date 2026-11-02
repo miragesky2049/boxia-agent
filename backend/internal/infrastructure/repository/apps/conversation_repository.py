@@ -24,12 +24,13 @@ class ConversationRepository:
         user_id: UUID,
         application_id: UUID,
         title: str = "",
+        channel: str = "api",
     ) -> UUID:
         cid = new_uuid()
         self._session.execute(
             text(
-                "INSERT INTO conversation (id, tenant_id, user_id, application_id, title) "
-                "VALUES (:id, :tid, :uid, :aid, :title)"
+                "INSERT INTO conversation (id, tenant_id, user_id, application_id, title, channel) "
+                "VALUES (:id, :tid, :uid, :aid, :title, :channel)"
             ),
             {
                 "id": cid,
@@ -37,6 +38,7 @@ class ConversationRepository:
                 "uid": user_id,
                 "aid": application_id,
                 "title": title,
+                "channel": channel,
             },
         )
         return cid
@@ -44,7 +46,8 @@ class ConversationRepository:
     def get_conversation(self, conversation_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
-                "SELECT id, tenant_id, user_id, application_id, title, created_at, updated_at "
+                "SELECT id, tenant_id, user_id, application_id, title, channel, "
+                "created_at, updated_at "
                 "FROM conversation WHERE id = :id"
             ),
             {"id": conversation_id},
@@ -57,26 +60,31 @@ class ConversationRepository:
         tenant_id: UUID,
         user_id: UUID,
         application_id: UUID | None = None,
+        channel: str | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> list[dict]:
-        """按 updated_at 倒序列出某用户的会话列表。"""
+        """按 updated_at 倒序列出某用户的会话列表；channel 为空时不过滤。"""
         params: dict[str, Any] = {
             "tid": tenant_id,
             "uid": user_id,
             "limit": limit,
             "offset": offset,
         }
-        app_filter = ""
+        filters = ""
         if application_id is not None:
-            app_filter = "AND application_id = :aid"
+            filters += " AND application_id = :aid"
             params["aid"] = application_id
+        if channel is not None:
+            filters += " AND channel = :channel"
+            params["channel"] = channel
         rows = self._session.execute(
             text(
-                "SELECT id, tenant_id, user_id, application_id, title, created_at, updated_at "
+                "SELECT id, tenant_id, user_id, application_id, title, channel, "
+                "created_at, updated_at "
                 "FROM conversation "
                 "WHERE tenant_id = :tid AND user_id = :uid "
-                f"{app_filter} "
+                f"{filters} "
                 "ORDER BY updated_at DESC LIMIT :limit OFFSET :offset"
             ),
             params,
@@ -110,6 +118,13 @@ class ConversationRepository:
                 "UPDATE conversation SET title = :title, updated_at = now() WHERE id = :id"
             ),
             {"id": conversation_id, "title": title},
+        )
+
+    def touch(self, conversation_id: UUID) -> None:
+        """刷新会话更新时间：每轮消息落库后调用，保证列表按最近活跃排序。"""
+        self._session.execute(
+            text("UPDATE conversation SET updated_at = now() WHERE id = :id"),
+            {"id": conversation_id},
         )
 
     def delete_conversation(self, conversation_id: UUID) -> None:

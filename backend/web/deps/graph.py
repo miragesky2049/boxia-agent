@@ -7,6 +7,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
@@ -24,6 +25,7 @@ from internal.domain.llm.adapter import (
 from internal.domain.retrieval.services import register_retrieval_services
 from internal.domain.agent.tool_executor import ToolExecutorService
 from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
+from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.run_repository import RunRepository
 from internal.infrastructure.repository.apps.usage_repository import UsageRepository
 from internal.infrastructure.repository.apps.webhook_repository import WebhookRepository
@@ -55,6 +57,8 @@ async def build_runner(
     run_id: UUID | None = None,
     current_user_id: UUID | None = None,
     actor_username: str | None = None,
+    conversation_id: UUID | None = None,
+    on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
 ) -> GraphRuntime:
     """构造 GraphRuntime：加载 coze 画布 JSON + 注册 llm/http/subgraph_loader 服务。
 
@@ -65,6 +69,25 @@ async def build_runner(
     canvas_json = await service.get_runtime_graph(application_id, tenant_id)
     model_service = ModelService(uow.session)
     resource_service = AppResourceService(uow.session)
+    app_repo = ApplicationRepository(uow.session)
+
+    # 变量体系：应用变量取默认值，用户变量优先取当前用户已持久化的值
+    try:
+        runtime_variables, user_variable_keys = service.build_runtime_variables(
+            application_id, current_user_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("加载应用变量失败 application=%s", application_id)
+        runtime_variables, user_variable_keys = {}, set()
+
+    # run_id 只生成一次：runtime、tool_executor、message_repo 共用，
+    # 保证本轮 run / 节点消息 / 最终回答的审计字段一致。
+    effective_run_id = run_id or uuid4()
+
+    def _persist_user_variables(values: dict[str, Any]) -> None:
+        if current_user_id is None:
+            return
+        app_repo.set_user_variables(application_id, current_user_id, values)
 
     run_repo = RunRepository(uow.session)
     usage_repo = UsageRepository(uow.session)
@@ -85,7 +108,7 @@ async def build_runner(
             tenant_id=tenant_id,
             user_id=current_user_id,
             application_id=application_id,
-            run_id=run_id or uuid4(),
+            run_id=effective_run_id,
         ),
     )
     register_retrieval_services(services)
@@ -93,7 +116,6 @@ async def build_runner(
 
     # conversation / message 节点（38/39/51-57）依赖的异步仓储。
     # user 端 current_user_id 必传；admin debug 路由走 _register_conversation_services 单独绑定。
-    effective_run_id = run_id or uuid4()
     if current_user_id is not None:
         async_conv_repo = AsyncConversationRepository(
             SyncConversationRepository(uow.session),
@@ -135,6 +157,11 @@ async def build_runner(
         user_id=current_user_id,
         application_id=application_id,
         thread_id=thread_id,
-        run_id=run_id,
+        run_id=effective_run_id,
         actor_username=actor_username,
+        conversation_id=conversation_id,
+        on_node_event=on_node_event,
+        variables=runtime_variables,
+        user_variable_keys=user_variable_keys,
+        on_user_variables_changed=_persist_user_variables if current_user_id else None,
     )

@@ -67,6 +67,10 @@ class GraphRuntime:
         actor_username: str | None = None,
         checkpointer: Any = _UNSET,
         on_node_event: Any = None,
+        conversation_id: UUID | None = None,
+        variables: dict[str, Any] | None = None,
+        user_variable_keys: set[str] | None = None,
+        on_user_variables_changed: Any = None,
     ):
         self.canvas_json = canvas_json
         self.services = services or ServiceRegistry()
@@ -78,6 +82,7 @@ class GraphRuntime:
         self.user_id = user_id
         self.application_id = application_id or uuid.uuid4()
         self.run_id = run_id or uuid.uuid4()
+        self.conversation_id = conversation_id
         # A13：业务裸 thread_id（前端传、run 表存、SSE 返回）；checkpoint 用带租户前缀的 key
         raw_thread_id = thread_id or str(uuid.uuid4())
         self.thread_id = self._strip_tenant_prefix(raw_thread_id)
@@ -86,6 +91,16 @@ class GraphRuntime:
         self._checkpointer_override = checkpointer
         # 逐节点事件回调：async callable(event_type: str, payload: dict)
         self._on_node_event = on_node_event
+
+        # 应用变量：每次请求以默认值初始化；用户变量键在运行成功后将变化写回持久层
+        self.variables: dict[str, Any] = dict(variables or {})
+        self._user_variable_keys = set(user_variable_keys or ())
+        self._on_user_variables_changed = on_user_variables_changed
+        self._initial_user_variables: dict[str, Any] = {
+            key: value
+            for key, value in self.variables.items()
+            if key in self._user_variable_keys
+        }
 
         self._canvas: CanvasGraph | None = None
         self._compiled: Any = None
@@ -104,6 +119,8 @@ class GraphRuntime:
             run_id=self.run_id,
             thread_id=self.thread_id,
             application_id=self.application_id,
+            conversation_id=self.conversation_id,
+            variables=dict(self.variables),
         )
         self._runtime_env = env
 
@@ -124,10 +141,50 @@ class GraphRuntime:
             return {}
         return {"configurable": {"thread_id": make_checkpoint_thread_id(self.tenant_id, self.thread_id)}}
 
+    def _build_system_vars(self, input_data: dict[str, Any] | None = None) -> dict[str, Any]:
+        """只读系统变量：工作流仅 USER_ID/RUN_ID；对话流额外注入会话上下文。"""
+        data = input_data or {}
+        system: dict[str, Any] = {
+            "USER_ID": str(self.user_id) if self.user_id else "",
+            "RUN_ID": str(self.run_id),
+        }
+        if self.conversation_id is not None:
+            system.update({
+                "CONVERSATION_ID": str(self.conversation_id),
+                "USER_INPUT": data.get("USER_INPUT", ""),
+                "CONVERSATION_NAME": data.get("CONVERSATION_NAME", ""),
+            })
+        else:
+            # 画布试运行 / 工作流也可能直接传 USER_INPUT，保持可见
+            if "USER_INPUT" in data:
+                system["USER_INPUT"] = data.get("USER_INPUT", "")
+            if "CONVERSATION_NAME" in data:
+                system["CONVERSATION_NAME"] = data.get("CONVERSATION_NAME", "")
+        return system
+
+    def _flush_user_variables(self, final_values: dict[str, Any]) -> None:
+        """把本轮对用户变量的写入（落在 state.globals）持久化回存储。"""
+        if not self._user_variable_keys or self._on_user_variables_changed is None:
+            return
+        globals_pool = final_values.get("globals") or {}
+        changed = {
+            key: globals_pool[key]
+            for key in self._user_variable_keys
+            if key in globals_pool
+            and globals_pool[key] != self._initial_user_variables.get(key)
+        }
+        if not changed:
+            return
+        try:
+            self._on_user_variables_changed(changed)
+        except Exception:  # noqa: BLE001
+            logger.exception("用户变量持久化失败 run=%s", self.run_id)
+
     def _strip_tenant_prefix(self, raw: str) -> str:
         """如果传入的 thread_id 已经带当前租户前缀（例如从 SSE 原样回传），剥掉前缀得到业务裸 ID。
 
-        若带的是别的租户前缀，直接拒绝——A13 跨租户隔离。
+        前缀不是本租户时按业务 ID 原样使用：checkpointer key 仍会加当前租户前缀，
+        因此不会读到其它租户的数据；同时兼容 `<conversation_id>:<子线程>` 形式。
         """
         if ":" not in raw:
             return raw
@@ -138,28 +195,37 @@ class GraphRuntime:
             # 不是 UUID 前缀，按业务 thread_id 本身包含冒号处理
             return raw
         if prefix_uuid != self.tenant_id:
-            raise RuntimeError(
-                f"thread_id 租户不匹配：传入前缀 {prefix_uuid} 与当前租户 {self.tenant_id} 不一致"
+            return raw
+        return rest or raw
+
+    def ensure_run(self, input_data: dict[str, Any]) -> None:
+        """确保 run 记录存在，供 message.run_id 外键与审计字段引用。
+
+        用户消息会在 invoke 之前落库，因此需要先建 run；resume 复用已中断的 run 时
+        这里直接命中已有记录，不会重复插入。
+        """
+        if self.run_repo is None:
+            return
+        try:
+            get_run = getattr(self.run_repo, "get_run", None)
+            if get_run is not None and get_run(self.run_id) is not None:
+                return
+            self.run_repo.insert_run(
+                run_id=self.run_id,
+                tenant_id=self.tenant_id,
+                workflow_id=self.application_id,
+                graph_snapshot=self.canvas_json,
+                input_data=input_data,
+                thread_id=self.thread_id,
             )
-        return rest
+        except Exception:  # noqa: BLE001
+            logger.exception("写 run 记录失败")
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行工作流，返回最终 output。人审中断本次不触发。"""
         started_at = time.time()
         await self._ensure_compiled()
-
-        if self.run_repo is not None:
-            try:
-                self.run_repo.insert_run(
-                    run_id=self.run_id,
-                    tenant_id=self.tenant_id,
-                    workflow_id=self.application_id,
-                    graph_snapshot=self.canvas_json,
-                    input_data=input_data,
-                    thread_id=self.thread_id,
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception("写 run 记录失败")
+        self.ensure_run(input_data)
 
         # A8：从编译器取 graph 级变量池默认值，合并到初始 globals
         default_globals: dict[str, Any] = {}
@@ -172,12 +238,18 @@ class GraphRuntime:
         initial_state = {
             "input": input_data,
             "node_outputs": {},
-            "globals": default_globals,
+            # 应用变量作为初始 globals 的一部分，运行期节点写入会覆盖默认值
+            "globals": {**default_globals, **self.variables},
+            "variables": dict(self.variables),
+            "system": self._build_system_vars(input_data),
             "env": {
                 "tenant_id": str(self.tenant_id),
                 "user_id": str(self.user_id) if self.user_id else None,
                 "run_id": str(self.run_id),
                 "thread_id": self.thread_id,
+                "conversation_id": (
+                    str(self.conversation_id) if self.conversation_id else None
+                ),
             },
             "output": {},
             "errors": {},
@@ -188,6 +260,7 @@ class GraphRuntime:
 
             # 中断检测：有 checkpointer 时从持久化 state 检查是否有人审 interrupt
             interrupt_payload = None
+            final_values: dict[str, Any] = {}
             if self._checkpointer_override is not None:
                 snapshot = await self._compiled.aget_state(self._config())
                 if snapshot.tasks:
@@ -195,9 +268,15 @@ class GraphRuntime:
                         if getattr(task, "interrupts", None):
                             interrupt_payload = task.interrupts[0].value
                             break
-                output = snapshot.values.get("output", {}) if snapshot.values else {}
+                final_values = dict(snapshot.values or {})
+                output = final_values.get("output", {})
             else:
-                output = (final_state_values or {}).get("output", {})
+                final_values = dict(final_state_values or {})
+                output = final_values.get("output", {})
+
+            # 用户变量：运行成功后把本轮变化写回持久层
+            if interrupt_payload is None:
+                self._flush_user_variables(final_values)
 
             duration_ms = int((time.time() - started_at) * 1000)
 
@@ -310,6 +389,8 @@ class GraphRuntime:
                 self._runtime_env,
                 input_data,
                 default_globals,
+                variables_pool=self.variables,
+                system_vars=self._build_system_vars(input_data),
             )
             outputs = result["outputs"]
             error_message = result["error"] or None
@@ -346,6 +427,7 @@ class GraphRuntime:
         """
         started_at = time.time()
         await self._ensure_compiled()
+        self.ensure_run({"resume": resume_payload})
 
         if self._checkpointer_override is None:
             raise RuntimeError("resume 需要 checkpointer 开启（人审状态持久化）")
@@ -357,7 +439,8 @@ class GraphRuntime:
             await self._stream_and_record(command)
 
             snapshot = await self._compiled.aget_state(self._config())
-            output = snapshot.values.get("output", {}) if snapshot.values else {}
+            final_values = dict(snapshot.values or {})
+            output = final_values.get("output", {})
 
             # 检查是否还有下一个人审中断
             if snapshot.tasks:
@@ -372,6 +455,9 @@ class GraphRuntime:
                             except Exception:  # noqa: BLE001
                                 logger.exception("更新 run 状态为 interrupted 失败")
                         raise GraphInterrupted(interrupt_payload, self.thread_id)
+
+            # 用户变量：续跑成功后把本轮变化写回持久层
+            self._flush_user_variables(final_values)
 
             duration_ms = int((time.time() - started_at) * 1000)
             if self.run_repo is not None:

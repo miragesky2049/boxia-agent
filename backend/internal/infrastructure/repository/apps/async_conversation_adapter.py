@@ -79,11 +79,17 @@ class AsyncConversationRepository(ConversationRepositoryABC):
         tenant_id: UUID,
         user_id: UUID | None,
         application_id: UUID,
+        enforce_application: bool = True,
+        channel: str = "api",
     ) -> None:
         self._repo = sync_repo
         self._tenant_id = tenant_id
         self._user_id = user_id
         self._application_id = application_id
+        # 画布 debug 试运行没有真实应用 ID，允许按租户+用户跨应用读写会话
+        self._enforce_application = enforce_application
+        # debug 会话不进用户端会话列表
+        self._channel = channel
 
     def _assert_in_scope(self, row: dict | None) -> dict | None:
         """校验会话归属：不在绑定作用域内返回 None。"""
@@ -93,7 +99,7 @@ class AsyncConversationRepository(ConversationRepositoryABC):
             return None
         if self._user_id is not None and row.get("user_id") not in (None, self._user_id):
             return None
-        if row.get("application_id") not in (None, self._application_id):
+        if self._enforce_application and row.get("application_id") not in (None, self._application_id):
             return None
         return row
 
@@ -108,6 +114,7 @@ class AsyncConversationRepository(ConversationRepositoryABC):
             user_id=user_id,
             application_id=app_id,
             title=conversation.title,
+            channel=self._channel,
         )
         saved = self._repo.get_conversation(cid)
         return _row_to_conversation(saved) if saved else Conversation(
@@ -163,12 +170,14 @@ class AsyncMessageRepository(MessageRepositoryABC):
         user_id: UUID | None,
         application_id: UUID,
         run_id: UUID | None = None,
+        enforce_application: bool = True,
     ) -> None:
         self._repo = sync_repo
         self._tenant_id = tenant_id
         self._user_id = user_id
         self._application_id = application_id
         self._run_id = run_id
+        self._enforce_application = enforce_application
 
     def _assert_conversation_in_scope(self, conversation_id: UUID) -> dict | None:
         """校验会话归属：不在绑定作用域内返回 None。"""
@@ -179,7 +188,7 @@ class AsyncMessageRepository(MessageRepositoryABC):
             return None
         if self._user_id is not None and row.get("user_id") not in (None, self._user_id):
             return None
-        if row.get("application_id") not in (None, self._application_id):
+        if self._enforce_application and row.get("application_id") not in (None, self._application_id):
             return None
         return row
 
@@ -195,7 +204,7 @@ class AsyncMessageRepository(MessageRepositoryABC):
                 raise ValueError("会话不属于当前租户")
             if self._user_id is not None and conv_row.get("user_id") not in (None, self._user_id):
                 raise ValueError("会话不属于当前用户")
-            if conv_row.get("application_id") not in (None, self._application_id):
+            if self._enforce_application and conv_row.get("application_id") not in (None, self._application_id):
                 raise ValueError("会话不属于当前应用")
         tool_calls = [
             {"call_id": tc.call_id, "name": tc.name, "arguments": tc.arguments}
