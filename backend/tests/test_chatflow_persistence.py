@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from types import SimpleNamespace
+from typing import Any
 from uuid import uuid4
 
 import internal.application.apps.chat_service as chat_module
@@ -188,7 +189,7 @@ class _FakeRunner:
         return self.output
 
 
-def _service() -> ChatService:
+def _service(runner_factory=None) -> ChatService:
     service = object.__new__(ChatService)
     service._tenant_id = uuid4()
     service._user_id = uuid4()
@@ -198,6 +199,7 @@ def _service() -> ChatService:
     service._uow = _FakeUow()
     service._conv_repo = _FakeConvRepo()
     service._msg_repo = _FakeMessageRepo()
+    service._runner_factory = runner_factory
     return service
 
 
@@ -212,16 +214,16 @@ def _prepared(application_id, *, message="你好", resume=None) -> ChatflowPrepa
     )
 
 
-def _patch_build_runner(monkeypatch, runner: _FakeRunner) -> dict:
+def _make_runner_factory(runner: _FakeRunner) -> tuple[dict, Any]:
+    """构造注入 ChatService._runner_factory 的假工厂；返回 (捕获的 kwargs, 工厂)。"""
     seen: dict = {}
 
-    async def fake_build_runner(service, uow, context, **kwargs):
+    async def fake_factory(service, uow, context, **kwargs):
         seen.update(kwargs)
         runner.on_event = kwargs.get("on_node_event")
         return runner
 
-    monkeypatch.setattr(graph_deps, "build_runner", fake_build_runner)
-    return seen
+    return seen, fake_factory
 
 
 def _collect(service, prepared) -> list[tuple[str, dict]]:
@@ -237,9 +239,9 @@ def test_run_chatflow_persists_user_and_final_message(monkeypatch):
     runner = _FakeRunner(
         run_id, "conv-1", application_id, output={"output": "最终回答"},
     )
-    _patch_build_runner(monkeypatch, runner)
+    _, factory = _make_runner_factory(runner)
     monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
-    service = _service()
+    service = _service(factory)
     prepared = _prepared(application_id)
 
     events = _collect(service, prepared)
@@ -267,9 +269,9 @@ def test_run_chatflow_does_not_duplicate_emitted_output(monkeypatch):
         output={"output": "最终回答"},
         emitted_text="最终回答",
     )
-    _patch_build_runner(monkeypatch, runner)
+    _, factory = _make_runner_factory(runner)
     monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
-    service = _service()
+    service = _service(factory)
 
     _collect(service, _prepared(application_id))
 
@@ -285,9 +287,9 @@ def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer(monkeypa
     runner = _FakeRunner(
         interrupted_run_id, "conv-1", application_id, output={"output": "续跑完成"},
     )
-    seen = _patch_build_runner(monkeypatch, runner)
+    seen, factory = _make_runner_factory(runner)
     monkeypatch.setattr(chat_module, "RunRepository", lambda session: run_repo)
-    service = _service()
+    service = _service(factory)
     prepared = _prepared(application_id, message="", resume=resume)
 
     _collect(service, prepared)
@@ -313,9 +315,9 @@ def test_run_chatflow_interrupt_persists_question_and_touches_conversation(monke
             "conv-1",
         ),
     )
-    _patch_build_runner(monkeypatch, runner)
+    _, factory = _make_runner_factory(runner)
     monkeypatch.setattr(chat_module, "RunRepository", lambda session: _FakeRunRepo())
-    service = _service()
+    service = _service(factory)
     prepared = _prepared(application_id)
 
     events = _collect(service, prepared)

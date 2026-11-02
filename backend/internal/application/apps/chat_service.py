@@ -16,6 +16,7 @@ from uuid import UUID, uuid4
 
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
+from internal.application.apps.ports import RunnerFactory
 from internal.application.apps.resource_service import AppResourceService
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.domain.llm.client import LLMResponse, LLMToolSpec
@@ -82,10 +83,13 @@ class ChatService:
         uow: UnitOfWork,
         context: Any,
         principal: Any,
+        runner_factory: RunnerFactory,
     ) -> None:
+        """runner_factory 由组合根注入（web.deps.graph.build_runner），避免应用层反向 import web。"""
         self._uow = uow
         self._context = context
         self._principal = principal
+        self._runner_factory = runner_factory
         self._tenant_id = principal.tenant_id
         self._user_id = principal.user_id
         self._app_service = ApplicationService(uow)
@@ -422,8 +426,6 @@ class ChatService:
         conversation_id: UUID | None = None,
     ) -> dict[str, Any]:
         """走 GraphRunner 跑 dag 工作流；人审中断时返回 waiting_approval。"""
-        from web.deps.graph import build_runner  # 延迟 import 避免反向依赖
-
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )
@@ -434,7 +436,7 @@ class ChatService:
         if any(str(node.get("type")) == "18" for node in canvas_json.get("nodes") or []):
             raise ValidationError("工作流中暂不支持问答节点：该节点会中断且没有恢复通道，请改用对话流")
 
-        runner = await build_runner(
+        runner = await self._runner_factory(
             self._app_service,
             self._uow,
             self._context,
@@ -548,7 +550,6 @@ class ChatService:
         resume = prepared.resume
 
         from internal.domain.graph.runtime import GraphInterrupted
-        from web.deps.graph import build_runner  # 延迟 import 避免反向依赖
 
         bound_thread_id = prepared.thread_id
         run_repo = RunRepository(self._uow.session)
@@ -559,7 +560,7 @@ class ChatService:
             await queue.put(("event", (event_type, payload)))
 
         async def make_runner(thread_id: str, run_id: UUID | None = None) -> Any:
-            return await build_runner(
+            return await self._runner_factory(
                 self._app_service,
                 self._uow,
                 self._context,

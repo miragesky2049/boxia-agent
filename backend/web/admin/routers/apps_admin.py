@@ -5,36 +5,18 @@ from __future__ import annotations
 import asyncio
 import logging
 import uuid
-from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, status
 from fastapi.responses import StreamingResponse
 
 from internal.application.apps.application_service import ApplicationService
-from internal.application.apps.model_service import ModelService
 from internal.application.errors import AppError, ValidationError
-from internal.domain.agent.tool_executor import ToolExecutorService
-from internal.domain.graph.http_service import HttpService
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
-from internal.domain.llm.adapter import LLMServiceAdapter, build_model_resolver
-from internal.domain.retrieval.services import register_retrieval_services
-from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
-from internal.infrastructure.repository.apps.async_conversation_adapter import (
-    AsyncConversationRepository,
-    AsyncMessageRepository,
-)
 from internal.infrastructure.repository.apps.conversation_repository import (
     ConversationRepository as SyncConversationRepository,
 )
-from internal.infrastructure.repository.apps.message_repository import (
-    MessageRepository as SyncMessageRepository,
-)
-from internal.infrastructure.repository.postgres_resource_repository import (
-    PostgresToolRepository,
-)
-from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from web.admin.schemas.apps import (
     AppCreatePayload,
     AppUpdatePayload,
@@ -55,6 +37,12 @@ from web.admin.schemas.apps import (
 )
 from web.deps.auth import PlatformAdminDep, require_platform_admin
 from web.deps.db import UowDep
+from web.deps.graph import (
+    load_debug_variables,
+    register_conversation_services,
+    register_llm_and_http,
+    register_subgraph_loader,
+)
 from web.deps.sse import SSE_HEADERS, sse_event
 
 logger = logging.getLogger(__name__)
@@ -76,106 +64,6 @@ def get_app_service(uow: UowDep) -> ApplicationService:
 
 
 AppServiceDep = Depends(get_app_service)
-
-
-def _register_conversation_services(
-    services: ServiceRegistry,
-    uow: UowDep,
-    principal: PlatformAdminDep,
-    application_id: UUID,
-    run_id: UUID,
-    enforce_application: bool = False,
-) -> None:
-    """把会话/消息仓储注册进 ServiceRegistry，供 conversation 类节点使用。
-
-    画布试运行没有真实应用 ID（application_id 固定为 DEBUG_APPLICATION_ID），
-    默认不校验应用维度，只按租户 + 用户收口，避免消息节点写入真实应用会话时报"不属于当前应用"。
-    """
-    tenant_id = principal.tenant_id or UUID("00000000-0000-0000-0000-000000000000")
-    conv_repo = AsyncConversationRepository(
-        SyncConversationRepository(uow.session),
-        tenant_id=tenant_id,
-        user_id=principal.user_id,
-        application_id=application_id,
-        enforce_application=enforce_application,
-        channel="debug",
-    )
-    # 试运行不写 run 表，消息的 run_id 必须留空，否则触发 run 外键约束
-    msg_repo = AsyncMessageRepository(
-        SyncMessageRepository(uow.session),
-        tenant_id=tenant_id,
-        user_id=principal.user_id,
-        application_id=application_id,
-        run_id=None,
-        enforce_application=enforce_application,
-    )
-    services.register("conversation_repo", conv_repo)
-    services.register("message_repo", msg_repo)
-    services.register(
-        "tool_executor",
-        ToolExecutorService(
-            PostgresToolRepository(
-                uow.session,
-                tenant_id=tenant_id,
-                apply_role_filter=False,
-            ),
-            tenant_id=tenant_id,
-            user_id=principal.user_id,
-            application_id=application_id,
-            run_id=run_id,
-        ),
-    )
-    register_retrieval_services(services)
-    services.register("sandbox", PythonSandbox())
-
-
-def _load_debug_variables(
-    uow: Any,
-    application_id: UUID | None,
-    principal: Any,
-) -> tuple[dict[str, Any], set[str], Any]:
-    """画布试运行使用真实应用的变量定义；未指定应用时返回空池。"""
-    if application_id is None or principal.user_id is None:
-        return {}, set(), None
-    try:
-        variables, user_keys = ApplicationService(uow).build_runtime_variables(
-            application_id, principal.user_id,
-        )
-    except Exception:  # noqa: BLE001
-        logger.exception("加载画布试运行变量失败 application=%s", application_id)
-        return {}, set(), None
-    repo = ApplicationRepository(uow.session)
-
-    def _persist(values: dict[str, Any]) -> None:
-        repo.set_user_variables(application_id, principal.user_id, values)
-
-    return variables, user_keys, _persist
-
-
-def _register_subgraph_loader(
-    services: ServiceRegistry,
-    uow: UowDep,
-    tenant_id: UUID,
-) -> None:
-    """把 subgraph_loader 注册进 ServiceRegistry，供 Subworkflow（type=9）节点调用。
-
-    debug 路由直接运行画布 JSON（未保存），但 Subworkflow 节点通过 workflowId
-    引用其他已保存的应用图——必须能按 tenant_id 加载其 runtime graph。
-    """
-    app_service = ApplicationService(uow)
-
-    async def _loader(child_app_id: str) -> dict:
-        try:
-            child_uuid = UUID(child_app_id)
-        except ValueError:
-            return {}
-        try:
-            return await app_service.get_runtime_graph(child_uuid, tenant_id)
-        except Exception:  # noqa: BLE001
-            logger.exception("debug 路由加载子图失败: child_app_id=%s", child_app_id)
-            return {}
-
-    services.register("subgraph_loader", _loader)
 
 
 @router.get("")
@@ -523,26 +411,24 @@ async def debug_run_stream(
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    model_service = ModelService(uow.session)
     services = ServiceRegistry()
-    services.register(
-        "llm",
-        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
-    )
-    services.register("http", HttpService())
+    register_llm_and_http(services, uow, _principal.tenant_id)
 
     run_id = uuid.uuid4()
     debug_app_id = payload.application_id or DEBUG_APPLICATION_ID
-    _register_conversation_services(
-        services, uow, _principal,
-        application_id=debug_app_id, run_id=run_id,
+    register_conversation_services(
+        services, uow,
+        tenant_id=_principal.tenant_id,
+        user_id=_principal.user_id,
+        application_id=debug_app_id,
+        run_id=run_id,
     )
-    _register_subgraph_loader(services, uow, _principal.tenant_id)
+    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
 
     async def _push_node_event(etype: str, evt_payload: dict) -> None:
         await queue.put(sse_event(etype, evt_payload))
 
-    debug_variables, debug_user_keys, debug_persist = _load_debug_variables(
+    debug_variables, debug_user_keys, debug_persist = load_debug_variables(
         uow, payload.application_id, _principal,
     )
     runtime = GraphRuntime(
@@ -619,20 +505,18 @@ async def debug_run_node(
     if not isinstance(nodes, list) or not nodes or len(nodes) > 50:
         raise ValidationError("graph 节点数必须在 1-50 之间")
 
-    model_service = ModelService(uow.session)
     services = ServiceRegistry()
-    services.register(
-        "llm",
-        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
-    )
-    services.register("http", HttpService())
+    register_llm_and_http(services, uow, _principal.tenant_id)
 
     run_id = uuid.uuid4()
-    _register_conversation_services(
-        services, uow, _principal,
-        application_id=DEBUG_APPLICATION_ID, run_id=run_id,
+    register_conversation_services(
+        services, uow,
+        tenant_id=_principal.tenant_id,
+        user_id=_principal.user_id,
+        application_id=DEBUG_APPLICATION_ID,
+        run_id=run_id,
     )
-    _register_subgraph_loader(services, uow, _principal.tenant_id)
+    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
 
     runtime = GraphRuntime(
         canvas_json=payload.graph,
@@ -687,26 +571,24 @@ async def debug_run_stream_resume(
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
-    model_service = ModelService(uow.session)
     services = ServiceRegistry()
-    services.register(
-        "llm",
-        LLMServiceAdapter(build_model_resolver(model_service, _principal.tenant_id)),
-    )
-    services.register("http", HttpService())
+    register_llm_and_http(services, uow, _principal.tenant_id)
 
     run_id = uuid.UUID(payload.run_id) if payload.run_id else uuid.uuid4()
     debug_app_id = payload.application_id or DEBUG_APPLICATION_ID
-    _register_conversation_services(
-        services, uow, _principal,
-        application_id=debug_app_id, run_id=run_id,
+    register_conversation_services(
+        services, uow,
+        tenant_id=_principal.tenant_id,
+        user_id=_principal.user_id,
+        application_id=debug_app_id,
+        run_id=run_id,
     )
-    _register_subgraph_loader(services, uow, _principal.tenant_id)
+    register_subgraph_loader(services, ApplicationService(uow), _principal.tenant_id)
 
     async def _push_node_event(etype: str, evt_payload: dict) -> None:
         await queue.put(sse_event(etype, evt_payload))
 
-    debug_variables, debug_user_keys, debug_persist = _load_debug_variables(
+    debug_variables, debug_user_keys, debug_persist = load_debug_variables(
         uow, payload.application_id, _principal,
     )
     runtime = GraphRuntime(

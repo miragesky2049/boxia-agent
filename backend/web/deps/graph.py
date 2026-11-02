@@ -13,8 +13,8 @@ from uuid import UUID, uuid4
 
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.model_service import ModelService
-from internal.application.apps.resource_service import AppResourceService
 from internal.application.retrieval_service import RetrievalService
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphRuntime
 from internal.domain.graph.http_service import HttpService
@@ -49,6 +49,116 @@ from internal.infrastructure.repository.postgres_resource_repository import (
 logger = logging.getLogger(__name__)
 
 
+def register_llm_and_http(services: ServiceRegistry, uow: Any, tenant_id: Any) -> None:
+    """注册 llm / http 基础服务（build_runner 与 admin debug 画布试运行共用装配）。
+
+    tenant_id 允许为 None：与迁移前 apps_admin debug 端点的直传行为保持一致。
+    """
+    model_service = ModelService(uow.session)
+    services.register(
+        "llm",
+        LLMServiceAdapter(build_model_resolver(model_service, tenant_id)),
+    )
+    services.register("http", HttpService())
+
+
+def register_conversation_services(
+    services: ServiceRegistry,
+    uow: Any,
+    *,
+    tenant_id: UUID | None,
+    user_id: UUID | None,
+    application_id: UUID,
+    run_id: UUID | str,
+    enforce_application: bool = False,
+) -> None:
+    """把会话/消息仓储 + tool_executor + retrieval + sandbox 注册进 ServiceRegistry。
+
+    admin 画布试运行专用（DDD 三期从 apps_admin 收敛至此）：
+    试运行没有真实应用 ID（application_id 可为 DEBUG_APPLICATION_ID），
+    默认不校验应用维度，只按租户 + 用户收口，避免消息节点写入真实应用会话时报"不属于当前应用"。
+    tenant_id 缺失时兜底平台租户（与原 apps_admin helper 行为一致）。
+    """
+    effective_tenant_id = tenant_id or PLATFORM_TENANT_ID
+    conv_repo = AsyncConversationRepository(
+        SyncConversationRepository(uow.session),
+        tenant_id=effective_tenant_id,
+        user_id=user_id,
+        application_id=application_id,
+        enforce_application=enforce_application,
+        channel="debug",
+    )
+    # 试运行不写 run 表，消息的 run_id 必须留空，否则触发 run 外键约束
+    msg_repo = AsyncMessageRepository(
+        SyncMessageRepository(uow.session),
+        tenant_id=effective_tenant_id,
+        user_id=user_id,
+        application_id=application_id,
+        run_id=None,
+        enforce_application=enforce_application,
+    )
+    services.register("conversation_repo", conv_repo)
+    services.register("message_repo", msg_repo)
+    services.register(
+        "tool_executor",
+        ToolExecutorService(
+            PostgresToolRepository(
+                uow.session,
+                tenant_id=effective_tenant_id,
+                apply_role_filter=False,
+            ),
+            tenant_id=effective_tenant_id,
+            user_id=user_id,
+            application_id=application_id,
+            run_id=run_id,
+        ),
+    )
+    register_retrieval_services(services)
+    services.register("sandbox", PythonSandbox())
+
+
+def register_subgraph_loader(
+    services: ServiceRegistry, service: ApplicationService, tenant_id: Any,
+) -> None:
+    """注册 subgraph_loader，供 Subworkflow（type=9）节点按 tenant 加载子应用 runtime graph。"""
+
+    async def _loader(child_app_id: str) -> dict:
+        try:
+            child_uuid = UUID(child_app_id)
+        except ValueError:
+            return {}
+        try:
+            return await service.get_runtime_graph(child_uuid, tenant_id)
+        except Exception:  # noqa: BLE001
+            logger.exception("加载子图失败: child_app_id=%s", child_app_id)
+            return {}
+
+    services.register("subgraph_loader", _loader)
+
+
+def load_debug_variables(
+    uow: Any,
+    application_id: UUID | None,
+    principal: Any,
+) -> tuple[dict[str, Any], set[str], Any]:
+    """画布试运行使用真实应用的变量定义；未指定应用时返回空池。"""
+    if application_id is None or principal.user_id is None:
+        return {}, set(), None
+    try:
+        variables, user_keys = ApplicationService(uow).build_runtime_variables(
+            application_id, principal.user_id,
+        )
+    except Exception:  # noqa: BLE001
+        logger.exception("加载画布试运行变量失败 application=%s", application_id)
+        return {}, set(), None
+    repo = ApplicationRepository(uow.session)
+
+    def _persist(values: dict[str, Any]) -> None:
+        repo.set_user_variables(application_id, principal.user_id, values)
+
+    return variables, user_keys, _persist
+
+
 async def build_runner(
     service: ApplicationService,
     uow: Any,
@@ -70,8 +180,6 @@ async def build_runner(
     - run_id 不传时由 runtime 内部生成
     """
     canvas_json = await service.get_runtime_graph(application_id, tenant_id)
-    model_service = ModelService(uow.session)
-    resource_service = AppResourceService(uow.session)
     app_repo = ApplicationRepository(uow.session)
 
     # 变量体系：应用变量取默认值，用户变量优先取当前用户已持久化的值
@@ -97,13 +205,9 @@ async def build_runner(
     audit_repo = PostgresAuditLogRepository(uow.session)
     webhook_repo = WebhookRepository(uow.session)
 
-    # 构造服务注册表：llm / http / subgraph_loader
+    # 构造服务注册表：llm / http / tool_executor / retrieval / sandbox / subgraph_loader
     services = ServiceRegistry()
-    services.register(
-        "llm",
-        LLMServiceAdapter(build_model_resolver(model_service, tenant_id)),
-    )
-    services.register("http", HttpService())
+    register_llm_and_http(services, uow, tenant_id)
     services.register(
         "tool_executor",
         ToolExecutorService(
@@ -140,18 +244,7 @@ async def build_runner(
         services.register("conversation_repo", async_conv_repo)
         services.register("message_repo", async_msg_repo)
 
-    async def subgraph_loader(child_app_id: str) -> dict:
-        try:
-            child_uuid = UUID(child_app_id)
-        except ValueError:
-            return {}
-        try:
-            return await service.get_runtime_graph(child_uuid, tenant_id)
-        except Exception:  # noqa: BLE001
-            logger.exception("加载子图失败: child_app_id=%s", child_app_id)
-            return {}
-
-    services.register("subgraph_loader", subgraph_loader)
+    register_subgraph_loader(services, service, tenant_id)
 
     return GraphRuntime(
         canvas_json=canvas_json,

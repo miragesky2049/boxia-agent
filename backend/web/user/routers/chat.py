@@ -20,6 +20,7 @@ from internal.application.apps.chat_service import ChatService
 from internal.application.errors import AppError
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
+from web.deps.graph import build_runner
 from web.deps.sse import SSE_HEADERS, sse_event
 from web.deps.tenant import RequestContextDep
 
@@ -61,7 +62,9 @@ def get_chat_service(
     context: RequestContextDep,
     principal: UserAuthDep,
 ) -> ChatService:
-    return ChatService(uow=uow, context=context, principal=principal)
+    return ChatService(
+        uow=uow, context=context, principal=principal, runner_factory=build_runner,
+    )
 
 
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
