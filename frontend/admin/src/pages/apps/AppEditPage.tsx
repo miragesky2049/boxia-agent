@@ -94,6 +94,7 @@ import {
   readSchemaVersion,
   toCozeIR,
 } from './canvas/adapters/cozeIR';
+import { normalizeIfElseCases, resolveFirstBranchOutputPort } from './canvas/adapters/branchPorts';
 import { downloadBlob, exportElementAsPng } from './canvas/exportImage';
 import { setupCanvasPan } from './canvas/adapters/canvasPan';
 
@@ -774,9 +775,11 @@ export default function AppEditPage() {
 
     // 必须走 createWorkflowNodeByType：裸 addNode 不会初始化 TransformData，
     // 节点会渲染在 (0,0) 且无法拖拽
+    // 条件节点必须自带一个「如果」，否则卡片/抽屉只剩「否则」，动态端口也会退化
+    const initialConfig = meta.type_key === 'if_else' ? { cases: normalizeIfElseCases(undefined) } : {};
     createNodeByType(ctx, meta.type_key, { x: posX, y: posY }, {
       id: nodeId,
-      data: { title: meta.title, config: {} },
+      data: { title: meta.title, config: initialConfig },
     });
 
     // 新节点添加后自动适应视图，确保用户能看到新节点（WorkflowDocument.fitView）
@@ -787,8 +790,12 @@ export default function AppEditPage() {
       const fromNodeId = options.fromNodeId;
       const fromNode = getNode(ctx, fromNodeId);
       if (fromNode) {
-        const fromMeta = keyToMeta[getNodeTypeKey(fromNode)];
-        const fromPortId = fromMeta?.outputs?.[0]?.name;
+        const fromTypeKey = getNodeTypeKey(fromNode);
+        const fromMeta = keyToMeta[fromTypeKey];
+        // 分支节点没有静态 outputs，必须用当前动态端口（首个 case / 首个意图）
+        const fromConfig = (getNodeExtInfo(fromNode)?.config || {}) as Record<string, unknown>;
+        const fromPortId = resolveFirstBranchOutputPort(fromTypeKey, fromConfig)
+          ?? fromMeta?.outputs?.[0]?.name;
         const toPortId = meta.inputs?.[0]?.name;
         if (fromPortId) {
           createLine(ctx, {

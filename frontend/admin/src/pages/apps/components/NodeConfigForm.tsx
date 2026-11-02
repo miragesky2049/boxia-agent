@@ -218,12 +218,17 @@ function CaseListEditor({
   };
 
   const removeCase = (idx: number) => {
+    // 条件节点至少保留一个「如果」，否则卡片与抽屉只剩「否则」
+    if (cases.length <= 1) return;
     onChange(cases.filter((_, i) => i !== idx));
   };
 
   const addCase = () => {
-    const nextId = `case_${cases.length + 1}`;
-    onChange([...cases, { case_id: nextId, left: '', operator: 'eq', right: '' }]);
+    // 删除中间条件后再新增，直接用 length+1 会和已有 case_id 冲突
+    const used = new Set(cases.map((c) => c.case_id));
+    let n = cases.length + 1;
+    while (used.has(`case_${n}`)) n += 1;
+    onChange([...cases, { case_id: `case_${n}`, left: '', operator: 'eq', right: '' }]);
   };
 
   return (
@@ -283,6 +288,7 @@ function CaseListEditor({
               size="small"
               type="text"
               danger
+              disabled={cases.length <= 1}
               onClick={() => removeCase(idx)}
               aria-label="删除条件"
             >

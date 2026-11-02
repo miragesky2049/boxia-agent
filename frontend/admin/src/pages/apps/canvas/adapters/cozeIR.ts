@@ -1,5 +1,7 @@
 import type { WorkflowJSON } from '@flowgram.ai/free-layout-editor';
 
+import { normalizeBranchEdgePorts, normalizeIfElseCases } from './branchPorts';
+
 // Coze IR ↔ FlowGram WorkflowJSON 的唯一转换层。
 // 后端 `/admin/apps/{id}/graph` 收发的是 Coze 结构；FlowGram 编辑器内部用自己的 WorkflowJSON。
 // 新增节点类型只依赖 type_key ↔ type_code 映射，不需要再改页面。
@@ -90,13 +92,18 @@ export function fromCozeIR(
     const rawPos = (n.meta as { position?: { x: number; y: number } })?.position ?? { x: 0, y: 0 };
     // 修正脏位置：如果节点在画布坐标 y > 1000（之前拖拽测试留下的），重置到合理位置
     const pos = rawPos.y > 1000 ? { x: 200, y: 200 } : rawPos;
+    // 条件分支必须始终至少有一个「如果」，否则卡片与抽屉只剩「否则」，
+    // 动态端口也会退化成单个 else，历史边无处可落
+    const config = registryType === 'if_else'
+      ? { ...inputs, cases: normalizeIfElseCases(inputs.cases) }
+      : inputs;
     const out: WorkflowJSON['nodes'][number] = {
       id: String(n.id),
       type: registryType,
       meta: { position: pos },
       data: {
         title: nodeMeta.title,
-        config: inputs,
+        config,
         outputs: (data.outputs || []) as unknown[],
       },
     } as WorkflowJSON['nodes'][number];
@@ -118,6 +125,17 @@ export function fromCozeIR(
     sourcePortID: e.sourcePortID,
     targetPortID: e.targetPortID,
   })) as unknown as WorkflowJSON['edges'];
+
+  // 历史图里分支边可能还挂 true/false、classificationId 等旧端口，
+  // 统一映射到当前动态端口，避免 FlowGram 为未知端口生成游离端点
+  normalizeBranchEdgePorts(
+    nodes.map((node) => ({
+      id: node.id,
+      typeKey: String(node.type),
+      config: (((node.data as unknown as Record<string, unknown> | undefined)?.config) ?? {}) as Record<string, unknown>,
+    })),
+    edges as unknown as Array<Record<string, unknown>>,
+  );
 
   return { nodes, edges };
 }

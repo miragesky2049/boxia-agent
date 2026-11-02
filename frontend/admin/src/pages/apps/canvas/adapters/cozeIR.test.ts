@@ -128,6 +128,69 @@ describe('cozeIR adapter', () => {
     expect(subgraph.nodes?.[0]).toMatchObject({ id: 'inner-1', type: 'start' });
   });
 
+  describe('分支端口归一化', () => {
+    const branchTypes = { '1': 'start', '3': 'llm', '8': 'if_else' };
+    const ifElseNode = (cases?: unknown) => ({
+      id: 'if-1',
+      type: '8',
+      data: { inputs: cases === undefined ? {} : { cases } },
+    });
+
+    it('空 cases 补一个默认「如果」', () => {
+      const result = fromCozeIR({ nodes: [ifElseNode()] }, branchTypes);
+      const config = (result.nodes[0]!.data as any).config;
+      expect(config.cases).toHaveLength(1);
+      expect(config.cases[0].case_id).toBe('case_1');
+    });
+
+    it('未知端口优先占用空闲分支口，已占用时落到 else', () => {
+      const result = fromCozeIR({
+        nodes: [
+          ifElseNode([{ case_id: 'case_1', left: '{{start.x}}', operator: 'eq', right: '1' }]),
+          { id: 'out-1', type: '3', data: {} },
+          { id: 'out-2', type: '3', data: {} },
+        ],
+        edges: [
+          { id: 'e1', sourceNodeID: 'if-1', targetNodeID: 'out-1', sourcePortID: 'case_1' },
+          { id: 'e2', sourceNodeID: 'if-1', targetNodeID: 'out-2', sourcePortID: 'true' },
+        ],
+      }, branchTypes);
+      expect(result.edges[0]!.sourcePortID).toBe('case_1');
+      expect(result.edges[1]!.sourcePortID).toBe('else');
+    });
+
+    it('false 端口直接映射到 else，不影响已有分支口', () => {
+      const result = fromCozeIR({
+        nodes: [
+          ifElseNode([{ case_id: 'case_1', left: '{{start.x}}', operator: 'eq', right: '1' }]),
+          { id: 'out-1', type: '3', data: {} },
+        ],
+        edges: [
+          { id: 'e1', sourceNodeID: 'if-1', targetNodeID: 'out-1', sourcePortID: 'false' },
+        ],
+      }, branchTypes);
+      expect(result.edges[0]!.sourcePortID).toBe('else');
+    });
+
+    it('同一端口不会被重复占用', () => {
+      const result = fromCozeIR({
+        nodes: [
+          ifElseNode([
+            { case_id: 'case_1', left: '{{start.x}}', operator: 'eq', right: '1' },
+            { case_id: 'case_2', left: '{{start.x}}', operator: 'eq', right: '2' },
+          ]),
+          { id: 'out-1', type: '3', data: {} },
+          { id: 'out-2', type: '3', data: {} },
+        ],
+        edges: [
+          { id: 'e1', sourceNodeID: 'if-1', targetNodeID: 'out-1', sourcePortID: 'case_1' },
+          { id: 'e2', sourceNodeID: 'if-1', targetNodeID: 'out-2', sourcePortID: 'true' },
+        ],
+      }, branchTypes);
+      expect(result.edges[1]!.sourcePortID).toBe('case_2');
+    });
+  });
+
   it('子图节点 toCozeIR 输出 blocks/edges 而不是嵌套 data', () => {
     const withSubgraph = {
       nodes: [

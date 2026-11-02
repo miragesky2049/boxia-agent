@@ -179,6 +179,35 @@ def test_multi_case_first_truthy_wins() -> None:
     assert result.route == "adult"
 
 
+def test_unconfigured_default_case_falls_to_else() -> None:
+    # 新建条件节点默认带一个空「如果」，不能按 ("" == "") 恒真误判
+    ctx = _make_ctx(
+        {"cases": [{"case_id": "case_1", "left": "", "operator": "eq", "right": ""}],
+         "else_port": "else"},
+        start_output={},
+    )
+    result = asyncio.run(IfElseNodeHandler().run(ctx))
+    assert result.route == "else"
+
+
+def test_unconfigured_case_does_not_block_later_case() -> None:
+    ctx = _make_ctx(
+        {"cases": [
+            {"case_id": "case_1", "left": "", "operator": "eq", "right": ""},
+            {
+                "case_id": "case_2",
+                "left": "{{start.output.age}}",
+                "operator": "eq",
+                "right": "18",
+            },
+        ],
+        "else_port": "else"},
+        start_output={"age": 18},
+    )
+    result = asyncio.run(IfElseNodeHandler().run(ctx))
+    assert result.route == "case_2"
+
+
 def test_all_cases_false_falls_to_else_port() -> None:
     ctx = _make_ctx(
         {"cases": [

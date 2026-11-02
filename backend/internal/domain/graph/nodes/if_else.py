@@ -132,6 +132,10 @@ class IfElseNodeHandler(NodeHandler):
             expr = _normalize_case_expression(case)
             if expr is None:
                 continue
+            # 新建节点的默认「如果」只有 case_id、没有配置左值：
+            # 若继续求值会得到 ("" == "") 恒真，导致永远走第一个分支
+            if not _has_case_operand(case):
+                continue
             # 用 evaluator 求值：拼接出的是字符串表达式（如 "(start.output.age) != (18)"），
             # 走 TemplateEvaluator.eval_expression 解析 ast 并求值；若已是 Expr 对象则走 resolve_config。
             # 用户手写 expression 可能带 {{...}} 模板插值，先 eval_template 剥掉再 eval_expression。
@@ -158,6 +162,24 @@ class IfElseNodeHandler(NodeHandler):
             outputs={"condition": condition_value},
             route="true" if matched else "false",
         )
+
+
+def _has_case_operand(case: dict[str, Any]) -> bool:
+    """判断 case 是否已配置有效的求值输入。
+
+    - 手写 expression / condition 且非空白 → 有效
+    - 结构化 case 的 left 非空白 → 有效（is_empty / is_not_empty 也依赖 left）
+    - 其余（只有 case_id 的空模板）→ 无效，应跳过
+    """
+    if "expression" in case or "condition" in case:
+        raw = case.get("expression") or case.get("condition")
+        return bool(str(raw).strip()) if raw is not None else False
+    left = case.get("left")
+    if left is None:
+        return False
+    if isinstance(left, str):
+        return bool(left.strip())
+    return True
 
 
 def _is_truthy(value: Any) -> bool:

@@ -13,20 +13,14 @@ export interface NodeCardActions {
   onDelete: (node: WorkflowNodeEntity) => void;
 }
 
-// FlowGram 未导出端口实体类型，这里只声明动态端口逻辑用到的最小结构
-interface WorkflowPortLike {
-  portType?: string;
-  portID?: string;
-  dispose?: () => void;
-}
-
 interface WorkflowNodePortsDataLike {
   updateDynamicPorts?: () => void;
-  allPorts?: WorkflowPortLike[];
 }
 
 // 等待 React 提交 DOM + FlowGram 创建端口实体后再重扫
 const DYNAMIC_PORT_RESCAN_DELAY_MS = 50;
+// 卡片高度变化（新增/删除分支行）会晚于首次提交，再补一次
+const DYNAMIC_PORT_RESCAN_SECOND_DELAY_MS = 200;
 
 // ========== 节点渲染组件（双击打开配置） ==========
 export function makeNodeRenderer(
@@ -79,30 +73,24 @@ export function makeNodeRenderer(
       return undefined;
     }, [meta.type_key, nodeData.config?.cases, nodeData.config?.intents]);
 
-    // if_else 节点：cases 变化时触发 FlowGram 重新扫描 DOM 中的 [data-port-id] 端口
-    // useDynamicPort 模式下，FlowGram 只在 SizeData.onDataChange 时自动调用 updateDynamicPorts
-    // 我们需要手动触发，确保新增/删除 case 后端口位置立刻更新
+    // if_else / intent 节点：配置变化后触发 FlowGram 重新扫描 DOM 中的 [data-port-id] 端口。
+    // useDynamicPort 模式下 FlowGram 只在 SizeData.onDataChange 时自动同步，这里补一次保证及时。
+    // 不要在外部手动 dispose 端口：WorkflowPortEntity.dispose() 会连带 dispose 端口上的连线，
+    // 而旧端口的清理已经由 IR 归一化（branchPorts）在加载阶段完成。
     useEffect(() => {
       if (!isDynamicBranchNode || !dynamicOutputs) return;
-      const timer = window.setTimeout(() => {
-        // 遍历 dataManager 找到 WorkflowNodePortsData 实例
-        // FlowGram 的 dataManager 是 Map，key 是 Registry.type 字符串
-        const dm = (node as unknown as { dataManager?: { get?: (type: string) => unknown } }).dataManager;
-        if (!dm?.get) return;
-        const portsData = dm.get('WorkflowNodePortsData') as WorkflowNodePortsDataLike | undefined;
-        if (!portsData || typeof portsData.updateDynamicPorts !== 'function') return;
-        portsData.updateDynamicPorts();
-        // 清理历史残留输出端口（旧 IR 反序列化时按 true/false 静态端口注册的实体）
-        // 预期输出端口 = 动态渲染的 case_id 列表 + 'else'；其余 output 实体 dispose 掉，
-        // 避免在节点右缘中部多出一个无 targetElement 的悬浮端点
-        const expected = new Set(dynamicOutputs.map((p) => p.portID));
-        portsData.allPorts?.forEach((port) => {
-          if (port.portType === 'output' && (port.portID == null || !expected.has(port.portID))) {
-            port.dispose?.();
-          }
-        });
-      }, DYNAMIC_PORT_RESCAN_DELAY_MS);
-      return () => window.clearTimeout(timer);
+      // 遍历 dataManager 找到 WorkflowNodePortsData 实例
+      // FlowGram 的 dataManager 是 Map，key 是 Registry.type 字符串
+      const dm = (node as unknown as { dataManager?: { get?: (type: string) => unknown } }).dataManager;
+      const portsData = dm?.get?.('WorkflowNodePortsData') as WorkflowNodePortsDataLike | undefined;
+      if (!portsData || typeof portsData.updateDynamicPorts !== 'function') return;
+      const sync = () => portsData.updateDynamicPorts?.();
+      const first = window.setTimeout(sync, DYNAMIC_PORT_RESCAN_DELAY_MS);
+      const second = window.setTimeout(sync, DYNAMIC_PORT_RESCAN_SECOND_DELAY_MS);
+      return () => {
+        window.clearTimeout(first);
+        window.clearTimeout(second);
+      };
     }, [dynamicOutputs, node, isDynamicBranchNode]);
 
     // Comment / Note 便签：黄色便签块，显示 content 文本，不显示端口和节点按钮样式
