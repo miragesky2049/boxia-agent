@@ -239,3 +239,7 @@ frontend/admin/playwright-report/
 frontend/admin/test-results/
 
 .playwright-mcp/
+
+# 本地实机截图与抓取素材（需要归档时再显式入库）
+/*.png
+/docs/assets/
