@@ -58,6 +58,9 @@ uv sync
 uv run alembic upgrade head
 
 # ---------- 4. 后台启动后端 ----------
+# --reload 不可去掉：Windows 上 uvicorn 单进程模式会强制 ProactorEventLoop，
+# psycopg async（LangGraph AsyncPostgresSaver）在该循环上无法建连，试运行会直接报错；
+# 带 --reload 时服务跑在子进程的 SelectorEventLoop 上才可用（Linux 无此问题）
 for site in "${SITES[@]}"; do
   case "$site" in
     admin) module=web.app_admin:app; port=8000 ;;
