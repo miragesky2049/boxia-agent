@@ -23,14 +23,12 @@ from web.admin.routers.resources import admin_router as resource_admin_router
 from web.admin.routers.resources import tenant_router as resource_tenant_router
 from web.admin.routers.roles import router as roles_router
 from web.admin.routers.tenants import router as tenants_router
-from web.admin.routers.tools import router as tools_router
 from web.admin.routers.users import router as users_router
 from web.deps.auth import require_admin
 
 router = APIRouter(prefix="/admin", dependencies=[Depends(require_admin)])
 router.include_router(context_router)
 router.include_router(tenants_router)
-router.include_router(tools_router)
 router.include_router(users_router)
 router.include_router(departments_router)
 router.include_router(documents_router)

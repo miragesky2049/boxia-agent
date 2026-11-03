@@ -427,33 +427,3 @@ export interface AuditLog {
   created_at: string
 }
 
-export interface ResourceBase {
-  id: string
-  name: string
-  description: string
-  is_enabled: boolean
-  tenant_id: string | null
-  is_platform: boolean
-  created_at: string
-  updated_at: string
-}
-
-export interface Tool extends ResourceBase {
-  type: string
-  config: Record<string, unknown>
-}
-
-export interface ListParams {
-  page?: number
-  page_size?: number
-  keyword?: string
-  is_enabled?: boolean
-}
-
-export interface ToolPayload {
-  name: string
-  description: string
-  is_enabled: boolean
-  type: string
-  config: Record<string, unknown>
-}

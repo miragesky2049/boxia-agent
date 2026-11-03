@@ -13,7 +13,6 @@ from internal.application.grant_service import GrantService
 from internal.application.hr_dictionary_service import HrDictionaryService
 from internal.application.ingestion_service import IngestionService
 from internal.application.mgmt_unit_service import MgmtUnitService
-from internal.application.resource_service import ResourceService
 from internal.application.retrieval_service import RetrievalService
 from internal.application.role_grant_service import RoleGrantService
 from internal.application.role_permission_service import RolePermissionService
@@ -21,7 +20,6 @@ from internal.application.role_service import RoleService
 from internal.application.tenant_service import TenantService
 from internal.application.user_admin_service import UserAdminService
 from internal.application.user_auth_service import UserAuthService
-from internal.domain.entity.resource import Tool
 from internal.domain.llm.client import OpenAICompatLLMClient
 from internal.domain.retrieval.query_rewrite import LLMQueryRewriter, QueryRewriter
 from internal.domain.retrieval.rerank import RerankClient, SiliconFlowRerankClient
@@ -40,11 +38,6 @@ def get_auth_service(uow: UowDep) -> AuthService:
 def get_user_auth_service(uow: UowDep) -> UserAuthService:
     """最终用户认证用例。"""
     return UserAuthService(uow)
-
-
-def get_tool_service(uow: AdminScopedUowDep, context: RequestContextDep) -> ResourceService[Tool]:
-    """工具用例。"""
-    return ResourceService(uow.tools, "工具", "tool", uow, context)
 
 
 def get_admin_user_service(uow: UowDep, context: RequestContextDep) -> AdminUserService:
@@ -153,7 +146,6 @@ def get_retrieval_service(uow: UserScopedUowDep, context: RequestContextDep) -> 
 
 AuthServiceDep = Annotated[AuthService, Depends(get_auth_service)]
 UserAuthServiceDep = Annotated[UserAuthService, Depends(get_user_auth_service)]
-ToolServiceDep = Annotated[ResourceService[Tool], Depends(get_tool_service)]
 AdminUserServiceDep = Annotated[AdminUserService, Depends(get_admin_user_service)]
 AuditServiceDep = Annotated[AuditService, Depends(get_audit_service)]
 TenantServiceDep = Annotated[TenantService, Depends(get_tenant_service)]
@@ -182,7 +174,6 @@ __all__ = [
     "RolePermissionServiceDep",
     "RoleServiceDep",
     "TenantServiceDep",
-    "ToolServiceDep",
     "UserAuthServiceDep",
     "DocumentServiceDep",
     "IngestionServiceDep",

@@ -56,7 +56,7 @@ def test_create_user_requires_password_change(
     assert created["must_change_password"] is True
     assert created["role_code"] == "admin"
     operator_headers = _login(client, "operator", OPERATOR_PASSWORD)
-    assert client.get("/api/v1/admin/tools", headers=operator_headers).status_code == 200
+    assert client.get("/api/v1/admin/resources", headers=operator_headers).status_code == 200
 
 
 def test_create_duplicate_username(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -98,21 +98,36 @@ def test_demote_user_takes_effect_immediately(
     created = _create_operator(client, auth_headers)
     operator_headers = _login(client, "operator", OPERATOR_PASSWORD)
 
+    restricted = client.post(
+        "/api/v1/admin/roles",
+        json={"code": "restricted", "name": "受限角色"},
+        headers=auth_headers,
+    )
+    assert restricted.status_code == 201, restricted.text
+    restricted_id = restricted.json()["id"]
+    replaced = client.put(
+        f"/api/v1/admin/roles/{restricted_id}/permissions",
+        json={"codes": ["system:console:access"]},
+        headers=auth_headers,
+    )
+    assert replaced.status_code == 200, replaced.text
+
+    def _menus() -> list[str]:
+        response = client.get("/api/v1/admin/context", headers=operator_headers)
+        assert response.status_code == 200, response.text
+        return response.json()["menus"]
+
+    assert "resources" in _menus()
+
     response = client.patch(
         f"{USERS_URL}/{created['id']}",
-        json={"role_id": _role_id(client, auth_headers, "viewer")},
+        json={"role_id": restricted_id},
         headers=auth_headers,
     )
     assert response.status_code == 200
-    assert response.json()["role_code"] == "viewer"
-    assert (
-        client.post(
-            "/api/v1/admin/tools",
-            json={"name": "降级后写入", "description": "", "content": "", "config": {}},
-            headers=operator_headers,
-        ).status_code
-        == 403
-    )
+    assert response.json()["role_code"] == "restricted"
+    # 降级后无需重新登录，下一次请求可见菜单立即收敛
+    assert _menus() == []
 
 
 def test_disable_user_revokes_sessions(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -203,19 +218,18 @@ def test_platform_account_rejects_tenant_role(
 
 def test_write_request_is_audited(client: TestClient, auth_headers: dict[str, str]) -> None:
     created = client.post(
-        "/api/v1/admin/tools",
+        "/api/v1/admin/resources",
         json={
+            "type": "tool",
             "name": "审计工具",
-            "description": "",
-            "type": "http",
             "config": {"url": "https://example.com/api", "method": "GET"},
         },
         headers=auth_headers,
     )
     assert created.status_code == 201
 
-    response = client.get("/api/v1/admin/audit-logs?action=post.tools", headers=auth_headers)
+    response = client.get("/api/v1/admin/audit-logs?action=post.resources", headers=auth_headers)
 
     assert response.status_code == 200, response.text
     assert response.json()["total"] >= 1
-    assert response.json()["items"][0]["resource_type"] == "tools"
+    assert response.json()["items"][0]["resource_type"] == "resources"

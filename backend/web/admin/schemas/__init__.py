@@ -13,11 +13,6 @@ from web.admin.schemas.auth import (
 )
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.context import AdminContextOut, PublicContextOut
-from web.admin.schemas.resource import (
-    ResourcePayload,
-    ToolOut,
-    ToolPayload,
-)
 from web.admin.schemas.tenant import (
     AppEnv,
     PasswordPolicyOut,
@@ -43,12 +38,9 @@ __all__ = [
     "PasswordPolicyOut",
     "PublicContextOut",
     "RefreshRequest",
-    "ResourcePayload",
     "TenantCreateRequest",
     "TenantOut",
     "TenantResolution",
     "TenantSwitchMode",
     "TenantUpdateRequest",
-    "ToolOut",
-    "ToolPayload",
 ]

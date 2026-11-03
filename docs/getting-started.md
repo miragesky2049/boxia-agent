@@ -90,15 +90,14 @@
 
 ### 1.5 角色与权限
 
-系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）、按钮（`button:*`）以及工具与文档的读写（如 `tool:read`、`document:update`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
+系统预置全局只读的权限资源目录，覆盖管理端菜单（`menu:*`）、页面（`page:*`）与按钮（`button:*`）。角色通过 `role_permissions` 绑定权限编码，账号绑定角色后实时生效。
 
 | 权限类别 | 作用                         | 示例                                                         |
 |----------|------------------------------|--------------------------------------------------------------|
 | `system` | 管理端入口与全量数据范围     | `system:console:access`、`system:data:all`                   |
 | `menu`   | 左侧菜单可见性               | `menu:roles`、`menu:apps`、`menu:marketplace`                |
-| `page`   | 页面与对应接口访问           | `page:roles`、`page:tools`、`page:resources`                 |
-| `button` | 页面操作按钮                 | `button:role:grant`、`button:app:create`、`button:tool:create` |
-| `tool`   | 工具与知识库文档读写         | `tool:create` / `tool:read` / `tool:update` / `tool:delete`；`document:create` / `document:read` / `document:update` / `document:delete` |
+| `page`   | 页面与对应接口访问           | `page:roles`、`page:apps`、`page:resources`                  |
+| `button` | 页面操作按钮                 | `button:role:grant`、`button:app:create`、`button:admin-user:create` |
 
 - 产品级平台与每个租户各自拥有 `superadmin` / `admin` / `viewer` 三个内置系统角色，不可删除、不可停用；平台与租户角色数据完全隔离。
 - `superadmin` 默认拥有所属作用域全部权限（含 `system:data:all`），其功能权限与数据授权在角色详情中只读。

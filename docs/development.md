@@ -303,9 +303,8 @@ boxia-agent/
 | --- | --- | --- |
 | `system` | 管理端入口与全量数据范围 | `system:console:access`、`system:data:all` |
 | `menu` | 左侧菜单可见性 | `menu:apps`、`menu:marketplace`、`menu:resources` |
-| `page` | 页面与对应接口访问 | `page:apps`、`page:tools`、`page:resources` |
-| `button` | 页面操作按钮 | `button:app:create`、`button:tool:create`、`button:role:grant` |
-| `tool` | 工具与知识库文档读写（`document:*` 归入该类别） | `tool:create` / `tool:read` / `tool:update` / `tool:delete`；`document:create` / `document:read` / `document:update` / `document:delete` |
+| `page` | 页面与对应接口访问 | `page:apps`、`page:resources`、`page:roles` |
+| `button` | 页面操作按钮 | `button:app:create`、`button:admin-user:create`、`button:role:grant` |
 
 约束与规则：
 
@@ -499,21 +498,7 @@ Authorization: Bearer <access_token>
 
 ### 8.6 工具与知识库接口
 
-**工具管理**（权限 `tool:read` / `tool:create` / `tool:update` / `tool:delete`）：
-
-| 方法   | 路径                              | 说明                                                                    |
-|--------|-----------------------------------|-------------------------------------------------------------------------|
-| GET    | `/admin/tools`                    | 工具列表                                                                |
-| POST   | `/admin/tools`                    | 创建工具                                                                |
-| POST   | `/admin/tools/pull-mcp-tools`     | 输入 `{server_url}`，SSRF 校验后调 MCP `list_tools`，返回候选（不落库）|
-| POST   | `/admin/tools/import-mcp-tools`   | 批量入库 MCP 工具                                                       |
-| POST   | `/admin/tools/parse-curl`         | 解析 curl 为 `{method, url, headers, body, notes}`                      |
-| GET    | `/admin/tools/{id}`               | 工具详情                                                                |
-| PUT    | `/admin/tools/{id}`               | 更新工具                                                                |
-| DELETE | `/admin/tools/{id}`               | 删除工具                                                                |
-| POST   | `/admin/tools/{id}/test-invoke`   | 试调用，返回 `{success, duration_ms, output, error}`（不落库）          |
-
-所有出站 URL 强制经过 `ssrf_guard.validate_outbound_url()`：拒绝 loopback / 云元数据（169.254.169.254）/ 链路本地 / 组播 / 保留地址；允许 RFC1918 私网（租户内网 MCP 合法）。
+工具是统一资源的一类，接口见 8.5 节（`/admin/resources`，`type=tool`），不再提供独立的工具管理、MCP 导入、curl 解析与试调用端点。所有工具出站调用仍强制经过 `ssrf_guard.validate_outbound_url()`：拒绝 loopback / 云元数据（169.254.169.254）/ 链路本地 / 组播 / 保留地址；允许 RFC1918 私网（租户内网地址合法）。
 
 **知识库文档**（权限 `document:*`；文档与租户绑定，可被 Dataset 节点引用）：
 

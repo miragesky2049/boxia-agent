@@ -56,9 +56,6 @@ from internal.infrastructure.repository.postgres_refresh_token_repository import
 from internal.infrastructure.repository.postgres_resource_grant_repository import (
     PostgresResourceGrantRepository,
 )
-from internal.infrastructure.repository.postgres_resource_repository import (
-    PostgresToolRepository,
-)
 from internal.infrastructure.repository.postgres_role_permission_repository import (
     PostgresRolePermissionRepository,
 )
@@ -76,6 +73,9 @@ from internal.infrastructure.repository.postgres_user_refresh_token_repository i
 )
 from internal.infrastructure.repository.postgres_user_repository import (
     PostgresUserRepository,
+)
+from internal.infrastructure.repository.resource_tool_repository import (
+    ResourceToolRepository,
 )
 
 
@@ -115,7 +115,7 @@ class SqlAlchemyUnitOfWork:
         )
         self._scope_role_ids: tuple[UUID, ...] = ()
         self._scope_apply_role_filter: bool = True
-        self.tools: ResourceRepository[Tool] = PostgresToolRepository(self.session, tenant_id)
+        self.tools: ResourceRepository[Tool] = ResourceToolRepository(self.session, tenant_id)
         # RAG 知识库：文档元数据 + 分块向量仓储
         self.documents = PostgresDocumentRepository(self.session, tenant_id)
         self.document_chunks = PostgresDocumentChunkRepository(self.session, tenant_id)
@@ -126,7 +126,7 @@ class SqlAlchemyUnitOfWork:
         """按当前账号角色重建资源仓储。"""
         self._scope_role_ids = tuple(role_ids)
         self._scope_apply_role_filter = apply_role_filter
-        self.tools = PostgresToolRepository(
+        self.tools = ResourceToolRepository(
             self.session, self.tenant_id, self._scope_role_ids, self._scope_apply_role_filter
         )
 

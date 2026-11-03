@@ -15,8 +15,7 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
-from internal.application.resource_service import MAX_PAGE_SIZE
-from internal.domain.entity.common import Page
+from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.department import Department
 from internal.domain.entity.employment import (
     EMPLOYMENT_CHANGE_TYPES,

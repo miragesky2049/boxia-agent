@@ -11,7 +11,6 @@ PERMISSION_CATEGORIES = (
     "menu",
     "page",
     "button",
-    "tool",
 )
 PERMISSION_ACTIONS = ("view", "access", "create", "read", "update", "delete", "manage")
 
@@ -63,7 +62,6 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("menu:apps", "应用管理", "menu", "view", 10),
     _perm("menu:marketplace", "应用市场", "menu", "view", 12),
     _perm("menu:resources", "资源管理", "menu", "view", 14),
-    _perm("menu:tools", "工具管理", "menu", "view", 16),
     _perm("menu:grants", "用户授权", "menu", "view", 20),
     _perm("menu:roles", "角色管理", "menu", "view", 30),
     _perm("menu:users", "用户管理", "menu", "view", 40),
@@ -76,7 +74,6 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("page:apps", "应用管理页面", "page", "view", 110),
     _perm("page:marketplace", "应用市场页面", "page", "view", 112),
     _perm("page:resources", "资源管理页面", "page", "view", 114),
-    _perm("page:tools", "工具管理页面", "page", "view", 116),
     _perm("page:grants", "用户授权页面", "page", "view", 120),
     _perm("page:roles", "角色管理页面", "page", "view", 130),
     _perm("page:users", "用户管理页面", "page", "view", 140),
@@ -86,9 +83,6 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("page:admin-users", "管理员账号页面", "page", "view", 150),
     _perm("page:tenants", "租户管理页面", "page", "view", 160),
     _perm("page:audit", "审计日志页面", "page", "view", 170),
-    _perm("button:tool:create", "工具-新建", "button", "create", 230),
-    _perm("button:tool:update", "工具-编辑", "button", "update", 231),
-    _perm("button:tool:delete", "工具-删除", "button", "delete", 232),
     _perm("button:role:create", "角色-新建", "button", "create", 260),
     _perm("button:role:update", "角色-编辑", "button", "update", 261),
     _perm("button:role:delete", "角色-删除", "button", "delete", 262),
@@ -104,10 +98,6 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:user:update", "用户-编辑", "button", "update", 291),
     _perm("button:user:delete", "用户-删除", "button", "delete", 292),
     _perm("button:grant:manage", "用户授权-维护", "button", "manage", 300),
-    _perm("tool:create", "工具-创建", "tool", "create", 330),
-    _perm("tool:read", "工具-查看", "tool", "read", 331),
-    _perm("tool:update", "工具-修改", "tool", "update", 332),
-    _perm("tool:delete", "工具-删除", "tool", "delete", 333),
     _perm("button:department:create", "部门-新建", "button", "create", 360),
     _perm("button:department:update", "部门-编辑", "button", "update", 361),
     _perm("button:department:delete", "部门-删除", "button", "delete", 362),
@@ -194,19 +184,6 @@ _ORG_WRITE_CODES = frozenset(
 TENANT_SCOPED_CODES: frozenset[str] = frozenset(PERMISSION_CODES) - PLATFORM_ONLY_CODES
 PLATFORM_SCOPED_CODES: frozenset[str] = frozenset(PERMISSION_CODES) - TENANT_ONLY_CODES
 
-_READ_CODES = frozenset({"tool:read"})
-_RESOURCE_WRITE_CODES = frozenset(
-    {
-        f"tool:{action}"
-        for action in ("create", "update", "delete")
-    }
-)
-_RESOURCE_BUTTON_CODES = frozenset(
-    {
-        f"button:tool:{action}"
-        for action in ("create", "update", "delete")
-    }
-)
 _CONSOLE_CODES = frozenset(
     {
         CONSOLE_ACCESS,
@@ -216,17 +193,13 @@ _CONSOLE_CODES = frozenset(
         "page:marketplace",
         "menu:resources",
         "page:resources",
-        "menu:tools",
-        "page:tools",
     }
 )
 
 # 平台内置角色：与迁移中的种子数据保持一致
 PLATFORM_SUPERADMIN_CODES: frozenset[str] = PLATFORM_SCOPED_CODES
-PLATFORM_ADMIN_CODES: frozenset[str] = (
-    _CONSOLE_CODES | _READ_CODES | _RESOURCE_WRITE_CODES | _RESOURCE_BUTTON_CODES
-)
-PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES | _READ_CODES
+PLATFORM_ADMIN_CODES: frozenset[str] = _CONSOLE_CODES
+PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES
 
 # 租户内置角色：仅包含租户作用域权限，并并入组织架构相关权限
 TENANT_SUPERADMIN_CODES: frozenset[str] = TENANT_SCOPED_CODES

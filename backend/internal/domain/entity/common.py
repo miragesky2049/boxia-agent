@@ -5,6 +5,8 @@ from typing import Generic, TypeVar
 
 T = TypeVar("T")
 
+MAX_PAGE_SIZE = 100
+
 
 @dataclass(frozen=True)
 class Page(Generic[T]):

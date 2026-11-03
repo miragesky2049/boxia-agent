@@ -68,17 +68,14 @@ def test_permission_catalog_covers_functional_resources(
         "menu:roles",
         "page:roles",
         "button:role:grant",
-        "tool:create",
-        "tool:read",
-        "tool:update",
-        "tool:delete",
+        "menu:resources",
+        "page:resources",
     } <= codes
     assert {
         "system",
         "menu",
         "page",
         "button",
-        "tool",
     } <= {item["category"] for item in items}
 
 
@@ -107,34 +104,34 @@ def test_role_permission_replace_add_and_remove(
     ).json()
 
     replaced = _replace_permissions(
-        site, headers, role["id"], ["system:console:access", "tool:read"]
+        site, headers, role["id"], ["system:console:access", "page:resources"]
     )
     assert replaced.status_code == 200, replaced.text
-    assert set(replaced.json()["codes"]) == {"system:console:access", "tool:read"}
+    assert set(replaced.json()["codes"]) == {"system:console:access", "page:resources"}
 
     added = site.post(
         f"{ROLES_URL}/{role['id']}/permissions",
-        json={"codes": ["tool:update"]},
+        json={"codes": ["menu:resources"]},
         headers=headers,
     )
     assert added.status_code == 200, added.text
     assert _role_codes(site, headers, role["id"]) == {
         "system:console:access",
-        "tool:read",
-        "tool:update",
+        "page:resources",
+        "menu:resources",
     }
 
     removed = site.delete(
-        f"{ROLES_URL}/{role['id']}/permissions/tool:read", headers=headers
+        f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers
     )
     assert removed.status_code == 204
     assert _role_codes(site, headers, role["id"]) == {
         "system:console:access",
-        "tool:update",
+        "menu:resources",
     }
 
     missing = site.delete(
-        f"{ROLES_URL}/{role['id']}/permissions/tool:read", headers=headers
+        f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers
     )
     assert missing.status_code == 404
 
@@ -174,18 +171,18 @@ def test_role_permission_grant_rejects_privilege_escalation(
 ) -> None:
     limited = client.post(
         ROLES_URL,
-        json={"code": "tool-admin", "name": "工具管理员"},
+        json={"code": "perm-operator", "name": "权限管理员"},
         headers=auth_headers,
     ).json()
     granted = _replace_permissions(
         client,
         auth_headers,
         limited["id"],
-        ["system:console:access", "button:role:grant", "tool:read"],
+        ["system:console:access", "button:role:grant", "page:admin-users"],
     )
     assert granted.status_code == 200, granted.text
     operator_headers = _create_platform_account(
-        client, auth_headers, "tool-admin", limited["id"]
+        client, auth_headers, "perm-operator", limited["id"]
     )
 
     target = client.post(
@@ -194,14 +191,14 @@ def test_role_permission_grant_rejects_privilege_escalation(
 
     denied = client.post(
         f"{ROLES_URL}/{target['id']}/permissions",
-        json={"codes": ["tool:update"]},
+        json={"codes": ["button:admin-user:create"]},
         headers=operator_headers,
     )
     assert denied.status_code == 403
 
     allowed = client.post(
         f"{ROLES_URL}/{target['id']}/permissions",
-        json={"codes": ["tool:read"]},
+        json={"codes": ["page:admin-users"]},
         headers=operator_headers,
     )
     assert allowed.status_code == 200, allowed.text
@@ -211,27 +208,27 @@ def test_permission_changes_take_effect_immediately(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     role = client.post(
-        ROLES_URL, json={"code": "tool-reader", "name": "工具只读"}, headers=auth_headers
+        ROLES_URL, json={"code": "user-reader", "name": "账号只读"}, headers=auth_headers
     ).json()
     assert (
         _replace_permissions(
-            client, auth_headers, role["id"], ["system:console:access", "tool:read"]
+            client, auth_headers, role["id"], ["system:console:access", "page:admin-users"]
         ).status_code
         == 200
     )
     operator_headers = _create_platform_account(
-        client, auth_headers, "tool-reader", role["id"]
+        client, auth_headers, "user-reader", role["id"]
     )
-    assert client.get("/api/v1/admin/tools", headers=operator_headers).status_code == 200
+    assert client.get(ADMIN_USERS_URL, headers=operator_headers).status_code == 200
 
     # 撤销权限后无需重新登录，下一次请求立即生效
     assert (
         client.delete(
-            f"{ROLES_URL}/{role['id']}/permissions/tool:read", headers=auth_headers
+            f"{ROLES_URL}/{role['id']}/permissions/page:admin-users", headers=auth_headers
         ).status_code
         == 204
     )
-    assert client.get("/api/v1/admin/tools", headers=operator_headers).status_code == 403
+    assert client.get(ADMIN_USERS_URL, headers=operator_headers).status_code == 403
 
 
 def test_readonly_platform_role_is_denied_management_endpoints(
@@ -245,7 +242,7 @@ def test_readonly_platform_role_is_denied_management_endpoints(
         client, auth_headers, "platform-readonly", roles["viewer"]["id"]
     )
 
-    assert client.get("/api/v1/admin/tools", headers=viewer_headers).status_code == 200
+    assert client.get("/api/v1/admin/resources", headers=viewer_headers).status_code == 200
     assert client.get(ROLES_URL, headers=viewer_headers).status_code == 403
     assert client.get(ADMIN_USERS_URL, headers=viewer_headers).status_code == 403
     assert client.get("/api/v1/admin/tenants", headers=viewer_headers).status_code == 403

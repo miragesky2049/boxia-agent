@@ -15,9 +15,8 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
-from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.entity.access import User
-from internal.domain.entity.common import Page
+from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.security.password import hash_password, validate_password_strength

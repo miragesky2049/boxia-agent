@@ -14,20 +14,42 @@ from tests.helpers import (
 
 _RESOURCE_TYPES = ("tool", "app")
 
-
-def _tool_payload(name: str) -> dict:
-    return {
-        "name": name,
-        "description": "",
-        "type": "http",
-        "config": {"url": "https://example.com/api", "method": "GET"},
-    }
+_TOOL_CONFIG = {"url": "https://example.com/api", "method": "GET"}
 
 
-def _create_tool(site: TestClient, headers: dict[str, str], name: str) -> dict:
-    response = site.post("/api/v1/admin/tools", json=_tool_payload(name), headers=headers)
+def _create_tenant_tool(
+    client: TestClient,
+    headers: dict[str, str],
+    tenant_id: UUID,
+    name: str,
+) -> dict:
+    """平台管理员创建归属于指定租户的工具（resource 表）。"""
+    response = client.post(
+        "/api/v1/admin/resources",
+        json={
+            "type": "tool",
+            "name": name,
+            "config": _TOOL_CONFIG,
+            "owner_type": "tenant",
+            "owner_id": str(tenant_id),
+        },
+        headers=headers,
+    )
     assert response.status_code == 201, response.text
-    return response.json()
+    return {"id": response.json()["resource_id"], "name": name}
+
+
+def _create_platform_tool(
+    client: TestClient, headers: dict[str, str], name: str
+) -> dict:
+    """平台管理员创建产品级工具（resource 表）。"""
+    response = client.post(
+        "/api/v1/admin/resources",
+        json={"type": "tool", "name": name, "config": _TOOL_CONFIG},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return {"id": response.json()["resource_id"], "name": name}
 
 
 def _create_admin_with_role(
@@ -102,7 +124,7 @@ def test_role_detail_and_grant_lifecycle(
     )
     assert platform_detail.status_code == 403
 
-    skill = _create_tool(site, headers, "角色授权技能")
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "角色授权技能")
     skill_id = skill["id"]
     assert _summary(site, headers, viewer_id) == {item: 0 for item in _RESOURCE_TYPES}
 
@@ -142,7 +164,7 @@ def test_role_detail_and_grant_lifecycle(
     assert _grant_items(site, headers, viewer_id, "tool") == []
 
     # 整体替换可一次授权多个资源，空数组表示清空
-    second = _create_tool(site, headers, "第二个技能")
+    second = _create_tenant_tool(client, auth_headers, tenant["id"], "第二个技能")
     replaced = site.put(
         f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [skill_id, second["id"]]},
@@ -165,11 +187,11 @@ def test_role_detail_and_grant_lifecycle(
 def test_superadmin_role_grants_read_only(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
-    create_tenant(client, auth_headers)
+    tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
     superadmin_id = roles["superadmin"]["id"]
-    skill = _create_tool(site, headers, "超管技能")
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "超管技能")
 
     assert _summary(site, headers, superadmin_id)["tool"] == 1
 
@@ -228,11 +250,7 @@ def test_role_grants_platform_resource_candidate_gate(
     viewer_id = roles["viewer"]["id"]
     admin_id = roles["admin"]["id"]
 
-    platform_skill = client.post(
-        "/api/v1/admin/tools", json=_tool_payload("平台技能"), headers=auth_headers
-    )
-    assert platform_skill.status_code == 201, platform_skill.text
-    platform_skill_id = platform_skill.json()["id"]
+    platform_skill_id = _create_platform_tool(client, auth_headers, "平台技能")["id"]
 
     # 未下发本租户的平台资源不可出现在候选集，也不能被授权
     candidates = _grant_items(site, headers, viewer_id, "tool", granted_only=False)
@@ -280,23 +298,18 @@ def test_role_grants_platform_resource_candidate_gate(
     assert _summary(site, headers, viewer_id)["tool"] == 0
     assert _summary(site, headers, admin_id)["tool"] == 1
 
-    admin_headers = _create_admin_with_role(site, headers, "platform-admin", admin_id)
-    visible = site.get("/api/v1/admin/tools", headers=admin_headers)
-    assert visible.status_code == 200, visible.text
-    assert platform_skill_id in {item["id"] for item in visible.json()["items"]}
-
 
 def test_role_grants_cross_tenant_isolation(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     tenant_a = create_tenant(client, auth_headers, code="acme", name="Acme")
-    create_tenant(client, auth_headers, code="beta", name="Beta")
+    tenant_b = create_tenant(client, auth_headers, code="beta", name="Beta")
     site_a, headers_a, _ = tenant_admin_client(tenant_client, "acme")
     roles_a = list_roles(site_a, headers_a)
     viewer_a_id = roles_a["viewer"]["id"]
 
     site_b, headers_b, _ = tenant_admin_client(tenant_client, "beta")
-    skill_b = _create_tool(site_b, headers_b, "Beta 技能")
+    skill_b = _create_tenant_tool(client, auth_headers, tenant_b["id"], "Beta 技能")
 
     assert (
         site_b.get(f"/api/v1/admin/roles/{viewer_a_id}", headers=headers_b).status_code
@@ -317,7 +330,7 @@ def test_role_grants_cross_tenant_isolation(
         == 404
     )
 
-    skill_a = _create_tool(site_a, headers_a, "Acme 技能")
+    skill_a = _create_tenant_tool(client, auth_headers, tenant_a["id"], "Acme 技能")
     assert (
         site_b.post(
             f"/api/v1/admin/roles/{viewer_a_id}/grants/tool",

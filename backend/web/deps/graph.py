@@ -41,8 +41,8 @@ from internal.infrastructure.repository.apps.message_repository import (
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
-from internal.infrastructure.repository.postgres_resource_repository import (
-    PostgresToolRepository,
+from internal.infrastructure.repository.resource_tool_repository import (
+    ResourceToolRepository,
 )
 from web.deps.apps_services import make_application_service, make_model_service
 
@@ -102,7 +102,7 @@ def register_conversation_services(
     services.register(
         "tool_executor",
         ToolExecutorService(
-            PostgresToolRepository(
+            ResourceToolRepository(
                 uow.session,
                 tenant_id=effective_tenant_id,
                 apply_role_filter=False,
@@ -257,7 +257,7 @@ async def build_runner(
     services.register(
         "tool_executor",
         ToolExecutorService(
-            PostgresToolRepository(
+            ResourceToolRepository(
                 uow.session,
                 tenant_id=tenant_id,
                 apply_role_filter=False,
