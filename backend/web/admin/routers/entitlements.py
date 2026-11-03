@@ -15,6 +15,9 @@ from web.admin.schemas.common import PageOut
 from web.admin.schemas.entitlement import (
     EntitlementBatchOut,
     EntitlementBatchRequest,
+    EntitlementPlanApplyRequest,
+    EntitlementPlanCreateRequest,
+    EntitlementPlanOut,
     EntitlementPreviewOut,
     EntitlementPurgeOut,
     EntitlementPurgeRequest,
@@ -164,6 +167,100 @@ async def purge_entitlement(
         reason=payload.reason,
     )
     return EntitlementPurgeOut.model_validate(result)
+
+
+@router.get("/plans", response_model=PageOut[EntitlementPlanOut], dependencies=[_VIEW_ENTITLEMENTS])
+def list_plans(
+    service: EntitlementServiceDep,
+    keyword: str | None = Query(None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+) -> PageOut[EntitlementPlanOut]:
+    """套餐模板分页列表（平台级定义）。"""
+    result = service.list_plans(keyword=keyword, page=page, page_size=page_size)
+    return PageOut[EntitlementPlanOut](
+        items=[EntitlementPlanOut.model_validate(plan) for plan in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+@router.get(
+    "/plans/{plan_id}", response_model=EntitlementPlanOut, dependencies=[_VIEW_ENTITLEMENTS]
+)
+def get_plan(plan_id: UUID, service: EntitlementServiceDep) -> EntitlementPlanOut:
+    """套餐模板详情（含条目集合）。"""
+    return EntitlementPlanOut.model_validate(service.get_plan(plan_id))
+
+
+@router.post(
+    "/plans",
+    response_model=EntitlementPlanOut,
+    status_code=201,
+    dependencies=[_MANAGE_ENTITLEMENTS],
+)
+def create_plan(
+    payload: EntitlementPlanCreateRequest,
+    principal: AdminAuthDep,
+    service: EntitlementServiceDep,
+) -> EntitlementPlanOut:
+    """创建套餐模板：code 全局唯一，条目对象需存在；模板不落权益。"""
+    plan_id = service.create_plan(
+        code=payload.code,
+        name=payload.name,
+        description=payload.description,
+        auth_type=payload.auth_type,
+        duration_days=payload.duration_days,
+        quota=payload.quota,
+        items=[EntitlementItem(item.object_type, item.object_id) for item in payload.items],
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+    )
+    return EntitlementPlanOut.model_validate(service.get_plan(plan_id))
+
+
+@router.delete("/plans/{plan_id}", dependencies=[_MANAGE_ENTITLEMENTS])
+def delete_plan(
+    plan_id: UUID,
+    principal: AdminAuthDep,
+    service: EntitlementServiceDep,
+) -> dict[str, bool]:
+    """删除套餐定义（条目级联清除）；已开通的权益不受影响。"""
+    service.delete_plan(plan_id, actor_id=principal.user_id, actor_username=principal.username)
+    return {"ok": True}
+
+
+@router.post(
+    "/plans/{plan_id}/apply",
+    response_model=EntitlementBatchOut,
+    dependencies=[_MANAGE_ENTITLEMENTS],
+)
+async def apply_plan(
+    plan_id: UUID,
+    payload: EntitlementPlanApplyRequest,
+    principal: AdminAuthDep,
+    request: Request,
+    service: EntitlementServiceDep,
+) -> EntitlementBatchOut:
+    """套餐开通：展开条目套用模板默认 auth_type/期限，复用批量单事务语义（失败整体不落库）。"""
+    ip, user_agent = client_meta(request)
+    result = await service.apply_plan(
+        payload.tenant_id,
+        plan_id,
+        start_time=payload.start_time,
+        expire_time=payload.expire_time,
+        reason=payload.reason,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return EntitlementBatchOut(
+        updated=result.updated,
+        failed=list(result.failed),
+        affected_role_grants=result.affected_role_grants,
+    )
 
 
 @router.post(

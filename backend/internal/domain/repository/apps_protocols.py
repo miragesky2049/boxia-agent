@@ -15,6 +15,7 @@ from uuid import UUID
 
 from internal.domain.entity.access import AppGrantRow
 from internal.domain.entity.entitlement import EntitlementItem, EntitlementView
+from internal.domain.entity.entitlement_plan import EntitlementPlan
 
 
 class ApplicationRepositoryProtocol(Protocol):
@@ -640,4 +641,40 @@ class EntitlementRepositoryProtocol(Protocol):
         self, tenant_id: UUID, object_type: str, object_id: UUID
     ) -> list[dict]:
         """该权益支撑的角色授权明细 [{role_id, role_name, subject_type}]，供 D-3 影响提示。"""
+        ...
+
+
+class EntitlementPlanRepositoryProtocol(Protocol):
+    """套餐模板仓储端口：entitlement_plan + entitlement_plan_item 定义行读写（P3-3）。"""
+
+    def get(self, plan_id: UUID) -> EntitlementPlan | None:
+        """模板聚合（含条目）；不存在返回 None。"""
+        ...
+
+    def get_by_code(self, code: str) -> EntitlementPlan | None:
+        """按唯一 code 取模板，供创建前重复校验。"""
+        ...
+
+    def list_page(
+        self, keyword: str | None, page: int, page_size: int
+    ) -> tuple[list[EntitlementPlan], int]:
+        """模板分页（含条目），code/name 模糊过滤。"""
+        ...
+
+    def create(
+        self,
+        *,
+        code: str,
+        name: str,
+        description: str,
+        auth_type: str,
+        duration_days: int | None,
+        quota: dict[str, Any],
+        items: tuple[EntitlementItem, ...],
+    ) -> UUID:
+        """新建模板与条目集合，返回模板 ID；调用方负责提交。"""
+        ...
+
+    def delete(self, plan_id: UUID) -> bool:
+        """物理删除模板（条目行外键级联清除）；返回是否有行被删除。"""
         ...

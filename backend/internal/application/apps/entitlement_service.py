@@ -7,7 +7,7 @@ apply_batch/purge 自管事务边界（批量原子性要求先全量校验再�
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -31,9 +31,13 @@ from internal.domain.entity.entitlement import (
     EntitlementView,
     RemovePreviewItem,
 )
+from internal.domain.entity.entitlement_plan import PLAN_AUTH_TYPES, EntitlementPlan
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.errors import ForbiddenError, NotFoundError, ValidationError
-from internal.domain.repository.apps_protocols import EntitlementRepositoryProtocol
+from internal.domain.repository.apps_protocols import (
+    EntitlementPlanRepositoryProtocol,
+    EntitlementRepositoryProtocol,
+)
 from internal.domain.repository.protocols import UnitOfWork
 
 MODE_GRANT = "grant"
@@ -54,12 +58,14 @@ class EntitlementService:
         context: RequestContext,
         *,
         auth_service: AuthService | None = None,
+        plan_repo: EntitlementPlanRepositoryProtocol | None = None,
         revoke_strict: bool = False,
     ) -> None:
         self._uow = uow
         self._repo = repo
         self._context = context
         self._auth_service = auth_service
+        self._plan_repo = plan_repo
         self._revoke_strict = revoke_strict
 
     # ========== 读侧 ==========
@@ -188,6 +194,160 @@ class EntitlementService:
             raise
         return BatchResult(updated=updated, failed=(), affected_role_grants=affected)
 
+    # ========== 套餐模板（P3-3） ==========
+    def list_plans(
+        self, *, keyword: str | None = None, page: int = 1, page_size: int = 20
+    ) -> Page[EntitlementPlan]:
+        """套餐模板分页（平台级定义，不区分租户）。"""
+        self._require_platform()
+        items, total = self._require_plan_repo().list_page(keyword, page, page_size)
+        return Page(items=items, total=total, page=page, page_size=page_size)
+
+    def get_plan(self, plan_id: UUID) -> EntitlementPlan:
+        self._require_platform()
+        plan = self._require_plan_repo().get(plan_id)
+        if plan is None:
+            raise NotFoundError("套餐不存在")
+        return plan
+
+    def create_plan(
+        self,
+        *,
+        code: str,
+        name: str,
+        description: str,
+        auth_type: str,
+        duration_days: int | None,
+        quota: dict[str, Any],
+        items: list[EntitlementItem],
+        actor_id: UUID,
+        actor_username: str,
+    ) -> UUID:
+        """创建模板：code 唯一 + 条目对象存在性前置校验；定义行不落权益，返回模板 ID。"""
+        self._require_platform()
+        if not code.strip():
+            raise ValidationError("套餐编码不能为空")
+        if auth_type not in PLAN_AUTH_TYPES:
+            raise ValidationError(f"不支持的套餐授权类型：{auth_type}")
+        if duration_days is not None and duration_days <= 0:
+            raise ValidationError("套餐期限天数必须为正数")
+        if not items:
+            raise ValidationError("套餐条目不能为空")
+        keys = {(item.object_type, item.object_id) for item in items}
+        if len(keys) != len(items):
+            raise ValidationError("套餐条目重复")
+        for item in items:
+            self._validate_object_type(item.object_type)
+            if self._repo.describe_object(item.object_type, item.object_id) is None:
+                raise ValidationError(f"对象不存在：{item.object_type}/{item.object_id}")
+        repo = self._require_plan_repo()
+        if repo.get_by_code(code) is not None:
+            raise ValidationError(f"套餐编码已存在：{code}")
+        try:
+            plan_id = repo.create(
+                code=code,
+                name=name,
+                description=description,
+                auth_type=auth_type,
+                duration_days=duration_days,
+                quota=quota,
+                items=tuple(items),
+            )
+            record_audit(
+                self._uow,
+                action="entitlement.plan.create",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="entitlement_plan",
+                resource_id=str(plan_id),
+                detail={
+                    "code": code,
+                    "name": name,
+                    "auth_type": auth_type,
+                    "duration_days": duration_days,
+                    "quota": quota,
+                    "items": [item.to_dict() for item in items],
+                },
+            )
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+        return plan_id
+
+    def delete_plan(
+        self,
+        plan_id: UUID,
+        *,
+        actor_id: UUID,
+        actor_username: str,
+    ) -> None:
+        """删除模板定义（条目行外键级联）；已开通权益不受影响。"""
+        self._require_platform()
+        repo = self._require_plan_repo()
+        plan = repo.get(plan_id)
+        if plan is None:
+            raise NotFoundError("套餐不存在")
+        try:
+            repo.delete(plan_id)
+            record_audit(
+                self._uow,
+                action="entitlement.plan.delete",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="entitlement_plan",
+                resource_id=str(plan_id),
+                detail={"code": plan.code, "name": plan.name},
+            )
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+
+    async def apply_plan(
+        self,
+        tenant_id: UUID,
+        plan_id: UUID,
+        *,
+        start_time: datetime | None = None,
+        expire_time: datetime | None = None,
+        reason: str = "",
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> BatchResult:
+        """套餐开通：展开条目套用默认 auth_type/期限后复用 apply_batch 单事务批量。
+
+        expire_time 未显式传入且模板有 duration_days 时，按生效起点顺延；
+        弃用/不存在对象等按 apply_batch 语义整体拒绝并返回 failed 明细。
+        """
+        self._require_platform()
+        plan = self._require_plan_repo().get(plan_id)
+        if plan is None:
+            raise NotFoundError("套餐不存在")
+        if not plan.is_active:
+            raise ValidationError("套餐已停用，不可开通")
+        final_expire = expire_time
+        if final_expire is None and plan.duration_days is not None:
+            now = datetime.now(UTC)
+            base = start_time if start_time is not None and start_time > now else now
+            final_expire = base + timedelta(days=plan.duration_days)
+        return await self.apply_batch(
+            tenant_id,
+            MODE_GRANT,
+            list(plan.items),
+            reason=reason or f"套餐开通：{plan.name}",
+            auth_type=plan.auth_type,
+            quota=plan.quota,
+            start_time=start_time,
+            expire_time=final_expire,
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
+        )
+
     async def purge(
         self,
         tenant_id: UUID,
@@ -295,6 +455,11 @@ class EntitlementService:
         # 权益写操作是平台运营职责；租户上下文命中即 403（SCOPE_FORBIDDEN 语义，§4.2）
         if not self._context.is_platform:
             raise ForbiddenError("权益操作仅限平台作用域")
+
+    def _require_plan_repo(self) -> EntitlementPlanRepositoryProtocol:
+        if self._plan_repo is None:
+            raise RuntimeError("套餐仓储未装配（组合根遗漏 plan_repo）")
+        return self._plan_repo
 
     def _require_tenant(self, tenant_id: UUID) -> None:
         tenant = self._uow.tenants.get_by_id(tenant_id)

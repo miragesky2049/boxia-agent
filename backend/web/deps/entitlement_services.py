@@ -17,6 +17,9 @@ from internal.domain.entity.request_context import RequestContext
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
+from internal.infrastructure.repository.apps.entitlement_plan_repository import (
+    EntitlementPlanRepository,
+)
 from internal.infrastructure.repository.apps.entitlement_repository import EntitlementRepository
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
@@ -25,13 +28,14 @@ from web.deps.tenant import RequestContextDep
 def make_entitlement_service(
     uow: SqlAlchemyUnitOfWork, context: RequestContext
 ) -> EntitlementService:
-    """权益读写服务：双表统一仓储 + AuthService 失效 + 严格模式开关（cache 当前为 None）。"""
+    """权益读写服务：双表统一仓储 + 套餐模板仓储 + AuthService 失效 + 严格模式开关（cache 当前为 None）。"""
     auth_service = AuthService(AuthRepository(uow.session), cache=None)
     return EntitlementService(
         uow,
         EntitlementRepository(uow.session),
         context,
         auth_service=auth_service,
+        plan_repo=EntitlementPlanRepository(uow.session),
         revoke_strict=get_settings().entitlement_revoke_strict,
     )
 

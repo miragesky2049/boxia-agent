@@ -119,3 +119,49 @@ class EntitlementPurgeOut(BaseModel):
     deleted: int
     role_grants_deleted: int
     audit_id: UUID
+
+
+class EntitlementPlanCreateRequest(BaseModel):
+    """套餐模板创建请求：条目集合 + 默认 auth_type/期限/配额（P3-3）。"""
+
+    code: str = Field(min_length=1, max_length=64)
+    name: str = Field(min_length=1, max_length=128)
+    description: str = ""
+    auth_type: Literal["FORMAL", "TRIAL", "GIFT"] = "FORMAL"
+    duration_days: int | None = Field(None, ge=1, le=36500)
+    quota: dict[str, Any] = Field(default_factory=dict)
+    items: list[EntitlementItemIn] = Field(min_length=1, max_length=100)
+
+
+class EntitlementPlanApplyRequest(BaseModel):
+    """套餐开通请求：expire_time 缺省时按模板 duration_days 顺延。"""
+
+    tenant_id: UUID
+    reason: str = ""
+    start_time: datetime | None = None
+    expire_time: datetime | None = None
+
+
+class EntitlementPlanItemOut(BaseModel):
+    """模板条目视图（from_attributes 映射 EntitlementItem）。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    object_type: str
+    object_id: UUID
+
+
+class EntitlementPlanOut(BaseModel):
+    """套餐模板视图。"""
+
+    model_config = ConfigDict(from_attributes=True)
+
+    id: UUID
+    code: str
+    name: str
+    description: str
+    auth_type: str
+    duration_days: int | None
+    quota: dict[str, Any]
+    is_active: bool
+    items: list[EntitlementPlanItemOut]

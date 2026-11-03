@@ -10,6 +10,7 @@ from tests.helpers import create_tenant, tenant_admin_client
 BASE = "/api/v1/admin/entitlements"
 _ROLE_PASSWORD = "Entitlement-pass-123"
 _PURGE_PASSWORD = "EntPurge-pass-123"
+_PLAN_PASSWORD = "EntPlan-pass-123"
 
 
 @pytest.fixture()
@@ -252,6 +253,101 @@ def test_purge_requires_confirm_and_deletes_row(client: TestClient, auth_headers
 
     listed = client.get(f"{BASE}/tenants/{env['tenant_id']}", headers=auth_headers).json()
     assert [item["object_type"] for item in listed["items"]] == ["app"]
+
+
+def test_plan_crud_and_apply_flow(client: TestClient, auth_headers, env):
+    """P3-3 API 闭环：建模板→列表→开通（默认 auth_type）→删模板（权益保留）→404。"""
+    created = client.post(
+        f"{BASE}/plans",
+        json={
+            "code": f"planapi-{uuid.uuid4().hex[:8]}",
+            "name": "接口套餐",
+            "auth_type": "GIFT",
+            "duration_days": 10,
+            "quota": {"seat": 2},
+            "items": _items(env),
+        },
+        headers=auth_headers,
+    )
+    assert created.status_code == 201, created.text
+    plan = created.json()
+    assert plan["is_active"] is True and len(plan["items"]) == 2
+
+    listed = client.get(f"{BASE}/plans", headers=auth_headers).json()
+    assert any(item["id"] == plan["id"] for item in listed["items"])
+
+    applied = client.post(
+        f"{BASE}/plans/{plan['id']}/apply",
+        json={"tenant_id": env["tenant_id"]},
+        headers=auth_headers,
+    )
+    assert applied.status_code == 200, applied.text
+    assert applied.json()["updated"] == 2
+    tenant_page = client.get(f"{BASE}/tenants/{env['tenant_id']}", headers=auth_headers).json()
+    assert tenant_page["total"] == 2
+    assert all(item["auth_type"] == "GIFT" for item in tenant_page["items"])
+
+    deleted = client.delete(f"{BASE}/plans/{plan['id']}", headers=auth_headers)
+    assert deleted.status_code == 200 and deleted.json() == {"ok": True}
+    assert client.get(f"{BASE}/plans/{plan['id']}", headers=auth_headers).status_code == 404
+    assert (
+        client.get(f"{BASE}/tenants/{env['tenant_id']}", headers=auth_headers).json()["total"] == 2
+    )
+
+
+def test_plan_permission_and_validation(client: TestClient, auth_headers, env):
+    """page 账号可读模板列表，创建/开通 403；空 items 422。"""
+    bad = client.post(
+        f"{BASE}/plans",
+        json={"code": f"x-{uuid.uuid4().hex[:6]}", "name": "空条目", "items": []},
+        headers=auth_headers,
+    )
+    assert bad.status_code == 422
+
+    role = client.post(
+        "/api/v1/admin/roles",
+        json={"code": "plan-viewer", "name": "套餐只读"},
+        headers=auth_headers,
+    ).json()
+    granted = client.put(
+        f"/api/v1/admin/roles/{role['id']}/permissions",
+        json={"codes": ["system:console:access", "page:entitlements"]},
+        headers=auth_headers,
+    )
+    assert granted.status_code == 200, granted.text
+    client.post(
+        "/api/v1/admin/admin-users",
+        json={
+            "username": "plan-viewer",
+            "password": _PLAN_PASSWORD,
+            "display_name": "套餐只读账号",
+            "role_id": role["id"],
+        },
+        headers=auth_headers,
+    )
+    login = client.post(
+        "/api/v1/admin/auth/login", json={"username": "plan-viewer", "password": _PLAN_PASSWORD}
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    assert client.get(f"{BASE}/plans", headers=headers).status_code == 200
+    blocked = client.post(
+        f"{BASE}/plans",
+        json={
+            "code": "plan-blocked",
+            "name": "被拦截",
+            "items": [{"object_type": "skill", "object_id": env["skill_id"]}],
+        },
+        headers=headers,
+    )
+    assert blocked.status_code == 403
+    blocked_apply = client.post(
+        f"{BASE}/plans/{uuid.uuid4()}/apply",
+        json={"tenant_id": env["tenant_id"]},
+        headers=headers,
+    )
+    assert blocked_apply.status_code == 403
 
 
 def test_purge_forbidden_for_non_superadmin(client: TestClient, auth_headers, env):
