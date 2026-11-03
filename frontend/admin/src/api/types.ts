@@ -139,12 +139,7 @@ export interface RoleCopyPayload {
   description?: string
 }
 
-export type PermissionCategory =
-  | 'system'
-  | 'menu'
-  | 'page'
-  | 'button'
-  | 'tool'
+export type PermissionCategory = 'system' | 'menu' | 'page' | 'button' | 'tool'
 
 export interface PermissionResource {
   id: string
@@ -376,7 +371,7 @@ export interface ResourceGrant {
   created_at: string
 }
 
-export type ResourceType = 'tool' | 'app'
+export type ResourceType = 'tool' | 'skill' | 'prompt' | 'knowledge' | 'app'
 
 export type GrantBatchMode = 'merge' | 'replace' | 'clear'
 
@@ -396,6 +391,8 @@ export interface RoleGrantResource {
   is_enabled: boolean
   updated_at: string
   is_granted: boolean
+  /** tenant 档整租户授权（全员可见），仅租户角色可能为 true。 */
+  is_tenant_wide?: boolean
 }
 
 export interface RoleGrantSummary {
@@ -426,4 +423,3 @@ export interface AuditLog {
   detail: Record<string, unknown>
   created_at: string
 }
-
