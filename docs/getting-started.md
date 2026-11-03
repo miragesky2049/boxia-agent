@@ -323,7 +323,8 @@ uv run alembic current
 
 ```bash
 ADMIN_AUTO_INIT=true
-ADMIN_INITIAL_PASSWORD='Boxia-2026-Root!'
+# 设置自己的强密码并妥善保管，不要使用文档或他人示例中的密码
+ADMIN_INITIAL_PASSWORD='<符合密码策略的强密码>'
 ADMIN_INITIAL_USERNAME=admin
 ADMIN_INITIAL_DISPLAY_NAME=系统管理员
 ADMIN_INITIAL_ROLE=superadmin
@@ -365,18 +366,18 @@ uv run python -m scripts.create_admin
 - 不能包含用户名（默认用户名是 `admin`，所以密码里不能出现 `admin`）
 - 不能是常见弱口令，例如 `password1234`
 
-可以用这个示例：`Boxia-2026-Root!`
+可用 `openssl rand -base64 18` 之类的方式生成随机密码，确认其满足上面的长度与字符类别要求；**不要使用文档或他人示例中的密码**。
 
-推荐用交互方式输入密码，这样密码不会留在命令历史里。如果你确实需要非交互方式（比如自动化脚本）：
+推荐用交互方式输入密码，这样密码不会留在命令历史里。如果你确实需要非交互方式（比如自动化脚本），请通过环境变量传入你自己生成的密码：
 
 ```bash
-ADMIN_USERNAME=admin ADMIN_PASSWORD='Boxia-2026-Root!' uv run python -m scripts.create_admin
+ADMIN_USERNAME=admin ADMIN_PASSWORD='<你的强密码>' uv run python -m scripts.create_admin
 ```
 
 PowerShell 写法：
 
 ```powershell
-$env:ADMIN_USERNAME="admin"; $env:ADMIN_PASSWORD="Boxia-2026-Root!"; uv run python -m scripts.create_admin
+$env:ADMIN_USERNAME="admin"; $env:ADMIN_PASSWORD="<你的强密码>"; uv run python -m scripts.create_admin
 ```
 
 > 同一命令可以重复执行。用户名已存在时会重置该账号的密码，不会创建重复账号；重置后同样会要求下次登录改密。
@@ -392,9 +393,12 @@ uv run uvicorn web.app_user:app --reload --port 8001
 
 # RAG 文档 ingest 异步 worker（另开终端，仅使用知识库时需要）
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag
+
+# 定时任务调度器 beat（另开终端；驱动权益生效/到期流转、到期提醒、宽限期回收、每日对账）
+uv run celery -A internal.infrastructure.celery_app beat --loglevel=info
 ```
 
-终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。Celery worker 依赖 Redis（默认 `redis://127.0.0.1:6379/1`），未启动 worker 时文档 ingest 会一直停在 `queued` 状态。
+终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。Celery worker 依赖 Redis（默认 `redis://127.0.0.1:6379/1`），未启动 worker 时文档 ingest 会一直停在 `queued` 状态。beat 只负责按周期把定时任务投入队列，任务实际由上面的 worker 执行，因此两个进程都要启动；beat 必须全局只运行一个实例，多实例会导致定时任务重复投递。
 
 **6）验证后端**
 
@@ -528,9 +532,9 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 3. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
 4. 执行 `uv sync` 和 `alembic upgrade head`
 5. 按参数后台启动对应后端：管理端 `127.0.0.1:8000`、用户端 `127.0.0.1:8001`（热重载模式）
-6. 后台启动 Celery RAG worker（队列 `rag`），Windows 下自动切 `--pool=solo`，详见 [4.14](#414-windows-下-celery-worker-报-permissionerror13-拒绝访问)
+6. 后台启动 Celery RAG worker（队列 `rag`），Windows 下自动切 `--pool=solo`，详见 [4.14](#414-windows-下-celery-worker-报-permissionerror13-拒绝访问)；随后后台启动 Celery beat 定时调度器（单实例）
 7. 按参数前台启动对应 Vite：管理端 `localhost:5173`、用户端 `localhost:5174`
-8. `Ctrl + C` 时一并停止本次启动的后端、Celery worker 与 Vite
+8. `Ctrl + C` 时一并停止本次启动的后端、Celery worker / beat 与 Vite
 
 注意：
 
@@ -575,6 +579,7 @@ docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 cd backend && uv run uvicorn web.app_admin:app --reload                # 管理端 8000
 cd backend && uv run uvicorn web.app_user:app --reload --port 8001     # 用户端 8001
 cd backend && uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # RAG ingest worker
+cd backend && uv run celery -A internal.infrastructure.celery_app beat --loglevel=info             # 定时任务调度器（单实例）
 
 # 启动前端（控制台 2）
 cd frontend && pnpm run dev admin   # 只启动管理端 5173
@@ -794,6 +799,8 @@ PermissionError: [WinError 5] 拒绝访问。
 ```bash
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag --pool=solo
 ```
+
+> beat 调度器进程（`celery ... beat`）不使用执行池，没有此问题，Windows 下无需也不能加 `--pool` 参数。
 
 ### 4.15 Vite 控制台报 `http proxy error: /api/... ECONNREFUSED 127.0.0.1:8001`
 

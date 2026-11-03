@@ -96,13 +96,14 @@ cp .env.example .env
 uv sync --python 3.12.10
 uv run alembic upgrade head
 
-# 4. 创建第一个管理员（按提示输入密码，建议示例：Boxia-2026-Root!）
+# 4. 创建第一个管理员（按提示输入自己的强密码，勿用文档或他人示例中的密码）
 uv run python -m scripts.create_admin
 
-# 5. 启动后端（三个终端，或用一键脚本）
+# 5. 启动后端（四个终端，或用一键脚本）
 uv run uvicorn web.app_admin:app --reload                       # 终端 A：管理端 :8000
 uv run uvicorn web.app_user:app --reload --port 8001            # 终端 B：用户端 :8001
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # 终端 C：RAG worker
+uv run celery -A internal.infrastructure.celery_app beat --loglevel=info           # 终端 D：定时任务调度器
 
 # 6. 启动前端（新终端，回到仓库根目录）
 cd frontend/admin && pnpm install && pnpm run dev              # 管理端 http://localhost:5173
@@ -111,7 +112,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 浏览器打开 <http://localhost:5173>，用 `admin` + 第 4 步设置的密码登录，**首次登录强制改密**。
 
-> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery RAG worker，以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
+> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery RAG worker 与 beat 定时调度器（权益生效/到期流转、宽限期回收、对账），以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
 
 ### 端口速查
 

@@ -176,6 +176,33 @@ services:
     mem_limit: 512m
     logging: *default-logging
 
+  celery-beat:
+    # 定时任务调度器：按 beat_schedule 投递认证/权益周期任务（生效流转、到期提醒、宽限期回收、对账）
+    # 只投递不执行，实际执行依赖 celery-worker；必须保持单副本，多实例会重复投递
+    build: *backend-build
+    image: boxia-agent-backend:local
+    command:
+      - celery
+      - -A
+      - internal.infrastructure.celery_app
+      - beat
+      - --loglevel=info
+      - --schedule=/tmp/celerybeat-schedule
+    env_file:
+      - ${ENV_FILE:-.env.prod}
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    networks:
+      - internal
+    restart: unless-stopped
+    mem_limit: 128m
+    logging: *default-logging
+
   frontend-admin:
     <<: *frontend-runtime
     build:
