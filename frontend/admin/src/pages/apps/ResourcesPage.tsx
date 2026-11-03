@@ -1,13 +1,11 @@
-import {
-  PlusOutlined,
-  ShareAltOutlined,
-} from '@ant-design/icons'
+import { PlusOutlined, ShareAltOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
   Drawer,
   Form,
   Input,
+  Modal,
   Popconfirm,
   Select,
   Space,
@@ -21,17 +19,24 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  createMyResource,
   createResource,
   deleteResource,
   grantResource,
+  listMyResources,
   listResourceGrants,
   listResources,
+  reviewResource,
   revokeResourceGrant,
+  submitMyResourceReview,
   updateResource,
   type Resource,
   type ResourceGrant,
+  type ResourceReviewStatus,
   type ResourceType,
 } from '../../api/apps'
+import { useAuth } from '../../auth/AuthContext'
+import { useTenant } from '../../tenant/TenantContext'
 import { fetchPublicTenants } from '../../api/tenant'
 import type { Tenant } from '../../api/types'
 
@@ -49,6 +54,18 @@ const TYPE_COLORS: Record<ResourceType, string> = {
   knowledge: 'purple',
 }
 
+const REVIEW_LABELS: Record<ResourceReviewStatus, string> = {
+  pending: '待审核',
+  approved: '已通过',
+  rejected: '已驳回',
+}
+
+const REVIEW_COLORS: Record<ResourceReviewStatus, string> = {
+  pending: 'orange',
+  approved: 'green',
+  rejected: 'red',
+}
+
 interface ResourceFormValues {
   name: string
   type: ResourceType
@@ -57,15 +74,26 @@ interface ResourceFormValues {
 
 export default function ResourcesPage() {
   const { message } = App.useApp()
+  const { isPlatform } = useTenant()
+  const { hasPermission } = useAuth()
+  const canReview = isPlatform && hasPermission('button:resource:review')
+  const canTenantCreate = !isPlatform && hasPermission('button:resource:create')
+
   const [loading, setLoading] = useState(false)
   const [data, setData] = useState<Resource[]>([])
   const [activeTab, setActiveTab] = useState<'all' | ResourceType>('all')
+  const [reviewFilter, setReviewFilter] = useState<ResourceReviewStatus>()
 
   // 编辑抽屉
   const [editOpen, setEditOpen] = useState(false)
   const [editing, setEditing] = useState<Resource | null>(null)
   const [saving, setSaving] = useState(false)
   const [form] = Form.useForm<ResourceFormValues>()
+
+  // 审核弹窗（仅平台且有 button:resource:review）
+  const [reviewing, setReviewing] = useState<Resource | null>(null)
+  const [reviewRemark, setReviewRemark] = useState('')
+  const [reviewSaving, setReviewSaving] = useState(false)
 
   // grant 抽屉
   const [grantOpen, setGrantOpen] = useState(false)
@@ -78,24 +106,28 @@ export default function ResourcesPage() {
     setLoading(true)
     try {
       const type = activeTab === 'all' ? undefined : activeTab
-      const items = await listResources({ type, owner_type: 'platform' })
+      // 平台/租户双视角：平台走 /admin/resources（可审核队列过滤），租户走 /admin/my-resources
+      const items = isPlatform
+        ? await listResources({ type, review_status: reviewFilter })
+        : await listMyResources(type)
       setData(items)
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载资源失败')
     } finally {
       setLoading(false)
     }
-  }, [activeTab, message])
+  }, [activeTab, isPlatform, message, reviewFilter])
 
   useEffect(() => {
     void load()
   }, [load])
 
   useEffect(() => {
+    if (!isPlatform) return
     fetchPublicTenants()
       .then(setAllTenants)
       .catch(() => {})
-  }, [])
+  }, [isPlatform])
 
   // ========== CRUD ==========
   const openCreate = () => {
@@ -128,9 +160,12 @@ export default function ResourcesPage() {
       if (editing) {
         await updateResource(editing.id, { name: values.name, config })
         message.success('已保存')
-      } else {
+      } else if (isPlatform) {
         await createResource({ type: values.type, name: values.name, config })
         message.success('已创建')
+      } else {
+        await createMyResource({ type: values.type, name: values.name, config })
+        message.success('已创建，待平台审核')
       }
       setEditOpen(false)
       await load()
@@ -158,6 +193,37 @@ export default function ResourcesPage() {
       await load()
     } catch (error) {
       message.error(error instanceof Error ? error.message : '操作失败')
+    }
+  }
+
+  // ========== 审核（平台）与重新提交（租户） ==========
+  const openReview = (record: Resource) => {
+    setReviewing(record)
+    setReviewRemark('')
+  }
+
+  const handleReview = async (decision: 'approve' | 'reject') => {
+    if (!reviewing) return
+    setReviewSaving(true)
+    try {
+      await reviewResource(reviewing.id, { decision, remark: reviewRemark })
+      message.success(decision === 'approve' ? '已通过审核' : '已驳回')
+      setReviewing(null)
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '审核失败')
+    } finally {
+      setReviewSaving(false)
+    }
+  }
+
+  const handleSubmitReview = async (record: Resource) => {
+    try {
+      await submitMyResourceReview(record.id)
+      message.success('已重新提交审核')
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '提交审核失败')
     }
   }
 
@@ -206,10 +272,7 @@ export default function ResourcesPage() {
     return map
   }, [allTenants])
 
-  const grantedTenantIds = useMemo(
-    () => new Set(grants.map((g) => g.tenant_id)),
-    [grants],
-  )
+  const grantedTenantIds = useMemo(() => new Set(grants.map((g) => g.tenant_id)), [grants])
 
   const availableTenants = useMemo(
     () => allTenants.filter((t) => !grantedTenantIds.has(t.id)),
@@ -222,7 +285,10 @@ export default function ResourcesPage() {
       dataIndex: 'name',
       render: (name: string, record) => (
         <Space direction="vertical" size={0}>
-          <Typography.Text strong>{name}</Typography.Text>
+          <Space size={4}>
+            <Typography.Text strong>{name}</Typography.Text>
+            {record.owner_type === 'tenant' && <Tag>自建</Tag>}
+          </Space>
           <Typography.Text type="secondary" style={{ fontSize: 12 }}>
             {record.id.slice(0, 8)}…
           </Typography.Text>
@@ -233,9 +299,7 @@ export default function ResourcesPage() {
       title: '类型',
       dataIndex: 'type',
       width: 100,
-      render: (type: ResourceType) => (
-        <Tag color={TYPE_COLORS[type]}>{TYPE_LABELS[type]}</Tag>
-      ),
+      render: (type: ResourceType) => <Tag color={TYPE_COLORS[type]}>{TYPE_LABELS[type]}</Tag>,
     },
     {
       title: '版本',
@@ -243,58 +307,99 @@ export default function ResourcesPage() {
       width: 80,
       render: (v: number) => `v${v}`,
     },
+    ...(isPlatform
+      ? ([
+          {
+            title: '启用',
+            dataIndex: 'is_enabled',
+            width: 90,
+            render: (enabled: boolean, record: Resource) => (
+              <Switch
+                size="small"
+                checked={enabled}
+                onChange={(v) => handleToggleEnabled(record, v)}
+              />
+            ),
+          },
+          {
+            title: '已废弃',
+            dataIndex: 'is_deprecated',
+            width: 90,
+            render: (deprecated: boolean) =>
+              deprecated ? <Tag color="default">已废弃</Tag> : <Tag>正常</Tag>,
+          },
+          {
+            title: '创建时间',
+            dataIndex: 'created_at',
+            width: 180,
+            render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
+          },
+        ] as ColumnsType<Resource>)
+      : ([
+          {
+            title: '来源',
+            dataIndex: 'owner_type',
+            width: 100,
+            render: (ownerType: Resource['owner_type']) =>
+              ownerType === 'platform' ? (
+                <Tag color="geekblue">平台开通</Tag>
+              ) : (
+                <Tag>本租户自建</Tag>
+              ),
+          },
+        ] as ColumnsType<Resource>)),
     {
-      title: '启用',
-      dataIndex: 'is_enabled',
-      width: 90,
-      render: (enabled: boolean, record) => (
-        <Switch
-          size="small"
-          checked={enabled}
-          onChange={(v) => handleToggleEnabled(record, v)}
-        />
-      ),
-    },
-    {
-      title: '已废弃',
-      dataIndex: 'is_deprecated',
-      width: 90,
-      render: (deprecated: boolean) =>
-        deprecated ? <Tag color="default">已废弃</Tag> : <Tag>正常</Tag>,
-    },
-    {
-      title: '创建时间',
-      dataIndex: 'created_at',
-      width: 180,
-      render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
+      title: '审核状态',
+      dataIndex: 'review_status',
+      width: 140,
+      render: (status: ResourceReviewStatus | undefined, record) =>
+        status ? (
+          <Space direction="vertical" size={0}>
+            <Tag color={REVIEW_COLORS[status]}>{REVIEW_LABELS[status]}</Tag>
+            {record.review_remark && (
+              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                {record.review_remark}
+              </Typography.Text>
+            )}
+          </Space>
+        ) : (
+          '-'
+        ),
     },
     {
       title: '操作',
       key: 'actions',
-      width: 220,
-      render: (_, record) => (
-        <Space size="small">
-          <Button type="link" size="small" onClick={() => openEdit(record)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<ShareAltOutlined />}
-            onClick={() => openGrants(record)}
-          >
-            授权
-          </Button>
-          <Popconfirm
-            title="确定删除该资源？"
-            onConfirm={() => handleDelete(record)}
-          >
-            <Button type="link" size="small" danger>
-              删除
+      width: isPlatform ? 260 : 120,
+      render: (_, record) =>
+        isPlatform ? (
+          <Space size="small">
+            {canReview && record.review_status === 'pending' && (
+              <Button type="link" size="small" onClick={() => openReview(record)}>
+                审核
+              </Button>
+            )}
+            <Button type="link" size="small" onClick={() => openEdit(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
+            <Button
+              type="link"
+              size="small"
+              icon={<ShareAltOutlined />}
+              onClick={() => openGrants(record)}
+            >
+              授权
+            </Button>
+            <Popconfirm title="确定删除该资源？" onConfirm={() => handleDelete(record)}>
+              <Button type="link" size="small" danger>
+                删除
+              </Button>
+            </Popconfirm>
+          </Space>
+        ) : record.owner_type === 'tenant' && record.review_status === 'rejected' ? (
+          <Button type="link" size="small" onClick={() => void handleSubmitReview(record)}>
+            提交审核
+          </Button>
+        ) : null,
     },
   ]
 
@@ -304,12 +409,32 @@ export default function ResourcesPage() {
         <Typography.Title level={4} style={{ margin: 0 }}>
           资源管理
         </Typography.Title>
-        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-          新建资源
-        </Button>
+        <Space>
+          {isPlatform && (
+            <Select
+              allowClear
+              placeholder="审核状态"
+              style={{ width: 120 }}
+              value={reviewFilter}
+              onChange={(v) => setReviewFilter(v)}
+              options={[
+                { value: 'pending', label: '待审核' },
+                { value: 'approved', label: '已通过' },
+                { value: 'rejected', label: '已驳回' },
+              ]}
+            />
+          )}
+          {(isPlatform || canTenantCreate) && (
+            <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+              新建资源
+            </Button>
+          )}
+        </Space>
       </Space>
       <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
-        平台级 tool / prompt / skill / knowledge 资源，通过授权开放给租户使用。
+        {isPlatform
+          ? '平台与租户的 tool / prompt / skill / knowledge 资源统一管理；平台新建直接过审，租户自建资源需审核放行，通过后授权开放给租户。'
+          : '平台开通给本租户的资源与本租户自建资源；自建资源默认待平台审核，被驳回后可重新提交审核。'}
       </Typography.Paragraph>
 
       <Tabs
@@ -352,11 +477,7 @@ export default function ResourcesPage() {
           >
             <Input placeholder="例如：快递查询工具" />
           </Form.Item>
-          <Form.Item
-            label="类型"
-            name="type"
-            rules={[{ required: true }]}
-          >
+          <Form.Item label="类型" name="type" rules={[{ required: true }]}>
             <Select
               options={(Object.keys(TYPE_LABELS) as ResourceType[]).map((t) => ({
                 value: t,
@@ -375,6 +496,41 @@ export default function ResourcesPage() {
           </Form.Item>
         </Form>
       </Drawer>
+
+      {/* 审核弹窗 */}
+      <Modal
+        open={!!reviewing}
+        title={reviewing ? `审核资源：${reviewing.name}` : '资源审核'}
+        onCancel={() => setReviewing(null)}
+        footer={[
+          <Button key="cancel" onClick={() => setReviewing(null)}>
+            取消
+          </Button>,
+          <Button
+            key="reject"
+            danger
+            loading={reviewSaving}
+            onClick={() => void handleReview('reject')}
+          >
+            驳回
+          </Button>,
+          <Button
+            key="approve"
+            type="primary"
+            loading={reviewSaving}
+            onClick={() => void handleReview('approve')}
+          >
+            通过
+          </Button>,
+        ]}
+      >
+        <Input.TextArea
+          rows={3}
+          placeholder="审核备注（可选，驳回时建议写明原因）"
+          value={reviewRemark}
+          onChange={(e) => setReviewRemark(e.target.value)}
+        />
+      </Modal>
 
       {/* 授权抽屉 */}
       <Drawer
@@ -410,8 +566,7 @@ export default function ResourcesPage() {
             {
               title: '租户',
               dataIndex: 'tenant_id',
-              render: (tid: string) =>
-                tenantNameMap.get(tid) ?? tid.slice(0, 8) + '…',
+              render: (tid: string) => tenantNameMap.get(tid) ?? tid.slice(0, 8) + '…',
             },
             {
               title: '授权时间',

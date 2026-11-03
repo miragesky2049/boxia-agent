@@ -98,13 +98,10 @@ export async function subscribeApplication(applicationId: string): Promise<{
   instance_id: string
   application_id: string
 }> {
-  return request<{ instance_id: string; application_id: string }>(
-    '/admin/marketplace/subscribe',
-    {
-      method: 'POST',
-      body: JSON.stringify({ application_id: applicationId }),
-    },
-  )
+  return request<{ instance_id: string; application_id: string }>('/admin/marketplace/subscribe', {
+    method: 'POST',
+    body: JSON.stringify({ application_id: applicationId }),
+  })
 }
 
 export async function listMyApps(): Promise<MyApp[]> {
@@ -148,13 +145,8 @@ export interface RunDetail {
   node_executions: NodeExecution[]
 }
 
-export async function listApplicationRuns(
-  applicationId: string,
-  limit = 50,
-): Promise<RunItem[]> {
-  return request<RunItem[]>(
-    `/admin/marketplace/applications/${applicationId}/runs?limit=${limit}`,
-  )
+export async function listApplicationRuns(applicationId: string, limit = 50): Promise<RunItem[]> {
+  return request<RunItem[]>(`/admin/marketplace/applications/${applicationId}/runs?limit=${limit}`)
 }
 
 export async function getRunDetail(runId: string): Promise<RunDetail> {
@@ -248,9 +240,7 @@ export interface ApplicationInput {
   default?: string | number | boolean | null
 }
 
-export async function getApplicationInputs(
-  applicationId: string,
-): Promise<ApplicationInput[]> {
+export async function getApplicationInputs(applicationId: string): Promise<ApplicationInput[]> {
   const data = await request<{ inputs: ApplicationInput[] }>(
     `/admin/marketplace/applications/${applicationId}/inputs`,
   )
@@ -293,9 +283,7 @@ export async function saveAppVariables(
   })
 }
 
-export async function getUserVariables(
-  applicationId: string,
-): Promise<Record<string, unknown>> {
+export async function getUserVariables(applicationId: string): Promise<Record<string, unknown>> {
   const data = await request<{ values: Record<string, unknown> }>(
     `/admin/apps/${applicationId}/user-variables`,
   )
@@ -316,6 +304,8 @@ export async function saveUserVariables(
 // ========== 统一资源（tool / prompt / skill / knowledge） ==========
 export type ResourceType = 'tool' | 'prompt' | 'skill' | 'knowledge'
 
+export type ResourceReviewStatus = 'pending' | 'approved' | 'rejected'
+
 export interface Resource {
   id: string
   type: ResourceType
@@ -327,6 +317,8 @@ export interface Resource {
   is_enabled: boolean
   is_deprecated: boolean
   created_at: string
+  review_status?: ResourceReviewStatus
+  review_remark?: string
 }
 
 export interface ResourceGrant {
@@ -336,15 +328,29 @@ export interface ResourceGrant {
   granted_at: string
 }
 
-export async function listResources(params: {
-  type?: ResourceType
-  owner_type?: 'platform' | 'tenant'
-} = {}): Promise<Resource[]> {
+export async function listResources(
+  params: {
+    type?: ResourceType
+    owner_type?: 'platform' | 'tenant'
+    review_status?: ResourceReviewStatus
+  } = {},
+): Promise<Resource[]> {
   const query = new URLSearchParams()
   if (params.type) query.set('type', params.type)
   if (params.owner_type) query.set('owner_type', params.owner_type)
+  if (params.review_status) query.set('review_status', params.review_status)
   const qs = query.toString()
   return request<Resource[]>(`/admin/resources${qs ? `?${qs}` : ''}`)
+}
+
+export async function reviewResource(
+  resourceId: string,
+  payload: { decision: 'approve' | 'reject'; remark?: string },
+): Promise<{ resource_id: string; review_status: ResourceReviewStatus; review_remark: string }> {
+  return request(`/admin/resources/${resourceId}/review`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
 }
 
 export async function getResource(resourceId: string): Promise<Resource> {
@@ -385,30 +391,49 @@ export async function listResourceGrants(resourceId: string): Promise<ResourceGr
   return request<ResourceGrant[]>(`/admin/resources/${resourceId}/grants`)
 }
 
-export async function grantResource(
-  resourceId: string,
-  tenantId: string,
-): Promise<void> {
+export async function grantResource(resourceId: string, tenantId: string): Promise<void> {
   await request<void>(`/admin/resources/${resourceId}/grants`, {
     method: 'POST',
     body: JSON.stringify({ tenant_id: tenantId }),
   })
 }
 
-export async function revokeResourceGrant(
-  resourceId: string,
-  tenantId: string,
-): Promise<void> {
+export async function revokeResourceGrant(resourceId: string, tenantId: string): Promise<void> {
   await request<void>(`/admin/resources/${resourceId}/grants/${tenantId}`, {
     method: 'DELETE',
   })
 }
 
+// ========== 租户视角：可用资源 + 自助创建 + 重新提交审核 ==========
+export async function listMyResources(type?: ResourceType): Promise<Resource[]> {
+  const qs = type ? `?type=${encodeURIComponent(type)}` : ''
+  return request<Resource[]>(`/admin/my-resources${qs}`)
+}
+
+export async function createMyResource(payload: {
+  type: ResourceType
+  name: string
+  config: Record<string, unknown>
+}): Promise<{ resource_id: string; review_status: ResourceReviewStatus }> {
+  return request(`/admin/my-resources`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function submitMyResourceReview(
+  resourceId: string,
+): Promise<{ resource_id: string; review_status: ResourceReviewStatus }> {
+  return request(`/admin/my-resources/${resourceId}/submit-review`, { method: 'POST' })
+}
+
 // ========== 平台应用管理 ==========
-export async function listApps(params: {
-  owner_type?: string
-  marketplace_only?: boolean
-} = {}): Promise<Application[]> {
+export async function listApps(
+  params: {
+    owner_type?: string
+    marketplace_only?: boolean
+  } = {},
+): Promise<Application[]> {
   const query = new URLSearchParams()
   if (params.owner_type) query.set('owner_type', params.owner_type)
   if (params.marketplace_only) query.set('marketplace_only', 'true')
@@ -501,18 +526,24 @@ export async function rollbackGraph(
   applicationId: string,
   version: number,
 ): Promise<{ ok: boolean; new_version?: number }> {
-  return request<{ ok: boolean; new_version?: number }>(`/admin/apps/${applicationId}/graph-rollback`, {
-    method: 'POST',
-    body: JSON.stringify({ version }),
-  })
+  return request<{ ok: boolean; new_version?: number }>(
+    `/admin/apps/${applicationId}/graph-rollback`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ version }),
+    },
+  )
 }
 
 export async function publishGraph(
   applicationId: string,
 ): Promise<{ ok: boolean; published_version?: number }> {
-  return request<{ ok: boolean; published_version?: number }>(`/admin/apps/${applicationId}/publish`, {
-    method: 'POST',
-  })
+  return request<{ ok: boolean; published_version?: number }>(
+    `/admin/apps/${applicationId}/publish`,
+    {
+      method: 'POST',
+    },
+  )
 }
 
 // ========== 字段级版本 ==========
@@ -875,9 +906,12 @@ export async function deleteAppConversation(
   conversationId: string,
   tenantId?: string,
 ): Promise<void> {
-  return request<void>(`/admin/apps/conversations/${conversationId}${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`, {
-    method: 'DELETE',
-  })
+  return request<void>(
+    `/admin/apps/conversations/${conversationId}${tenantId ? `?tenant_id=${encodeURIComponent(tenantId)}` : ''}`,
+    {
+      method: 'DELETE',
+    },
+  )
 }
 
 export async function deleteAppConversationMessage(
