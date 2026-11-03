@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     access_token_minutes: int = Field(default=30, ge=1, le=120)
     refresh_token_days: int = Field(default=14, ge=1, le=90)
 
+    # 权益取消严格模式：角色授权仍引用该权益时整批拒绝（ENTITLEMENT_IN_USE，P1-5）
+    entitlement_revoke_strict: bool = False
+    # 取消权益时是否中断在跑任务：预留开关，P3 实现前恒为 False
+    entitlement_revoke_kill_running: bool = False
+
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
     login_max_attempts: int = Field(default=5, ge=1, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
@@ -159,11 +164,11 @@ class Settings(BaseSettings):
     # graph JSONB 超过 1MB 阈值时写入对象存储，DB 只存 URI 引用。
     # 留空 endpoint 表示不启用对象存储，超过阈值时降级为内联写入并打 warning。
     # ============================================================
-    object_storage_endpoint: str = ""          # 如 127.0.0.1:9000
+    object_storage_endpoint: str = ""  # 如 127.0.0.1:9000
     object_storage_access_key: str = ""
     object_storage_secret_key: SecretStr = SecretStr("")
     object_storage_bucket: str = "boxia-graphs"
-    object_storage_secure: bool = False        # True 用 https
+    object_storage_secure: bool = False  # True 用 https
 
     # ============================================================
     # 产品级平台管理员自动初始化（部署产品级运营平台时开启）

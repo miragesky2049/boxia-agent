@@ -14,6 +14,7 @@ from typing import Any, Protocol
 from uuid import UUID
 
 from internal.domain.entity.access import AppGrantRow
+from internal.domain.entity.entitlement import EntitlementItem, EntitlementView
 
 
 class ApplicationRepositoryProtocol(Protocol):
@@ -544,3 +545,63 @@ class AppGrantRepositoryProtocol(Protocol):
     ) -> tuple[list[AppGrantRow], int]: ...
 
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]: ...
+
+
+class EntitlementRepositoryProtocol(Protocol):
+    """权益仓储端口：统一读写 tenant_application_instance（app）与 resource_grant（资源）。"""
+
+    def list_by_tenant(
+        self,
+        tenant_id: UUID,
+        object_type: str | None,
+        status: str | None,
+        keyword: str | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[EntitlementView], int]:
+        """租户权益分页；status 按持久列过滤，视图状态另经时间计算。"""
+        ...
+
+    def list_tenants_by_object(
+        self, object_type: str, object_id: UUID, page: int, page_size: int
+    ) -> tuple[list[dict], int]:
+        """对象反查持有权益的租户（分页）。"""
+        ...
+
+    def get(self, tenant_id: UUID, object_type: str, object_id: UUID) -> EntitlementView | None:
+        """单条权益视图；无权益返回 None。"""
+        ...
+
+    def describe_object(self, object_type: str, object_id: UUID) -> dict | None:
+        """对象元数据 {id, name, is_deprecated}；对象不存在返回 None。"""
+        ...
+
+    def grant(
+        self,
+        tenant_id: UUID,
+        item: EntitlementItem,
+        *,
+        auth_source: str,
+        auth_type: str,
+        start_time: datetime | None,
+        expire_time: datetime | None,
+        quota: dict[str, Any],
+        remark: str,
+        granted_by: UUID | None,
+    ) -> UUID:
+        """开通权益；已存在（含 revoked/expired）则整行覆盖恢复，返回权益行 ID。"""
+        ...
+
+    def revoke(self, tenant_id: UUID, object_type: str, object_id: UUID) -> bool:
+        """软失效：置 status='revoked'，不删行；返回是否有行被更新。"""
+        ...
+
+    def purge(self, tenant_id: UUID, object_type: str, object_id: UUID) -> int:
+        """物理删除权益行（退租/合规，接口由 P3-6 暴露），返回删除条数。"""
+        ...
+
+    def affected_role_grants(
+        self, tenant_id: UUID, object_type: str, object_id: UUID
+    ) -> list[dict]:
+        """该权益支撑的角色授权明细 [{role_id, role_name, subject_type}]，供 D-3 影响提示。"""
+        ...
