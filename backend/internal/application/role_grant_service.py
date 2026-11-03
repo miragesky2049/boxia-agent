@@ -45,6 +45,7 @@ class RoleGrantResource:
     is_enabled: bool
     updated_at: datetime
     is_granted: bool
+    is_tenant_wide: bool = False
 
 
 class RoleGrantService:
@@ -68,11 +69,16 @@ class RoleGrantService:
         repository = self._resource_repository(resource_type)
         page = max(page, 1)
         page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+        tenant_wide_ids: set[UUID] = set()
+        if not role.is_platform:
+            tenant_wide_ids = self._uow.resource_grants.list_tenant_wide_resource_ids(
+                role.tenant_id, resource_type
+            )
         if self._has_all_resources(role):
             # 全量数据权限角色默认拥有作用域内全部资源，授权页只读展示全量
             items, total = repository.list_grantable(page, page_size, keyword, None)
             return Page(
-                items=[self._to_item(item, True) for item in items],
+                items=[self._to_item(item, True, item.id in tenant_wide_ids) for item in items],
                 total=total,
                 page=page,
                 page_size=page_size,
@@ -81,7 +87,10 @@ class RoleGrantService:
         ids = sorted(granted_ids) if granted_only else None
         items, total = repository.list_grantable(page, page_size, keyword, ids)
         return Page(
-            items=[self._to_item(item, item.id in granted_ids) for item in items],
+            items=[
+                self._to_item(item, item.id in granted_ids, item.id in tenant_wide_ids)
+                for item in items
+            ],
             total=total,
             page=page,
             page_size=page_size,
@@ -216,6 +225,43 @@ class RoleGrantService:
         )
         self._uow.commit()
 
+    def set_tenant_wide(
+        self,
+        role_id: UUID,
+        resource_type: str,
+        resource_id: UUID,
+        *,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """将资源设为整租户授权（tenant 档）：仅租户角色可用，幂等，取消走 remove 降级。"""
+        role = self._require_writable_role(role_id)
+        if role.is_platform:
+            raise ValidationError("平台角色不支持整租户授权")
+        self._ensure_resource_type(resource_type)
+        repository = self._resource_repository(resource_type)
+        # 开通/审核门槛与角色档授权一致：未对租户开通的资源不能全员可见
+        self._validate_ids(repository, [resource_id])
+        self._uow.resource_grants.lock_resources(resource_type, [resource_id])
+        if self._uow.resource_grants.has_tenant_wide(resource_type, resource_id, role.tenant_id):
+            return
+        self._uow.resource_grants.set_tenant_wide(
+            resource_type, resource_id, role.tenant_id, actor_id
+        )
+        self._record_audit(
+            role,
+            resource_type,
+            action="role.grant.tenant_wide",
+            detail={"resource_id": resource_id},
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
+        )
+        self._uow.commit()
+
     def _scope(self) -> UUID:
         """管理作用域：平台返回 PLATFORM_TENANT_ID，租户返回本租户 ID。"""
         if self._context.is_platform:
@@ -309,7 +355,9 @@ class RoleGrantService:
         raise NotFoundError("部分资源不存在或无权授权")
 
     @staticmethod
-    def _to_item(resource: Any, is_granted: bool) -> RoleGrantResource:
+    def _to_item(
+        resource: Any, is_granted: bool, is_tenant_wide: bool = False
+    ) -> RoleGrantResource:
         return RoleGrantResource(
             resource_id=resource.id,
             name=resource.name,
@@ -318,6 +366,7 @@ class RoleGrantService:
             is_enabled=resource.is_enabled,
             updated_at=resource.updated_at,
             is_granted=is_granted,
+            is_tenant_wide=is_tenant_wide,
         )
 
     def _record_audit(

@@ -299,6 +299,58 @@ def test_role_grants_platform_resource_candidate_gate(
     assert _summary(site, headers, admin_id)["tool"] == 1
 
 
+def test_role_grants_tenant_wide_toggle(client: TestClient, auth_headers, tenant_client) -> None:
+    tenant = create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    roles = list_roles(site, headers)
+    viewer_id = roles["viewer"]["id"]
+    admin_id = roles["admin"]["id"]
+
+    # 未对租户开通的资源不能设为全员可见，门槛与角色档授权一致
+    platform_skill_id = _create_platform_tool(client, auth_headers, "全员可见平台技能")["id"]
+    rejected = site.put(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{platform_skill_id}/tenant-wide",
+        headers=headers,
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
+
+    # 已有 role 档授权时设全员可见：role 档被 tenant 档取代，任意角色有效授权都计入
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "全员可见技能")
+    skill_id = skill["id"]
+    site.post(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
+        json={"resource_ids": [skill_id]},
+        headers=headers,
+    )
+    response = site.put(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}/tenant-wide", headers=headers
+    )
+    assert response.status_code == 204, response.text
+    assert (
+        site.put(
+            f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}/tenant-wide", headers=headers
+        ).status_code
+        == 204
+    )  # 幂等
+    items = _grant_items(site, headers, admin_id, "tool", granted_only=False)
+    target = next(item for item in items if item["resource_id"] == skill_id)
+    assert target["is_tenant_wide"] is True
+    assert target["is_granted"] is True
+    assert _summary(site, headers, viewer_id)["tool"] == 1
+
+    # 取消全员可见 = 单角色移除触发降级：tenant 档清除，其余角色保留显式 role 档
+    removed = site.delete(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}", headers=headers
+    )
+    assert removed.status_code == 204, removed.text
+    items = _grant_items(site, headers, admin_id, "tool", granted_only=False)
+    target = next(item for item in items if item["resource_id"] == skill_id)
+    assert target["is_tenant_wide"] is False
+    assert target["is_granted"] is True
+    assert _summary(site, headers, viewer_id)["tool"] == 0
+
+
 def test_role_grants_cross_tenant_isolation(
     client: TestClient, auth_headers, tenant_client
 ) -> None:

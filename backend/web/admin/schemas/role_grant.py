@@ -18,6 +18,7 @@ class RoleGrantResourceOut(BaseModel):
     is_enabled: bool
     updated_at: datetime
     is_granted: bool
+    is_tenant_wide: bool = False
 
 
 class RoleGrantReplaceRequest(BaseModel):
