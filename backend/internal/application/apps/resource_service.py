@@ -6,9 +6,10 @@ from typing import Any
 from uuid import UUID
 
 from internal.application.errors import NotFoundError, ValidationError
+from internal.domain.entity.access import RESOURCE_TABLE_TYPES
 from internal.domain.repository.apps_protocols import AppResourceRepositoryProtocol
 
-_VALID_TYPES = {"tool", "prompt", "skill", "knowledge"}
+_VALID_TYPES = frozenset(RESOURCE_TABLE_TYPES)
 
 
 class AppResourceService:

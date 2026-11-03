@@ -4,6 +4,7 @@ from uuid import UUID
 
 from fastapi.testclient import TestClient
 
+from internal.domain.entity.access import RESOURCE_TYPES as _RESOURCE_TYPES
 from tests.helpers import (
     USER_PASSWORD,
     create_tenant,
@@ -11,8 +12,6 @@ from tests.helpers import (
     list_roles,
     tenant_admin_client,
 )
-
-_RESOURCE_TYPES = ("tool", "app")
 
 _TOOL_CONFIG = {"url": "https://example.com/api", "method": "GET"}
 

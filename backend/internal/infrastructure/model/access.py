@@ -24,8 +24,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
-RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
-
 
 class RoleModel(Base):
     """roles 表：tenant_id 非空；平台角色 = PLATFORM_TENANT_ID（全零 UUID），租户角色 = 真实租户 ID。"""
@@ -186,7 +184,7 @@ class ResourceGrantModel(Base):
     __tablename__ = "resource_grants"
     __table_args__ = (
         CheckConstraint(
-            "resource_type IN ('agent', 'skill', 'tool', 'component', 'prompt')",
+            "resource_type IN ('app', 'tool', 'skill', 'prompt', 'knowledge')",
             name="ck_resource_grants_type",
         ),
         CheckConstraint(

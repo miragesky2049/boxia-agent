@@ -13,7 +13,12 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-RESOURCE_TYPES = ("tool", "app")
+# 应用权益存于 application / tenant_application_instance，不在 resource 表
+APP_RESOURCE_TYPE = "app"
+# 统一资源表（resource）承载的类型
+RESOURCE_TABLE_TYPES = ("tool", "skill", "prompt", "knowledge")
+# RBAC 资源授权可选的全部类型
+RESOURCE_TYPES = (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
 
 
 @dataclass(frozen=True)
