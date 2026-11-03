@@ -18,6 +18,7 @@ from internal.domain.entity.entitlement import (
     ENTITLEMENT_OBJECT_TYPES,
     OBJECT_TYPE_APP,
     STATUS_ACTIVE,
+    STATUS_EXPIRED,
     STATUS_REVOKED,
     BatchPreview,
     BatchResult,
@@ -217,6 +218,25 @@ class EntitlementService:
             self._uow.rollback()
             raise
         return deleted
+
+    # ========== 生命周期（系统定时调用，无作用域门禁） ==========
+    def process_resource_wait_effective(self, now: datetime) -> int:
+        """到点把 resource_grant 的 wait_effect 行落库为 active（P3-1）。
+
+        读侧 effective_status 已按时间计算，本流转只为把持久状态对齐、
+        支撑统计与运维查询；返回值为本批激活条数。
+        """
+        rows = self._repo.list_resource_wait_effective(now)
+        for row in rows:
+            self._repo.update_resource_grant_status(row["id"], STATUS_ACTIVE)
+        return len(rows)
+
+    def process_resource_expired(self, now: datetime) -> int:
+        """到期把 resource_grant 的 active 行落库为 expired（P3-1）。"""
+        rows = self._repo.list_resource_expired(now)
+        for row in rows:
+            self._repo.update_resource_grant_status(row["id"], STATUS_EXPIRED)
+        return len(rows)
 
     # ========== 内部：校验 ==========
     def _require_platform(self) -> None:

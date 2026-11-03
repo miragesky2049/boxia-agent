@@ -616,6 +616,18 @@ class EntitlementRepositoryProtocol(Protocol):
         """物理删除权益行（退租/合规，接口由 P3-6 暴露），返回删除条数。"""
         ...
 
+    def list_resource_wait_effective(self, now: datetime) -> list[dict]:
+        """resource_grant 中 wait_effect 且已过 start_time 的行（P3-1 生命周期流转）。"""
+        ...
+
+    def list_resource_expired(self, now: datetime) -> list[dict]:
+        """resource_grant 中 active 且已过 expire_time 的行（P3-1 生命周期流转）。"""
+        ...
+
+    def update_resource_grant_status(self, grant_id: UUID, status: str) -> None:
+        """更新 resource_grant 行持久状态（wait_effect→active / active→expired）。"""
+        ...
+
     def affected_role_grants(
         self, tenant_id: UUID, object_type: str, object_id: UUID
     ) -> list[dict]:

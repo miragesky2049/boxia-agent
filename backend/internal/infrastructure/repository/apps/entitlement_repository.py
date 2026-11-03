@@ -203,6 +203,33 @@ class EntitlementRepository:
         result = cast_cursor(self._session.execute(stmt, {"tid": tenant_id, "oid": object_id}))
         return int(result.rowcount)
 
+    # ========== 生命周期（P3-1：读侧已按时间计算，任务仅对齐持久状态） ==========
+    def list_resource_wait_effective(self, now: datetime) -> list[dict]:
+        rows = self._session.execute(
+            text(
+                "SELECT id, tenant_id, resource_id FROM resource_grant "
+                "WHERE status = 'wait_effect' AND start_time IS NOT NULL AND start_time <= :now"
+            ),
+            {"now": now},
+        ).all()
+        return [dict(row._mapping) for row in rows]
+
+    def list_resource_expired(self, now: datetime) -> list[dict]:
+        rows = self._session.execute(
+            text(
+                "SELECT id, tenant_id, resource_id FROM resource_grant "
+                "WHERE status = 'active' AND expire_time IS NOT NULL AND expire_time <= :now"
+            ),
+            {"now": now},
+        ).all()
+        return [dict(row._mapping) for row in rows]
+
+    def update_resource_grant_status(self, grant_id, status: str) -> None:
+        self._session.execute(
+            text("UPDATE resource_grant SET status = :status WHERE id = :id"),
+            {"id": grant_id, "status": status},
+        )
+
     # ========== 内部 ==========
     def _grant_app(self, params: dict[str, Any], now: datetime):
         result = cast_cursor(

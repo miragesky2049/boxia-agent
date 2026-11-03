@@ -1,6 +1,7 @@
 """P1-5 EntitlementService：统一读写两套存储的用例语义（批量原子/软失效/恢复/严格模式/弃用拦截）。"""
 
 import asyncio
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -260,3 +261,56 @@ def test_purge_deletes_entitlement_rows(uow, tenant):
     )
     assert deleted == 1
     assert EntitlementRepository(uow.session).get(tenant, "skill", skill_id) is None
+
+
+def _raw_resource_grant_status(uow: SqlAlchemyUnitOfWork, resource_id) -> str:
+    row = uow.session.execute(
+        text("SELECT status FROM resource_grant WHERE resource_id = :rid"), {"rid": resource_id}
+    ).first()
+    return row.status
+
+
+def test_process_resource_wait_effective_flips_at_start_time(uow, tenant):
+    """P3-1：未到 start_time 不动；到点后 wait_effect 行落库为 active。"""
+    now = datetime.now(UTC)
+    tool_id = _create_resource(uow, "tool")
+    asyncio.run(
+        _service(uow).apply_batch(
+            tenant,
+            "grant",
+            [EntitlementItem("tool", tool_id)],
+            start_time=now + timedelta(days=1),
+            actor_id=_ACTOR_ID,
+            actor_username=_ACTOR,
+        )
+    )
+    assert _raw_resource_grant_status(uow, tool_id) == "wait_effect"
+
+    svc = _service(uow)
+    assert svc.process_resource_wait_effective(now) == 0
+    assert svc.process_resource_wait_effective(now + timedelta(days=2)) == 1
+    assert _raw_resource_grant_status(uow, tool_id) == "active"
+    # 幂等：再次流转无行可动
+    assert svc.process_resource_wait_effective(now + timedelta(days=2)) == 0
+
+
+def test_process_resource_expired_flips_after_expire(uow, tenant):
+    """P3-1：active 行过 expire_time 落库为 expired；revoked 行不受影响。"""
+    now = datetime.now(UTC)
+    tool_id = _create_resource(uow, "tool")
+    skill_id = _create_resource(uow, "skill")
+    _apply(uow, tenant, "grant", [EntitlementItem("tool", tool_id)])
+    _apply(uow, tenant, "grant", [EntitlementItem("skill", skill_id)])
+    _apply(uow, tenant, "revoke", [EntitlementItem("skill", skill_id)])
+    for rid in (tool_id, skill_id):
+        uow.session.execute(
+            text("UPDATE resource_grant SET expire_time = :t WHERE resource_id = :rid"),
+            {"t": now - timedelta(hours=1), "rid": rid},
+        )
+    uow.commit()
+
+    svc = _service(uow)
+    assert svc.process_resource_expired(now) == 1
+    assert _raw_resource_grant_status(uow, tool_id) == "expired"
+    assert _raw_resource_grant_status(uow, skill_id) == "revoked"
+    assert svc.process_resource_expired(now) == 0
