@@ -10,6 +10,7 @@ from unittest.mock import MagicMock
 
 from internal.domain.repository.apps_protocols import (
     ApplicationRepositoryProtocol,
+    AppGrantRepositoryProtocol,
     AppResourceRepositoryProtocol,
     AuthRepositoryProtocol,
     ConversationRepositoryProtocol,
@@ -20,6 +21,7 @@ from internal.domain.repository.apps_protocols import (
     UsageRepositoryProtocol,
     WebhookRepositoryProtocol,
 )
+from internal.infrastructure.repository.apps.app_grant_repository import AppGrantRepository
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
 from internal.infrastructure.repository.apps.conversation_repository import ConversationRepository
@@ -38,6 +40,7 @@ def test_infra_repositories_structurally_satisfy_protocols() -> None:
     session = MagicMock(name="session")
 
     app_repo: ApplicationRepositoryProtocol = ApplicationRepository(session)
+    app_grant_repo: AppGrantRepositoryProtocol = AppGrantRepository(session)
     model_repo: ModelRepositoryProtocol = ModelRepository(session)
     conv_repo: ConversationRepositoryProtocol = ConversationRepository(session)
     msg_repo: MessageRepositoryProtocol = MessageRepository(session)
@@ -51,7 +54,7 @@ def test_infra_repositories_structurally_satisfy_protocols() -> None:
     assert all(
         r is not None
         for r in (
-            app_repo, model_repo, conv_repo, msg_repo, run_repo,
+            app_repo, app_grant_repo, model_repo, conv_repo, msg_repo, run_repo,
             usage_repo, webhook_repo, resource_repo, auth_repo, tenant_settings_repo,
         )
     )

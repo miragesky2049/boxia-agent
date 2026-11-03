@@ -22,6 +22,18 @@ RESOURCE_TYPES = (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
 
 
 @dataclass(frozen=True)
+class AppGrantRow:
+    """应用授权行：application 表映射为与 resource 仓储输出对齐的候选/汇总结构。"""
+
+    id: UUID
+    name: str
+    description: str
+    tenant_id: UUID
+    is_enabled: bool
+    updated_at: datetime
+
+
+@dataclass(frozen=True)
 class Role:
     """角色；tenant_id 非空，平台角色 = PLATFORM_TENANT_ID（全零 UUID），租户角色 = 真实租户 ID。"""
 

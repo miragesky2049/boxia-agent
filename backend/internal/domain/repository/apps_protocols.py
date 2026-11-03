@@ -13,6 +13,8 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
+from internal.domain.entity.access import AppGrantRow
+
 
 class ApplicationRepositoryProtocol(Protocol):
     """application / application_graph / graph_version / tenant_instance 仓储端口。"""
@@ -109,7 +111,9 @@ class ApplicationRepositoryProtocol(Protocol):
 
     def list_graph_versions(self, application_id: UUID, limit: int = 50) -> list[dict]: ...
 
-    def update_graph(self, application_id: UUID, graph: dict, runtime_mode: str = "dag") -> None: ...
+    def update_graph(
+        self, application_id: UUID, graph: dict, runtime_mode: str = "dag"
+    ) -> None: ...
 
     def list_tenant_config(self, tenant_id: UUID, application_id: UUID) -> dict[str, Any]: ...
 
@@ -501,3 +505,34 @@ class TenantSettingsRepositoryProtocol(Protocol):
     ) -> dict: ...
 
     def list_all(self) -> list[dict]: ...
+
+
+class AppGrantRepositoryProtocol(Protocol):
+    """应用授权仓储端口：application 表适配为资源授权统一查询接口。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        is_enabled: bool | None,
+        manageable_only: bool = False,
+        grant_state: str | None = None,
+        grant_tenant_id: UUID | None = None,
+    ) -> tuple[list[AppGrantRow], int]: ...
+
+    def get(self, resource_id: UUID) -> AppGrantRow | None: ...
+
+    def ids_exist(self, ids: list[UUID]) -> set[UUID]: ...
+
+    def ids_owned(self, ids: list[UUID]) -> set[UUID]: ...
+
+    def list_grantable(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        ids: list[UUID] | None = None,
+    ) -> tuple[list[AppGrantRow], int]: ...
+
+    def ids_grantable(self, ids: list[UUID]) -> set[UUID]: ...

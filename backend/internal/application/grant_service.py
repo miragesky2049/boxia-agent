@@ -16,6 +16,7 @@ from internal.application.errors import (
 )
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import (
+    APP_RESOURCE_TYPE,
     RESOURCE_TYPES,
     GrantSummary,
     ResourceGrant,
@@ -372,7 +373,9 @@ class GrantService:
         """按资源类型返回当前作用域的仓储。"""
         if resource_type not in RESOURCE_TYPES:
             raise ValidationError(f"资源类型必须是 {', '.join(RESOURCE_TYPES)} 之一")
-        return self._uow.tools
+        if resource_type == APP_RESOURCE_TYPE:
+            return self._uow.app_grants
+        return self._uow.resource_repo(resource_type)
 
     def _require_resource(self, resource_type: str, resource_id: UUID) -> Any:
         resource = self._resource_repository(resource_type).get(resource_id)

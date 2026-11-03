@@ -26,6 +26,7 @@ from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Tool
 from internal.domain.entity.tenant import Tenant
 from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
+from internal.domain.repository.apps_protocols import AppGrantRepositoryProtocol
 
 TResource = TypeVar("TResource")
 
@@ -553,9 +554,7 @@ class DepartmentRepository(Protocol):
     def delete(self, department_id: UUID) -> bool:
         """物理删除部门。"""
 
-    def code_exists(
-        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
-    ) -> bool:
+    def code_exists(self, tenant_id: UUID, code: str, exclude_id: UUID | None = None) -> bool:
         """租户内部门编码是否已存在（忽略大小写）。"""
 
     def name_exists_under_parent(
@@ -686,14 +685,10 @@ class MgmtUnitRepository(Protocol):
     def get(self, unit_id: UUID) -> ManagementUnit | None:
         """按主键查询管理单元。"""
 
-    def get_for_update(
-        self, unit_id: UUID, tenant_id: UUID | None = None
-    ) -> ManagementUnit | None:
+    def get_for_update(self, unit_id: UUID, tenant_id: UUID | None = None) -> ManagementUnit | None:
         """按主键加行锁查询管理单元；传入租户时同时限定租户。"""
 
-    def list_all(
-        self, tenant_id: UUID, include_inactive: bool = True
-    ) -> list[ManagementUnit]:
+    def list_all(self, tenant_id: UUID, include_inactive: bool = True) -> list[ManagementUnit]:
         """按物化路径顺序返回租户全部管理单元。"""
 
     def list_active(self, tenant_id: UUID) -> list[ManagementUnit]:
@@ -708,9 +703,7 @@ class MgmtUnitRepository(Protocol):
     def delete(self, unit_id: UUID) -> bool:
         """物理删除管理单元。"""
 
-    def code_exists(
-        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
-    ) -> bool:
+    def code_exists(self, tenant_id: UUID, code: str, exclude_id: UUID | None = None) -> bool:
         """租户内管理单元编码是否已存在（忽略大小写）。"""
 
     def name_exists_under_parent(
@@ -731,17 +724,13 @@ class MgmtUnitRepository(Protocol):
     def list_users(self, unit_id: UUID) -> list[MgmtUnitUser]:
         """读取管理单元已关联的人员列表。"""
 
-    def replace_departments(
-        self, unit_id: UUID, bindings: list[tuple[UUID, bool]]
-    ) -> None:
+    def replace_departments(self, unit_id: UUID, bindings: list[tuple[UUID, bool]]) -> None:
         """整体替换管理单元的部门关联；bindings 为 (department_id, include_subtree) 列表。"""
 
     def replace_users(self, unit_id: UUID, user_ids: list[UUID]) -> None:
         """整体替换管理单元的人员关联。"""
 
-    def list_departments_for_units(
-        self, unit_ids: list[UUID]
-    ) -> list[MgmtUnitDepartment]:
+    def list_departments_for_units(self, unit_ids: list[UUID]) -> list[MgmtUnitDepartment]:
         """批量读取多个单元的部门关联，避免 N+1；仅返回仍启用的单元关联。"""
 
     def list_users_for_units(self, unit_ids: list[UUID]) -> list[MgmtUnitUser]:
@@ -829,6 +818,7 @@ class UnitOfWork(Protocol):
     mgmt_units: MgmtUnitRepository
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     tools: ResourceRepository[Tool]
+    app_grants: AppGrantRepositoryProtocol
 
     def resource_repo(self, resource_type: str) -> ResourceRepository[Tool]:
         """按资源类型返回当前作用域仓储；tools 等价于 resource_repo('tool')。"""
