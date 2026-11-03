@@ -13,10 +13,16 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.entity.access import RESOURCE_TABLE_TYPES
+from internal.domain.entity.access import (
+    GRANT_BLOCK_DEPRECATED,
+    GRANT_BLOCK_NOT_APPROVED,
+    GRANT_BLOCK_NOT_ENTITLED,
+    RESOURCE_TABLE_TYPES,
+)
 from internal.domain.entity.resource import Tool
 from internal.infrastructure.model.resource import ResourceModel
 from internal.infrastructure.repository.grant_filters import (
+    entitlement_active_exists,
     has_any_grant,
     platform_resource_visible,
     platform_role_grant_exists,
@@ -158,9 +164,7 @@ class ResourceToolRepository:
             condition = (
                 has_any_grant(self._resource_type, ResourceModel.id)
                 if grant_tenant_id is None
-                else tenant_grant_exists(
-                    self._resource_type, ResourceModel.id, grant_tenant_id
-                )
+                else tenant_grant_exists(self._resource_type, ResourceModel.id, grant_tenant_id)
             )
             stmt = stmt.where(condition if grant_state == "granted" else ~condition)
         if keyword and keyword.strip():
@@ -272,8 +276,12 @@ class ResourceToolRepository:
         ).all()
         return set(rows)
 
-    def _grantable(self, stmt):
-        """角色授权候选范围：租户自有工具 + 已对本租户可见的平台工具。"""
+    def _grantable(self, stmt, *, with_constraints: bool = True):
+        """角色授权候选范围：租户自有工具 + 已授权且已开通权益的平台工具。
+
+        with_constraints=False 供"已授权集合"浏览：弃用/未审核/未开通只拦截
+        新授权与候选集，历史授权仍需在授权页可见（P1-8）。
+        """
         if self._tenant_id == PLATFORM_TENANT_ID:
             return stmt.where(
                 ResourceModel.type == self._resource_type,
@@ -293,9 +301,15 @@ class ResourceToolRepository:
                 False,
             ),
         )
-        return stmt.where(
+        stmt = stmt.where(
             ResourceModel.type == self._resource_type, or_(tenant_owned, platform_entitled)
         )
+        if with_constraints:
+            stmt = stmt.where(
+                ResourceModel.review_status == "approved",
+                ResourceModel.is_deprecated.is_(False),
+            )
+        return stmt
 
     def list_grantable(
         self,
@@ -304,8 +318,8 @@ class ResourceToolRepository:
         keyword: str | None,
         ids: list[UUID] | None = None,
     ) -> tuple[list[Tool], int]:
-        """分页查询可向本租户角色授权的工具。"""
-        stmt = self._grantable(select(ResourceModel))
+        """分页查询可向本租户角色授权的工具；显式 ids（已授权集合）不受新约束过滤。"""
+        stmt = self._grantable(select(ResourceModel), with_constraints=ids is None)
         if ids is not None:
             if not ids:
                 return [], 0
@@ -328,3 +342,30 @@ class ResourceToolRepository:
             self._grantable(select(ResourceModel.id)).where(ResourceModel.id.in_(ids))
         ).all()
         return set(rows)
+
+    def grant_block_reasons(self, ids: list[UUID]) -> dict[UUID, str]:
+        """对候选集外资源分类拦截原因（P1-8 写侧错误语义）。
+
+        返回 {资源ID: 原因码}；不存在或不属于当前作用域的 id 不出现在结果中
+        （由调用方按"不存在"处理）。平台作用域无权益/审核门槛，恒返回空。
+        """
+        if not ids or self._tenant_id == PLATFORM_TENANT_ID:
+            return {}
+        rows = self._session.execute(
+            select(
+                ResourceModel.id,
+                ResourceModel.owner_type,
+                ResourceModel.review_status,
+                ResourceModel.is_deprecated,
+                entitlement_active_exists(ResourceModel.id, self._tenant_id).label("entitled"),
+            ).where(ResourceModel.type == self._resource_type, ResourceModel.id.in_(ids))
+        ).all()
+        reasons: dict[UUID, str] = {}
+        for row in rows:
+            if row.owner_type == "platform" and not row.entitled:
+                reasons[row.id] = GRANT_BLOCK_NOT_ENTITLED
+            elif row.review_status != "approved":
+                reasons[row.id] = GRANT_BLOCK_NOT_APPROVED
+            elif row.is_deprecated:
+                reasons[row.id] = GRANT_BLOCK_DEPRECATED
+        return reasons

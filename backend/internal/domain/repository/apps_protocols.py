@@ -546,6 +546,10 @@ class AppGrantRepositoryProtocol(Protocol):
 
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]: ...
 
+    def grant_block_reasons(self, ids: list[UUID]) -> dict[UUID, str]:
+        """候选集外资源拦截原因码；应用档 P1-8 无权益/审核口径恒返回空（P1-10 联动）。"""
+        ...
+
 
 class EntitlementRepositoryProtocol(Protocol):
     """权益仓储端口：统一读写 tenant_application_instance（app）与 resource_grant（资源）。"""

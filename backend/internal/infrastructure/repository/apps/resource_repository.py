@@ -139,9 +139,7 @@ class AppResourceRepository:
 
     def revoke(self, resource_id: UUID, tenant_id: UUID) -> None:
         self._session.execute(
-            text(
-                "DELETE FROM resource_grant WHERE resource_id = :rid AND tenant_id = :tid"
-            ),
+            text("DELETE FROM resource_grant WHERE resource_id = :rid AND tenant_id = :tid"),
             {"rid": resource_id, "tid": tenant_id},
         )
 
@@ -170,7 +168,8 @@ class AppResourceRepository:
         """
         row = self._session.execute(
             text(
-                "SELECT r.id, r.type, r.owner_type, r.owner_id, r.name, r.config, r.version "
+                "SELECT r.id, r.type, r.owner_type, r.owner_id, r.name, r.config, r.version, "
+                "r.review_status "
                 "FROM resource r "
                 "WHERE r.id = :rid AND r.is_enabled = true AND r.is_deprecated = false "
                 "AND ( "
@@ -178,6 +177,9 @@ class AppResourceRepository:
                 "  OR (r.owner_type = 'platform' AND EXISTS ( "
                 "    SELECT 1 FROM resource_grant g "
                 "    WHERE g.resource_id = r.id AND g.tenant_id = :tid "
+                "      AND g.status IN ('active', 'wait_effect') "
+                "      AND (g.start_time IS NULL OR g.start_time <= NOW()) "
+                "      AND (g.expire_time IS NULL OR g.expire_time > NOW()) "
                 "  )) "
                 ")"
             ),
@@ -193,7 +195,8 @@ class AppResourceRepository:
     ) -> list[dict]:
         """列出租户可用资源：平台已 grant 给该租户的 + 租户自建私有资源。"""
         sql = (
-            "SELECT r.id, r.type, r.owner_type, r.owner_id, r.name, r.config, r.version "
+            "SELECT r.id, r.type, r.owner_type, r.owner_id, r.name, r.config, r.version, "
+            "r.review_status "
             "FROM resource r "
             "WHERE r.is_enabled = true AND r.is_deprecated = false "
             "AND ( "
@@ -201,6 +204,9 @@ class AppResourceRepository:
             "  OR (r.owner_type = 'platform' AND EXISTS ( "
             "    SELECT 1 FROM resource_grant g "
             "    WHERE g.resource_id = r.id AND g.tenant_id = :tid "
+            "      AND g.status IN ('active', 'wait_effect') "
+            "      AND (g.start_time IS NULL OR g.start_time <= NOW()) "
+            "      AND (g.expire_time IS NULL OR g.expire_time > NOW()) "
             "  )) "
             ")"
         )

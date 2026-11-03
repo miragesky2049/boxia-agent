@@ -205,6 +205,13 @@ class ResourceRepository(Protocol[TResource]):
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中可向本租户角色授权的部分。"""
 
+    def grant_block_reasons(self, ids: list[UUID]) -> dict[UUID, str]:
+        """候选集外资源的拦截原因码（P1-8）：{资源ID: 原因码}。
+
+        原因码取 GRANT_BLOCK_NOT_ENTITLED / GRANT_BLOCK_NOT_APPROVED /
+        GRANT_BLOCK_DEPRECATED；不存在或越权 id 不入结果（调用方按无权授权处理）。
+        """
+
 
 class RoleRepository(Protocol):
     """角色仓储：tenant_id 为空表示平台角色。"""

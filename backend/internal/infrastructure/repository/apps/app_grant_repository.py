@@ -150,3 +150,7 @@ class AppGrantRepository:
     def ids_grantable(self, ids: list[UUID]) -> set[UUID]:
         """返回给定 id 中可授权给角色的应用集合。"""
         return self.ids_exist(ids)
+
+    def grant_block_reasons(self, ids: list[UUID]) -> dict[UUID, str]:
+        """应用档 P1-8 无权益/审核口径，恒返回空（服务层回落 404；P1-10 联动 is_tenant_wide）。"""
+        return {}

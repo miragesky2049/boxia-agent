@@ -20,6 +20,11 @@ RESOURCE_TABLE_TYPES = ("tool", "skill", "prompt", "knowledge")
 # RBAC 资源授权可选的全部类型
 RESOURCE_TYPES = (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
 
+# 角色授权写侧拦截原因码（P1-8）：候选仓储 diagnose 返回码，服务层映射为领域错误
+GRANT_BLOCK_NOT_ENTITLED = "not_entitled"
+GRANT_BLOCK_NOT_APPROVED = "not_approved"
+GRANT_BLOCK_DEPRECATED = "deprecated"
+
 
 @dataclass(frozen=True)
 class AppGrantRow:

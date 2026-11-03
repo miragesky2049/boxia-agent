@@ -9,9 +9,22 @@ from typing import Any
 from uuid import UUID
 
 from internal.application.audit import record_audit
-from internal.application.errors import NotFoundError, ValidationError
+from internal.application.errors import (
+    NotFoundError,
+    ResourceDeprecatedError,
+    ResourceNotApprovedError,
+    ResourceNotEntitledError,
+    ValidationError,
+)
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.entity.access import APP_RESOURCE_TYPE, RESOURCE_TYPES, Role
+from internal.domain.entity.access import (
+    APP_RESOURCE_TYPE,
+    GRANT_BLOCK_DEPRECATED,
+    GRANT_BLOCK_NOT_APPROVED,
+    GRANT_BLOCK_NOT_ENTITLED,
+    RESOURCE_TYPES,
+    Role,
+)
 from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.permission import DATA_ALL
 from internal.domain.entity.request_context import RequestContext
@@ -273,14 +286,26 @@ class RoleGrantService:
             return self._uow.app_grants
         return self._uow.resource_repo(resource_type)
 
-    @staticmethod
-    def _validate_ids(repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:
+    def _validate_ids(self, repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:
+        """候选集校验：全部命中直接通过；有缺失则按拦截原因给出 422 专属错误码。"""
         ids = sorted(set(resource_ids))
         if not ids:
             return []
-        if repository.ids_grantable(ids) != set(ids):
-            raise NotFoundError("部分资源不存在或无权授权")
-        return ids
+        grantable = repository.ids_grantable(ids)
+        missing = [resource_id for resource_id in ids if resource_id not in grantable]
+        if not missing:
+            return ids
+        reasons = repository.grant_block_reasons(missing)
+        reason = next(
+            (reasons.get(resource_id) for resource_id in missing if reasons.get(resource_id)), None
+        )
+        if reason == GRANT_BLOCK_NOT_ENTITLED:
+            raise ResourceNotEntitledError("资源未对当前租户开通")
+        if reason == GRANT_BLOCK_NOT_APPROVED:
+            raise ResourceNotApprovedError("资源尚未通过审核")
+        if reason == GRANT_BLOCK_DEPRECATED:
+            raise ResourceDeprecatedError("资源已弃用，不可新授权")
+        raise NotFoundError("部分资源不存在或无权授权")
 
     @staticmethod
     def _to_item(resource: Any, is_granted: bool) -> RoleGrantResource:

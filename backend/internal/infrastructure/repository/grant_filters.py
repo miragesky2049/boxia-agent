@@ -3,11 +3,13 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import exists, false, or_, true
+from sqlalchemy import and_, exists, false, func, or_, true
 from sqlalchemy.sql.elements import ColumnElement
 
 from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.entity.entitlement import STATUS_ACTIVE, STATUS_WAIT_EFFECT
 from internal.infrastructure.model.access import ResourceGrantModel
+from internal.infrastructure.model.resource import ResourceEntitlementModel
 
 
 def _role_condition(role_ids: tuple[UUID, ...], apply_role_filter: bool) -> ColumnElement[bool]:
@@ -85,6 +87,27 @@ def tenant_resource_visible(
     return grant_exists(resource_type, resource_id_col, tenant_id, role_ids, True)
 
 
+def entitlement_active_exists(resource_id_col: Any, tenant_id: UUID) -> ColumnElement[bool]:
+    """单数 resource_grant 权益有效谓词（P1-8）。
+
+    时间语义与读侧 effective_status 对齐（D-3）：wait_effect 行过 start_time 后
+    即计入有效，expired/revoked/suspended/disabled 不计入；NULL 视为不限。
+    """
+    return exists().where(
+        ResourceEntitlementModel.resource_id == resource_id_col,
+        ResourceEntitlementModel.tenant_id == tenant_id,
+        ResourceEntitlementModel.status.in_((STATUS_ACTIVE, STATUS_WAIT_EFFECT)),
+        or_(
+            ResourceEntitlementModel.start_time.is_(None),
+            ResourceEntitlementModel.start_time <= func.now(),
+        ),
+        or_(
+            ResourceEntitlementModel.expire_time.is_(None),
+            ResourceEntitlementModel.expire_time > func.now(),
+        ),
+    )
+
+
 def platform_resource_visible(
     resource_type: str,
     resource_id_col: Any,
@@ -92,5 +115,8 @@ def platform_resource_visible(
     role_ids: tuple[UUID, ...],
     apply_role_filter: bool,
 ) -> ColumnElement[bool]:
-    """产品级资源：必须直接授权命中。"""
-    return grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter)
+    """产品级资源：角色授权命中 且 租户权益已开通（授权≠开通，P1-8 双条件）。"""
+    return and_(
+        grant_exists(resource_type, resource_id_col, tenant_id, role_ids, apply_role_filter),
+        entitlement_active_exists(resource_id_col, tenant_id),
+    )

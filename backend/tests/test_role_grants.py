@@ -38,9 +38,7 @@ def _create_tenant_tool(
     return {"id": response.json()["resource_id"], "name": name}
 
 
-def _create_platform_tool(
-    client: TestClient, headers: dict[str, str], name: str
-) -> dict:
+def _create_platform_tool(client: TestClient, headers: dict[str, str], name: str) -> dict:
     """平台管理员创建产品级工具（resource 表）。"""
     response = client.post(
         "/api/v1/admin/resources",
@@ -74,9 +72,7 @@ def _create_admin_with_role(
 
 
 def _summary(site: TestClient, headers: dict[str, str], role_id: UUID) -> dict[str, int]:
-    response = site.get(
-        f"/api/v1/admin/roles/{role_id}/grants/summary", headers=headers
-    )
+    response = site.get(f"/api/v1/admin/roles/{role_id}/grants/summary", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()["counts"]
 
@@ -102,9 +98,7 @@ def _grant_items(
     return response.json()["items"]
 
 
-def test_role_detail_and_grant_lifecycle(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_role_detail_and_grant_lifecycle(client: TestClient, auth_headers, tenant_client) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -183,9 +177,7 @@ def test_role_detail_and_grant_lifecycle(
     assert _summary(site, headers, viewer_id)["tool"] == 0
 
 
-def test_superadmin_role_grants_read_only(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_superadmin_role_grants_read_only(client: TestClient, auth_headers, tenant_client) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -251,7 +243,7 @@ def test_role_grants_platform_resource_candidate_gate(
 
     platform_skill_id = _create_platform_tool(client, auth_headers, "平台技能")["id"]
 
-    # 未下发本租户的平台资源不可出现在候选集，也不能被授权
+    # 未下发本租户的平台资源不可出现在候选集，也不能被授权（P1-8：未开通给专属 422 码）
     candidates = _grant_items(site, headers, viewer_id, "tool", granted_only=False)
     assert platform_skill_id not in {item["resource_id"] for item in candidates}
     rejected = site.post(
@@ -259,7 +251,16 @@ def test_role_grants_platform_resource_candidate_gate(
         json={"resource_ids": [platform_skill_id]},
         headers=headers,
     )
-    assert rejected.status_code == 404
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
+
+    # 授权≠开通：下发（复数授权）之外还需开通租户权益（单数 resource_grant）
+    entitlement = client.post(
+        f"/api/v1/admin/resources/{platform_skill_id}/grants",
+        json={"tenant_id": tenant["id"]},
+        headers=auth_headers,
+    )
+    assert entitlement.status_code == 201, entitlement.text
 
     grant_resource(
         client,
@@ -310,10 +311,7 @@ def test_role_grants_cross_tenant_isolation(
     site_b, headers_b, _ = tenant_admin_client(tenant_client, "beta")
     skill_b = _create_tenant_tool(client, auth_headers, tenant_b["id"], "Beta 技能")
 
-    assert (
-        site_b.get(f"/api/v1/admin/roles/{viewer_a_id}", headers=headers_b).status_code
-        == 404
-    )
+    assert site_b.get(f"/api/v1/admin/roles/{viewer_a_id}", headers=headers_b).status_code == 404
     assert (
         site_b.get(
             f"/api/v1/admin/roles/{viewer_a_id}/grants/summary", headers=headers_b
@@ -345,4 +343,3 @@ def test_role_grants_cross_tenant_isolation(
         headers=auth_headers,
     )
     assert platform_detail.status_code == 403
-

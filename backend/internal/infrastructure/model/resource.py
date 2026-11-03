@@ -14,6 +14,7 @@ from sqlalchemy import (
     DateTime,
     Integer,
     String,
+    Text,
     Uuid,
     func,
 )
@@ -38,3 +39,37 @@ class ResourceModel(Base):
     is_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_deprecated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    review_status: Mapped[str] = mapped_column(
+        String(20),
+        nullable=False,
+        server_default="approved",
+        comment="pending / approved / rejected",
+    )
+    reviewed_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), comment="审核人")
+    reviewed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), comment="审核时间"
+    )
+    review_remark: Mapped[str] = mapped_column(
+        Text, nullable=False, server_default="", comment="审核意见"
+    )
+    created_by: Mapped[UUID | None] = mapped_column(
+        Uuid(as_uuid=True), comment="创建人（职责分离校验用，历史存量 NULL）"
+    )
+
+
+class ResourceEntitlementModel(Base):
+    """resource_grant 单表：租户对资源的权益行（运营开通/市场申请落此表）。
+
+    与复数 resource_grants（角色授权，"哪些角色可用"）职责不同：单表表达
+    "租户是否已开通权益"。本模型仅供读侧 EXISTS 判定装配（P1-8），
+    写路径仍走 EntitlementRepository 裸 SQL。
+    """
+
+    __tablename__ = "resource_grant"
+
+    id: Mapped[UuidPrimaryKey]
+    resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
+    start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expire_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

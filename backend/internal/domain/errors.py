@@ -48,6 +48,24 @@ class ValidationError(AppError):
     code = "VALIDATION_ERROR"
 
 
+class ResourceNotEntitledError(ValidationError):
+    """角色授权目标资源未对当前租户开通权益。"""
+
+    code = "RESOURCE_NOT_ENTITLED"
+
+
+class ResourceNotApprovedError(ValidationError):
+    """角色授权目标资源尚未通过审核。"""
+
+    code = "RESOURCE_NOT_APPROVED"
+
+
+class ResourceDeprecatedError(ValidationError):
+    """角色授权目标资源已弃用，不可新授权。"""
+
+    code = "RESOURCE_DEPRECATED"
+
+
 class RateLimitError(AppError):
     """请求过于频繁或账号被临时锁定。"""
 
