@@ -1,4 +1,4 @@
-"""权益统一读写模型：屏蔽 tenant_application_instance 与 resource_grant 两套存储。
+"""权益统一读写模型：屏蔽 tenant_application_instance 与 tenant_resource_entitlement 两套存储。
 
 视图状态在读侧按 UTC 左闭右开区间 [start_time, expire_time) 计算（D-3），
 不依赖 Celery 定时任务的持久化 status 刷新，避免"已过期但仍可用"窗口。

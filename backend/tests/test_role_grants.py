@@ -254,7 +254,7 @@ def test_role_grants_platform_resource_candidate_gate(
     assert rejected.status_code == 422, rejected.text
     assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
 
-    # 授权≠开通：下发（复数授权）之外还需开通租户权益（单数 resource_grant）
+    # 授权≠开通：下发（复数 resource_grants）之外还需开通租户权益（tenant_resource_entitlement）
     entitlement = client.post(
         f"/api/v1/admin/resources/{platform_skill_id}/grants",
         json={"tenant_id": tenant["id"]},

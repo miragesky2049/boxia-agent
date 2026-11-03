@@ -43,7 +43,7 @@ def _create_platform_tool(client: TestClient, headers: dict[str, str], name: str
 def _open_entitlement(
     client: TestClient, headers: dict[str, str], resource_id: str, tenant_id: str
 ) -> None:
-    """开通租户权益（单数 resource_grant）。"""
+    """开通租户权益（tenant_resource_entitlement 单表）。"""
     response = client.post(
         f"/api/v1/admin/resources/{resource_id}/grants",
         json={"tenant_id": tenant_id},
@@ -152,7 +152,7 @@ def test_entitlement_status_and_window_gate_new_grants(
     _open_entitlement(client, auth_headers, tool_id, tenant["id"])
 
     _run_sql(
-        "UPDATE resource_grant SET status = 'revoked' "
+        "UPDATE tenant_resource_entitlement SET status = 'revoked' "
         "WHERE resource_id = :rid AND tenant_id = :tid",
         rid=tool_id,
         tid=tenant["id"],
@@ -162,7 +162,7 @@ def test_entitlement_status_and_window_gate_new_grants(
     assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
 
     _run_sql(
-        "UPDATE resource_grant SET status = 'active' WHERE resource_id = :rid AND tenant_id = :tid",
+        "UPDATE tenant_resource_entitlement SET status = 'active' WHERE resource_id = :rid AND tenant_id = :tid",
         rid=tool_id,
         tid=tenant["id"],
     )
@@ -170,7 +170,7 @@ def test_entitlement_status_and_window_gate_new_grants(
     assert restored.status_code == 200, restored.text
 
     _run_sql(
-        "UPDATE resource_grant SET expire_time = NOW() - INTERVAL '1 minute' "
+        "UPDATE tenant_resource_entitlement SET expire_time = NOW() - INTERVAL '1 minute' "
         "WHERE resource_id = :rid AND tenant_id = :tid",
         rid=tool_id,
         tid=tenant["id"],
@@ -181,7 +181,7 @@ def test_entitlement_status_and_window_gate_new_grants(
     assert tool_id not in _role_resource_ids(site, headers, viewer_id, granted_only=False)
 
     _run_sql(
-        "UPDATE resource_grant SET expire_time = NULL "
+        "UPDATE tenant_resource_entitlement SET expire_time = NULL "
         "WHERE resource_id = :rid AND tenant_id = :tid",
         rid=tool_id,
         tid=tenant["id"],

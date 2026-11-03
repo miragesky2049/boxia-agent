@@ -58,14 +58,14 @@ class ResourceModel(Base):
 
 
 class ResourceEntitlementModel(Base):
-    """resource_grant 单表：租户对资源的权益行（运营开通/市场申请落此表）。
+    """tenant_resource_entitlement 单表：租户对资源的权益行（运营开通/市场申请落此表）。
 
     与复数 resource_grants（角色授权，"哪些角色可用"）职责不同：单表表达
     "租户是否已开通权益"。本模型仅供读侧 EXISTS 判定装配（P1-8），
     写路径仍走 EntitlementRepository 裸 SQL。
     """
 
-    __tablename__ = "resource_grant"
+    __tablename__ = "tenant_resource_entitlement"
 
     id: Mapped[UuidPrimaryKey]
     resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)

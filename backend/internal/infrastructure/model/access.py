@@ -173,8 +173,8 @@ class UserRefreshTokenModel(Base):
 class ResourceGrantModel(Base):
     """resource_grants 表（旧 RBAC 风格）：资源对租户或租户角色的授权。
 
-    与 v4 的 resource_grant（单数）表区别：
-    - resource_grant（单数）：v4 市场场景，resource_id + tenant_id 直接授权
+    与 v4 的 tenant_resource_entitlement（原名单数 resource_grant）表区别：
+    - tenant_resource_entitlement：v4 市场场景，resource_id + tenant_id 直接授权
     - resource_grants（复数，本表）：旧管理后台 RBAC 场景，按 resource_type + role_id 粒度授权
 
     tenant_id 非空；产品级授权 = PLATFORM_TENANT_ID（全零 UUID），租户授权 = 真实租户 ID。

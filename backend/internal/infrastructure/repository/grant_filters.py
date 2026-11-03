@@ -95,7 +95,7 @@ def tenant_resource_visible(
 
 
 def entitlement_active_exists(resource_id_col: Any, tenant_id: UUID) -> ColumnElement[bool]:
-    """单数 resource_grant 权益有效谓词（P1-8）。
+    """tenant_resource_entitlement 权益有效谓词（P1-8）。
 
     时间语义与读侧 effective_status 对齐（D-3）：wait_effect 行过 start_time 后
     即计入有效，expired/revoked/suspended/disabled 不计入；NULL 视为不限。

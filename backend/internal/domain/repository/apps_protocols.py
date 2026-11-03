@@ -565,7 +565,7 @@ class AppGrantRepositoryProtocol(Protocol):
 
 
 class EntitlementRepositoryProtocol(Protocol):
-    """权益仓储端口：统一读写 tenant_application_instance（app）与 resource_grant（资源）。"""
+    """权益仓储端口：统一读写 tenant_application_instance（app）与 tenant_resource_entitlement（资源）。"""
 
     def list_by_tenant(
         self,
@@ -622,15 +622,15 @@ class EntitlementRepositoryProtocol(Protocol):
         ...
 
     def list_resource_wait_effective(self, now: datetime) -> list[dict]:
-        """resource_grant 中 wait_effect 且已过 start_time 的行（P3-1 生命周期流转）。"""
+        """tenant_resource_entitlement 中 wait_effect 且已过 start_time 的行（P3-1 生命周期流转）。"""
         ...
 
     def list_resource_expired(self, now: datetime) -> list[dict]:
-        """resource_grant 中 active 且已过 expire_time 的行（P3-1 生命周期流转）。"""
+        """tenant_resource_entitlement 中 active 且已过 expire_time 的行（P3-1 生命周期流转）。"""
         ...
 
-    def update_resource_grant_status(self, grant_id: UUID, status: str) -> None:
-        """更新 resource_grant 行持久状态（wait_effect→active / active→expired）。"""
+    def update_entitlement_status(self, entitlement_id: UUID, status: str) -> None:
+        """更新 tenant_resource_entitlement 行持久状态（wait_effect→active / active→expired）。"""
         ...
 
     def list_expiring(self, now: datetime, window_days: int) -> list[dict]:

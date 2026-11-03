@@ -137,7 +137,9 @@ def test_apply_plan_start_time_and_explicit_expire(uow, tenant):
     )
     assert result.updated == 1
     raw = uow.session.execute(
-        text("SELECT status, expire_time, remark FROM resource_grant WHERE resource_id = :rid"),
+        text(
+            "SELECT status, expire_time, remark FROM tenant_resource_entitlement WHERE resource_id = :rid"
+        ),
         {"rid": skill_id},
     ).first()
     assert raw.status == "wait_effect"

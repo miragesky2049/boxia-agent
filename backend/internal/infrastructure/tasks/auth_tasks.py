@@ -1,7 +1,7 @@
 """Celery 定时任务：授权与资源权益状态流转。
 
-- process_wait_effective: 每 5 分钟扫描 wait_effect → active（app 授权 + resource_grant）
-- process_expired: 每 5 分钟扫描 active → expired（app 授权 + resource_grant）
+- process_wait_effective: 每 5 分钟扫描 wait_effect → active（app 授权 + tenant_resource_entitlement）
+- process_expired: 每 5 分钟扫描 active → expired（app 授权 + tenant_resource_entitlement）
 
 beat 配置在 celery_app 中注册；资源权益复用同一调度，独立短事务（P3-1）。
 """
@@ -41,7 +41,7 @@ def _run_process(kind: str) -> int:
 
 
 def _run_resource_process(kind: str) -> int:
-    """resource_grant 生命周期流转：与 app 授权分离的独立短事务（P3-1）。"""
+    """tenant_resource_entitlement 生命周期流转：与 app 授权分离的独立短事务（P3-1）。"""
     uow = SqlAlchemyUnitOfWork()
     try:
         context = RequestContext(scope=PLATFORM_SCOPE, tenant=None, host="system")

@@ -1,4 +1,4 @@
-"""权益仓储实现：统一读写 tenant_application_instance（app）与 resource_grant（资源）。
+"""权益仓储实现：统一读写 tenant_application_instance（app）与 tenant_resource_entitlement（资源）。
 
 只依赖 SQLAlchemy Core / text，不 import application 层（DDD 依赖方向：infra → domain）。
 读侧 status 统一经 effective_status 按 [start, expire) 时间重算（D-3），
@@ -40,7 +40,7 @@ _LIST_SQL_BASE = """
                g.status, g.auth_source, g.auth_type, g.start_time, g.expire_time,
                COALESCE(g.quota_json, '{}'::jsonb), COALESCE(g.remark, ''), g.granted_at,
                r.is_deprecated
-        FROM resource_grant g
+        FROM tenant_resource_entitlement g
         JOIN resource r ON r.id = g.resource_id
         WHERE g.tenant_id = :tid
     ) e
@@ -96,7 +96,7 @@ class EntitlementRepository:
             """
         else:
             base = """
-                FROM resource_grant e
+                FROM tenant_resource_entitlement e
                 JOIN resource r ON r.id = e.resource_id
                 JOIN tenants t ON t.id = e.tenant_id
                 WHERE e.resource_id = :oid AND r.type = :otype
@@ -186,7 +186,7 @@ class EntitlementRepository:
             )
         else:
             stmt = text(
-                "UPDATE resource_grant SET status = 'revoked', remark = :remark "
+                "UPDATE tenant_resource_entitlement SET status = 'revoked', remark = :remark "
                 "WHERE tenant_id = :tid AND resource_id = :oid AND status <> 'revoked'"
             )
         result = cast_cursor(self._session.execute(stmt, params))
@@ -199,7 +199,9 @@ class EntitlementRepository:
                 "WHERE tenant_id = :tid AND application_id = :oid"
             )
         else:
-            stmt = text("DELETE FROM resource_grant WHERE tenant_id = :tid AND resource_id = :oid")
+            stmt = text(
+                "DELETE FROM tenant_resource_entitlement WHERE tenant_id = :tid AND resource_id = :oid"
+            )
         result = cast_cursor(self._session.execute(stmt, {"tid": tenant_id, "oid": object_id}))
         return int(result.rowcount)
 
@@ -207,7 +209,7 @@ class EntitlementRepository:
     def list_resource_wait_effective(self, now: datetime) -> list[dict]:
         rows = self._session.execute(
             text(
-                "SELECT id, tenant_id, resource_id FROM resource_grant "
+                "SELECT id, tenant_id, resource_id FROM tenant_resource_entitlement "
                 "WHERE status = 'wait_effect' AND start_time IS NOT NULL AND start_time <= :now"
             ),
             {"now": now},
@@ -217,17 +219,17 @@ class EntitlementRepository:
     def list_resource_expired(self, now: datetime) -> list[dict]:
         rows = self._session.execute(
             text(
-                "SELECT id, tenant_id, resource_id FROM resource_grant "
+                "SELECT id, tenant_id, resource_id FROM tenant_resource_entitlement "
                 "WHERE status = 'active' AND expire_time IS NOT NULL AND expire_time <= :now"
             ),
             {"now": now},
         ).all()
         return [dict(row._mapping) for row in rows]
 
-    def update_resource_grant_status(self, grant_id, status: str) -> None:
+    def update_entitlement_status(self, entitlement_id, status: str) -> None:
         self._session.execute(
-            text("UPDATE resource_grant SET status = :status WHERE id = :id"),
-            {"id": grant_id, "status": status},
+            text("UPDATE tenant_resource_entitlement SET status = :status WHERE id = :id"),
+            {"id": entitlement_id, "status": status},
         )
 
     def purge_role_grants(self, tenant_id, object_type: str, object_id) -> int:
@@ -257,7 +259,7 @@ class EntitlementRepository:
                   AND i.expire_time IS NOT NULL AND i.expire_time > :now AND i.expire_time <= :horizon
                 UNION ALL
                 SELECT r.type, g.resource_id, g.tenant_id, r.name, g.expire_time
-                FROM resource_grant g
+                FROM tenant_resource_entitlement g
                 JOIN resource r ON r.id = g.resource_id
                 WHERE g.status IN ('active', 'wait_effect')
                   AND g.expire_time IS NOT NULL AND g.expire_time > :now AND g.expire_time <= :horizon
@@ -319,7 +321,7 @@ class EntitlementRepository:
             self._session.execute(
                 text(
                     """
-                    UPDATE resource_grant
+                    UPDATE tenant_resource_entitlement
                     SET status = :status, auth_source = :auth_source, auth_type = :auth_type,
                         start_time = :start_time, expire_time = :expire_time,
                         quota_json = CAST(:quota AS JSONB), remark = :remark,
@@ -332,7 +334,9 @@ class EntitlementRepository:
         )
         if result.rowcount == 1:
             row = self._session.execute(
-                text("SELECT id FROM resource_grant WHERE tenant_id = :tid AND resource_id = :oid"),
+                text(
+                    "SELECT id FROM tenant_resource_entitlement WHERE tenant_id = :tid AND resource_id = :oid"
+                ),
                 {"tid": params["tid"], "oid": params["oid"]},
             ).scalar_one()
             return row
@@ -340,7 +344,7 @@ class EntitlementRepository:
         self._session.execute(
             text(
                 """
-                INSERT INTO resource_grant
+                INSERT INTO tenant_resource_entitlement
                     (id, resource_id, tenant_id, granted_at, status, auth_source, auth_type,
                      start_time, expire_time, quota_json, remark, granted_by)
                 VALUES

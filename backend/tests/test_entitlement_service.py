@@ -302,9 +302,10 @@ def test_purge_requires_superadmin_and_confirm(uow, tenant):
     assert EntitlementRepository(uow.session).get(tenant, "skill", skill_id) is not None
 
 
-def _raw_resource_grant_status(uow: SqlAlchemyUnitOfWork, resource_id) -> str:
+def _raw_entitlement_status(uow: SqlAlchemyUnitOfWork, resource_id) -> str:
     row = uow.session.execute(
-        text("SELECT status FROM resource_grant WHERE resource_id = :rid"), {"rid": resource_id}
+        text("SELECT status FROM tenant_resource_entitlement WHERE resource_id = :rid"),
+        {"rid": resource_id},
     ).first()
     return row.status
 
@@ -323,12 +324,12 @@ def test_process_resource_wait_effective_flips_at_start_time(uow, tenant):
             actor_username=_ACTOR,
         )
     )
-    assert _raw_resource_grant_status(uow, tool_id) == "wait_effect"
+    assert _raw_entitlement_status(uow, tool_id) == "wait_effect"
 
     svc = _service(uow)
     assert svc.process_resource_wait_effective(now) == 0
     assert svc.process_resource_wait_effective(now + timedelta(days=2)) == 1
-    assert _raw_resource_grant_status(uow, tool_id) == "active"
+    assert _raw_entitlement_status(uow, tool_id) == "active"
     # 幂等：再次流转无行可动
     assert svc.process_resource_wait_effective(now + timedelta(days=2)) == 0
 
@@ -343,13 +344,15 @@ def test_process_resource_expired_flips_after_expire(uow, tenant):
     _apply(uow, tenant, "revoke", [EntitlementItem("skill", skill_id)])
     for rid in (tool_id, skill_id):
         uow.session.execute(
-            text("UPDATE resource_grant SET expire_time = :t WHERE resource_id = :rid"),
+            text(
+                "UPDATE tenant_resource_entitlement SET expire_time = :t WHERE resource_id = :rid"
+            ),
             {"t": now - timedelta(hours=1), "rid": rid},
         )
     uow.commit()
 
     svc = _service(uow)
     assert svc.process_resource_expired(now) == 1
-    assert _raw_resource_grant_status(uow, tool_id) == "expired"
-    assert _raw_resource_grant_status(uow, skill_id) == "revoked"
+    assert _raw_entitlement_status(uow, tool_id) == "expired"
+    assert _raw_entitlement_status(uow, skill_id) == "revoked"
     assert svc.process_resource_expired(now) == 0

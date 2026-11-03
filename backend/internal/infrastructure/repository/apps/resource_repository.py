@@ -1,4 +1,4 @@
-"""统一资源仓储：resource + resource_grant。"""
+"""统一资源仓储：resource + tenant_resource_entitlement。"""
 
 from __future__ import annotations
 
@@ -16,7 +16,7 @@ class AppResourceRepository:
     """统一资源仓储，用原生 SQL 操作。
 
     resource 表覆盖 tool / prompt / skill / knowledge 四类资源；
-    resource_grant 表把平台资源开放给指定租户。
+    tenant_resource_entitlement 表把平台资源开放给指定租户。
     """
 
     def __init__(self, session: Session):
@@ -162,7 +162,7 @@ class AppResourceRepository:
         """把资源开放给租户。已 grant 则忽略（幂等）。"""
         self._session.execute(
             text(
-                "INSERT INTO resource_grant (id, resource_id, tenant_id) "
+                "INSERT INTO tenant_resource_entitlement (id, resource_id, tenant_id) "
                 "VALUES (:id, :rid, :tid) "
                 "ON CONFLICT (resource_id, tenant_id) DO NOTHING"
             ),
@@ -171,7 +171,9 @@ class AppResourceRepository:
 
     def revoke(self, resource_id: UUID, tenant_id: UUID) -> None:
         self._session.execute(
-            text("DELETE FROM resource_grant WHERE resource_id = :rid AND tenant_id = :tid"),
+            text(
+                "DELETE FROM tenant_resource_entitlement WHERE resource_id = :rid AND tenant_id = :tid"
+            ),
             {"rid": resource_id, "tid": tenant_id},
         )
 
@@ -179,7 +181,7 @@ class AppResourceRepository:
         rows = self._session.execute(
             text(
                 "SELECT id, resource_id, tenant_id, granted_at "
-                "FROM resource_grant WHERE resource_id = :rid ORDER BY granted_at"
+                "FROM tenant_resource_entitlement WHERE resource_id = :rid ORDER BY granted_at"
             ),
             {"rid": resource_id},
         ).all()
@@ -187,7 +189,7 @@ class AppResourceRepository:
 
     def list_tenants_granted(self, resource_id: UUID) -> list[UUID]:
         rows = self._session.execute(
-            text("SELECT tenant_id FROM resource_grant WHERE resource_id = :rid"),
+            text("SELECT tenant_id FROM tenant_resource_entitlement WHERE resource_id = :rid"),
             {"rid": resource_id},
         ).all()
         return [r[0] for r in rows]
@@ -207,7 +209,7 @@ class AppResourceRepository:
                 "AND ( "
                 "  (r.owner_type = 'tenant' AND r.owner_id = :tid) "
                 "  OR (r.owner_type = 'platform' AND EXISTS ( "
-                "    SELECT 1 FROM resource_grant g "
+                "    SELECT 1 FROM tenant_resource_entitlement g "
                 "    WHERE g.resource_id = r.id AND g.tenant_id = :tid "
                 "      AND g.status IN ('active', 'wait_effect') "
                 "      AND (g.start_time IS NULL OR g.start_time <= NOW()) "
@@ -234,7 +236,7 @@ class AppResourceRepository:
             "AND ( "
             "  (r.owner_type = 'tenant' AND r.owner_id = :tid) "
             "  OR (r.owner_type = 'platform' AND EXISTS ( "
-            "    SELECT 1 FROM resource_grant g "
+            "    SELECT 1 FROM tenant_resource_entitlement g "
             "    WHERE g.resource_id = r.id AND g.tenant_id = :tid "
             "      AND g.status IN ('active', 'wait_effect') "
             "      AND (g.start_time IS NULL OR g.start_time <= NOW()) "

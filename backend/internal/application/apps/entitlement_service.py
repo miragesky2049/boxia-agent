@@ -1,4 +1,4 @@
-"""权益统一读写用例：屏蔽 tenant_application_instance 与 resource_grant 两套存储。
+"""权益统一读写用例：屏蔽 tenant_application_instance 与 tenant_resource_entitlement 两套存储。
 
 只依赖 domain Protocol 端口（仓储/uow/异常），不 import infra 具体类；
 apply_batch/purge 自管事务边界（批量原子性要求先全量校验再写入，
@@ -433,21 +433,21 @@ class EntitlementService:
 
     # ========== 生命周期（系统定时调用，无作用域门禁） ==========
     def process_resource_wait_effective(self, now: datetime) -> int:
-        """到点把 resource_grant 的 wait_effect 行落库为 active（P3-1）。
+        """到点把 tenant_resource_entitlement 的 wait_effect 行落库为 active（P3-1）。
 
         读侧 effective_status 已按时间计算，本流转只为把持久状态对齐、
         支撑统计与运维查询；返回值为本批激活条数。
         """
         rows = self._repo.list_resource_wait_effective(now)
         for row in rows:
-            self._repo.update_resource_grant_status(row["id"], STATUS_ACTIVE)
+            self._repo.update_entitlement_status(row["id"], STATUS_ACTIVE)
         return len(rows)
 
     def process_resource_expired(self, now: datetime) -> int:
-        """到期把 resource_grant 的 active 行落库为 expired（P3-1）。"""
+        """到期把 tenant_resource_entitlement 的 active 行落库为 expired（P3-1）。"""
         rows = self._repo.list_resource_expired(now)
         for row in rows:
-            self._repo.update_resource_grant_status(row["id"], STATUS_EXPIRED)
+            self._repo.update_entitlement_status(row["id"], STATUS_EXPIRED)
         return len(rows)
 
     # ========== 内部：校验 ==========
