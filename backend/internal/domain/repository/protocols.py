@@ -482,6 +482,18 @@ class ResourceGrantRepository(Protocol):
     def has_tenant_wide(self, resource_type: str, resource_id: UUID, tenant_id: UUID) -> bool:
         """资源是否存在对指定租户的整租户授权。"""
 
+    def set_tenant_wide(
+        self,
+        resource_type: str,
+        resource_id: UUID,
+        tenant_id: UUID,
+        granted_by: UUID | None,
+    ) -> None:
+        """建立整租户授权（tenant 档）：清除同资源该租户的 role 档行并幂等写入 tenant 档行。"""
+
+    def unset_tenant_wide(self, resource_type: str, resource_id: UUID, tenant_id: UUID) -> None:
+        """仅移除整租户授权（tenant 档）行，不影响 role 档授权。"""
+
     def list_for_role(self, role_id: UUID, resource_type: str) -> list[ResourceGrant]:
         """读取角色在某类资源上的全部授权明细。"""
 

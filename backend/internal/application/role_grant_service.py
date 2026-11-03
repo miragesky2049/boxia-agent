@@ -266,14 +266,15 @@ class RoleGrantService:
         tenant_id = role.tenant_id
         if role.is_platform:
             raise ValidationError("平台角色不支持整租户授权")
+        # 只为其余启用中的角色补 role 档显式授权；停用角色不保留（P1-10）
         remaining = [
-            item.id
-            for item in self._uow.roles.list_by_tenant(tenant_id, include_inactive=True)
-            if item.id != role.id
+            item.id for item in self._uow.roles.list_by_tenant(tenant_id) if item.id != role.id
         ]
-        self._uow.resource_grants.replace_for_tenant(
-            resource_type, resource_id, tenant_id, remaining, actor_id
-        )
+        self._uow.resource_grants.unset_tenant_wide(resource_type, resource_id, tenant_id)
+        for other_role_id in remaining:
+            self._uow.resource_grants.add_for_role(
+                other_role_id, tenant_id, resource_type, [resource_id], actor_id
+            )
 
     @staticmethod
     def _ensure_resource_type(resource_type: str) -> None:

@@ -54,7 +54,28 @@ def test_infra_repositories_structurally_satisfy_protocols() -> None:
     assert all(
         r is not None
         for r in (
-            app_repo, app_grant_repo, model_repo, conv_repo, msg_repo, run_repo,
-            usage_repo, webhook_repo, resource_repo, auth_repo, tenant_settings_repo,
+            app_repo,
+            app_grant_repo,
+            model_repo,
+            conv_repo,
+            msg_repo,
+            run_repo,
+            usage_repo,
+            webhook_repo,
+            resource_repo,
+            auth_repo,
+            tenant_settings_repo,
         )
     )
+
+
+def test_resource_grant_repository_satisfies_protocol() -> None:
+    """P1-10：整租户授权（subject_type）读写方法需与 ResourceGrantRepository 协议同构。"""
+    from internal.domain.repository.protocols import ResourceGrantRepository
+    from internal.infrastructure.repository.postgres_resource_grant_repository import (
+        PostgresResourceGrantRepository,
+    )
+
+    repo: ResourceGrantRepository = PostgresResourceGrantRepository(MagicMock(name="session"))
+    for method in ("set_tenant_wide", "unset_tenant_wide", "has_tenant_wide"):
+        assert callable(getattr(repo, method))

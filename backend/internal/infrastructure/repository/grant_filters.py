@@ -13,14 +13,21 @@ from internal.infrastructure.model.resource import ResourceEntitlementModel
 
 
 def _role_condition(role_ids: tuple[UUID, ...], apply_role_filter: bool) -> ColumnElement[bool]:
-    """租户内角色命中条件；关闭角色过滤时任意授权均命中。"""
+    """租户内授权命中条件（P1-10 起以 subject_type 显式表达）。
+
+    tenant 档全员可见（含新增角色自动继承）；role 档仅命中指定角色时可见；
+    关闭角色过滤时两档均命中；无角色上下文时 fail-closed 只命中 tenant 档。
+    """
     if not apply_role_filter:
-        return ResourceGrantModel.role_id.is_not(None) | ResourceGrantModel.role_id.is_(None)
+        return true()
     if not role_ids:
-        return ResourceGrantModel.role_id.is_(None)
+        return ResourceGrantModel.subject_type == "tenant"
     return or_(
-        ResourceGrantModel.role_id.is_(None),
-        ResourceGrantModel.role_id.in_(role_ids),
+        ResourceGrantModel.subject_type == "tenant",
+        and_(
+            ResourceGrantModel.subject_type == "role",
+            ResourceGrantModel.role_id.in_(role_ids),
+        ),
     )
 
 

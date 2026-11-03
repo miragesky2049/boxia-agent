@@ -197,9 +197,14 @@ class GrantService:
         for resource_id in ids:
             before = before_by_resource.get(resource_id, [])
             new_roles = self._merge_roles(mode, scope_roles, before)
-            self._uow.resource_grants.replace_for_tenant(
-                resource_type, resource_id, target_tenant, new_roles, actor_id
-            )
+            if new_roles is None:
+                self._uow.resource_grants.set_tenant_wide(
+                    resource_type, resource_id, target_tenant, actor_id
+                )
+            else:
+                self._uow.resource_grants.replace_for_tenant(
+                    resource_type, resource_id, target_tenant, new_roles, actor_id
+                )
             record_audit(
                 self._uow,
                 action="grant.updated",
@@ -350,9 +355,14 @@ class GrantService:
             return []
         if mode == "replace":
             return scope_roles
-        if scope_roles is None or any(grant.role_id is None for grant in before):
+        if scope_roles is None or any(grant.subject_type == "tenant" for grant in before):
             return None
-        existing_roles = {grant.role_id for grant in before if grant.role_id is not None}
+        # role 档 role_id 必非空（0057 CHECK 保证），判空仅为收窄 Optional 类型
+        existing_roles = {
+            grant.role_id
+            for grant in before
+            if grant.subject_type == "role" and grant.role_id is not None
+        }
         return sorted(existing_roles | set(scope_roles))
 
     def _to_overview(self, resource: Any, summary: GrantSummary | None) -> ResourceGrantOverview:
@@ -421,11 +431,20 @@ class GrantService:
         return self._context.tenant_id
 
 
-def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, UUID | None]]:
-    return [{"tenant_id": grant.tenant_id, "role_id": grant.role_id} for grant in grants]
+def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, Any]]:
+    return [
+        {
+            "tenant_id": grant.tenant_id,
+            "role_id": grant.role_id,
+            "subject_type": grant.subject_type,
+        }
+        for grant in grants
+    ]
 
 
-def _after_view(tenant_id: UUID, role_ids: list[UUID] | None) -> list[dict[str, UUID | None]]:
+def _after_view(tenant_id: UUID, role_ids: list[UUID] | None) -> list[dict[str, Any]]:
     if role_ids is None:
-        return [{"tenant_id": tenant_id, "role_id": None}]
-    return [{"tenant_id": tenant_id, "role_id": role_id} for role_id in role_ids]
+        return [{"tenant_id": tenant_id, "role_id": None, "subject_type": "tenant"}]
+    return [
+        {"tenant_id": tenant_id, "role_id": role_id, "subject_type": "role"} for role_id in role_ids
+    ]
