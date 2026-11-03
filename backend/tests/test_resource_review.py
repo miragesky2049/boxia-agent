@@ -136,6 +136,74 @@ def test_tenant_created_tool_pending_then_review_flow(
     assert mine[tool_id]["review_remark"] == "发现风险"
 
 
+def test_tenant_rejected_tool_resubmit_sets_pending(
+    client: TestClient, auth_headers, tenant_client
+) -> None:
+    """P2-4：被驳回的自建资源可重新提交置 pending；未驳回/非本租户自建拦截 422。"""
+    create_tenant(client, auth_headers, code="rresub", name="重提公司")
+    site, headers, _ = tenant_admin_client(tenant_client, "rresub")
+    tool_id = _create_my_tool(site, headers, "驳回后重提")
+
+    early = site.post(f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=headers)
+    assert early.status_code == 422, early.text
+
+    rejected = _review(client, auth_headers, tool_id, "reject", "需整改")
+    assert rejected.status_code == 200, rejected.text
+
+    resubmitted = site.post(f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=headers)
+    assert resubmitted.status_code == 200, resubmitted.text
+    assert resubmitted.json()["review_status"] == "pending"
+    mine = {item["id"]: item for item in _my_resources(site, headers)}
+    assert mine[tool_id]["review_status"] == "pending"
+
+    platform_tool = _create_platform_tool(client, auth_headers, "平台资源不可重提")
+    foreign = site.post(f"/api/v1/admin/my-resources/{platform_tool}/submit-review", headers=headers)
+    assert foreign.status_code == 422, foreign.text
+
+
+def test_resubmit_requires_create_permission(
+    client: TestClient, auth_headers, tenant_client
+) -> None:
+    """租户 viewer 无 button:resource:create → 重新提交 403。"""
+    create_tenant(client, auth_headers, code="rrespb", name="无权重提")
+    site, headers, _ = tenant_admin_client(tenant_client, "rrespb")
+    tool_id = _create_my_tool(site, headers, "权重提交拦截")
+    _review(client, auth_headers, tool_id, "reject", "需整改")
+
+    viewer = _create_tenant_viewer(site, headers, "rrb-viewer")
+    response = site.post(
+        f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=viewer
+    )
+    assert response.status_code == 403, response.text
+
+
+def _create_tenant_viewer(
+    site: TestClient, admin_headers: dict[str, str], username: str
+) -> dict[str, str]:
+    """在租户站点创建 viewer 管理员并登录，返回鉴权头（viewer 无 button:resource:create）。"""
+    roles = {
+        item["code"]: item
+        for item in site.get("/api/v1/admin/roles", headers=admin_headers).json()
+    }
+    created = site.post(
+        "/api/v1/admin/admin-users",
+        json={
+            "username": username,
+            "password": USER_PASSWORD,
+            "display_name": username,
+            "role_id": roles["viewer"]["id"],
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    login = site.post(
+        "/api/v1/admin/auth/login",
+        json={"username": username, "password": USER_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
 def test_review_requires_permission(client: TestClient, auth_headers) -> None:
     """平台 viewer 无 button:resource:review → 403。"""
     viewer_headers = _create_platform_admin(client, auth_headers, "rr-viewer", "viewer")

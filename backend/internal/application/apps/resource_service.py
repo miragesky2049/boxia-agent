@@ -14,6 +14,7 @@ from internal.application.errors import (
 from internal.domain.entity.access import RESOURCE_TABLE_TYPES
 from internal.domain.entity.resource import (
     REVIEW_STATUS_APPROVED,
+    REVIEW_STATUS_PENDING,
     REVIEW_STATUS_REJECTED,
     REVIEW_STATUSES,
 )
@@ -163,6 +164,44 @@ class AppResourceService:
             tenant_id=record.get("owner_id"),
         )
         return {"resource_id": resource_id, "review_status": after, "review_remark": remark}
+
+    def resubmit_for_review(
+        self,
+        resource_id: UUID,
+        *,
+        tenant_id: UUID,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """重新提交审核：仅本租户自建且被驳回的资源，置回 pending 并清空审核痕迹（P2-4）。"""
+        record = self._repo.get_resource(resource_id)
+        if record is None:
+            raise NotFoundError("资源不存在")
+        if record.get("owner_type") != "tenant" or record.get("owner_id") != tenant_id:
+            raise ValidationError("只能重新提交本租户自建的资源")
+        if record.get("review_status") != REVIEW_STATUS_REJECTED:
+            raise ValidationError("仅被驳回的资源可重新提交审核")
+        self._repo.review_resource(
+            resource_id,
+            review_status=REVIEW_STATUS_PENDING,
+            reviewer_id=None,
+            remark="",
+        )
+        record_audit(
+            self._uow,
+            action="resource.resubmitted",
+            actor_id=actor_id,
+            actor_username=actor_username,
+            resource_type=str(record.get("type", "")),
+            resource_id=str(resource_id),
+            ip=ip,
+            user_agent=user_agent,
+            detail={"before": REVIEW_STATUS_REJECTED, "after": REVIEW_STATUS_PENDING},
+            tenant_id=tenant_id,
+        )
+        return {"resource_id": resource_id, "review_status": REVIEW_STATUS_PENDING}
 
     # ========== grant ==========
     def grant_resource(self, resource_id: UUID, tenant_id: UUID) -> None:

@@ -233,3 +233,28 @@ def create_my_resource(
     )
     uow.commit()
     return {"resource_id": resource_id, "review_status": REVIEW_STATUS_PENDING}
+
+
+@tenant_router.post("/{resource_id}/submit-review", dependencies=[_CREATE_TENANT_RESOURCE])
+def submit_my_resource_review(
+    resource_id: UUID,
+    principal: AdminAuthDep,
+    context: RequestContextDep,
+    request: Request,
+    uow: UowDep,
+    service: AppResourceService = ResourceServiceDep,
+) -> dict:
+    """租户重新提交被驳回的自建资源：置回 pending 等待平台审核（P2-4）。"""
+    if context.tenant_id is None:
+        raise ValidationError("无法识别租户")
+    ip, user_agent = client_meta(request)
+    result = service.resubmit_for_review(
+        resource_id,
+        tenant_id=context.tenant_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    uow.commit()
+    return result
