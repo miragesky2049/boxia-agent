@@ -112,6 +112,14 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:app:create", "应用-新建", "button", "create", 400),
     _perm("button:app:update", "应用-编辑", "button", "update", 401),
     _perm("button:app:delete", "应用-删除", "button", "delete", 402),
+    _perm("menu:entitlements", "租户开通", "menu", "view", 15),
+    _perm("page:entitlements", "租户开通页面", "page", "view", 115),
+    _perm("button:entitlement:manage", "租户开通-维护", "button", "manage", 405),
+    _perm("button:resource:review", "资源-审核", "button", "manage", 406),
+    _perm("menu:role-access", "角色授权", "menu", "view", 21),
+    _perm("page:role-access", "角色授权页面", "page", "view", 121),
+    _perm("button:role-access:manage", "角色授权-维护", "button", "manage", 301),
+    _perm("button:resource:create", "资源-新建", "button", "create", 302),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)
@@ -126,9 +134,13 @@ PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
         "page:tenants",
         "button:tenant:create",
         "button:tenant:update",
+        "menu:entitlements",
+        "page:entitlements",
+        "button:entitlement:manage",
+        "button:resource:review",
     }
 )
-# 平台作用域不展示租户用户、用户授权与组织架构菜单：平台授权入口在资源/角色详情内
+# 平台作用域不展示租户用户、用户授权、组织架构与角色授权菜单：平台授权入口在资源/角色详情内
 TENANT_ONLY_CODES: frozenset[str] = frozenset(
     {
         "menu:grants",
@@ -153,6 +165,10 @@ TENANT_ONLY_CODES: frozenset[str] = frozenset(
         "button:mgmt-unit:update",
         "button:mgmt-unit:delete",
         "button:mgmt-unit:grant",
+        "menu:role-access",
+        "page:role-access",
+        "button:role-access:manage",
+        "button:resource:create",
     }
 )
 
@@ -196,16 +212,38 @@ _CONSOLE_CODES = frozenset(
     }
 )
 
+# 平台内置角色新增：租户开通 + 资源审核（viewer 不授予）
+_ENTITLEMENT_CODES = frozenset(
+    {
+        "menu:entitlements",
+        "page:entitlements",
+        "button:entitlement:manage",
+        "button:resource:review",
+    }
+)
+# 租户内置角色新增：角色授权 + 资源新建（viewer 不授予）
+_TENANT_ACCESS_CODES = frozenset(
+    {
+        "menu:role-access",
+        "page:role-access",
+        "button:role-access:manage",
+        "button:resource:create",
+    }
+)
+
 # 平台内置角色：与迁移中的种子数据保持一致
 PLATFORM_SUPERADMIN_CODES: frozenset[str] = PLATFORM_SCOPED_CODES
-PLATFORM_ADMIN_CODES: frozenset[str] = _CONSOLE_CODES
+PLATFORM_ADMIN_CODES: frozenset[str] = _CONSOLE_CODES | _ENTITLEMENT_CODES
 PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES
 
 # 租户内置角色：仅包含租户作用域权限，并并入组织架构相关权限
 TENANT_SUPERADMIN_CODES: frozenset[str] = TENANT_SCOPED_CODES
 TENANT_ADMIN_CODES: frozenset[str] = (
-    PLATFORM_ADMIN_CODES & TENANT_SCOPED_CODES
-) | _ORG_READ_CODES | _ORG_WRITE_CODES
+    (PLATFORM_ADMIN_CODES & TENANT_SCOPED_CODES)
+    | _ORG_READ_CODES
+    | _ORG_WRITE_CODES
+    | _TENANT_ACCESS_CODES
+)
 TENANT_VIEWER_CODES: frozenset[str] = (
     PLATFORM_VIEWER_CODES & TENANT_SCOPED_CODES
 ) | _ORG_READ_CODES
