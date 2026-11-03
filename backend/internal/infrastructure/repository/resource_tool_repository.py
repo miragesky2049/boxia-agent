@@ -277,10 +277,12 @@ class ResourceToolRepository:
         return set(rows)
 
     def _grantable(self, stmt, *, with_constraints: bool = True):
-        """角色授权候选范围：租户自有工具 + 已授权且已开通权益的平台工具。
+        """角色授权候选范围：租户自有工具 + 已开通权益的平台工具。
 
-        with_constraints=False 供"已授权集合"浏览：弃用/未审核/未开通只拦截
-        新授权与候选集，历史授权仍需在授权页可见（P1-8）。
+        候选集只要求权益有效，不要求已存在授权行——授权页正是创建首条
+        角色授权的入口，以 grant_exists 做门槛会形成先有鸡还是先有蛋的死锁。
+        with_constraints=False 供"已授权集合"浏览：弃用/未审核/权益失效只拦截
+        新授权与候选集，历史授权行仍在 resource_grants，需继续可见（P1-8）。
         """
         if self._tenant_id == PLATFORM_TENANT_ID:
             return stmt.where(
@@ -291,18 +293,15 @@ class ResourceToolRepository:
             ResourceModel.owner_type == "tenant",
             ResourceModel.owner_id == self._tenant_id,
         )
-        platform_entitled = and_(
-            ResourceModel.owner_type == "platform",
-            platform_resource_visible(
-                self._resource_type,
-                ResourceModel.id,
-                self._tenant_id,
-                (),
-                False,
-            ),
-        )
+        if with_constraints:
+            platform_scope = and_(
+                ResourceModel.owner_type == "platform",
+                entitlement_active_exists(ResourceModel.id, self._tenant_id),
+            )
+        else:
+            platform_scope = ResourceModel.owner_type == "platform"
         stmt = stmt.where(
-            ResourceModel.type == self._resource_type, or_(tenant_owned, platform_entitled)
+            ResourceModel.type == self._resource_type, or_(tenant_owned, platform_scope)
         )
         if with_constraints:
             stmt = stmt.where(

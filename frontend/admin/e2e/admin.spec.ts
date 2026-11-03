@@ -22,7 +22,7 @@ async function login(
   await page.getByLabel('密码').fill(password)
   await page.getByRole('button', { name: /登\s*录/ }).click()
   if (expectSuccess) {
-    await page.waitForURL(/\/(agents|change-password)$/)
+    await page.waitForURL(/\/(apps|change-password)$/)
   }
 }
 
@@ -45,13 +45,18 @@ async function ensureViewer(request: APIRequestContext, token: string): Promise<
   const existing = list.items.find((item) => item.username === VIEWER_USERNAME)
 
   if (!existing) {
+    const roles = (await (
+      await request.get('/api/v1/admin/roles', { headers: auth })
+    ).json()) as { id: string; code: string }[]
+    const viewer = roles.find((item) => item.code === 'viewer')
+    expect(viewer).toBeTruthy()
     const created = await request.post('/api/v1/admin/admin-users', {
       headers: auth,
       data: {
         username: VIEWER_USERNAME,
         display_name: 'E2E 只读用户',
         password: VIEWER_INITIAL_PASSWORD,
-        role: 'viewer',
+        role_id: viewer!.id,
       },
     })
     expect(created.status()).toBe(201)
@@ -66,24 +71,6 @@ async function ensureViewer(request: APIRequestContext, token: string): Promise<
   return existing.id
 }
 
-async function createAgent(
-  request: APIRequestContext,
-  token: string,
-  name: string,
-): Promise<string> {
-  const created = await request.post('/api/v1/admin/agents', {
-    headers: { Authorization: `Bearer ${token}` },
-    data: {
-      name,
-      description: '由 Playwright 创建',
-      is_enabled: true,
-      config: {},
-    },
-  })
-  expect(created.status()).toBe(201)
-  return ((await created.json()) as { id: string }).id
-}
-
 test.describe('认证流程', () => {
   test('错误密码给出提示', async ({ page }) => {
     await login(page, ADMIN_USERNAME, 'wrong-password-123', false)
@@ -93,12 +80,12 @@ test.describe('认证流程', () => {
 
   test('登录后刷新页面保持会话', async ({ page }) => {
     await login(page)
-    await expect(page).toHaveURL(/\/agents$/)
-    await expect(page.getByRole('heading', { name: '智能体管理' })).toBeVisible()
+    await expect(page).toHaveURL(/\/apps$/)
+    await expect(page.getByRole('heading', { name: '产品级应用' })).toBeVisible()
 
     await page.reload()
-    await expect(page).toHaveURL(/\/agents$/)
-    await expect(page.getByRole('heading', { name: '智能体管理' })).toBeVisible()
+    await expect(page).toHaveURL(/\/apps$/)
+    await expect(page.getByRole('heading', { name: '产品级应用' })).toBeVisible()
   })
 
   test('退出登录后受保护页面跳转登录', async ({ page }) => {
@@ -107,73 +94,66 @@ test.describe('认证流程', () => {
     await page.getByRole('menuitem', { name: '退出登录' }).click()
     await expect(page).toHaveURL(/\/login/)
 
-    await page.goto('/agents')
-    await expect(page).toHaveURL(/\/login\?next=%2Fagents/)
+    await page.goto('/apps')
+    await expect(page).toHaveURL(/\/login\?next=%2Fapps/)
   })
 })
 
-test.describe('资源与智能体', () => {
-  test('技能在智能体详情内新建、编辑与删除', async ({ page, request }) => {
-    const token = await adminToken(request)
-    const agentName = `E2E 资源智能体 ${Date.now()}`
-    const agentId = await createAgent(request, token, agentName)
+test.describe('资源与应用', () => {
+  test('技能在资源管理页新建、编辑与删除', async ({ page }) => {
     const suffix = Date.now()
     const name = `E2E 技能 ${suffix}`
     const updatedName = `${name} 已更新`
 
-    try {
-      await login(page)
-      await page.goto(`/agents/${agentId}/edit`)
-      await page.getByRole('tab', { name: '技能与资源' }).click()
-      await page.getByRole('tab', { name: '技能', exact: true }).click()
-      await expect(page.getByRole('heading', { name: '技能管理' })).toBeVisible()
-
-      await page.getByRole('button', { name: '新建技能' }).click()
-      let dialog = page.getByRole('dialog', { name: '新建技能' })
-      await dialog.getByLabel('技能名称').fill(name)
-      await dialog.getByLabel('描述').fill('由 Playwright 创建')
-      await dialog.getByRole('button', { name: '保存' }).click()
-      await expect(page.getByText('创建成功')).toBeVisible()
-
-      const row = page.getByRole('row', { name: new RegExp(name) })
-      await expect(row).toBeVisible()
-      await row.getByRole('button', { name: /编\s*辑/ }).click()
-      dialog = page.getByRole('dialog', { name: '编辑技能' })
-      await dialog.getByLabel('技能名称').fill(updatedName)
-      await dialog.getByRole('button', { name: '保存' }).click()
-      await expect(page.getByText('保存成功')).toBeVisible()
-      await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toBeVisible()
-
-      const updatedRow = page.getByRole('row', { name: new RegExp(updatedName) })
-      await updatedRow.getByRole('button', { name: /删\s*除/ }).click()
-      await page
-        .locator('.ant-popconfirm')
-        .getByRole('button', { name: /删\s*除/ })
-        .click()
-      await expect(page.getByText('已删除')).toBeVisible()
-      await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toHaveCount(0)
-    } finally {
-      await request.delete(`/api/v1/admin/agents/${agentId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-    }
-  })
-
-  test('智能体保存后再次打开可回显', async ({ page }) => {
-    const name = `E2E 智能体 ${Date.now()}`
-
     await login(page)
-    await page.goto('/agents/new')
-    await page.getByLabel('智能体名称').fill(name)
-    await page.getByLabel('简介').fill('Playwright 自动化创建')
-    await page.getByRole('button', { name: '保存配置' }).first().click()
-    await expect(page.getByText('创建成功')).toBeVisible()
-    await expect(page).toHaveURL(/\/agents$/)
+    await page.goto('/resources')
+    await expect(page.getByRole('heading', { name: '资源管理' })).toBeVisible()
+    await page.getByRole('tab', { name: '技能', exact: true }).click()
+
+    await page.getByRole('button', { name: '新建资源' }).click()
+    const drawer = page.locator('.ant-drawer-content')
+    await expect(drawer).toBeVisible()
+    await drawer.getByLabel('名称').fill(name)
+    // antd Select 的可点击区域是 .ant-select-selector，search input 会被选中项遮挡
+    await drawer.locator('.ant-select-selector').click()
+    await page
+      .locator('.ant-select-item-option')
+      .filter({ hasText: '技能' })
+      .first()
+      .click()
+    await drawer.getByRole('button', { name: /保\s*存/ }).click()
+    await expect(page.getByText('已创建')).toBeVisible()
 
     const row = page.getByRole('row', { name: new RegExp(name) })
-    await row.getByRole('button', { name: /配\s*置/ }).click()
-    await expect(page.getByLabel('智能体名称')).toHaveValue(name)
-    await expect(page.getByLabel('简介')).toHaveValue('Playwright 自动化创建')
+    await expect(row).toBeVisible()
+    await row.getByRole('button', { name: /编\s*辑/ }).click()
+    await drawer.getByLabel('名称').fill(updatedName)
+    await drawer.getByRole('button', { name: /保\s*存/ }).click()
+    await expect(page.getByText('已保存')).toBeVisible()
+    await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toBeVisible()
+
+    const updatedRow = page.getByRole('row', { name: new RegExp(updatedName) })
+    await updatedRow.getByRole('button', { name: /删\s*除/ }).click()
+    await page.locator('.ant-popconfirm').locator('.ant-btn-primary').click()
+    await expect(page.getByText('已删除')).toBeVisible()
+    await expect(page.getByRole('row', { name: new RegExp(updatedName) })).toHaveCount(0)
+  })
+
+  test('应用创建后详情可回显', async ({ page }) => {
+    const name = `E2E 应用 ${Date.now()}`
+
+    await login(page)
+    await page.goto('/apps')
+    await page.getByRole('button', { name: '新建应用' }).click()
+    const dialog = page.getByRole('dialog', { name: '新建应用' })
+    await dialog.getByPlaceholder('给应用起个名字，便于识别').fill(name)
+    await dialog.getByPlaceholder('简单描述应用的用途（选填）').fill('Playwright 自动化创建')
+    await dialog.getByRole('button', { name: /^创\s*建$/ }).click()
+
+    const row = page.getByRole('row', { name: new RegExp(name) })
+    await expect(row).toBeVisible()
+    await row.getByRole('button', { name: /详\s*情/ }).click()
+    await expect(page.getByText(`应用详情：${name}`)).toBeVisible()
   })
 
   test('未知路径展示 404 页面', async ({ page }) => {
@@ -198,8 +178,8 @@ test.describe('改密与只读权限', () => {
     await expect(page).toHaveURL(/\/login/)
 
     await login(page, VIEWER_USERNAME, VIEWER_NEW_PASSWORD)
-    await expect(page).toHaveURL(/\/agents$/)
-    await expect(page.getByRole('button', { name: '新建智能体' })).toHaveCount(0)
+    await expect(page).toHaveURL(/\/apps$/)
+    await expect(page.getByRole('button', { name: '新建应用' })).toHaveCount(0)
 
     await page.goto('/users')
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()

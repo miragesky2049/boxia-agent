@@ -261,7 +261,7 @@ export default function TenantsPage() {
         forceRender
         width={560}
       >
-        <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+        <Form<CreateFormValues> form={createForm} name="tenant-create" layout="vertical" requiredMark={false}>
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             租户信息
           </Divider>
@@ -327,7 +327,7 @@ export default function TenantsPage() {
         cancelText="取消"
         forceRender
       >
-        <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+        <Form<EditFormValues> form={editForm} name="tenant-edit" layout="vertical" requiredMark={false}>
           <Form.Item label="租户编码">
             <Input value={editing?.code} disabled />
           </Form.Item>

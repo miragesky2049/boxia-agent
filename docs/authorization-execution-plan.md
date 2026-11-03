@@ -1082,7 +1082,7 @@ record_audit(
 
 ### 3.3 P2 — 前端双入口（4–6 人日）
 
-> **执行状态（2026-11-03）**：P2-1…P2-6 全部完成。提交依次为 123c256 / f5cfb79 / 1156106 / 5cb6d35 / 4fc1275 / e134cc0 / d6bccad / 6e3292c（P2-2 拆 a/b 分别交付整租户授权后端 HTTP 面与角色授权页，P2-4 拆 a/b 分别交付重新提交审核后端路径与资源页双视角）。P2-7 前端回归并入各提交执行：vitest 全量 67、typecheck/oxlint/prettier 全绿；`pnpm e2e` 因环境未设置 `E2E_PASSWORD` 仍阻塞，DoD 未全绿。
+> **执行状态（2026-11-03）**：P2-1…P2-6 全部完成。提交依次为 123c256 / f5cfb79 / 1156106 / 5cb6d35 / 4fc1275 / e134cc0 / d6bccad / 6e3292c（P2-2 拆 a/b 分别交付整租户授权后端 HTTP 面与角色授权页，P2-4 拆 a/b 分别交付重新提交审核后端路径与资源页双视角）。P2-7 前端回归并入各提交执行：vitest 全量 67、typecheck/oxlint/prettier 全绿；`pnpm e2e` 于 2026-11-03 完成闭环（设置 `E2E_PASSWORD` 后全量 19 用例全绿，含 §5.3 权益流 5 场景），DoD 全绿。
 >
 > 前端基线：React 18 + Ant Design 5 + Semi UI，包管理 `pnpm`。以下路径均已核实存在。
 
@@ -1161,6 +1161,8 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 
 - 补双入口用例；确认现有页面无回归。
 - **DoD**：全绿。　**预估**：0.25
+
+> **执行状态（2026-11-03）**：DoD 全绿（typecheck / oxlint / vitest 67 / playwright e2e 19）。§5.3 权益流 5 场景落 `e2e/entitlement.spec.ts`：平台批量开通预览确认、租户自建资源审核、角色授权候选集与批量授权、用户端仅可见已开通应用（Node 请求上下文不解析 `*.localhost`，走回环 `127.0.0.1:8001` + `X-Tenant-Code`）、跨作用域互斥（租户访问开通页 API 403 / 页面 404，平台访问角色授权页 404）。回归期修复两处产品问题：① `resource_tool_repository._grantable` 候选集以 `grant_exists` 为必要条件，与批量开通（只写权益表不写授权行）形成先有鸡还是先有蛋死锁，改为仅要求权益有效（`platform_resource_visible` 保留用于最终用户可见性）；② `TenantsPage` 新建/编辑两个 Modal 表单未区分 `name`，`label[for]` 与重复 DOM id 使 `getByLabel` 在 dialog 作用域内解析为 0 项，补 `tenant-create`/`tenant-edit`。配套：`main.tsx` 恢复 antd `<App>` 包装（53c93d5 引入的回归）；dev 环境启用 `ALLOW_TENANT_HEADER`；`admin.spec.ts` 适配 agents→apps 路由迁移与用户创建 `role_id` 契约。
 
 ---
 
