@@ -113,7 +113,7 @@ class UserRefreshToken:
 
 @dataclass(frozen=True)
 class ResourceGrant:
-    """资源授权：role_id 为空表示授予整个租户。"""
+    """资源授权：subject_type='tenant'（role_id 为空）授予整个租户，'role' 授予指定角色。"""
 
     id: UUID
     resource_type: str
@@ -122,6 +122,7 @@ class ResourceGrant:
     role_id: UUID | None
     granted_by: UUID | None
     created_at: datetime
+    subject_type: str = "role"
 
 
 @dataclass(frozen=True)

@@ -127,6 +127,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "tenant" if role_id is None else "role",
                         "granted_by": granted_by,
                     }
                     for tenant_id, role_id in grants
@@ -161,6 +162,7 @@ class PostgresResourceGrantRepository:
                     resource_id=resource_id,
                     tenant_id=tenant_id,
                     role_id=None,
+                    subject_type="tenant",
                     granted_by=granted_by,
                 )
             )
@@ -175,6 +177,7 @@ class PostgresResourceGrantRepository:
                             "resource_id": resource_id,
                             "tenant_id": tenant_id,
                             "role_id": role_id,
+                            "subject_type": "role",
                             "granted_by": granted_by,
                         }
                         for role_id in unique_role_ids
@@ -331,6 +334,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -359,6 +363,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -366,7 +371,8 @@ class PostgresResourceGrantRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["resource_type", "resource_id", "tenant_id", "role_id"],
-                index_where=ResourceGrantModel.role_id.is_not(None),
+                # 必须与 ux_resource_grants_role_subject 的部分索引谓词完全一致
+                index_where=ResourceGrantModel.subject_type == "role",
             )
             .returning(ResourceGrantModel.id)
         )
@@ -437,6 +443,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -464,6 +471,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -471,10 +479,10 @@ class PostgresResourceGrantRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["resource_type", "resource_id", "role_id"],
-                # 必须与 ux_resource_grants_platform_role 的部分索引谓词完全一致
+                # 必须与 ux_resource_grants_platform_role_subject 的部分索引谓词完全一致
                 index_where=and_(
+                    ResourceGrantModel.subject_type == "role",
                     ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
-                    ResourceGrantModel.role_id.is_not(None),
                 ),
             )
             .returning(ResourceGrantModel.id)
@@ -511,4 +519,5 @@ class PostgresResourceGrantRepository:
             role_id=row.role_id,
             granted_by=row.granted_by,
             created_at=row.created_at,
+            subject_type=row.subject_type,
         )
