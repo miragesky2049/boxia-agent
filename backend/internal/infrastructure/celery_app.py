@@ -18,6 +18,7 @@ def make_celery() -> Celery:
             "internal.infrastructure.tasks.ingest_tasks",
             "internal.infrastructure.tasks.auth_tasks",
             "internal.infrastructure.tasks.entitlement_tasks",
+            "internal.infrastructure.tasks.entitlement_reconcile",
         ],
     )
     app.conf.update(
@@ -41,6 +42,10 @@ def make_celery() -> Celery:
             },
             "entitlement-scan-expiry-reminders": {
                 "task": "entitlement.scan_expiry_reminders",
+                "schedule": 86400.0,
+            },
+            "entitlement-reconcile": {
+                "task": "entitlement.reconcile",
                 "schedule": 86400.0,
             },
         },
