@@ -6,6 +6,10 @@ entitlement 相关工厂统一收口本文件，不再往 apps_services.py 加�
 
 from __future__ import annotations
 
+from typing import Annotated
+
+from fastapi import Depends
+
 from internal.application.apps.entitlement_service import EntitlementService
 from internal.domain.auth.grant_service import GrantService
 from internal.domain.auth.service import AuthService
@@ -14,6 +18,8 @@ from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
 from internal.infrastructure.repository.apps.entitlement_repository import EntitlementRepository
+from web.deps.db import UowDep
+from web.deps.tenant import RequestContextDep
 
 
 def make_entitlement_service(
@@ -35,3 +41,13 @@ def make_grant_engine_service(uow: SqlAlchemyUnitOfWork) -> GrantService:
     repo = AuthRepository(uow.session)
     auth_service = AuthService(repo, cache=None)
     return GrantService(repo, auth_service)
+
+
+def get_entitlement_service(
+    uow: UowDep, context: RequestContextDep
+) -> EntitlementService:
+    """请求级权益用例装配（P1-6 router 消费）。"""
+    return make_entitlement_service(uow, context)
+
+
+EntitlementServiceDep = Annotated[EntitlementService, Depends(get_entitlement_service)]

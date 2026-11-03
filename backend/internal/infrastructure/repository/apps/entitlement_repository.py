@@ -176,18 +176,20 @@ class EntitlementRepository:
             return self._grant_app(params, now)
         return self._grant_resource(params)
 
-    def revoke(self, tenant_id, object_type: str, object_id) -> bool:
+    def revoke(self, tenant_id, object_type: str, object_id, remark: str = "") -> bool:
+        params = {"tid": tenant_id, "oid": object_id, "remark": remark}
         if object_type == OBJECT_TYPE_APP:
             stmt = text(
-                "UPDATE tenant_application_instance SET status = 'revoked', updated_at = NOW() "
+                "UPDATE tenant_application_instance SET status = 'revoked', remark = :remark, "
+                "updated_at = NOW() "
                 "WHERE tenant_id = :tid AND application_id = :oid AND status <> 'revoked'"
             )
         else:
             stmt = text(
-                "UPDATE resource_grant SET status = 'revoked' "
+                "UPDATE resource_grant SET status = 'revoked', remark = :remark "
                 "WHERE tenant_id = :tid AND resource_id = :oid AND status <> 'revoked'"
             )
-        result = cast_cursor(self._session.execute(stmt, {"tid": tenant_id, "oid": object_id}))
+        result = cast_cursor(self._session.execute(stmt, params))
         return result.rowcount == 1
 
     def purge(self, tenant_id, object_type: str, object_id) -> int:

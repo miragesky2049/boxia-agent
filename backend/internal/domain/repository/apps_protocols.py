@@ -592,8 +592,8 @@ class EntitlementRepositoryProtocol(Protocol):
         """开通权益；已存在（含 revoked/expired）则整行覆盖恢复，返回权益行 ID。"""
         ...
 
-    def revoke(self, tenant_id: UUID, object_type: str, object_id: UUID) -> bool:
-        """软失效：置 status='revoked'，不删行；返回是否有行被更新。"""
+    def revoke(self, tenant_id: UUID, object_type: str, object_id: UUID, remark: str = "") -> bool:
+        """软失效：置 status='revoked' 并记录原因，不删行；返回是否有行被更新。"""
         ...
 
     def purge(self, tenant_id: UUID, object_type: str, object_id: UUID) -> int:

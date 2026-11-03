@@ -11,6 +11,7 @@ from web.admin.routers.context import router as context_router
 from web.admin.routers.departments import router as departments_router
 from web.admin.routers.documents import router as documents_router
 from web.admin.routers.employments import router as employments_router
+from web.admin.routers.entitlements import router as entitlements_router
 from web.admin.routers.grants import router as grants_router
 from web.admin.routers.hr_dictionaries import router as hr_dictionaries_router
 from web.admin.routers.marketplace import router as marketplace_router
@@ -39,6 +40,7 @@ router.include_router(admin_users_router)
 router.include_router(roles_router)
 router.include_router(permissions_router)
 router.include_router(grants_router)
+router.include_router(entitlements_router)
 router.include_router(audit_logs_router)
 router.include_router(marketplace_router)
 router.include_router(applies_router)

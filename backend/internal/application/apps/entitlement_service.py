@@ -352,7 +352,7 @@ class EntitlementService:
                     granted_by=granted_by,
                 )
             else:
-                self._repo.revoke(tenant_id, item.object_type, item.object_id)
+                self._repo.revoke(tenant_id, item.object_type, item.object_id, reason)
                 affected += affected_counts.get((item.object_type, item.object_id), 0)
             updated += 1
             if item.object_type == OBJECT_TYPE_APP and self._auth_service is not None:
