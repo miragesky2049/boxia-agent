@@ -93,6 +93,10 @@ class ApplicationRepositoryProtocol(Protocol):
 
     def get_instance(self, tenant_id: UUID, application_id: UUID) -> dict | None: ...
 
+    def get_active_instance(self, tenant_id: UUID, application_id: UUID) -> dict | None:
+        """仅返回 status='active' 且未过期的实例。"""
+        ...
+
     def list_instances(self, tenant_id: UUID) -> list[dict]: ...
 
     def insert_graph_version(

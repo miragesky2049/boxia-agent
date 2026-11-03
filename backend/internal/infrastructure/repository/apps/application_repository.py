@@ -195,8 +195,8 @@ class ApplicationRepository:
         row = self._session.execute(
             text(
                 "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-                "is_listed_in_market, visibility_mode, published_graph_version, flow_type, "
-                "created_by, created_at, updated_at "
+                "is_listed_in_market, sale_mode, visibility_mode, published_graph_version, "
+                "flow_type, created_by, created_at, updated_at "
                 "FROM application WHERE id = :aid"
             ),
             {"aid": application_id},
@@ -397,6 +397,18 @@ class ApplicationRepository:
             text(
                 "SELECT * FROM tenant_application_instance "
                 "WHERE tenant_id = :tid AND application_id = :aid"
+            ),
+            {"tid": tenant_id, "aid": application_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def get_active_instance(self, tenant_id: UUID, application_id: UUID) -> dict | None:
+        """仅返回 status='active' 且未过期的实例。"""
+        row = self._session.execute(
+            text(
+                "SELECT * FROM tenant_application_instance "
+                "WHERE tenant_id = :tid AND application_id = :aid AND status = 'active' "
+                "AND (expire_time IS NULL OR expire_time > now())"
             ),
             {"tid": tenant_id, "aid": application_id},
         ).first()

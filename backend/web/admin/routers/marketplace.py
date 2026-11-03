@@ -169,9 +169,7 @@ async def run_application(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service.get_tenant_instance(tenant_id, application_id)
-    if instance is None:
-        raise NotFoundError("该应用未开通或不存在")
+    service.require_runtime_instance(tenant_id, application_id)
 
     runner = await _build_runner(
         service, uow, context, tenant_id, application_id,
@@ -217,9 +215,7 @@ async def resume_application(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service.get_tenant_instance(tenant_id, application_id)
-    if instance is None:
-        raise NotFoundError("该应用未开通或不存在")
+    service.require_runtime_instance(tenant_id, application_id)
 
     pending = make_run_service(uow).get_running_for_thread(tenant_id, application_id, thread_id)
 
@@ -290,9 +286,7 @@ def get_application_inputs(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
 
-    instance = service.get_tenant_instance(tenant_id, application_id)
-    if instance is None:
-        raise NotFoundError("该应用未开通或不存在")
+    service.require_runtime_instance(tenant_id, application_id)
 
     graph = service.build_effective_graph_sync(application_id, tenant_id)
     # coze 标准 type="1" 为 START；兼容早期简化格式 type="start"

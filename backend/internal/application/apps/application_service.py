@@ -12,11 +12,11 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from internal.application.errors import NotFoundError, ValidationError
+from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.canvas.variable_types import coerce as coerce_variable
@@ -315,6 +315,9 @@ class ApplicationService:
             raise ValidationError("该应用未上架市场")
         if not app["is_enabled"]:
             raise ValidationError("该应用已被禁用")
+        # sale_mode：1=仅运营后台开通；2=市场可见+可申请（语义见 domain/entity/auth_constants）
+        if int(app.get("sale_mode") or 1) != 2:
+            raise ValidationError("该应用仅支持运营后台开通")
 
         instance_id = self._repo.subscribe(tenant_id, application_id)
         self._uow.commit()
@@ -330,6 +333,23 @@ class ApplicationService:
     def get_tenant_instance(self, tenant_id: UUID, application_id: UUID) -> dict | None:
         """租户已开通实例查询（未开通返回 None）。"""
         return self._repo.get_instance(tenant_id, application_id)
+
+    @staticmethod
+    def instance_is_active(instance: dict) -> bool:
+        """实例是否生效：status='active' 且未过期（expire_time 为空视为永久）。"""
+        if instance.get("status") != "active":
+            return False
+        expire_time = instance.get("expire_time")
+        return expire_time is None or expire_time > datetime.now(UTC)
+
+    def require_runtime_instance(self, tenant_id: UUID, application_id: UUID) -> dict:
+        """运行前门槛：未开通 404，已开通但失效（撤销/过期）403。"""
+        instance = self._repo.get_instance(tenant_id, application_id)
+        if instance is None:
+            raise NotFoundError("该应用未开通或不存在")
+        if not self.instance_is_active(instance):
+            raise ForbiddenError("应用授权已失效")
+        return instance
 
     def list_applications(
         self,
@@ -756,10 +776,12 @@ class ApplicationService:
         published_version = app.get("published_graph_version") if app else None
         base_version = int(published_version) if published_version else latest_version
 
-        # 3. 租户 pin 覆盖
+        # 3. 租户 pin 覆盖；实例存在但已失效（撤销/过期）时兜底拒绝，防绕过入口门槛
         pinned_version = base_version
         if tenant_id is not None:
             inst = self._repo.get_instance(tenant_id, application_id)
+            if inst and not self.instance_is_active(inst):
+                raise ForbiddenError("应用授权已失效")
             if inst and inst.get("pinned_graph_version"):
                 pinned_version = int(inst["pinned_graph_version"])
 
@@ -861,6 +883,8 @@ class ApplicationService:
         pinned_version = latest["version"]
         if tenant_id is not None:
             inst = self._repo.get_instance(tenant_id, application_id)
+            if inst and not self.instance_is_active(inst):
+                raise ForbiddenError("应用授权已失效")
             if inst and inst.get("pinned_graph_version"):
                 pinned_version = int(inst["pinned_graph_version"])
 
