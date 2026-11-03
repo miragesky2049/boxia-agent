@@ -109,7 +109,7 @@ Permission 层（租户内角色 → 资源）：角色能使用什么
 ### 2.1 迁移顺序与依赖
 
 ```text
-0055_resource_entitlement_lifecycle
+0055_resource_grant_lifecycle
       │  resource_grant 加生命周期字段；修正 instance status CHECK
       ▼
 0056_resource_review
@@ -352,7 +352,8 @@ cd frontend/admin && pnpm e2e
 
 #### 3.0.4 迁移写法约定
 
-- 文件：`backend/migrations/versions/NNNN_<snake_name>.py`，`revision = "NNNN_<snake_name>"`（与文件名一致的 slug，沿用仓库既有风格），`down_revision = "<上一个 head 的 revision>"`；本轮起点 head 为 `0054_grant_resource_type_unify`（P0-1 已交付），P1 自 `0055` 起。
+- 文件：`backend/migrations/versions/NNNN_<snake_name>.py`，`revision = "NNNN_<snake_name>"`（与文件名一致的 slug，沿用仓库既有风格），`down_revision = "<上一个 head 的 revision>"`；revision ID 必须 ≤32 字符（`alembic_version.version_num` 为 VARCHAR(32)，超长在写版本号时报 StringDataRightTruncation）；本轮起点 head 为 `0054_grant_resource_type_unify`（P0-1 已交付），P1 自 `0055` 起。
+- **revision slug 必须 ≤32 字符**（`alembic_version.version_num` 为 VARCHAR(32)，超长在 upgrade 时报 StringDataRightTruncation）。
 - 必须实现 `downgrade()`，且 downgrade 后可再 upgrade。
 - 迁移内只允许 `sqlalchemy` / `alembic.op` 与字面常量，不得 import `internal.application` / `internal.domain`。
 - 权限种子参考 `backend/migrations/versions/0038_apps_menu_permissions.py` 的 `_PERMISSIONS` + `_code_array()` + `ON CONFLICT DO NOTHING` 写法。
@@ -704,11 +705,11 @@ cd backend && python -m pytest tests/test_applies_auth.py -q
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0055_resource_entitlement_lifecycle.py` |
+| 文件 | `backend/migrations/versions/0055_resource_grant_lifecycle.py` |
 | 内容 | 见 §2.2，含 `tenant_application_instance` 的 `ck_instance_status` 重建（原 P0-5） |
 
 **实现要点**
-- `revision = "0055_resource_entitlement_lifecycle"`，`down_revision = "0054_grant_resource_type_unify"`。
+- `revision = "0055_resource_grant_lifecycle"`，`down_revision = "0054_grant_resource_type_unify"`。
 - `upgrade()` 顺序：加列 → 加 CHECK → 加索引 → 重建 instance CHECK。
 - `downgrade()` 逆序：删索引 → 删 CHECK → 删列 → 恢复 instance 旧 CHECK（旧值先 `grep -n "ck_instance_status" backend/migrations/versions/*.py` 确认）。
 - downgrade 前若存在 `wait_effect/expired` 数据会失败，脚本应在 downgrade docstring 明确"需先清理"。
@@ -729,7 +730,7 @@ cd backend && python -m pytest tests/test_applies_auth.py -q
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0056_resource_review.py`（`revision="0056_resource_review"`，`down_revision="0055_resource_entitlement_lifecycle"`） |
+| 文件 | `backend/migrations/versions/0056_resource_review.py`（`revision="0056_resource_review"`，`down_revision="0055_resource_grant_lifecycle"`） |
 | 内容 | 见 §2.3 |
 
 **要点**：默认 `approved` 覆盖存量；`reviewed_by/reviewed_at/review_remark` 可空或默认空串；`created_by` 存量置 `NULL`，新建资源必须写入当前管理员 ID（供 P1-9 职责分离校验）。
