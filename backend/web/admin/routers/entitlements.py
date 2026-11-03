@@ -4,9 +4,10 @@
 router 只做参数收窄与 DTO 转换，两套存储差异全部收口在 EntitlementService。
 """
 
+from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Header, Query, Request
 
 from internal.application.errors import ValidationError
 from internal.domain.auth.grant_service import CreateGrantRequest, GrantError
@@ -122,8 +123,12 @@ async def apply_batch(
     principal: AdminAuthDep,
     request: Request,
     service: EntitlementServiceDep,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> EntitlementBatchOut:
-    """批量开通/软失效：单事务不做部分成功；revoke 返回影响的角色授权数。"""
+    """批量开通/软失效：单事务不做部分成功；revoke 返回影响的角色授权数。
+
+    携带 Idempotency-Key 头启用请求去重（P3-8）：重放返回首次结果，并发执行中 409。
+    """
     ip, user_agent = client_meta(request)
     result = await service.apply_batch(
         payload.tenant_id,
@@ -137,6 +142,7 @@ async def apply_batch(
         actor_username=principal.username,
         ip=ip,
         user_agent=user_agent,
+        idempotency_key=idempotency_key,
     )
     return EntitlementBatchOut(
         updated=result.updated,

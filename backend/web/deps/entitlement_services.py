@@ -21,6 +21,9 @@ from internal.infrastructure.repository.apps.entitlement_plan_repository import 
     EntitlementPlanRepository,
 )
 from internal.infrastructure.repository.apps.entitlement_repository import EntitlementRepository
+from internal.infrastructure.repository.apps.entitlement_request_log_repository import (
+    EntitlementRequestLogRepository,
+)
 from internal.infrastructure.repository.apps.resource_type_catalog_repository import (
     ResourceTypeCatalogRepository,
 )
@@ -40,6 +43,7 @@ def make_entitlement_service(
         auth_service=auth_service,
         plan_repo=EntitlementPlanRepository(uow.session),
         type_catalog=ResourceTypeCatalogRepository(uow.session),
+        request_log=EntitlementRequestLogRepository(uow.session),
         revoke_strict=get_settings().entitlement_revoke_strict,
     )
 

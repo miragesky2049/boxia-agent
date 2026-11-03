@@ -691,3 +691,31 @@ class ResourceTypeCatalogRepositoryProtocol(Protocol):
     def list_active(self) -> list[str]:
         """启用中的资源类型 code，按 sort_order 稳定排序。"""
         ...
+
+
+class EntitlementRequestLogRepositoryProtocol(Protocol):
+    """幂等请求去重仓储端口：entitlement_request_log（P3-8）。
+
+    生命周期：processing → completed / failed；failed 行可被同键重试接管（version+1）。
+    状态以 JSONB result 承载首次结果，重放时原样返回。
+    """
+
+    def try_begin(self, request_id: str, tenant_id: UUID, action: str, payload: dict) -> bool:
+        """INSERT ON CONFLICT DO NOTHING 占位；True=本请求获得执行权，False=键已存在。"""
+        ...
+
+    def get(self, request_id: str) -> dict | None:
+        """取 {request_id, status, version, result}；不存在返回 None。"""
+        ...
+
+    def retry_begin(self, request_id: str) -> None:
+        """failed 行接管重试：status 置回 processing、version+1、清空 result。"""
+        ...
+
+    def mark_completed(self, request_id: str, result: dict) -> None:
+        """写入首次执行结果并置 completed、记录 completed_at。"""
+        ...
+
+    def mark_failed(self, request_id: str) -> None:
+        """执行异常后标记 failed，保留 payload 供排查。"""
+        ...

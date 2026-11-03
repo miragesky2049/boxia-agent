@@ -47,6 +47,12 @@ class ConflictError(AppError):
     code = "CONFLICT"
 
 
+class VersionConflictError(ConflictError):
+    """同幂等键的请求仍在执行中（P3-8），调用方应稍后重试而非重复提交。"""
+
+    code = "VERSION_CONFLICT"
+
+
 class ValidationError(AppError):
     """业务规则校验失败。"""
 

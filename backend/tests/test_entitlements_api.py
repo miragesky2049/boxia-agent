@@ -406,3 +406,39 @@ def test_purge_forbidden_for_non_superadmin(client: TestClient, auth_headers, en
         headers=headers,
     )
     assert blocked.status_code == 403
+
+
+def test_batch_idempotency_key_replay(client: TestClient, auth_headers, env):
+    """Idempotency-Key：首次执行成功，同键重放原样返回首次结果且不重复写入；超 128 字符 422。"""
+    key = f"api-{uuid.uuid4().hex}"
+    headers = {**auth_headers, "Idempotency-Key": key}
+    first = client.post(
+        f"{BASE}/batch",
+        json={"tenant_id": env["tenant_id"], "mode": "grant", "items": _items(env)},
+        headers=headers,
+    )
+    assert first.status_code == 200, first.text
+    assert first.json() == {"updated": 2, "failed": [], "affected_role_grants": 0}
+
+    replay = client.post(
+        f"{BASE}/batch",
+        json={
+            "tenant_id": env["tenant_id"],
+            "mode": "grant",
+            "items": [{"object_type": "skill", "object_id": env["skill_id"]}],
+        },
+        headers=headers,
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json() == first.json()
+
+    listed = client.get(f"{BASE}/tenants/{env['tenant_id']}", headers=auth_headers).json()
+    assert listed["total"] == 2
+
+    too_long = client.post(
+        f"{BASE}/batch",
+        json={"tenant_id": env["tenant_id"], "mode": "grant", "items": _items(env)},
+        headers={**auth_headers, "Idempotency-Key": "x" * 129},
+    )
+    assert too_long.status_code == 422
+    assert "128" in too_long.json()["detail"]

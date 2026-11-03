@@ -33,10 +33,16 @@ from internal.domain.entity.entitlement import (
 )
 from internal.domain.entity.entitlement_plan import PLAN_AUTH_TYPES, EntitlementPlan
 from internal.domain.entity.request_context import RequestContext
-from internal.domain.errors import ForbiddenError, NotFoundError, ValidationError
+from internal.domain.errors import (
+    ForbiddenError,
+    NotFoundError,
+    ValidationError,
+    VersionConflictError,
+)
 from internal.domain.repository.apps_protocols import (
     EntitlementPlanRepositoryProtocol,
     EntitlementRepositoryProtocol,
+    EntitlementRequestLogRepositoryProtocol,
     ResourceTypeCatalogRepositoryProtocol,
 )
 from internal.domain.repository.protocols import UnitOfWork
@@ -47,6 +53,9 @@ _MODES = (MODE_GRANT, MODE_REVOKE)
 
 # P1-5 批量上限：服务层兜底校验（接口层 payload 另有 max_length）
 _BATCH_MAX_ITEMS = 200
+
+# P3-8 Idempotency-Key 长度上限：与 entitlement_request_log.request_id VARCHAR(128) 对齐
+_IDEMPOTENCY_KEY_MAX = 128
 
 
 class EntitlementService:
@@ -61,6 +70,7 @@ class EntitlementService:
         auth_service: AuthService | None = None,
         plan_repo: EntitlementPlanRepositoryProtocol | None = None,
         type_catalog: ResourceTypeCatalogRepositoryProtocol | None = None,
+        request_log: EntitlementRequestLogRepositoryProtocol | None = None,
         revoke_strict: bool = False,
     ) -> None:
         self._uow = uow
@@ -69,6 +79,7 @@ class EntitlementService:
         self._auth_service = auth_service
         self._plan_repo = plan_repo
         self._type_catalog = type_catalog
+        self._request_log = request_log
         self._revoke_strict = revoke_strict
         self._resource_types: frozenset[str] | None = None
 
@@ -127,17 +138,35 @@ class EntitlementService:
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
+        idempotency_key: str | None = None,
     ) -> BatchResult:
-        """批量开通/软失效：单事务，任一项校验失败整体回滚并返回 failed 明细。"""
+        """批量开通/软失效：单事务，任一项校验失败整体回滚并返回 failed 明细。
+
+        带 Idempotency-Key（P3-8）：先占位 processing 并独立提交使跨请求可见；
+        同键已 completed 直接返回首次结果（重放不改数据），仍 processing 则
+        409 VERSION_CONFLICT，failed 行以 version+1 接管重试。
+        """
         self._require_platform()
         self._validate_mode(mode)
         self._validate_items(items)
+        key = (idempotency_key or "").strip() or None
+        if key is not None and len(key) > _IDEMPOTENCY_KEY_MAX:
+            raise ValidationError(f"Idempotency-Key 长度不能超过 {_IDEMPOTENCY_KEY_MAX} 个字符")
+        if key is not None:
+            replay = self._begin_idempotent_request(key, tenant_id, mode, items, reason=reason)
+            if replay is not None:
+                return replay
         try:
             self._require_tenant(tenant_id)
             failed, affected_counts = self._validate_batch(tenant_id, mode, items)
             if failed:
                 self._uow.rollback()
-                return BatchResult(updated=0, failed=tuple(failed))
+                result = BatchResult(updated=0, failed=tuple(failed))
+                if key is not None:
+                    # 业务失败明细同样属于"首次结果"，重放原样返回
+                    self._require_request_log().mark_completed(key, self._result_to_json(result))
+                    self._uow.commit()
+                return result
             if mode == MODE_REVOKE and self._revoke_strict and any(affected_counts.values()):
                 # 严格模式：权益仍被角色授权引用则整批拒绝（ENTITLEMENT_IN_USE，409 语义）
                 raise ValidationError("权益仍被角色授权引用，严格模式下不可取消")
@@ -192,11 +221,79 @@ class EntitlementService:
             self._record_change_notices(
                 tenant_id, mode, items, before, reason=reason, actor_username=actor_username
             )
+            result = BatchResult(updated=updated, failed=(), affected_role_grants=affected)
+            if key is not None:
+                # completed 与批量写入同事务落库，不存在"批次已生效但日志停在 processing"的窗口
+                self._require_request_log().mark_completed(key, self._result_to_json(result))
             self._uow.commit()
         except Exception:
             self._uow.rollback()
+            if key is not None:
+                self._mark_idempotent_failed(key)
             raise
-        return BatchResult(updated=updated, failed=(), affected_role_grants=affected)
+        return result
+
+    # ========== 幂等（P3-8） ==========
+    def _begin_idempotent_request(
+        self,
+        key: str,
+        tenant_id: UUID,
+        mode: str,
+        items: list[EntitlementItem],
+        *,
+        reason: str,
+    ) -> BatchResult | None:
+        """占位成功返回 None（本请求执行）；completed 返回首次结果；processing 冲突 409；failed 接管重试。"""
+        log = self._require_request_log()
+        payload = {
+            "tenant_id": str(tenant_id),
+            "mode": mode,
+            "reason": reason,
+            "items": [item.to_dict() for item in items],
+        }
+        if log.try_begin(key, tenant_id, "batch", payload):
+            # 占位先独立提交：并发同键请求立即看到 processing 而非等待本批次完成
+            self._uow.commit()
+            return None
+        row = log.get(key)
+        if row is not None and row["status"] == "completed":
+            return self._result_from_json(row["result"])
+        if row is not None and row["status"] == "processing":
+            raise VersionConflictError("相同幂等键的请求仍在执行中，请稍后重试")
+        # failed（或极小竞态窗口下行已消失）：接管重试，version+1
+        log.retry_begin(key)
+        self._uow.commit()
+        return None
+
+    def _mark_idempotent_failed(self, key: str) -> None:
+        # 主事务已回滚，失败标记走独立小事务；标记自身失败不回滚语义、不得掩盖原始异常
+        try:
+            self._require_request_log().mark_failed(key)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+
+    @staticmethod
+    def _result_to_json(result: BatchResult) -> dict[str, Any]:
+        return {
+            "updated": result.updated,
+            "failed": list(result.failed),
+            "affected_role_grants": result.affected_role_grants,
+        }
+
+    @staticmethod
+    def _result_from_json(data: dict[str, Any] | None) -> BatchResult:
+        d = data or {}
+        return BatchResult(
+            updated=int(d.get("updated", 0)),
+            failed=tuple(d.get("failed", ())),
+            affected_role_grants=int(d.get("affected_role_grants", 0)),
+        )
+
+    def _require_request_log(self) -> EntitlementRequestLogRepositoryProtocol:
+        if self._request_log is None:
+            raise RuntimeError("幂等请求日志仓储未装配（组合根遗漏 request_log）")
+        return self._request_log
 
     # ========== 套餐模板（P3-3） ==========
     def list_plans(
