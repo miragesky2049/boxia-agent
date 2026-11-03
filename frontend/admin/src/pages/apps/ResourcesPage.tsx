@@ -37,6 +37,7 @@ import {
 } from '../../api/apps'
 import { useAuth } from '../../auth/AuthContext'
 import { useTenant } from '../../tenant/TenantContext'
+import ObjectTenantsTab from '../entitlements/ObjectTenantsTab'
 import { fetchPublicTenants } from '../../api/tenant'
 import type { Tenant } from '../../api/types'
 
@@ -532,62 +533,91 @@ export default function ResourcesPage() {
         />
       </Modal>
 
-      {/* 授权抽屉 */}
+      {/* 授权 / 已开通租户抽屉 */}
       <Drawer
         open={grantOpen}
-        width={480}
+        width={560}
         title={grantingResource ? `授权：${grantingResource.name}` : '资源授权'}
         onClose={() => setGrantOpen(false)}
+        destroyOnClose
       >
-        <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
-          <Select
-            style={{ flex: 1 }}
-            placeholder="选择要授权的租户"
-            value={grantingTenantId ?? undefined}
-            onChange={(v) => setGrantingTenantId(v)}
-            options={availableTenants.map((t) => ({
-              value: t.id,
-              label: `${t.name}（${t.code}）`,
-            }))}
-          />
-          <Button type="primary" onClick={handleGrant} disabled={!grantingTenantId}>
-            授权
-          </Button>
-        </Space.Compact>
+        {grantingResource && (
+          <Tabs
+            defaultActiveKey="grant"
+            items={[
+              {
+                key: 'grant',
+                label: '授权管理',
+                children: (
+                  <>
+                    <Space.Compact style={{ width: '100%', marginBottom: 16 }}>
+                      <Select
+                        style={{ flex: 1 }}
+                        placeholder="选择要授权的租户"
+                        value={grantingTenantId ?? undefined}
+                        onChange={(v) => setGrantingTenantId(v)}
+                        options={availableTenants.map((t) => ({
+                          value: t.id,
+                          label: `${t.name}（${t.code}）`,
+                        }))}
+                      />
+                      <Button type="primary" onClick={handleGrant} disabled={!grantingTenantId}>
+                        授权
+                      </Button>
+                    </Space.Compact>
 
-        <Typography.Text strong>已授权租户（{grants.length}）</Typography.Text>
-        <Table
-          style={{ marginTop: 8 }}
-          rowKey="id"
-          size="small"
-          pagination={false}
-          dataSource={grants}
-          columns={[
-            {
-              title: '租户',
-              dataIndex: 'tenant_id',
-              render: (tid: string) => tenantNameMap.get(tid) ?? tid.slice(0, 8) + '…',
-            },
-            {
-              title: '授权时间',
-              dataIndex: 'granted_at',
-              width: 170,
-              render: (v: string) => dayjs(v).format('MM-DD HH:mm'),
-            },
-            {
-              title: '操作',
-              key: 'actions',
-              width: 80,
-              render: (_: unknown, record: ResourceGrant) => (
-                <Popconfirm title="确定撤销授权？" onConfirm={() => handleRevoke(record.tenant_id)}>
-                  <Button type="link" size="small" danger>
-                    撤销
-                  </Button>
-                </Popconfirm>
-              ),
-            },
-          ]}
-        />
+                    <Typography.Text strong>已授权租户（{grants.length}）</Typography.Text>
+                    <Table
+                      style={{ marginTop: 8 }}
+                      rowKey="id"
+                      size="small"
+                      pagination={false}
+                      dataSource={grants}
+                      columns={[
+                        {
+                          title: '租户',
+                          dataIndex: 'tenant_id',
+                          render: (tid: string) => tenantNameMap.get(tid) ?? tid.slice(0, 8) + '…',
+                        },
+                        {
+                          title: '授权时间',
+                          dataIndex: 'granted_at',
+                          width: 170,
+                          render: (v: string) => dayjs(v).format('MM-DD HH:mm'),
+                        },
+                        {
+                          title: '操作',
+                          key: 'actions',
+                          width: 80,
+                          render: (_: unknown, record: ResourceGrant) => (
+                            <Popconfirm
+                              title="确定撤销授权？"
+                              onConfirm={() => handleRevoke(record.tenant_id)}
+                            >
+                              <Button type="link" size="small" danger>
+                                撤销
+                              </Button>
+                            </Popconfirm>
+                          ),
+                        },
+                      ]}
+                    />
+                  </>
+                ),
+              },
+              {
+                key: 'tenants',
+                label: '已开通租户',
+                children: (
+                  <ObjectTenantsTab
+                    objectType={grantingResource.type}
+                    objectId={grantingResource.id}
+                  />
+                ),
+              },
+            ]}
+          />
+        )}
       </Drawer>
     </div>
   )

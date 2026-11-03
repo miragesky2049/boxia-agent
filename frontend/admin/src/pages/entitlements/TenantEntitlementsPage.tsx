@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { App, Button, Input, Menu, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useAuth } from '../../auth/AuthContext'
@@ -53,6 +54,7 @@ export default function TenantEntitlementsPage() {
   const { message } = App.useApp()
   const { hasPermission } = useAuth()
   const canManage = hasPermission('button:entitlement:manage')
+  const [searchParams] = useSearchParams()
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [tenantId, setTenantId] = useState<string | undefined>(undefined)
@@ -88,8 +90,14 @@ export default function TenantEntitlementsPage() {
     fetchPublicTenants()
       .then((items) => {
         setTenants(items)
+        // 反查 Tab 跳转定位：?tenant= 优先于最近访问与首个活跃租户（P2-5）
+        const urlTenant = searchParams.get('tenant')
         setTenantId((current) => {
           if (current) return current
+          if (urlTenant && items.some((t) => t.id === urlTenant)) {
+            writeRecentTenantId(urlTenant)
+            return urlTenant
+          }
           const recent = readRecentTenantIds().find((id) => items.some((t) => t.id === id))
           return recent ?? items.find((t) => t.is_active)?.id
         })
@@ -97,7 +105,7 @@ export default function TenantEntitlementsPage() {
       .catch((error: unknown) =>
         message.error(error instanceof Error ? error.message : '加载租户失败'),
       )
-  }, [message])
+  }, [message, searchParams])
 
   const loadRows = useCallback(async () => {
     if (!tenantId) return

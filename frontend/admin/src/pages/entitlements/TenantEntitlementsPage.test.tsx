@@ -137,10 +137,10 @@ function mockApi(captured: Captured) {
   })
 }
 
-function renderPage() {
+function renderPage(entry = '/entitlements') {
   return render(
     <AntdApp>
-      <MemoryRouter initialEntries={['/entitlements']}>
+      <MemoryRouter initialEntries={[entry]}>
         <AuthProvider>
           <Routes>
             <Route path="/entitlements" element={<TenantEntitlementsPage />} />
@@ -197,6 +197,14 @@ describe('TenantEntitlementsPage', () => {
     expect(
       await screen.findByText('已更新 1 项，影响角色授权 2 项', {}, { timeout: 3000 }),
     ).toBeInTheDocument()
+  })
+
+  it('URL ?tenant= 优先定位租户（反查 Tab 跳转）', async () => {
+    vi.stubGlobal('fetch', mockApi({ batchBodies: [] }))
+    renderPage('/entitlements?tenant=10')
+
+    expect(await screen.findByText('租户B（b）', {}, { timeout: 3000 })).toBeInTheDocument()
+    await waitFor(() => expect(screen.queryByText('权益技能A')).not.toBeInTheDocument())
   })
 
   it('切换租户后空状态展示', async () => {

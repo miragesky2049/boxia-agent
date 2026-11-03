@@ -3,6 +3,8 @@ import {
   Button,
   Card,
   Col,
+  Descriptions,
+  Drawer,
   Empty,
   Input,
   Modal,
@@ -11,6 +13,7 @@ import {
   Spin,
   Switch,
   Table,
+  Tabs,
   Tag,
   Typography,
 } from 'antd'
@@ -24,6 +27,7 @@ import {
   type Application,
   type FlowType,
 } from '../../api/apps'
+import ObjectTenantsTab from '../entitlements/ObjectTenantsTab'
 
 type TypeFilter = 'all' | FlowType
 
@@ -62,6 +66,7 @@ export default function AppListPage() {
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [detailApp, setDetailApp] = useState<Application | null>(null)
 
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
@@ -159,9 +164,7 @@ export default function AppListPage() {
           <Typography.Title level={4} style={{ margin: 0 }}>
             产品级应用
           </Typography.Title>
-          <Typography.Text type="secondary">
-            平台统一发布，租户通过应用市场自助开通
-          </Typography.Text>
+          <Typography.Text type="secondary">平台统一发布，租户通过应用市场自助开通</Typography.Text>
         </Col>
         <Col>
           <Button type="primary" onClick={() => setCreateOpen(true)}>
@@ -205,10 +208,7 @@ export default function AppListPage() {
               title: '名称',
               dataIndex: 'name',
               render: (name: string, record) => (
-                <a
-                  onClick={() => navigate(`/apps/${record.id}/edit`)}
-                  style={{ fontWeight: 500 }}
-                >
+                <a onClick={() => navigate(`/apps/${record.id}/edit`)} style={{ fontWeight: 500 }}>
                   {name}
                 </a>
               ),
@@ -264,9 +264,18 @@ export default function AppListPage() {
             {
               title: '操作',
               render: (_, record) => (
-                <Button type="link" size="small" onClick={() => navigate(`/apps/${record.id}/edit`)}>
-                  编辑画布
-                </Button>
+                <>
+                  <Button type="link" size="small" onClick={() => setDetailApp(record)}>
+                    详情
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => navigate(`/apps/${record.id}/edit`)}
+                  >
+                    编辑画布
+                  </Button>
+                </>
               ),
             },
           ]}
@@ -310,9 +319,7 @@ export default function AppListPage() {
                     <div style={{ fontSize: 12, color: '#8c8c8c', marginTop: 8 }}>
                       初始画布：{opt.nodes}
                     </div>
-                    <div style={{ fontSize: 12, color: '#8c8c8c' }}>
-                      试运行：{opt.trial}
-                    </div>
+                    <div style={{ fontSize: 12, color: '#8c8c8c' }}>试运行：{opt.trial}</div>
                   </Card>
                 </Col>
               )
@@ -360,6 +367,63 @@ export default function AppListPage() {
           </Col>
         </Row>
       </Modal>
+
+      <Drawer
+        open={!!detailApp}
+        width={640}
+        title={detailApp ? `应用详情：${detailApp.name}` : '应用详情'}
+        onClose={() => setDetailApp(null)}
+        destroyOnClose
+      >
+        {detailApp && (
+          <Tabs
+            defaultActiveKey="basic"
+            items={[
+              {
+                key: 'basic',
+                label: '基本信息',
+                children: (
+                  <Descriptions
+                    column={1}
+                    size="small"
+                    items={[
+                      { key: 'name', label: '名称', children: detailApp.name },
+                      {
+                        key: 'flow',
+                        label: '类型',
+                        children: detailApp.flow_type === 'chatflow' ? '对话流' : '工作流',
+                      },
+                      { key: 'desc', label: '描述', children: detailApp.description || '-' },
+                      {
+                        key: 'listing',
+                        label: '市场状态',
+                        children: detailApp.is_listed_in_market ? '已上架' : '未上架',
+                      },
+                      {
+                        key: 'enabled',
+                        label: '启用状态',
+                        children: detailApp.is_enabled ? '启用' : '禁用',
+                      },
+                      {
+                        key: 'updated',
+                        label: '更新时间',
+                        children: detailApp.updated_at
+                          ? new Date(detailApp.updated_at).toLocaleString()
+                          : '-',
+                      },
+                    ]}
+                  />
+                ),
+              },
+              {
+                key: 'tenants',
+                label: '已开通租户',
+                children: <ObjectTenantsTab objectType="app" objectId={detailApp.id} />,
+              },
+            ]}
+          />
+        )}
+      </Drawer>
     </div>
   )
 }
