@@ -226,7 +226,9 @@ node_modules/
 .env.*.local
 backend/.env.*
 !backend/.env.example
-frontend/*/.env.local
+# 前端各端仅跟踪共享开发配置 .env.dev 与 .env.*.example，.env.prod 等真实环境文件一律忽略
+frontend/*/.env.*
+!frontend/*/.env.dev
 !frontend/*/.env.*.example
 
 # 跨端运维本地文件
