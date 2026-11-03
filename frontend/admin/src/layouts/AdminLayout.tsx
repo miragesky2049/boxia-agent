@@ -5,6 +5,7 @@ import {
   ClusterOutlined,
   DatabaseOutlined,
   FileSearchOutlined,
+  GiftOutlined,
   IdcardOutlined,
   KeyOutlined,
   LogoutOutlined,
@@ -41,6 +42,8 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
   audit: { icon: <FileSearchOutlined />, label: '审计日志' },
+  entitlements: { icon: <GiftOutlined />, label: '租户开通' },
+  'role-access': { icon: <KeyOutlined />, label: '角色授权' },
 }
 
 interface MenuGroup {
@@ -104,9 +107,7 @@ export default function AdminLayout() {
       }
       return
     }
-    const groupEntry = Object.entries(MENU_GROUPS).find(([, group]) =>
-      group.children.includes(key),
-    )
+    const groupEntry = Object.entries(MENU_GROUPS).find(([, group]) => group.children.includes(key))
     if (!groupEntry) return
     const [groupKey, group] = groupEntry
     const groupMenuKey = `group:${groupKey}`
@@ -174,7 +175,9 @@ export default function AdminLayout() {
               {platformName}
               <small>
                 {scopeLabel}
-                {context && context.app_env !== 'prod' ? ` · ${ENV_LABELS[context.app_env]}环境` : ''}
+                {context && context.app_env !== 'prod'
+                  ? ` · ${ENV_LABELS[context.app_env]}环境`
+                  : ''}
               </small>
             </span>
           )}
