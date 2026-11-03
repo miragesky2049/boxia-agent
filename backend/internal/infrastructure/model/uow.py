@@ -115,10 +115,20 @@ class SqlAlchemyUnitOfWork:
         )
         self._scope_role_ids: tuple[UUID, ...] = ()
         self._scope_apply_role_filter: bool = True
-        self.tools: ResourceRepository[Tool] = ResourceToolRepository(self.session, tenant_id)
+        self.tools: ResourceRepository[Tool] = self.resource_repo("tool")
         # RAG 知识库：文档元数据 + 分块向量仓储
         self.documents = PostgresDocumentRepository(self.session, tenant_id)
         self.document_chunks = PostgresDocumentChunkRepository(self.session, tenant_id)
+
+    def resource_repo(self, resource_type: str) -> ResourceToolRepository:
+        """按资源类型返回当前作用域仓储；tools 等价于 resource_repo('tool')。"""
+        return ResourceToolRepository(
+            self.session,
+            self.tenant_id,
+            self._scope_role_ids,
+            self._scope_apply_role_filter,
+            resource_type,
+        )
 
     def apply_scope(
         self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True
@@ -126,9 +136,7 @@ class SqlAlchemyUnitOfWork:
         """按当前账号角色重建资源仓储。"""
         self._scope_role_ids = tuple(role_ids)
         self._scope_apply_role_filter = apply_role_filter
-        self.tools = ResourceToolRepository(
-            self.session, self.tenant_id, self._scope_role_ids, self._scope_apply_role_filter
-        )
+        self.tools = self.resource_repo("tool")
 
     def commit(self) -> None:
         """提交当前事务。"""

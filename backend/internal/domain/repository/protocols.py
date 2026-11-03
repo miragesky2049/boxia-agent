@@ -830,6 +830,9 @@ class UnitOfWork(Protocol):
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     tools: ResourceRepository[Tool]
 
+    def resource_repo(self, resource_type: str) -> ResourceRepository[Tool]:
+        """按资源类型返回当前作用域仓储；tools 等价于 resource_repo('tool')。"""
+
     def apply_scope(self, role_ids: tuple[UUID, ...] = (), apply_role_filter: bool = True) -> None:
         """按当前账号角色重建资源仓储。"""
 

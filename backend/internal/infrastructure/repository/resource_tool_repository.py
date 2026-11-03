@@ -1,9 +1,9 @@
-"""基于统一 resource 表的工具仓储。
+"""基于统一 resource 表的资源仓储（按 type 参数化）。
 
-工具行固定为 resource.type='tool'；归属经 owner_type/owner_id 表示：
-owner_type='platform' 为产品级工具，owner_type='tenant' 时 owner_id 为所属租户。
-角色级数据授权继续走 resource_grants（复数）表，resource_type='tool'，
-因迁移保留原 ID，历史授权记录仍然有效。
+默认服务工具（resource.type='tool'），也可实例化为 skill / prompt / knowledge；
+归属经 owner_type/owner_id 表示：owner_type='platform' 为产品级资源，
+owner_type='tenant' 时 owner_id 为所属租户。
+角色级数据授权继续走 resource_grants（复数）表，resource_type 与仓储类型一致。
 """
 
 from typing import Any
@@ -13,6 +13,7 @@ from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.entity.access import RESOURCE_TABLE_TYPES
 from internal.domain.entity.resource import Tool
 from internal.infrastructure.model.resource import ResourceModel
 from internal.infrastructure.repository.grant_filters import (
@@ -23,11 +24,11 @@ from internal.infrastructure.repository.grant_filters import (
     tenant_resource_visible,
 )
 
-_RESOURCE_TYPE = "tool"
+_DEFAULT_RESOURCE_TYPE = "tool"
 
 
 class ResourceToolRepository:
-    """工具仓储：resource 表 + resource_grants 可见性，输出 Tool 实体。"""
+    """resource 表仓储：按 resource_type 过滤 + resource_grants 可见性，输出 Tool 实体。"""
 
     def __init__(
         self,
@@ -35,11 +36,15 @@ class ResourceToolRepository:
         tenant_id: UUID | None = None,
         role_ids: tuple[UUID, ...] = (),
         apply_role_filter: bool = True,
+        resource_type: str = _DEFAULT_RESOURCE_TYPE,
     ):
+        if resource_type not in RESOURCE_TABLE_TYPES:
+            raise ValueError(f"resource_type 必须是 {', '.join(RESOURCE_TABLE_TYPES)} 之一")
         self._session = session
         self._tenant_id: UUID = tenant_id if tenant_id is not None else PLATFORM_TENANT_ID
         self._role_ids = tuple(role_ids)
         self._apply_role_filter = apply_role_filter
+        self._resource_type = resource_type
 
     def _to_entity(self, row: ResourceModel) -> Tool:
         config = row.config or {}
@@ -65,11 +70,11 @@ class ResourceToolRepository:
         """写归属：平台作用域仅产品级，租户作用域仅本租户自有。"""
         if self._tenant_id == PLATFORM_TENANT_ID:
             return and_(
-                ResourceModel.type == _RESOURCE_TYPE,
+                ResourceModel.type == self._resource_type,
                 ResourceModel.owner_type == "platform",
             )
         return and_(
-            ResourceModel.type == _RESOURCE_TYPE,
+            ResourceModel.type == self._resource_type,
             ResourceModel.owner_type == "tenant",
             ResourceModel.owner_id == self._tenant_id,
         )
@@ -81,13 +86,13 @@ class ResourceToolRepository:
         """读可见范围：语义与旧 tools 表仓储一致。"""
         if self._tenant_id == PLATFORM_TENANT_ID:
             stmt = stmt.where(
-                ResourceModel.type == _RESOURCE_TYPE,
+                ResourceModel.type == self._resource_type,
                 ResourceModel.owner_type == "platform",
             )
             if self._apply_role_filter:
                 stmt = stmt.where(
                     platform_role_grant_exists(
-                        _RESOURCE_TYPE, ResourceModel.id, self._role_ids
+                        self._resource_type, ResourceModel.id, self._role_ids
                     )
                 )
             return stmt
@@ -95,7 +100,7 @@ class ResourceToolRepository:
             ResourceModel.owner_type == "tenant",
             ResourceModel.owner_id == self._tenant_id,
             tenant_resource_visible(
-                _RESOURCE_TYPE,
+                self._resource_type,
                 ResourceModel.id,
                 self._tenant_id,
                 self._role_ids,
@@ -105,7 +110,7 @@ class ResourceToolRepository:
         platform_resource = and_(
             ResourceModel.owner_type == "platform",
             platform_resource_visible(
-                _RESOURCE_TYPE,
+                self._resource_type,
                 ResourceModel.id,
                 self._tenant_id,
                 self._role_ids,
@@ -113,12 +118,12 @@ class ResourceToolRepository:
             ),
         )
         return stmt.where(
-            ResourceModel.type == _RESOURCE_TYPE, or_(tenant_owned, platform_resource)
+            ResourceModel.type == self._resource_type, or_(tenant_owned, platform_resource)
         )
 
     def _get_owned(self, resource_id: UUID) -> ResourceModel | None:
         row = self._session.get(ResourceModel, resource_id)
-        if row is None or row.type != _RESOURCE_TYPE:
+        if row is None or row.type != self._resource_type:
             return None
         if row.owner_type == "platform":
             return row if self._tenant_id == PLATFORM_TENANT_ID else None
@@ -151,10 +156,10 @@ class ResourceToolRepository:
         )
         if grant_state is not None:
             condition = (
-                has_any_grant(_RESOURCE_TYPE, ResourceModel.id)
+                has_any_grant(self._resource_type, ResourceModel.id)
                 if grant_tenant_id is None
                 else tenant_grant_exists(
-                    _RESOURCE_TYPE, ResourceModel.id, grant_tenant_id
+                    self._resource_type, ResourceModel.id, grant_tenant_id
                 )
             )
             stmt = stmt.where(condition if grant_state == "granted" else ~condition)
@@ -187,7 +192,7 @@ class ResourceToolRepository:
         is_platform = self._tenant_id == PLATFORM_TENANT_ID
         row = ResourceModel(
             id=payload.get("id"),
-            type=_RESOURCE_TYPE,
+            type=self._resource_type,
             owner_type="platform" if is_platform else "tenant",
             owner_id=None if is_platform else self._tenant_id,
             name=payload["name"],
@@ -212,7 +217,10 @@ class ResourceToolRepository:
         row.name = values.get("name", row.name)
         row.config = config
         if values.get("type") is not None:
-            row.type = values["type"]
+            new_type = values["type"]
+            if new_type not in RESOURCE_TABLE_TYPES:
+                raise ValueError(f"type 必须是 {', '.join(RESOURCE_TABLE_TYPES)} 之一")
+            row.type = new_type
         if values.get("is_enabled") is not None:
             row.is_enabled = values["is_enabled"]
         self._session.flush()
@@ -268,7 +276,7 @@ class ResourceToolRepository:
         """角色授权候选范围：租户自有工具 + 已对本租户可见的平台工具。"""
         if self._tenant_id == PLATFORM_TENANT_ID:
             return stmt.where(
-                ResourceModel.type == _RESOURCE_TYPE,
+                ResourceModel.type == self._resource_type,
                 ResourceModel.owner_type == "platform",
             )
         tenant_owned = and_(
@@ -278,7 +286,7 @@ class ResourceToolRepository:
         platform_entitled = and_(
             ResourceModel.owner_type == "platform",
             platform_resource_visible(
-                _RESOURCE_TYPE,
+                self._resource_type,
                 ResourceModel.id,
                 self._tenant_id,
                 (),
@@ -286,7 +294,7 @@ class ResourceToolRepository:
             ),
         )
         return stmt.where(
-            ResourceModel.type == _RESOURCE_TYPE, or_(tenant_owned, platform_entitled)
+            ResourceModel.type == self._resource_type, or_(tenant_owned, platform_entitled)
         )
 
     def list_grantable(
