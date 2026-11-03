@@ -73,6 +73,8 @@ class Settings(BaseSettings):
     entitlement_revoke_strict: bool = False
     # 取消权益时是否中断在跑任务：预留开关，P3 实现前恒为 False
     entitlement_revoke_kill_running: bool = False
+    # 到期宽限期天数（P3-11）：expired 后 N 天内保留配置与恢复入口，超期由对账流转落 revoked；0=关闭
+    entitlement_grace_days: int = Field(default=30, ge=0, le=365)
 
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
     login_max_attempts: int = Field(default=5, ge=1, le=20)

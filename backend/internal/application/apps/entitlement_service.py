@@ -75,6 +75,7 @@ class EntitlementService:
         type_catalog: ResourceTypeCatalogRepositoryProtocol | None = None,
         request_log: EntitlementRequestLogRepositoryProtocol | None = None,
         revoke_strict: bool = False,
+        grace_days: int = 0,
     ) -> None:
         self._uow = uow
         self._repo = repo
@@ -84,6 +85,7 @@ class EntitlementService:
         self._type_catalog = type_catalog
         self._request_log = request_log
         self._revoke_strict = revoke_strict
+        self._grace_days = grace_days
         self._resource_types: frozenset[str] | None = None
 
     # ========== 读侧 ==========
@@ -584,6 +586,16 @@ class EntitlementService:
         for row in rows:
             self._repo.update_entitlement_status(row["id"], STATUS_EXPIRED)
         return len(rows)
+
+    def process_grace_revoked(self, now: datetime) -> int:
+        """宽限期超期把双存储 expired 行落库为 revoked（P3-11），grace_days=0 关闭时返回 0。
+
+        读侧 effective_status 已把超窗行显示为 revoked，本流转只为把持久状态对齐。
+        """
+        if self._grace_days <= 0:
+            return 0
+        cutoff = now - timedelta(days=self._grace_days)
+        return self._repo.revoke_grace_overdue(cutoff)
 
     # ========== 内部：校验 ==========
     def _require_platform(self) -> None:

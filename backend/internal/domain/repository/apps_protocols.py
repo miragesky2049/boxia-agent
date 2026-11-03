@@ -629,6 +629,10 @@ class EntitlementRepositoryProtocol(Protocol):
         """tenant_resource_entitlement 中 active 且已过 expire_time 的行（P3-1 生命周期流转）。"""
         ...
 
+    def revoke_grace_overdue(self, cutoff: datetime) -> int:
+        """宽限期超期落库流转（P3-11）：双存储 expired 且 expire_time <= cutoff → revoked，返回影响行数。"""
+        ...
+
     def update_entitlement_status(self, entitlement_id: UUID, status: str) -> None:
         """更新 tenant_resource_entitlement 行持久状态（wait_effect→active / active→expired）。"""
         ...

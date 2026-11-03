@@ -34,17 +34,19 @@ from web.deps.tenant import RequestContextDep
 def make_entitlement_service(
     uow: SqlAlchemyUnitOfWork, context: RequestContext
 ) -> EntitlementService:
-    """权益读写服务：双表统一仓储 + 套餐模板仓储 + 类型注册表 + AuthService 失效 + 严格模式开关（cache 当前为 None）。"""
+    """权益读写服务：双表统一仓储 + 套餐模板仓储 + 类型注册表 + AuthService 失效 + 严格模式/宽限期开关（cache 当前为 None）。"""
+    settings = get_settings()
     auth_service = AuthService(AuthRepository(uow.session), cache=None)
     return EntitlementService(
         uow,
-        EntitlementRepository(uow.session),
+        EntitlementRepository(uow.session, grace_days=settings.entitlement_grace_days),
         context,
         auth_service=auth_service,
         plan_repo=EntitlementPlanRepository(uow.session),
         type_catalog=ResourceTypeCatalogRepository(uow.session),
         request_log=EntitlementRequestLogRepository(uow.session),
-        revoke_strict=get_settings().entitlement_revoke_strict,
+        revoke_strict=settings.entitlement_revoke_strict,
+        grace_days=settings.entitlement_grace_days,
     )
 
 

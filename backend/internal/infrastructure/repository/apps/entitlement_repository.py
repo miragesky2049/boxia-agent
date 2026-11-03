@@ -50,8 +50,10 @@ _LIST_SQL_BASE = """
 class EntitlementRepository:
     """结构性满足 EntitlementRepositoryProtocol 的 PostgreSQL 实现。"""
 
-    def __init__(self, session: Session):
+    def __init__(self, session: Session, grace_days: int = 0):
         self._session = session
+        # 宽限期读侧口径（P3-11），与流转任务的 settings 同源装配
+        self._grace_days = grace_days
 
     # ========== 读侧 ==========
     def list_by_tenant(
@@ -226,6 +228,23 @@ class EntitlementRepository:
         ).all()
         return [dict(row._mapping) for row in rows]
 
+    def revoke_grace_overdue(self, cutoff: datetime) -> int:
+        """宽限期超期落库流转（P3-11）：双存储 expired 且 expire_time <= cutoff → revoked。"""
+        total = 0
+        for table in ("tenant_application_instance", "tenant_resource_entitlement"):
+            result = cast_cursor(
+                self._session.execute(
+                    text(
+                        f"UPDATE {table} SET status = 'revoked' "
+                        "WHERE status = 'expired' AND expire_time IS NOT NULL "
+                        "AND expire_time <= :cutoff"
+                    ),
+                    {"cutoff": cutoff},
+                )
+            )
+            total += int(result.rowcount)
+        return total
+
     def update_entitlement_status(self, entitlement_id, status: str) -> None:
         self._session.execute(
             text("UPDATE tenant_resource_entitlement SET status = :status WHERE id = :id"),
@@ -381,7 +400,9 @@ class EntitlementRepository:
             object_type=row.object_type,
             object_id=row.object_id,
             name=row.name,
-            status=effective_status(row.status, row.start_time, row.expire_time, now),
+            status=effective_status(
+                row.status, row.start_time, row.expire_time, now, self._grace_days
+            ),
             auth_source=row.auth_source,
             auth_type=row.auth_type,
             start_time=row.start_time,

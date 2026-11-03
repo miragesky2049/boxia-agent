@@ -48,6 +48,10 @@ def make_celery() -> Celery:
                 "task": "entitlement.reconcile",
                 "schedule": 86400.0,
             },
+            "entitlement-process-grace-revoked": {
+                "task": "entitlement.process_grace_revoked",
+                "schedule": 86400.0,
+            },
         },
     )
     return app

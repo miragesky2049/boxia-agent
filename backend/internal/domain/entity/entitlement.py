@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -32,16 +32,26 @@ def effective_status(
     start_time: datetime | None,
     expire_time: datetime | None,
     now: datetime,
+    grace_days: int = 0,
 ) -> str:
-    """读侧生效判定：revoked/suspended/disabled 原样透出；其余按时间区间归一到三态。"""
+    """读侧生效判定：revoked/suspended/disabled 原样透出；其余按时间区间归一到三态。
+
+    宽限期（P3-11）：grace_days>0 时到期后 N 天内仍显 expired（只读窗口，配置保留可恢复），
+    超过窗口读作 revoked，与定时流转口径一致；grace_days=0 关闭宽限期，行为同旧版。
+    """
     if status in _TERMINAL_STATUSES:
         return status
+    grace_over = (
+        grace_days > 0
+        and expire_time is not None
+        and expire_time <= now - timedelta(days=grace_days)
+    )
     if status == STATUS_EXPIRED:
-        return STATUS_EXPIRED
+        return STATUS_REVOKED if grace_over else STATUS_EXPIRED
     if start_time is not None and start_time > now:
         return STATUS_WAIT_EFFECT
     if expire_time is not None and expire_time <= now:
-        return STATUS_EXPIRED
+        return STATUS_REVOKED if grace_over else STATUS_EXPIRED
     return STATUS_ACTIVE
 
 
