@@ -30,6 +30,9 @@ from internal.infrastructure.repository.apps.conversation_repository import (
 from internal.infrastructure.repository.apps.message_repository import MessageRepository
 from internal.infrastructure.repository.apps.model_repository import ModelRepository
 from internal.infrastructure.repository.apps.resource_repository import AppResourceRepository
+from internal.infrastructure.repository.apps.resource_type_catalog_repository import (
+    ResourceTypeCatalogRepository,
+)
 from internal.infrastructure.repository.apps.run_repository import RunRepository
 from internal.infrastructure.repository.apps.tenant_settings_repository import (
     TenantSettingsRepository,
@@ -54,8 +57,10 @@ def make_model_service(session: Session) -> ModelService:
 
 
 def make_app_resource_service(uow: SqlAlchemyUnitOfWork) -> AppResourceService:
-    """资源服务：裸 SQL 仓储 + 请求级 UoW（审核审计共享事务）。"""
-    return AppResourceService(AppResourceRepository(uow.session), uow)
+    """资源服务：裸 SQL 仓储 + 请求级 UoW（审核审计共享事务）+ 类型注册表读侧（P3-5）。"""
+    return AppResourceService(
+        AppResourceRepository(uow.session), uow, ResourceTypeCatalogRepository(uow.session)
+    )
 
 
 def make_tenant_settings_service(session: Session) -> TenantSettingsService:

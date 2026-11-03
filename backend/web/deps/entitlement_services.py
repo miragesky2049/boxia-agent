@@ -21,6 +21,9 @@ from internal.infrastructure.repository.apps.entitlement_plan_repository import 
     EntitlementPlanRepository,
 )
 from internal.infrastructure.repository.apps.entitlement_repository import EntitlementRepository
+from internal.infrastructure.repository.apps.resource_type_catalog_repository import (
+    ResourceTypeCatalogRepository,
+)
 from web.deps.db import UowDep
 from web.deps.tenant import RequestContextDep
 
@@ -28,7 +31,7 @@ from web.deps.tenant import RequestContextDep
 def make_entitlement_service(
     uow: SqlAlchemyUnitOfWork, context: RequestContext
 ) -> EntitlementService:
-    """权益读写服务：双表统一仓储 + 套餐模板仓储 + AuthService 失效 + 严格模式开关（cache 当前为 None）。"""
+    """权益读写服务：双表统一仓储 + 套餐模板仓储 + 类型注册表 + AuthService 失效 + 严格模式开关（cache 当前为 None）。"""
     auth_service = AuthService(AuthRepository(uow.session), cache=None)
     return EntitlementService(
         uow,
@@ -36,6 +39,7 @@ def make_entitlement_service(
         context,
         auth_service=auth_service,
         plan_repo=EntitlementPlanRepository(uow.session),
+        type_catalog=ResourceTypeCatalogRepository(uow.session),
         revoke_strict=get_settings().entitlement_revoke_strict,
     )
 
@@ -47,9 +51,7 @@ def make_grant_engine_service(uow: SqlAlchemyUnitOfWork) -> GrantService:
     return GrantService(repo, auth_service)
 
 
-def get_entitlement_service(
-    uow: UowDep, context: RequestContextDep
-) -> EntitlementService:
+def get_entitlement_service(uow: UowDep, context: RequestContextDep) -> EntitlementService:
     """请求级权益用例装配（P1-6 router 消费）。"""
     return make_entitlement_service(uow, context)
 

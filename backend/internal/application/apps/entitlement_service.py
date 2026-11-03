@@ -18,9 +18,9 @@ from internal.application.entitlement_notify import (
     record_change_notice,
 )
 from internal.domain.auth.service import AuthService
+from internal.domain.entity.access import RESOURCE_TABLE_TYPES
 from internal.domain.entity.common import Page
 from internal.domain.entity.entitlement import (
-    ENTITLEMENT_OBJECT_TYPES,
     OBJECT_TYPE_APP,
     STATUS_ACTIVE,
     STATUS_EXPIRED,
@@ -37,6 +37,7 @@ from internal.domain.errors import ForbiddenError, NotFoundError, ValidationErro
 from internal.domain.repository.apps_protocols import (
     EntitlementPlanRepositoryProtocol,
     EntitlementRepositoryProtocol,
+    ResourceTypeCatalogRepositoryProtocol,
 )
 from internal.domain.repository.protocols import UnitOfWork
 
@@ -59,6 +60,7 @@ class EntitlementService:
         *,
         auth_service: AuthService | None = None,
         plan_repo: EntitlementPlanRepositoryProtocol | None = None,
+        type_catalog: ResourceTypeCatalogRepositoryProtocol | None = None,
         revoke_strict: bool = False,
     ) -> None:
         self._uow = uow
@@ -66,7 +68,9 @@ class EntitlementService:
         self._context = context
         self._auth_service = auth_service
         self._plan_repo = plan_repo
+        self._type_catalog = type_catalog
         self._revoke_strict = revoke_strict
+        self._resource_types: frozenset[str] | None = None
 
     # ========== 读侧 ==========
     def list_by_tenant(
@@ -473,9 +477,17 @@ class EntitlementService:
         if mode not in _MODES:
             raise ValidationError(f"不支持的批量模式：{mode}")
 
-    @staticmethod
-    def _validate_object_type(object_type: str) -> None:
-        if object_type not in ENTITLEMENT_OBJECT_TYPES:
+    def _validate_object_type(self, object_type: str) -> None:
+        # app 为权益对象固定类型不入目录（P3-5）；其余类型以注册表为准，
+        # 未装配目录时退回常量（仅单测/旁路装配场景）
+        if object_type == OBJECT_TYPE_APP:
+            return
+        if self._resource_types is None:
+            if self._type_catalog is not None:
+                self._resource_types = frozenset(self._type_catalog.list_active())
+            else:
+                self._resource_types = frozenset(RESOURCE_TABLE_TYPES)
+        if object_type not in self._resource_types:
             raise ValidationError(f"不支持的权益对象类型：{object_type}")
 
     @staticmethod

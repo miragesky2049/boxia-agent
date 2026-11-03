@@ -678,3 +678,16 @@ class EntitlementPlanRepositoryProtocol(Protocol):
     def delete(self, plan_id: UUID) -> bool:
         """物理删除模板（条目行外键级联清除）；返回是否有行被删除。"""
         ...
+
+
+class ResourceTypeCatalogRepositoryProtocol(Protocol):
+    """资源类型注册表端口：resource_type_catalog 读侧（P3-5）。
+
+    类型集合的唯一事实源：新增资源类型 = 目录插一行，免改迁移与 CHECK；
+    服务层写路径以 list_active 为校验依据。app 不属于资源类型（权益对象
+    固定类型），由服务层单独放行，不经本目录。
+    """
+
+    def list_active(self) -> list[str]:
+        """启用中的资源类型 code，按 sort_order 稳定排序。"""
+        ...

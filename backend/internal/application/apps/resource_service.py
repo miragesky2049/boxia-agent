@@ -18,20 +18,43 @@ from internal.domain.entity.resource import (
     REVIEW_STATUS_REJECTED,
     REVIEW_STATUSES,
 )
-from internal.domain.repository.apps_protocols import AppResourceRepositoryProtocol
+from internal.domain.repository.apps_protocols import (
+    AppResourceRepositoryProtocol,
+    ResourceTypeCatalogRepositoryProtocol,
+)
 from internal.domain.repository.protocols import UnitOfWork
 
-_VALID_TYPES = frozenset(RESOURCE_TABLE_TYPES)
 _VALID_REVIEW_DECISIONS = frozenset({"approve", "reject"})
 
 
 class AppResourceService:
     """统一资源服务。"""
 
-    def __init__(self, repo: AppResourceRepositoryProtocol, uow: UnitOfWork):
-        """仓储与 UoW 由组合根（web/deps/apps_services.py）构造注入；审核审计共享 UoW 事务。"""
+    def __init__(
+        self,
+        repo: AppResourceRepositoryProtocol,
+        uow: UnitOfWork,
+        type_catalog: ResourceTypeCatalogRepositoryProtocol | None = None,
+    ):
+        """仓储与 UoW 由组合根（web/deps/apps_services.py）构造注入；审核审计共享 UoW 事务。
+
+        type_catalog 为资源类型注册表读侧（P3-5）：类型合法性以目录为准，
+        新增类型插目录行即可放行；未装配时退回 RESOURCE_TABLE_TYPES 常量（单测场景）。
+        """
         self._repo: AppResourceRepositoryProtocol = repo
         self._uow: UnitOfWork = uow
+        self._type_catalog = type_catalog
+        self._valid_types: frozenset[str] | None = None
+
+    def _require_valid_type(self, type: str) -> None:
+        """类型枚举校验：目录为事实源，请求级缓存一次查询。"""
+        if self._valid_types is None:
+            if self._type_catalog is not None:
+                self._valid_types = frozenset(self._type_catalog.list_active())
+            else:
+                self._valid_types = frozenset(RESOURCE_TABLE_TYPES)
+        if type not in self._valid_types:
+            raise ValidationError(f"resource type 必须是 {sorted(self._valid_types)} 之一")
 
     # ========== admin / 租户自建 CRUD ==========
     def create_resource(
@@ -45,8 +68,7 @@ class AppResourceService:
         created_by: UUID | None = None,
         review_status: str = REVIEW_STATUS_APPROVED,
     ) -> UUID:
-        if type not in _VALID_TYPES:
-            raise ValidationError(f"resource type 必须是 {sorted(_VALID_TYPES)} 之一")
+        self._require_valid_type(type)
         if not name.strip():
             raise ValidationError("资源名称不能为空")
         if owner_type == "tenant" and owner_id is None:
@@ -102,8 +124,8 @@ class AppResourceService:
         review_status: str | None = None,
     ) -> list[dict]:
         """admin 用：列出全部资源（含禁用），可按审核状态过滤（P1-9 审核队列）。"""
-        if type is not None and type not in _VALID_TYPES:
-            raise ValidationError(f"resource type 必须是 {sorted(_VALID_TYPES)} 之一")
+        if type is not None:
+            self._require_valid_type(type)
         if review_status is not None and review_status not in REVIEW_STATUSES:
             raise ValidationError(f"review_status 必须是 {', '.join(REVIEW_STATUSES)} 之一")
         return self._repo.list_resources(
@@ -224,8 +246,8 @@ class AppResourceService:
     # ========== 租户视角 ==========
     def list_available(self, tenant_id: UUID, *, type: str | None = None) -> list[dict]:
         """租户浏览可用资源：平台已 grant 的 + 自建私有资源。"""
-        if type is not None and type not in _VALID_TYPES:
-            raise ValidationError(f"resource type 必须是 {sorted(_VALID_TYPES)} 之一")
+        if type is not None:
+            self._require_valid_type(type)
         return self._repo.list_available_for_tenant(tenant_id, type=type)
 
     def resolve_for_tenant(self, resource_id: UUID, tenant_id: UUID) -> dict | None:
