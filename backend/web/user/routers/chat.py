@@ -78,7 +78,7 @@ def get_chat_service(
         runner_factory=build_runner,
         app_service=make_application_service(uow),
         model_service=make_model_service(uow.session),
-        resource_service=make_app_resource_service(uow.session),
+        resource_service=make_app_resource_service(uow),
         conv_repo=make_conversation_repository(uow.session),
         msg_repo=make_message_repository(uow.session),
         run_repo=make_run_repository(uow.session),
@@ -257,7 +257,9 @@ async def list_conversations(
 ) -> list[dict]:
     """列出当前用户在指定应用下的会话列表（按 updated_at 倒序）。"""
     return await service.list_conversations(
-        application_id=application_id, limit=limit, offset=offset,
+        application_id=application_id,
+        limit=limit,
+        offset=offset,
     )
 
 

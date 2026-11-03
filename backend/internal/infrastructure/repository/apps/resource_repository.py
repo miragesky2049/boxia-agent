@@ -31,12 +31,16 @@ class AppResourceRepository:
         config: dict[str, Any],
         owner_type: str = "platform",
         owner_id: UUID | None = None,
+        review_status: str = "approved",
+        created_by: UUID | None = None,
     ) -> UUID:
         resource_id = new_uuid()
         self._session.execute(
             text(
-                "INSERT INTO resource (id, type, owner_type, owner_id, name, config) "
-                "VALUES (:id, :type, :owner_type, :owner_id, :name, CAST(:config AS JSONB))"
+                "INSERT INTO resource (id, type, owner_type, owner_id, name, config, "
+                "review_status, created_by) "
+                "VALUES (:id, :type, :owner_type, :owner_id, :name, CAST(:config AS JSONB), "
+                ":review_status, :created_by)"
             ),
             {
                 "id": resource_id,
@@ -45,15 +49,39 @@ class AppResourceRepository:
                 "owner_id": owner_id,
                 "name": name,
                 "config": json.dumps(config or {}),
+                "review_status": review_status,
+                "created_by": created_by,
             },
         )
         return resource_id
+
+    def review_resource(
+        self,
+        resource_id: UUID,
+        *,
+        review_status: str,
+        reviewer_id: UUID | None,
+        remark: str = "",
+    ) -> None:
+        self._session.execute(
+            text(
+                "UPDATE resource SET review_status = :status, reviewed_by = :reviewer, "
+                "reviewed_at = NOW(), review_remark = :remark WHERE id = :id"
+            ),
+            {
+                "id": resource_id,
+                "status": review_status,
+                "reviewer": reviewer_id,
+                "remark": remark,
+            },
+        )
 
     def get_resource(self, resource_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
                 "SELECT id, type, owner_type, owner_id, name, config, version, "
-                "is_enabled, is_deprecated, created_at "
+                "is_enabled, is_deprecated, created_at, "
+                "review_status, review_remark, created_by "
                 "FROM resource WHERE id = :id"
             ),
             {"id": resource_id},
@@ -103,10 +131,11 @@ class AppResourceRepository:
         owner_type: str | None = None,
         owner_id: UUID | None = None,
         include_disabled: bool = False,
+        review_status: str | None = None,
     ) -> list[dict]:
         sql = (
             "SELECT id, type, owner_type, owner_id, name, config, version, "
-            "is_enabled, is_deprecated, created_at "
+            "is_enabled, is_deprecated, created_at, review_status, review_remark "
             "FROM resource WHERE 1=1"
         )
         params: dict[str, Any] = {}
@@ -119,6 +148,9 @@ class AppResourceRepository:
         if owner_id is not None:
             sql += " AND owner_id = :owner_id"
             params["owner_id"] = owner_id
+        if review_status:
+            sql += " AND review_status = :review_status"
+            params["review_status"] = review_status
         if not include_disabled:
             sql += " AND is_enabled = true AND is_deprecated = false"
         sql += " ORDER BY type, name"
@@ -193,10 +225,10 @@ class AppResourceRepository:
         *,
         type: str | None = None,
     ) -> list[dict]:
-        """列出租户可用资源：平台已 grant 给该租户的 + 租户自建私有资源。"""
+        """列出租户可用资源：平台已 grant 给该租户的 + 租户自建私有资源（含审核状态）。"""
         sql = (
             "SELECT r.id, r.type, r.owner_type, r.owner_id, r.name, r.config, r.version, "
-            "r.review_status "
+            "r.review_status, r.review_remark "
             "FROM resource r "
             "WHERE r.is_enabled = true AND r.is_deprecated = false "
             "AND ( "

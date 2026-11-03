@@ -27,6 +27,12 @@ class ForbiddenError(AppError):
     code = "FORBIDDEN"
 
 
+class SelfReviewForbiddenError(ForbiddenError):
+    """资源创建人不能审核自己创建的资源（职责分离）。"""
+
+    code = "SELF_REVIEW_FORBIDDEN"
+
+
 class NotFoundError(AppError):
     """资源不存在。"""
 

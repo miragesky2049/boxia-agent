@@ -1,23 +1,36 @@
-"""统一资源服务：tool / prompt / skill / knowledge 的 CRUD、grant、租户可用资源查询。"""
+"""统一资源服务：tool / prompt / skill / knowledge 的 CRUD、grant、租户可用资源查询与审核。"""
 
 from __future__ import annotations
 
 from typing import Any
 from uuid import UUID
 
-from internal.application.errors import NotFoundError, ValidationError
+from internal.application.audit import record_audit
+from internal.application.errors import (
+    NotFoundError,
+    SelfReviewForbiddenError,
+    ValidationError,
+)
 from internal.domain.entity.access import RESOURCE_TABLE_TYPES
+from internal.domain.entity.resource import (
+    REVIEW_STATUS_APPROVED,
+    REVIEW_STATUS_REJECTED,
+    REVIEW_STATUSES,
+)
 from internal.domain.repository.apps_protocols import AppResourceRepositoryProtocol
+from internal.domain.repository.protocols import UnitOfWork
 
 _VALID_TYPES = frozenset(RESOURCE_TABLE_TYPES)
+_VALID_REVIEW_DECISIONS = frozenset({"approve", "reject"})
 
 
 class AppResourceService:
     """统一资源服务。"""
 
-    def __init__(self, repo: AppResourceRepositoryProtocol):
-        """仓储由组合根（web/deps/apps_services.py）构造注入。"""
+    def __init__(self, repo: AppResourceRepositoryProtocol, uow: UnitOfWork):
+        """仓储与 UoW 由组合根（web/deps/apps_services.py）构造注入；审核审计共享 UoW 事务。"""
         self._repo: AppResourceRepositoryProtocol = repo
+        self._uow: UnitOfWork = uow
 
     # ========== admin / 租户自建 CRUD ==========
     def create_resource(
@@ -28,6 +41,8 @@ class AppResourceService:
         config: dict[str, Any],
         owner_type: str = "platform",
         owner_id: UUID | None = None,
+        created_by: UUID | None = None,
+        review_status: str = REVIEW_STATUS_APPROVED,
     ) -> UUID:
         if type not in _VALID_TYPES:
             raise ValidationError(f"resource type 必须是 {sorted(_VALID_TYPES)} 之一")
@@ -35,12 +50,16 @@ class AppResourceService:
             raise ValidationError("资源名称不能为空")
         if owner_type == "tenant" and owner_id is None:
             raise ValidationError("租户资源必须指定 owner_id")
+        # pending 只由租户自助入口（POST /my-resources）显式传入；
+        # 平台代建即使归属租户也不拦审核（P1-9）
         return self._repo.create_resource(
             type=type,
             name=name.strip(),
             config=config or {},
             owner_type=owner_type,
             owner_id=owner_id,
+            review_status=review_status,
+            created_by=created_by,
         )
 
     def get_resource(self, resource_id: UUID) -> dict:
@@ -79,16 +98,71 @@ class AppResourceService:
         type: str | None = None,
         owner_type: str | None = None,
         owner_id: UUID | None = None,
+        review_status: str | None = None,
     ) -> list[dict]:
-        """admin 用：列出全部资源（含禁用）。"""
+        """admin 用：列出全部资源（含禁用），可按审核状态过滤（P1-9 审核队列）。"""
         if type is not None and type not in _VALID_TYPES:
             raise ValidationError(f"resource type 必须是 {sorted(_VALID_TYPES)} 之一")
+        if review_status is not None and review_status not in REVIEW_STATUSES:
+            raise ValidationError(f"review_status 必须是 {', '.join(REVIEW_STATUSES)} 之一")
         return self._repo.list_resources(
             type=type,
             owner_type=owner_type,
             owner_id=owner_id,
             include_disabled=True,
+            review_status=review_status,
         )
+
+    # ========== 审核 ==========
+    def review_resource(
+        self,
+        resource_id: UUID,
+        *,
+        decision: str,
+        reviewer_id: UUID,
+        reviewer_username: str,
+        remark: str = "",
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> dict[str, Any]:
+        """审核资源：通过=approved、驳回=rejected；创建人审核自己的资源按职责分离拒绝（P1-9）。"""
+        if decision not in _VALID_REVIEW_DECISIONS:
+            raise ValidationError(
+                f"decision 必须是 {', '.join(sorted(_VALID_REVIEW_DECISIONS))} 之一"
+            )
+        record = self._repo.get_resource(resource_id)
+        if record is None:
+            raise NotFoundError("资源不存在")
+        created_by = record.get("created_by")
+        if created_by is not None and created_by == reviewer_id:
+            # created_by 为 NULL 的历史资源放行（职责分离只约束新资源）
+            raise SelfReviewForbiddenError("不能审核自己创建的资源")
+        after = REVIEW_STATUS_APPROVED if decision == "approve" else REVIEW_STATUS_REJECTED
+        before = record.get("review_status")
+        self._repo.review_resource(
+            resource_id,
+            review_status=after,
+            reviewer_id=reviewer_id,
+            remark=remark,
+        )
+        record_audit(
+            self._uow,
+            action="resource.reviewed",
+            actor_id=reviewer_id,
+            actor_username=reviewer_username,
+            resource_type=str(record.get("type", "")),
+            resource_id=str(resource_id),
+            ip=ip,
+            user_agent=user_agent,
+            detail={
+                "before": before,
+                "after": after,
+                "remark": remark,
+                "reviewer_id": str(reviewer_id),
+            },
+            tenant_id=record.get("owner_id"),
+        )
+        return {"resource_id": resource_id, "review_status": after, "review_remark": remark}
 
     # ========== grant ==========
     def grant_resource(self, resource_id: UUID, tenant_id: UUID) -> None:

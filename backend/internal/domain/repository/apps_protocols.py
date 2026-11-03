@@ -406,7 +406,18 @@ class AppResourceRepositoryProtocol(Protocol):
         config: dict[str, Any],
         owner_type: str = "platform",
         owner_id: UUID | None = None,
+        review_status: str = "approved",
+        created_by: UUID | None = None,
     ) -> UUID: ...
+
+    def review_resource(
+        self,
+        resource_id: UUID,
+        *,
+        review_status: str,
+        reviewer_id: UUID | None,
+        remark: str = "",
+    ) -> None: ...
 
     def get_resource(self, resource_id: UUID) -> dict | None: ...
 
@@ -429,6 +440,7 @@ class AppResourceRepositoryProtocol(Protocol):
         owner_type: str | None = None,
         owner_id: UUID | None = None,
         include_disabled: bool = False,
+        review_status: str | None = None,
     ) -> list[dict]: ...
 
     def grant(self, resource_id: UUID, tenant_id: UUID) -> None: ...

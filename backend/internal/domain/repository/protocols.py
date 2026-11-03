@@ -808,7 +808,11 @@ class UserMgmtUnitGrantRepository(Protocol):
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
-    tenant_id: UUID | None
+    @property
+    def tenant_id(self) -> UUID | None:
+        """当前工作单元绑定的租户 ID（只读成员，实现可将 None 归一化为平台租户）。"""
+        ...
+
     tenants: TenantRepository
     admin_users: AdminUserRepository
     refresh_tokens: RefreshTokenRepository

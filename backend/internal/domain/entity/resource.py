@@ -7,6 +7,13 @@ from uuid import UUID
 
 from internal.domain.constants import PLATFORM_TENANT_ID
 
+# 资源审核状态（迁移 0056 ck_resource_review_status 三值）：
+# 平台自建直接 approved，租户自建进入 pending 走人工审核。
+REVIEW_STATUS_PENDING = "pending"
+REVIEW_STATUS_APPROVED = "approved"
+REVIEW_STATUS_REJECTED = "rejected"
+REVIEW_STATUSES = (REVIEW_STATUS_PENDING, REVIEW_STATUS_APPROVED, REVIEW_STATUS_REJECTED)
+
 
 @dataclass(frozen=True)
 class Tool:

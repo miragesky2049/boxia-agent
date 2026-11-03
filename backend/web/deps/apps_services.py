@@ -53,8 +53,9 @@ def make_model_service(session: Session) -> ModelService:
     return ModelService(ModelRepository(session))
 
 
-def make_app_resource_service(session: Session) -> AppResourceService:
-    return AppResourceService(AppResourceRepository(session))
+def make_app_resource_service(uow: SqlAlchemyUnitOfWork) -> AppResourceService:
+    """资源服务：裸 SQL 仓储 + 请求级 UoW（审核审计共享事务）。"""
+    return AppResourceService(AppResourceRepository(uow.session), uow)
 
 
 def make_tenant_settings_service(session: Session) -> TenantSettingsService:
