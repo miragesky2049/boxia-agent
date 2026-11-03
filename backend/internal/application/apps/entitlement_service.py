@@ -30,12 +30,15 @@ from internal.domain.entity.entitlement import (
     EntitlementItem,
     EntitlementView,
     RemovePreviewItem,
+    quota_limit,
 )
 from internal.domain.entity.entitlement_plan import PLAN_AUTH_TYPES, EntitlementPlan
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.errors import (
     ForbiddenError,
     NotFoundError,
+    QuotaExceededError,
+    ResourceNotEntitledError,
     ValidationError,
     VersionConflictError,
 )
@@ -111,6 +114,37 @@ class EntitlementService:
         self._validate_object_type(object_type)
         items, total = self._repo.list_tenants_by_object(object_type, object_id, page, page_size)
         return Page(items=items, total=total, page=page, page_size=page_size)
+
+    # ========== 配额执行点（P3-10） ==========
+    def check_quota(
+        self,
+        tenant_id: UUID,
+        object_type: str,
+        object_id: UUID,
+        *,
+        dimension: str,
+        used: int,
+        amount: int = 1,
+    ) -> None:
+        """配额放行判定：used 由调用方（运行入口/席位分配）聚合传入，超限抛 422 QUOTA_EXCEEDED。
+
+        无权益 404；非 active（wait_effect/expired/revoked 等）422 RESOURCE_NOT_ENTITLED；
+        配额缺失/None/0 为不限。业务入口用例，不施加平台作用域门禁。
+        """
+        for name, value in (("used", used), ("amount", amount)):
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValidationError(f"配额校验参数非法：{name} 必须为非负整数")
+        self._validate_object_type(object_type)
+        view = self._repo.get(tenant_id, object_type, object_id)
+        if view is None:
+            raise NotFoundError(f"权益未开通：{object_type}/{object_id}")
+        if view.status != STATUS_ACTIVE:
+            raise ResourceNotEntitledError(f"权益未生效，当前状态：{view.status}")
+        limit = quota_limit(view.quota, dimension)
+        if limit is not None and used + amount > limit:
+            raise QuotaExceededError(
+                f"配额超限：{dimension} 上限 {limit}，已用 {used}，本次申请 {amount}"
+            )
 
     # ========== 批量 ==========
     def preview(self, tenant_id: UUID, mode: str, items: list[EntitlementItem]) -> BatchPreview:

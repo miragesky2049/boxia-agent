@@ -11,6 +11,8 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
+from internal.domain.errors import ValidationError
+
 OBJECT_TYPE_APP = "app"
 ENTITLEMENT_OBJECT_TYPES: tuple[str, ...] = ("app", "tool", "skill", "prompt", "knowledge")
 
@@ -41,6 +43,23 @@ def effective_status(
     if expire_time is not None and expire_time <= now:
         return STATUS_EXPIRED
     return STATUS_ACTIVE
+
+
+# 配额语义（P3-10）：quota_json 仅以下两个键参与执行点判定，缺失/None/0 均为不限；
+# 其余键（如 qps）为存储展示项，check_quota 不解释。seats=席位数，runs=累计次数。
+QUOTA_DIMENSIONS = ("seats", "runs")
+
+
+def quota_limit(quota: dict[str, Any], dimension: str) -> int | None:
+    """解析配额维度上限；非法配置（非负整数以外）抛 422，None 表示不限。"""
+    if dimension not in QUOTA_DIMENSIONS:
+        raise ValidationError(f"不支持的配额维度：{dimension}，仅支持 {'/'.join(QUOTA_DIMENSIONS)}")
+    value = quota.get(dimension)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValidationError(f"配额配置非法：{dimension} 必须为非负整数，当前为 {value!r}")
+    return value if value > 0 else None
 
 
 @dataclass(frozen=True)

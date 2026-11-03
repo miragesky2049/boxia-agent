@@ -78,6 +78,12 @@ class ResourceDeprecatedError(ValidationError):
     code = "RESOURCE_DEPRECATED"
 
 
+class QuotaExceededError(ValidationError):
+    """权益配额超限（P3-10），调用方应引导购买方扩容或释放占用。"""
+
+    code = "QUOTA_EXCEEDED"
+
+
 class RateLimitError(AppError):
     """请求过于频繁或账号被临时锁定。"""
 
