@@ -33,7 +33,7 @@
 | A5 | 平台资源默认 `review_status=approved`，存量资源回填 approved | 避免误伤已在使用资源 |
 | A6 | 租户自建资源创建即 `pending`，仅 approved 可授权 | 满足 D3 |
 | A7 | 产品级入口命名「租户开通」`/entitlements`；租户级「角色授权」`/role-access` | 与"用户授权"区分 |
-| A8 | 新迁移从 `0054` 起，依次 0054–0057 | 当前最新为 0053 |
+| A8 | 新迁移从 `0055` 起，依次 0055–0058（P3-3 顺延为 `0059`） | `0054`（`grant_resource_type_unify`）已随 P0-1 交付，原计划编号整体顺延（2026-11-03 P0-7 同步） |
 
 ### 0.3 本轮不做
 
@@ -69,7 +69,7 @@ Permission 层（租户内角色 → 资源）：角色能使用什么
 | --- | --- | --- |
 | `resource_grant`（单数） | 增加 status/auth_source/auth_type/start_time/expire_time/quota_json/remark/granted_by | 资源权益 |
 | `resource` | 增加 review_status/reviewed_by/reviewed_at/review_remark | 租户自建审核 |
-| `resource_grants`（复数） | 增加 `subject_type`（`tenant`/`role`）；`role_id` 仅 `role` 档必填；重建作用域约束/索引；resource_type CHECK 统一 | 角色授权 + 全员可见 |
+| `resource_grants`（复数） | 增加 `subject_type`（`tenant`/`role`）；`role_id` 仅 `role` 档必填；重建作用域约束/索引（resource_type CHECK 统一已随 0054 交付） | 角色授权 + 全员可见 |
 | `tenant_application_instance` | 修正 status CHECK | 应用权益 |
 | `permission_resources` | 种子新增 8 个权限码 | 菜单/按钮 |
 
@@ -109,23 +109,25 @@ Permission 层（租户内角色 → 资源）：角色能使用什么
 ### 2.1 迁移顺序与依赖
 
 ```text
-0054_resource_entitlement_lifecycle
+0055_resource_entitlement_lifecycle
       │  resource_grant 加生命周期字段；修正 instance status CHECK
       ▼
-0055_resource_review
+0056_resource_review
       │  resource 加审核字段；存量回填 approved
       ▼
-0056_grant_subject_type
-      │  整租户授权显式化（subject_type）；重建约束/索引；resource_type CHECK 统一
+0057_grant_subject_type
+      │  整租户授权显式化（subject_type）；重建约束/索引（resource_type CHECK 统一已随 0054 提前交付）
       ▼
-0057_entitlement_permissions
+0058_entitlement_permissions
       │  权限码种子 + 内置角色授权（可独立发）
 ```
 
-> **本次采用停机维护窗口**：0054–0056 与后端代码在同一次停写窗口内完成（停写 → 迁移 → 发代码 → 恢复写），因此 0056 可一次性完成加列、回填、CHECK 与索引重建，无需 expand/contract 拆分。0057 可随后单独发。
+> **编号说明（2026-11-03 P0-7）**：`0054_grant_resource_type_unify` 已随 P0-1 在线交付（可滚动发布、无需停机），故原计划的 0054–0057 整体顺延为 0055–0058，P3-3 顺延为 0059。
+
+> **本次采用停机维护窗口**：0055–0057 与后端代码在同一次停写窗口内完成（停写 → 迁移 → 发代码 → 恢复写），因此 0057 可一次性完成加列、回填、CHECK 与索引重建，无需 expand/contract 拆分。0058 可随后单独发。
 > 若未来改为无停机滚动发布，必须按标准 expand → contract 拆成两次迁移（见 §6.1 备注）。
 
-### 2.2 0054：资源权益生命周期
+### 2.2 0055：资源权益生命周期
 
 ```sql
 -- resource_grant（单数）
@@ -160,7 +162,7 @@ ALTER TABLE tenant_application_instance
 
 回滚：删除新增列/约束，恢复 `ck_instance_status` 旧值（需先清理 `wait_effect/expired` 数据）。
 
-### 2.3 0055：资源审核
+### 2.3 0056：资源审核
 
 ```sql
 ALTER TABLE resource
@@ -182,13 +184,13 @@ CREATE INDEX ix_resource_review_status
 
 `created_by`：存量平台资源为 `NULL`（历史无记录来源）；新建资源必须写入当前管理员 ID，用于 P1-9 的「审核人不得审核自己创建的资源」（职责分离，行业通用要求）。
 
-### 2.4 0056：整租户授权显式化 + 类型统一
+### 2.4 0057：整租户授权显式化
 
 > **D-2 已确认（2026-11-03）：路线 1 — 显式 `subject_type`。**
 > 保留"全员可见 + 新增角色自动继承"语义，不拆分给具体角色；`role_id IS NULL` 回填为 `subject_type='tenant'`。
-> 迁移前需先完成 D-1 的孤儿清理。
+> **D-1 孤儿清理与 resource_type CHECK 统一已随 `0054_grant_resource_type_unify` 提前交付（P0-1，可滚动发布，无需停机）**，本迁移不再包含 DELETE 与类型 CHECK 步骤。
 
-> **发布方式（2026-11-03 确认）**：采用停机维护窗口——停写 → 执行 0054–0056 → 发布 P1 后端代码 → 恢复写。因此 0056 可一次性完成加列、回填、CHECK 与索引重建，不存在"旧代码插入 `role_id NULL` 撞新 CHECK"的窗口。
+> **发布方式（2026-11-03 确认）**：采用停机维护窗口——停写 → 执行 0055–0057 → 发布 P1 后端代码 → 恢复写。因此 0057 可一次性完成加列、回填、CHECK 与索引重建，不存在"旧代码插入 `role_id NULL` 撞新 CHECK"的窗口。
 > 若未来改为无停机滚动发布，必须按标准 expand → contract 拆成两次迁移：先加列/回填/建新索引并保留旧索引，代码全量上线后再加 CHECK、删旧索引。
 
 **迁移前盘点（必须先执行，结果留档）：**
@@ -198,7 +200,7 @@ CREATE INDEX ix_resource_review_status
 SELECT resource_type, role_id IS NULL AS tenant_wide, count(*)
 FROM resource_grants GROUP BY 1,2 ORDER BY 1,2;
 
--- 2) 历史 agent/component 授权是否还有效
+-- 2) 历史 agent/component 授权（0054 已清理，执行 0055 前应恒为 0 行，留作核验）
 SELECT resource_type, count(*)
 FROM resource_grants
 WHERE resource_type IN ('agent','component')
@@ -212,20 +214,15 @@ WHERE role_id IS NULL GROUP BY 1;
 **迁移步骤：**
 
 ```sql
--- 1) 清理孤儿授权（D-1 已确认：A 删除）
---    依据：0037 已 DROP agents/components 且未迁移授权，resource_id 无对应对象
---    执行前必须备份 resource_grants
-DELETE FROM resource_grants WHERE resource_type IN ('agent','component');
-
--- 2) 新增 subject_type，默认 role
+-- 1) 新增 subject_type，默认 role
 ALTER TABLE resource_grants
   ADD COLUMN subject_type VARCHAR(10) NOT NULL DEFAULT 'role';
 
--- 3) 回填：role_id IS NULL → 全员可见；其余保持 role
+-- 2) 回填：role_id IS NULL → 全员可见；其余保持 role
 UPDATE resource_grants SET subject_type = 'tenant' WHERE role_id IS NULL;
 UPDATE resource_grants SET subject_type = 'role'  WHERE role_id IS NOT NULL;
 
--- 4) 重建作用域约束：tenant 档必须无 role_id，role 档必须有 role_id
+-- 3) 重建作用域约束：tenant 档必须无 role_id，role 档必须有 role_id
 ALTER TABLE resource_grants DROP CONSTRAINT IF EXISTS ck_resource_grants_scope;
 ALTER TABLE resource_grants
   ADD CONSTRAINT ck_resource_grants_subject
@@ -234,7 +231,7 @@ ALTER TABLE resource_grants
       OR (subject_type = 'role' AND role_id IS NOT NULL)
     );
 
--- 5) 索引：tenant 档唯一性用 subject_type 表达；旧索引在新代码上线后删除
+-- 4) 索引：tenant 档唯一性用 subject_type 表达；旧索引在新代码上线后删除
 CREATE UNIQUE INDEX ux_resource_grants_tenant_subject
   ON resource_grants (resource_type, resource_id, tenant_id)
   WHERE subject_type = 'tenant';
@@ -250,22 +247,16 @@ CREATE UNIQUE INDEX ux_resource_grants_platform_role_subject
 DROP INDEX IF EXISTS ux_resource_grants_tenant_wide;
 DROP INDEX IF EXISTS ux_resource_grants_role;
 DROP INDEX IF EXISTS ux_resource_grants_platform_role;
-
--- 6) 统一资源类型 CHECK（旧值已被第 1 步清理）
-ALTER TABLE resource_grants DROP CONSTRAINT IF EXISTS ck_resource_grants_type;
-ALTER TABLE resource_grants
-  ADD CONSTRAINT ck_resource_grants_type
-    CHECK (resource_type IN ('app','tool','skill','prompt','knowledge'));
 ```
 
 **注意：**
-- 本迁移**不删除任何有效数据**（除 D-1 的孤儿记录），downgrade 可逆：删除新增索引与约束、删除 `subject_type` 列。
+- 本迁移**不删除任何数据**（D-1 孤儿已随 0054 清理），downgrade 可逆：删除新增索引与约束、删除 `subject_type` 列。
 - `subject_type='tenant'` 记录在运行时对所有当前及未来角色生效；新增角色天然继承，无需补授权。
 - `subject_type='role'` 保持原有按角色授权语义。
 - 迁移脚本须在日志中输出回填统计：`tenant` 档与 `role` 档各多少条，便于核对。
-- 仍**升级前备份 `resource_grants`**（D-1 的 DELETE 不可逆）。
+- **升级前仍备份 `resource_grants`**（回填与索引重建属高风险 DDL）。
 
-### 2.5 0057：权限码种子
+### 2.5 0058：权限码种子
 
 ```sql
 INSERT INTO permission_resources
@@ -335,7 +326,7 @@ backend/
 #### 3.0.3 命令与基线
 
 ```bash
-# 后端单测（基线约 431 个）
+# 后端单测（基线约 460 个，P0 完成后）
 cd backend && python -m pytest -q
 
 # 单文件
@@ -357,11 +348,11 @@ cd frontend/admin && pnpm test
 cd frontend/admin && pnpm e2e
 ```
 
-基线（2026-11-03 DDD 五期完成后）：pytest 431 passed；ruff/mypy 存量告警不得新增。
+基线（2026-11-03，P0 完成后实测）：pytest 460 passed；ruff 存量 139（P0 前 146）、mypy 存量 109（P0 前 116），后续任务不得新增。
 
 #### 3.0.4 迁移写法约定
 
-- 文件：`backend/migrations/versions/NNNN_<snake_name>.py`，`revision = "NNNN"`，`down_revision = "<上一个 head>"`；本轮起点 `0053_drop_tools_table`。
+- 文件：`backend/migrations/versions/NNNN_<snake_name>.py`，`revision = "NNNN_<snake_name>"`（与文件名一致的 slug，沿用仓库既有风格），`down_revision = "<上一个 head 的 revision>"`；本轮起点 head 为 `0054_grant_resource_type_unify`（P0-1 已交付），P1 自 `0055` 起。
 - 必须实现 `downgrade()`，且 downgrade 后可再 upgrade。
 - 迁移内只允许 `sqlalchemy` / `alembic.op` 与字面常量，不得 import `internal.application` / `internal.domain`。
 - 权限种子参考 `backend/migrations/versions/0038_apps_menu_permissions.py` 的 `_PERMISSIONS` + `_code_array()` + `ON CONFLICT DO NOTHING` 写法。
@@ -402,6 +393,8 @@ cd frontend/admin && pnpm e2e
 | 平台/租户鉴权依赖 | `web/deps/auth.py:103-122`、`:160-162` |
 
 ### 3.1 P0 — 前置修正（1–2 人日）
+
+> **执行状态（2026-11-03）**：P0 全部完成并提交——P0-1 `952e96d`、P0-2 `cf51ab4`、P0-3 `8ab7f2e`、P0-4 `7eeed51`、P0-6 `d2a5da0`；P0-5 并入 P1-1（见其小节）。与计划的两处偏差：① P0-1 额外新建迁移 `0054_grant_resource_type_unify`（孤儿清理 + 类型 CHECK 统一提前交付，P1 迁移整体顺延为 0055–0058）；② P0-3 的 `AppGrantRepository` 按 grant_service 实际消费面补全了 `list_page/get/ids_owned` 等方法（原计划只列 `list_grantable/ids_grantable`）。P0-7 回归基线见 §5.4。
 
 #### P0-1 统一资源类型常量
 
@@ -524,7 +517,7 @@ def resource_repo(self, resource_type: str) -> ResourceToolRepository:
 **验证**
 
 ```bash
-cd backend && python -m pytest tests/test_resource_repository_types.py tests/test_tools.py -q
+cd backend && python -m pytest tests/test_resource_repository_types.py tests/test_resource_types.py tests/test_resources.py -q
 ```
 
 **DoD**：`uow.resource_repo("skill")` 只返回 skill；既有工具接口行为不变。
@@ -568,7 +561,7 @@ def _resource_repository(self, resource_type: str) -> Any:
 **验证**
 
 ```bash
-cd backend && python -m pytest tests/test_grant_service_types.py tests/test_role_grants.py tests/test_grant_overview.py -q
+cd backend && python -m pytest tests/test_grant_service_types.py tests/test_role_grants.py tests/test_user_grant_save.py -q
 ```
 
 **DoD**：任意资源类型不再一律查 tool；`role_grant_service` 行为不变。
@@ -621,7 +614,7 @@ def get_active_instance(self, tenant_id: UUID, application_id: UUID) -> dict | N
 **验证**
 
 ```bash
-cd backend && python -m pytest tests/test_application_subscribe.py tests/test_marketplace.py tests/test_tenant_apps.py -q
+cd backend && python -m pytest tests/test_application_subscribe.py tests/test_marketplace_workbench.py -q
 ```
 
 **DoD**：市场不能绕过 `sale_mode`；失效实例不可运行。
@@ -632,9 +625,9 @@ cd backend && python -m pytest tests/test_application_subscribe.py tests/test_ma
 
 #### P0-5 修正应用实例状态 CHECK（已并入 P1-1）
 
-**说明**：该改动只能通过迁移完成，故并入 `0054`，随 P1-1 一起交付，不新建迁移文件，避免与 P1-1 抢同一 revision。
+**说明**：该改动只能通过迁移完成，故并入 `0055`，随 P1-1 一起交付，不新建迁移文件，避免与 P1-1 抢同一 revision。
 
-**验收**：P1-1 的 `0054` upgrade/downgrade 往返通过，且 `tenant_application_instance` 可写入 `wait_effect`、`expired`。
+**验收**：P1-1 的 `0055` upgrade/downgrade 往返通过，且 `tenant_application_instance` 可写入 `wait_effect`、`expired`。
 
 ---
 
@@ -685,7 +678,7 @@ def claim(self, apply_id: UUID, sales_user_id: UUID, operator_name: str) -> None
 **验证**
 
 ```bash
-cd backend && python -m pytest tests/test_applies_auth.py tests/test_applies.py -q
+cd backend && python -m pytest tests/test_applies_auth.py -q
 ```
 
 **DoD**：任意租户管理员不能操作他人申请；`sales_user_id` 落库可追溯。
@@ -707,15 +700,15 @@ cd backend && python -m pytest tests/test_applies_auth.py tests/test_applies.py 
 
 ### 3.2 P1 — 后端统一 Entitlement（4–6 人日）
 
-#### P1-1 迁移 0054：权益生命周期 + 实例状态 CHECK
+#### P1-1 迁移 0055：权益生命周期 + 实例状态 CHECK
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0054_resource_entitlement_lifecycle.py` |
+| 文件 | `backend/migrations/versions/0055_resource_entitlement_lifecycle.py` |
 | 内容 | 见 §2.2，含 `tenant_application_instance` 的 `ck_instance_status` 重建（原 P0-5） |
 
 **实现要点**
-- `revision = "0054"`，`down_revision = "0053"`。
+- `revision = "0055_resource_entitlement_lifecycle"`，`down_revision = "0054_grant_resource_type_unify"`。
 - `upgrade()` 顺序：加列 → 加 CHECK → 加索引 → 重建 instance CHECK。
 - `downgrade()` 逆序：删索引 → 删 CHECK → 删列 → 恢复 instance 旧 CHECK（旧值先 `grep -n "ck_instance_status" backend/migrations/versions/*.py` 确认）。
 - downgrade 前若存在 `wait_effect/expired` 数据会失败，脚本应在 downgrade docstring 明确"需先清理"。
@@ -732,11 +725,11 @@ cd backend && python -m pytest tests/test_applies_auth.py tests/test_applies.py 
 
 ---
 
-#### P1-2 迁移 0055：资源审核
+#### P1-2 迁移 0056：资源审核
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0055_resource_review.py`（`revision="0055"`，`down_revision="0054"`） |
+| 文件 | `backend/migrations/versions/0056_resource_review.py`（`revision="0056_resource_review"`，`down_revision="0055_resource_entitlement_lifecycle"`） |
 | 内容 | 见 §2.3 |
 
 **要点**：默认 `approved` 覆盖存量；`reviewed_by/reviewed_at/review_remark` 可空或默认空串；`created_by` 存量置 `NULL`，新建资源必须写入当前管理员 ID（供 P1-9 职责分离校验）。
@@ -746,12 +739,12 @@ cd backend && python -m pytest tests/test_applies_auth.py tests/test_applies.py 
 
 ---
 
-#### P1-3 迁移 0056：整租户授权显式化 + 类型统一
+#### P1-3 迁移 0057：整租户授权显式化
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0056_grant_subject_type.py`（`revision="0056"`，`down_revision="0055"`） |
-| 内容 | 见 §2.4；单次迁移完成加列、回填、CHECK、索引重建与 `resource_type` CHECK（停机窗口内执行） |
+| 文件 | `backend/migrations/versions/0057_grant_subject_type.py`（`revision="0057_grant_subject_type"`，`down_revision="0056_resource_review"`） |
+| 内容 | 见 §2.4；单次迁移完成加列、回填、subject CHECK、索引重建（停机窗口内执行；`resource_type` CHECK 与孤儿清理已随 0054 交付） |
 
 **配套 ORM 改动**（`internal/infrastructure/model/access.py`）
 
@@ -763,7 +756,7 @@ class ResourceGrantModel(Base):
     )
 ```
 
-- `__table_args__`：删除 `ck_resource_grants_scope`，新增 `ck_resource_grants_subject`；三个旧索引不再声明，新增 `ux_resource_grants_tenant_subject`、`ux_resource_grants_role_subject`、`ux_resource_grants_platform_role_subject`（谓词与迁移完全一致）；`ck_resource_grants_type` 更新为五类。
+- `__table_args__`：删除 `ck_resource_grants_scope`，新增 `ck_resource_grants_subject`；三个旧索引不再声明，新增 `ux_resource_grants_tenant_subject`、`ux_resource_grants_role_subject`、`ux_resource_grants_platform_role_subject`（谓词与迁移完全一致）。`ck_resource_grants_type` 五类口径已随 P0-1 更新，无需再改。
 - `ResourceGrant` 实体（`internal/domain/entity/access.py:97-108`）增加 `subject_type: str = "role"`，仓储 `_to_entity` 填充。
 
 **测试**（新增 `tests/test_grant_subject_migration.py`）
@@ -777,16 +770,16 @@ class ResourceGrantModel(Base):
 
 **特别注意**：`ux_resource_grants_platform_role_subject` 的谓词必须与 `postgres_resource_grant_repository.py:447-484` 的 `on_conflict_do_nothing(index_elements=..., index_where=...)` 完全一致，否则 upsert 报 "no unique or exclusion constraint matching"。
 
-**DoD**：无数据丢失（除 D-1 孤儿）；两档唯一性与 CHECK 生效；downgrade 可逆。
+**DoD**：无数据丢失（D-1 孤儿已随 0054 清理）；两档唯一性与 CHECK 生效；downgrade 可逆。
 **依赖**：P1-1、P1-2（同发布窗口）　**预估**：0.5
 
 ---
 
-#### P1-4 迁移 0057：权限码种子
+#### P1-4 迁移 0058：权限码种子
 
 | 项 | 内容 |
 | --- | --- |
-| 文件 | `backend/migrations/versions/0057_entitlement_permissions.py`（`revision="0057"`，`down_revision="0056"`） |
+| 文件 | `backend/migrations/versions/0058_entitlement_permissions.py`（`revision="0058_entitlement_permissions"`，`down_revision="0057_grant_subject_type"`） |
 | 内容 | 见 §2.5 |
 
 **配套代码**（`internal/domain/entity/permission.py`）：同步 `PERMISSION_CATALOG`、`PLATFORM_ONLY_CODES`、`TENANT_ONLY_CODES`、内置角色默认集合。
@@ -1046,7 +1039,7 @@ class ReviewPayload(BaseModel):
 **验证**
 
 ```bash
-cd backend && python -m pytest tests/test_role_grant_subject.py tests/test_apps_protocols_conformance.py tests/test_role_grants.py tests/test_grant_overview.py -q
+cd backend && python -m pytest tests/test_role_grant_subject.py tests/test_apps_protocols_conformance.py tests/test_role_grants.py tests/test_grant_service_types.py -q
 cd backend && grep -rn "role_id.is_(None)\|role_id IS NULL" internal web | grep -v migrations   # 目标为空
 ```
 
@@ -1172,7 +1165,7 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 | --- | --- | --- | --- | --- |
 | P3-1 | 权益生命周期定时任务 | `internal/infrastructure/tasks/auth_tasks.py`；`internal/domain/auth/grant_service.py:180-238` 已有 `process_wait_effective/process_expired` | 资源权益复用同一调度：`resource_grant` 的 `wait_effect→active`、`active→expired`；需在仓储补 `list_wait_effective` / `list_expired` | 0.75 |
 | P3-2 | 到期提醒 | 新增 `internal/application/entitlement_notify.py` + 调度任务 | 扫描 7/3/1 天内到期；去重键 `(tenant_id, object_type, object_id, days)` | 0.75 |
-| P3-3 | 套餐模板 | 新增迁移 `0058_entitlement_plan.py`、`domain/entity/entitlement_plan.py`、`EntitlementService.apply_plan` | 模板 = 条目集合 + 默认 auth_type/期限；开通复用 `apply_batch` | 1.0 |
+| P3-3 | 套餐模板 | 新增迁移 `0059_entitlement_plan.py`、`domain/entity/entitlement_plan.py`、`EntitlementService.apply_plan` | 模板 = 条目集合 + 默认 auth_type/期限；开通复用 `apply_batch` | 1.0 |
 | P3-4 | 表重命名 | 迁移把 `resource_grant` 改为 `tenant_resource_entitlement` | 同步 `apps/resource_repository.py` 原生 SQL、ORM、Protocol；建议保留兼容视图一个周期 | 0.5 |
 | P3-5 | 类型注册表 | 新增 `resource_type_catalog` 表 + 迁移 | CHECK 改外键或应用校验，新增类型免改迁移 | 1.0 |
 | P3-6 | 权益清除（purge） | `EntitlementService.purge` + `POST /admin/entitlements/purge` | 仅平台 superadmin；二次确认；先写审计快照再物理删除 `resource_grant` 与关联 `resource_grants`；返回 `audit_id` | 0.75 |
@@ -1308,7 +1301,7 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 | `test_grant_service_types.py` | app/资源仓储路由 | P0-3 |
 | `test_application_subscribe.py` | sale_mode、失效实例 | P0-4 |
 | `test_applies_auth.py` | 运营端点 403、销售归属、重复 claim | P0-6 |
-| `test_grant_subject_migration.py` | 0056 回填、两档唯一性、CHECK、旧索引删除、downgrade | P1-3 |
+| `test_grant_subject_migration.py` | 0057 回填、两档唯一性、CHECK、旧索引删除、downgrade | P1-3 |
 | `test_entitlement_service.py` | 统一视图、预览、批量原子回滚、软失效/恢复、严格模式、读时有效期计算、弃用资源、缓存失效调用 | P1-5 |
 | `test_entitlements_api.py` | 列表/反查/预览/批量/权限 | P1-6 |
 | `test_ops_grant_application.py` | OPS 直开、wait_effect、重复开通 | P1-7 |
@@ -1335,7 +1328,7 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 | 取消开通 → 重新开通 | 角色授权自动恢复可见，无需重新配置 |
 | purge 清除 | entitlement 与角色授权物理删除；审计快照可还原 |
 | 整租户授权迁移 | 迁移后原 `role_id IS NULL` 记录变为 `subject_type='tenant'`；记录数不变；新建角色自动可见 |
-| 停机窗口发布 | 停写后迁移 → 发代码 → 恢复写；迁移期间无旧写入路径，0056 的 CHECK 不会误拦 |
+| 停机窗口发布 | 停写后迁移 → 发代码 → 恢复写；迁移期间无旧写入路径，0057 的 CHECK 不会误拦 |
 | 弃用资源 | 不可新开通/新授权（422）；已授权用户仍可见至有效期结束 |
 | 批量原子性 | 批次中一项未开通 → 整体回滚，无部分写入 |
 | 职责分离 | 创建人审核自己的资源 → 403 `SELF_REVIEW_FORBIDDEN` |
@@ -1352,16 +1345,16 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 
 ```bash
 cd backend
-python -m pytest -q                     # 基线 ≥ 431 passed
+python -m pytest -q                     # 基线 ≥ 460 passed（P0 完成后）
 ruff check internal web tests
 mypy internal web
 alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 ```
 
-- 现有 pytest 全量（当前 431 个）必须全绿。
+- 现有 pytest 全量（P0 完成后 460 个）必须全绿。
 - ruff / mypy 不新增错误。
 - DDD 结构符合性测试（`tests/test_apps_protocols_conformance.py`）通过。
-- 迁移在空库 + 存量库各跑一次 upgrade/downgrade；0056 还需在**含 `role_id IS NULL` 记录**的库上验证回填。
+- 迁移在空库 + 存量库各跑一次 upgrade/downgrade；0057 还需在**含 `role_id IS NULL` 记录**的库上验证回填。
 
 ---
 
@@ -1372,15 +1365,15 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 ```text
 1. 通知停写（维护窗口开始）
 2. 备份 resource_grants / resource_grant / tenant_application_instance
-3. 执行 0054 → 0055 → 0056（单次迁移，含 CHECK 与索引重建）
+3. 执行 0055 → 0056 → 0057（单次迁移，含 CHECK 与索引重建）
 4. 发布 P0 + P1 后端代码
 5. 恢复写流量
-6. 执行 0057 权限码
+6. 执行 0058 权限码
 7. 发布 P2 前端
 8. 验证 → 打开前端入口
 ```
 
-> 本计划按**停机维护窗口**发布：0056 含 `ck_resource_grants_subject` 且删除旧索引，与旧代码不兼容，故必须在停写期间与代码同步切换。窗口长度取决于 0056 的回填耗时（`resource_grants` 数据量 × 索引重建），需在预发环境实测。
+> 本计划按**停机维护窗口**发布：0057 含 `ck_resource_grants_subject` 且删除旧索引，与旧代码不兼容，故必须在停写期间与代码同步切换。窗口长度取决于 0057 的回填耗时（`resource_grants` 数据量 × 索引重建），需在预发环境实测。
 > 若未来改为无停机滚动发布，须拆为 expand → 发代码 → contract 两次迁移（见 §2.4），窗口顺序不再适用。
 
 ### 6.2 灰度建议
@@ -1394,9 +1387,9 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 | 场景 | 操作 |
 | --- | --- |
 | P2 前端异常 | 关闭开关，回退前端版本；后端 API 保留 |
-| P1 代码异常 | 回滚后端；迁移 0054/0055 可 downgrade |
-| 0056 数据异常 | 可 downgrade（删除 `subject_type`、恢复旧索引、去掉 CHECK）；若 D-1 孤儿已删除，需用备份恢复 `resource_grants` |
-| 0057 权限码异常 | 删除新增权限码与 role_permissions 关联（幂等脚本） |
+| P1 代码异常 | 回滚后端；迁移 0055/0056 可 downgrade |
+| 0057 数据异常 | 可 downgrade（删除 `subject_type`、恢复旧索引、去掉 CHECK）；D-1 孤儿属 0054 删除，如需恢复用 0054 发布前备份 |
+| 0058 权限码异常 | 删除新增权限码与 role_permissions 关联（幂等脚本） |
 
 ---
 
@@ -1413,10 +1406,10 @@ alembic upgrade head && alembic downgrade -1 && alembic upgrade head
 | R5 | 批量取消导致角色授权悬挂 | 中 | D-3 已确认软失效：entitlement 置 `revoked`，角色授权保留并自动失效；恢复开通后自动恢复 |
 | R6 | 前端一次上线认知负担 | 低 | 开关灰度；保留旧入口一个周期 |
 | R7 | 迁移不可逆 | 高 | 强制备份；迁移脚本 dry-run 模式 |
-| R8 | 0056 与旧代码不兼容（旧代码插入 `role_id NULL` 会触发新 CHECK；`on_conflict` 依赖旧索引） | 高 | 采用停机维护窗口，停写后迁移+发代码同步切换（§6.1）；如需滚动发布须改 expand/contract（§2.4） |
+| R8 | 0057 与旧代码不兼容（旧代码插入 `role_id NULL` 会触发新 CHECK；`on_conflict` 依赖旧索引） | 高 | 采用停机维护窗口，停写后迁移+发代码同步切换（§6.1）；如需滚动发布须改 expand/contract（§2.4） |
 | R9 | 状态流转依赖调度：P1 直开/批量开通允许 `start_time`，但 `resource_grant` 的 `wait_effect→active` 任务在 P3 | 高 | 读侧按 `[start_time, expire_time)` 实时计算，不依赖持久化 status；调度只做展示收敛 |
 | R10 | 权益直写 `tenant_application_instance` 绕过 `domain/auth/grant_service.py`，若启用 AuthCache 则回收不生效 | 中 | EntitlementService 写后调用 `AuthService.invalidate`；补缓存启用用例测试 |
-| R11 | `resource` 无 `created_by` 时无法做职责分离（自审） | 中 | 0055 增加 `created_by`；P1-9 校验；存量 NULL 放行 |
+| R11 | `resource` 无 `created_by` 时无法做职责分离（自审） | 中 | 0056 增加 `created_by`；P1-9 校验；存量 NULL 放行 |
 | R12 | 弃用资源（`is_deprecated`）与权益/授权关系未定义，可能出现对已弃用对象继续开通 | 中 | P1-5/P1-8 明确：不可新开通/新授权，已有授权保留 |
 | R13 | 批量写接口无幂等键，重试会重复写入或报唯一冲突 | 中 | 本轮以唯一索引兜底（重复即 unchanged）；幂等键列入 P3 |
 | R14 | 审计表支持清空（`button:audit:clear`），与合规保留要求冲突 | 中 | 生产环境限制清空权限；保留期与归档策略单独评审 |
@@ -1455,7 +1448,7 @@ WHERE rg.resource_type = 'agent'
 - 第二条等于总数 → 全部孤儿，删除。
 - 存在可匹配记录 → 单独人工处理，不要批量删。
 
-**结论（2026-11-03）**：选择 A。迁移 0056 直接删除 `resource_type IN ('agent','component')` 的孤儿记录；升级前必须备份 `resource_grants`。
+**结论（2026-11-03）**：选择 A。已由 `0054_grant_resource_type_unify`（P0-1 交付）删除 `resource_type IN ('agent','component')` 的孤儿记录；删除前已要求备份 `resource_grants`。
 
 > 依据：0037 已 DROP 旧表且未迁移授权，0028 也未迁入 `application`，这些记录无对应对象，保留只会阻塞新 CHECK。
 
@@ -1560,7 +1553,7 @@ FROM (
 - 是否需要"提交人不能审核自己的资源"？租户提交/平台审核天然分离；若平台也能创建租户资源，需额外校验。
 
 **结论（2026-11-03）**：选择 B。新增 `button:resource:review`；平台 superadmin/admin 默认授予，viewer 不授予；租户管理员只能提交、不能审核。
-**职责分离（2026-11-03 补充）**：平台也可能创建租户资源，因此按行业通用做法强制「创建人不得审核自己创建的资源」——0055 增加 `resource.created_by`，P1-9 校验 `created_by != reviewer_id`，违者 403 `SELF_REVIEW_FORBIDDEN`；历史资源 `created_by IS NULL` 放行，避免一次性清空审核队列。
+**职责分离（2026-11-03 补充）**：平台也可能创建租户资源，因此按行业通用做法强制「创建人不得审核自己创建的资源」——0056 增加 `resource.created_by`，P1-9 校验 `created_by != reviewer_id`，违者 403 `SELF_REVIEW_FORBIDDEN`；历史资源 `created_by IS NULL` 放行，避免一次性清空审核队列。
 
 #### D-5 资源被拒绝后的处理（补充）
 
@@ -1595,7 +1588,7 @@ FROM (
 | 席位/用量配额 | Stripe metered、AWS 用量计量 | `quota_json` 仅存储 | 明确本轮不参与判定（§0.3）；P3 定义执行点 |
 | 变更幂等 | `Idempotency-Key` + 请求去重表 | ❌ | 本轮靠唯一索引兜底；P3 增加键与去重表 |
 | 乐观并发 | ETag / `If-Match` / `version` 列 | ❌ | 批量操作以单事务 + 唯一索引保证；高并发场景 P3 补 `version` |
-| 职责分离（SoD） | 提交人 ≠ 审核人，双人审批 purge | 缺 `created_by` | ✅ 0055 补列 + P1-9 校验；purge 二次确认，P3 补双人审批 |
+| 职责分离（SoD） | 提交人 ≠ 审核人，双人审批 purge | 缺 `created_by` | ✅ 0056 补列 + P1-9 校验；purge 二次确认，P3 补双人审批 |
 | 变更历史 | 专门的 entitlement 事件流（before/after 结构化） | 复用 `audit_logs.detail` | 可接受；P3 若需回放再抽事件表 |
 | 对账 / 漂移检测 | SCIM 定期 reconciliation，告警悬挂授权 | ❌ | P3：扫描"有角色授权但无权益/无审核"并告警 |
 | 委派管理 | Entra delegated admin、MSP 多租户 | ❌ 单层租户 | 明确本轮不做（§0.3） |
@@ -1617,16 +1610,16 @@ P0-6 ───────────────┼→ P1-1 → P1-3 → P1-5 
 P1-4 → P2-3
 P1-7 → P2-6
 P1-11 依赖 P1-5
-发布节点：0054–0056 迁移 + P1 代码在停机窗口内同步生效
+发布节点：0055–0057 迁移 + P1 代码在停机窗口内同步生效
 ```
 
 > P0-5 已并入 P1-1，不再单列节点。P1-10 必须在 P2-2 之前完成（前端 consume `is_tenant_wide`）；`P1-8 → P2-2` 的读侧一致性由 P1-10 收口。
-> P1 后端不在窗口内单独先行上线：0056 与旧代码不兼容，必须与代码同步切换（§6.1）。P2 前端仍可开关灰度。
+> P1 后端不在窗口内单独先行上线：0057 与旧代码不兼容，必须与代码同步切换（§6.1）。P2 前端仍可开关灰度。
 
 | 阶段 | 内容 | 人日 | 可独立发版 |
 | --- | --- | --- | --- |
 | P0 | 类型/仓储/状态/鉴权修正 | 1–2 | 是 |
-| P1 | 迁移 0054–0056 + EntitlementService + API + 约束 | 4.5–6 | 是（停机窗口内与迁移同步） |
+| P1 | 迁移 0055–0057 + EntitlementService + API + 约束 | 4.5–6 | 是（停机窗口内与迁移同步） |
 | P2 | 双入口前端 + 审核 + 审批 | 4–6 | 是（开关灰度） |
 | P3 | 生命周期/套餐/清除/通知/重命名/幂等/对账/配额/宽限期 | 7–11 | 按需 |
 
@@ -1638,7 +1631,7 @@ P1-11 依赖 P1-5
 
 | 类型 | 交付物 |
 | --- | --- |
-| 迁移 | `0054`–`0057` 四个迁移脚本 + 回滚脚本（0056 需附回填统计输出；停机窗口内单次执行） |
+| 迁移 | `0055`–`0058` 四个迁移脚本 + 回滚脚本（0057 需附回填统计输出；停机窗口内单次执行） |
 | 后端 | `EntitlementService`（application/apps + infra 仓储 + Protocol）、`/admin/entitlements`、`/admin/resources/{id}/review`、`POST /my-resources`、角色授权约束、`subject_type` 读写适配 |
 | 前端 | `pages/entitlements/*`、`pages/roleAccess/*`、`api/entitlements.ts`、资源页双视角与审核、反查 Tab、审批工作台 |
 | 测试 | 13 个新单测文件（见 §5.1）+ 集成场景 + 5 条 E2E |
