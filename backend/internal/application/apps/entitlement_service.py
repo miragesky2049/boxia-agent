@@ -125,6 +125,8 @@ class EntitlementService:
             if mode == MODE_REVOKE and self._revoke_strict and any(affected_counts.values()):
                 # 严格模式：权益仍被角色授权引用则整批拒绝（ENTITLEMENT_IN_USE，409 语义）
                 raise ValidationError("权益仍被角色授权引用，严格模式下不可取消")
+            # 写前快照先于写入读取，写后快照在提交前读取，两组快照使审计可还原一次批量操作
+            before = self._snapshots(tenant_id, items)
             updated, affected = await self._write_batch(
                 tenant_id,
                 mode,
@@ -137,6 +139,16 @@ class EntitlementService:
                 granted_by=actor_id,
                 affected_counts=affected_counts,
             )
+            after = self._snapshots(tenant_id, items)
+            was_active = sum(
+                1 for snap in before if snap is not None and snap["status"] == STATUS_ACTIVE
+            )
+            if mode == MODE_GRANT:
+                # 恢复语义下 revoked/expired/wait_effect 均计入 add，仅 active 无变化
+                add, remove, unchanged = len(items) - was_active, 0, was_active
+            else:
+                # 校验已保证 revoke 项全部存在且未取消，整批都是失效
+                add, remove, unchanged = 0, len(items), 0
             record_audit(
                 self._uow,
                 action="entitlement.batch",
@@ -144,13 +156,21 @@ class EntitlementService:
                 actor_username=actor_username,
                 resource_type="entitlement",
                 resource_id=str(tenant_id),
+                ip=ip,
+                user_agent=user_agent,
+                tenant_id=tenant_id,
                 detail={
                     "mode": mode,
                     "tenant_id": str(tenant_id),
                     "reason": reason,
                     "updated": updated,
                     "affected_role_grants": affected,
-                    "items": [f"{item.object_type}:{item.object_id}" for item in items],
+                    "items": [item.to_dict() for item in items],
+                    "add": add,
+                    "remove": remove,
+                    "unchanged": unchanged,
+                    "before": before,
+                    "after": after,
                 },
             )
             self._uow.commit()
@@ -358,3 +378,32 @@ class EntitlementService:
             if item.object_type == OBJECT_TYPE_APP and self._auth_service is not None:
                 await self._auth_service.invalidate(tenant_id, item.object_id)
         return updated, affected
+
+    # ========== 内部：审计快照 ==========
+    def _snapshots(
+        self, tenant_id: UUID, items: list[EntitlementItem]
+    ) -> list[dict[str, Any] | None]:
+        """批量项读侧快照序列，与 items 同序；无权益记 None。"""
+        return [
+            self._snapshot(self._repo.get(tenant_id, item.object_type, item.object_id))
+            for item in items
+        ]
+
+    @staticmethod
+    def _snapshot(view: EntitlementView | None) -> dict[str, Any] | None:
+        """权益视图转 JSON 安全 dict，供审计 before/after 还原操作前后状态。"""
+        if view is None:
+            return None
+        return {
+            "object_type": view.object_type,
+            "object_id": str(view.object_id),
+            "name": view.name,
+            "status": view.status,
+            "auth_source": view.auth_source,
+            "auth_type": view.auth_type,
+            "start_time": view.start_time.isoformat() if view.start_time else None,
+            "expire_time": view.expire_time.isoformat() if view.expire_time else None,
+            "granted_at": view.granted_at.isoformat() if view.granted_at else None,
+            "quota": view.quota,
+            "remark": view.remark,
+        }

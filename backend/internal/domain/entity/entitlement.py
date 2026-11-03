@@ -50,6 +50,10 @@ class EntitlementItem:
     object_type: str
     object_id: UUID
 
+    def to_dict(self) -> dict[str, str]:
+        """JSON 安全序列化，供审计 detail 使用。"""
+        return {"object_type": self.object_type, "object_id": str(self.object_id)}
+
 
 @dataclass(frozen=True)
 class EntitlementView:
