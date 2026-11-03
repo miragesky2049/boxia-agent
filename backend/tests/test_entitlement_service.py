@@ -2,7 +2,7 @@
 
 import asyncio
 from datetime import UTC, datetime, timedelta
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 import pytest
 from sqlalchemy import text
@@ -248,19 +248,58 @@ def test_tenant_scope_forbidden(uow):
         svc.list_by_tenant(uuid4())
 
 
+def _purge(uow, tenant, object_type, object_id, *, role_code="superadmin", confirm=True):
+    return asyncio.run(
+        _service(uow).purge(
+            tenant,
+            object_type,
+            object_id,
+            actor_id=_ACTOR_ID,
+            actor_username=_ACTOR,
+            actor_role_code=role_code,
+            confirm=confirm,
+            reason="用例清理",
+        )
+    )
+
+
 def test_purge_deletes_entitlement_rows(uow, tenant):
-    """purge 物理删除权益行（服务层先行，接口 P3-6 暴露）。"""
+    """purge 物理删权益行并连带删除支撑的角色授权行，先写含快照的审计（P3-6）。"""
+    skill_id = _create_resource(uow, "skill")
+    _apply(uow, tenant, "grant", [EntitlementItem("skill", skill_id)])
+    _create_role_with_grant(uow, tenant, skill_id)
+
+    result = _purge(uow, tenant, "skill", skill_id)
+    assert result["deleted"] == 1
+    assert result["role_grants_deleted"] == 1
+    assert UUID(result["audit_id"])
+    assert EntitlementRepository(uow.session).get(tenant, "skill", skill_id) is None
+    kept = uow.session.execute(
+        text("SELECT count(*) FROM resource_grants WHERE resource_id = :rid"), {"rid": skill_id}
+    ).scalar_one()
+    assert kept == 0
+    audit = uow.session.execute(
+        text(
+            "SELECT detail FROM audit_logs WHERE action = 'entitlement.purge' AND tenant_id = :tid "
+            "ORDER BY created_at DESC LIMIT 1"
+        ),
+        {"tid": tenant},
+    ).first()
+    assert audit is not None
+    assert audit.detail["snapshot"]["object_id"] == str(skill_id)
+    assert audit.detail["role_grants_before"][0]["role_name"].startswith("授权角色")
+
+
+def test_purge_requires_superadmin_and_confirm(uow, tenant):
+    """非 superadmin 403、未二次确认 422，均不删任何行。"""
     skill_id = _create_resource(uow, "skill")
     _apply(uow, tenant, "grant", [EntitlementItem("skill", skill_id)])
 
-    svc = _service(uow)
-    deleted = asyncio.run(
-        svc.purge(
-            tenant, "skill", skill_id, actor_id=_ACTOR_ID, actor_username=_ACTOR, reason="用例清理"
-        )
-    )
-    assert deleted == 1
-    assert EntitlementRepository(uow.session).get(tenant, "skill", skill_id) is None
+    with pytest.raises(ForbiddenError, match="superadmin"):
+        _purge(uow, tenant, "skill", skill_id, role_code="admin")
+    with pytest.raises(ValidationError, match="二次确认"):
+        _purge(uow, tenant, "skill", skill_id, confirm=False)
+    assert EntitlementRepository(uow.session).get(tenant, "skill", skill_id) is not None
 
 
 def _raw_resource_grant_status(uow: SqlAlchemyUnitOfWork, resource_id) -> str:

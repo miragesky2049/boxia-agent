@@ -27,13 +27,15 @@ class PostgresAuditLogRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def record(self, values: dict[str, Any]) -> None:
-        """写入审计记录（调用方负责提交）。"""
+    def record(self, values: dict[str, Any]) -> UUID:
+        """写入审计记录并返回记录 ID（调用方负责提交；purge 快照需回填 audit_id，P3-6）。"""
         payload = dict(values)
         # JSONB 列由 psycopg 用标准 json 序列化，UUID 需先转为字符串
         payload["detail"] = _json_safe(payload.get("detail"))
-        self._session.add(AuditLogModel(**payload))
+        model = AuditLogModel(**payload)
+        self._session.add(model)
         self._session.flush()
+        return model.id
 
     def list_page(
         self,

@@ -9,6 +9,7 @@ from tests.helpers import create_tenant, tenant_admin_client
 
 BASE = "/api/v1/admin/entitlements"
 _ROLE_PASSWORD = "Entitlement-pass-123"
+_PURGE_PASSWORD = "EntPurge-pass-123"
 
 
 @pytest.fixture()
@@ -210,3 +211,102 @@ def test_items_count_bounds(client: TestClient, auth_headers, env):
         headers=auth_headers,
     )
     assert over.status_code == 422
+
+
+def test_purge_requires_confirm_and_deletes_row(client: TestClient, auth_headers, env):
+    """P3-6：purge 未确认 422；superadmin 确认后物理删行并返回 audit_id。"""
+    granted = client.post(
+        f"{BASE}/batch",
+        json={"tenant_id": env["tenant_id"], "mode": "grant", "items": _items(env)},
+        headers=auth_headers,
+    )
+    assert granted.status_code == 200 and granted.json()["updated"] == 2
+
+    unconfirmed = client.post(
+        f"{BASE}/purge",
+        json={
+            "tenant_id": env["tenant_id"],
+            "object_type": "skill",
+            "object_id": env["skill_id"],
+            "confirm": False,
+        },
+        headers=auth_headers,
+    )
+    assert unconfirmed.status_code == 422
+
+    purged = client.post(
+        f"{BASE}/purge",
+        json={
+            "tenant_id": env["tenant_id"],
+            "object_type": "skill",
+            "object_id": env["skill_id"],
+            "confirm": True,
+            "reason": "接口用例清理",
+        },
+        headers=auth_headers,
+    )
+    assert purged.status_code == 200, purged.text
+    body = purged.json()
+    assert body["deleted"] == 1 and body["role_grants_deleted"] == 0
+    uuid.UUID(body["audit_id"])
+
+    listed = client.get(f"{BASE}/tenants/{env['tenant_id']}", headers=auth_headers).json()
+    assert [item["object_type"] for item in listed["items"]] == ["app"]
+
+
+def test_purge_forbidden_for_non_superadmin(client: TestClient, auth_headers, env):
+    """有 button:entitlement:manage 的非 superadmin 角色：batch 可写，purge 仍 403。"""
+    role = client.post(
+        "/api/v1/admin/roles", json={"code": "ent-ops", "name": "权益运营"}, headers=auth_headers
+    ).json()
+    granted = client.put(
+        f"/api/v1/admin/roles/{role['id']}/permissions",
+        json={
+            "codes": [
+                "system:console:access",
+                "page:entitlements",
+                "button:entitlement:manage",
+            ]
+        },
+        headers=auth_headers,
+    )
+    assert granted.status_code == 200, granted.text
+    client.post(
+        "/api/v1/admin/admin-users",
+        json={
+            "username": "ent-ops",
+            "password": _PURGE_PASSWORD,
+            "display_name": "权益运营账号",
+            "role_id": role["id"],
+        },
+        headers=auth_headers,
+    )
+    login = client.post(
+        "/api/v1/admin/auth/login",
+        json={"username": "ent-ops", "password": _PURGE_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+    batch = client.post(
+        f"{BASE}/batch",
+        json={
+            "tenant_id": env["tenant_id"],
+            "mode": "grant",
+            "items": [{"object_type": "skill", "object_id": env["skill_id"]}],
+        },
+        headers=headers,
+    )
+    assert batch.status_code == 200, batch.text
+
+    blocked = client.post(
+        f"{BASE}/purge",
+        json={
+            "tenant_id": env["tenant_id"],
+            "object_type": "skill",
+            "object_id": env["skill_id"],
+            "confirm": True,
+        },
+        headers=headers,
+    )
+    assert blocked.status_code == 403

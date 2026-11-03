@@ -188,36 +188,80 @@ class EntitlementService:
         *,
         actor_id: UUID,
         actor_username: str,
+        actor_role_code: str,
+        confirm: bool,
         reason: str = "",
-    ) -> int:
-        """物理删除权益行（退租/合规）；服务层先行，接口由 P3-6 暴露。"""
+    ) -> dict[str, Any]:
+        """物理清除：先写快照审计，再删权益行并级联删角色授权行（P3-6）。
+
+        仅平台 superadmin；confirm=True 为二次确认位；返回删除计数与 audit_id。
+        """
         self._require_platform()
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("权益清除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("清除为不可逆操作，需显式二次确认")
         self._validate_object_type(object_type)
         try:
             self._require_tenant(tenant_id)
+            snapshot = self._repo.get(tenant_id, object_type, object_id)
+            role_grants = self._repo.affected_role_grants(tenant_id, object_type, object_id)
             deleted = self._repo.purge(tenant_id, object_type, object_id)
+            role_grants_deleted = self._repo.purge_role_grants(tenant_id, object_type, object_id)
             if object_type == OBJECT_TYPE_APP and self._auth_service is not None:
                 await self._auth_service.invalidate(tenant_id, object_id)
-            record_audit(
+            audit_id = record_audit(
                 self._uow,
                 action="entitlement.purge",
                 actor_id=actor_id,
                 actor_username=actor_username,
                 resource_type="entitlement",
                 resource_id=str(tenant_id),
+                tenant_id=tenant_id,
                 detail={
                     "tenant_id": str(tenant_id),
                     "object_type": object_type,
                     "object_id": str(object_id),
                     "deleted": deleted,
+                    "role_grants_deleted": role_grants_deleted,
                     "reason": reason,
+                    "snapshot": self._view_snapshot(snapshot),
+                    "role_grants_before": [
+                        {
+                            "role_id": str(g["role_id"]),
+                            "role_name": g["role_name"],
+                            "subject_type": g["subject_type"],
+                        }
+                        for g in role_grants
+                    ],
                 },
             )
             self._uow.commit()
         except Exception:
             self._uow.rollback()
             raise
-        return deleted
+        return {
+            "deleted": deleted,
+            "role_grants_deleted": role_grants_deleted,
+            "audit_id": str(audit_id),
+        }
+
+    @staticmethod
+    def _view_snapshot(view: EntitlementView | None) -> dict[str, Any] | None:
+        if view is None:
+            return None
+        return {
+            "object_type": view.object_type,
+            "object_id": str(view.object_id),
+            "name": view.name,
+            "status": view.status,
+            "auth_source": view.auth_source,
+            "auth_type": view.auth_type,
+            "start_time": view.start_time.isoformat() if view.start_time else None,
+            "expire_time": view.expire_time.isoformat() if view.expire_time else None,
+            "quota": view.quota,
+            "remark": view.remark,
+        }
 
     # ========== 生命周期（系统定时调用，无作用域门禁） ==========
     def process_resource_wait_effective(self, now: datetime) -> int:

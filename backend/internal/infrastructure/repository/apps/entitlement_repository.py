@@ -230,6 +230,19 @@ class EntitlementRepository:
             {"id": grant_id, "status": status},
         )
 
+    def purge_role_grants(self, tenant_id, object_type: str, object_id) -> int:
+        """物理删除该权益支撑的角色授权行 resource_grants（purge 级联，P3-6）。"""
+        result = cast_cursor(
+            self._session.execute(
+                text(
+                    "DELETE FROM resource_grants "
+                    "WHERE tenant_id = :tid AND resource_type = :otype AND resource_id = :oid"
+                ),
+                {"tid": tenant_id, "otype": object_type, "oid": object_id},
+            )
+        )
+        return int(result.rowcount)
+
     def list_expiring(self, now: datetime, window_days: int) -> list[dict]:
         """双表中 window_days 天内到期的有效权益行（到期提醒扫描，P3-2）。"""
         horizon = now + timedelta(days=window_days)

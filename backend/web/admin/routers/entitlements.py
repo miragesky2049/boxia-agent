@@ -16,6 +16,8 @@ from web.admin.schemas.entitlement import (
     EntitlementBatchOut,
     EntitlementBatchRequest,
     EntitlementPreviewOut,
+    EntitlementPurgeOut,
+    EntitlementPurgeRequest,
     EntitlementTenantRowOut,
     EntitlementViewOut,
     GrantApplicationOut,
@@ -138,6 +140,30 @@ async def apply_batch(
         failed=list(result.failed),
         affected_role_grants=result.affected_role_grants,
     )
+
+
+@router.post(
+    "/purge",
+    response_model=EntitlementPurgeOut,
+    dependencies=[_MANAGE_ENTITLEMENTS],
+)
+async def purge_entitlement(
+    payload: EntitlementPurgeRequest,
+    principal: AdminAuthDep,
+    service: EntitlementServiceDep,
+) -> EntitlementPurgeOut:
+    """权益清除：仅平台 superadmin + 显式二次确认；先写审计快照再物理删除并连带角色授权行。"""
+    result = await service.purge(
+        payload.tenant_id,
+        payload.object_type,
+        payload.object_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        confirm=payload.confirm,
+        reason=payload.reason,
+    )
+    return EntitlementPurgeOut.model_validate(result)
 
 
 @router.post(

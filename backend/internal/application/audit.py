@@ -19,9 +19,9 @@ def record_audit(
     user_agent: str | None = None,
     detail: dict[str, Any] | None = None,
     tenant_id: UUID | None = None,
-) -> None:
-    """写入一条审计记录（与调用方共享事务）；平台操作默认归属 PLATFORM_TENANT_ID。"""
-    uow.audit_logs.record(
+) -> UUID:
+    """写入一条审计记录并返回记录 ID（与调用方共享事务）；平台操作默认归属 PLATFORM_TENANT_ID。"""
+    return uow.audit_logs.record(
         {
             "tenant_id": tenant_id if tenant_id is not None else PLATFORM_TENANT_ID,
             "actor_id": actor_id,

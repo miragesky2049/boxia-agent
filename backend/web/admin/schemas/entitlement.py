@@ -101,3 +101,21 @@ class EntitlementTenantRowOut(BaseModel):
     status: str
     auth_source: str
     granted_at: datetime | None = None
+
+
+class EntitlementPurgeRequest(BaseModel):
+    """权益清除请求：不可逆物理删除，confirm 必须显式为 True（P3-6）。"""
+
+    tenant_id: UUID
+    object_type: EntitlementObjectType
+    object_id: UUID
+    reason: str = ""
+    confirm: bool = False
+
+
+class EntitlementPurgeOut(BaseModel):
+    """清除结果：删除计数与审计快照记录 ID。"""
+
+    deleted: int
+    role_grants_deleted: int
+    audit_id: UUID

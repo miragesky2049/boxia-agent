@@ -140,8 +140,8 @@ class RefreshTokenRepository(Protocol):
 class AuditLogRepository(Protocol):
     """审计日志仓储。"""
 
-    def record(self, values: dict[str, Any]) -> None:
-        """写入审计记录。"""
+    def record(self, values: dict[str, Any]) -> UUID:
+        """写入审计记录并返回记录 ID。"""
 
     def list_page(
         self,

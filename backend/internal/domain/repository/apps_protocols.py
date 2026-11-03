@@ -616,6 +616,10 @@ class EntitlementRepositoryProtocol(Protocol):
         """物理删除权益行（退租/合规，接口由 P3-6 暴露），返回删除条数。"""
         ...
 
+    def purge_role_grants(self, tenant_id: UUID, object_type: str, object_id: UUID) -> int:
+        """物理删除该权益支撑的 resource_grants 角色授权行（purge 级联），返回删除条数。"""
+        ...
+
     def list_resource_wait_effective(self, now: datetime) -> list[dict]:
         """resource_grant 中 wait_effect 且已过 start_time 的行（P3-1 生命周期流转）。"""
         ...
