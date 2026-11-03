@@ -491,6 +491,10 @@ class AuthRepositoryProtocol(Protocol):
         contract_no: str = "",
     ) -> None: ...
 
+    def claim_apply(self, apply_id: UUID, sales_user_id: UUID) -> bool:
+        """CAS 认领：仅 SUBMITTED 行更新为 HANDLING 并写入销售归属，返回是否成功。"""
+        ...
+
     def append_audit_log(self, data: dict[str, Any]) -> None: ...
 
 

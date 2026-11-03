@@ -7,11 +7,9 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-from typing import Any
+from datetime import datetime
+from typing import Annotated, Any
 from uuid import UUID
-
-from typing import Annotated
 
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
@@ -27,6 +25,7 @@ from web.deps.tenant import RequestContextDep
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/applies", tags=["applies"])
+
 
 def get_apply_service(uow: UowDep) -> ApplyService:
     # 装配（仓储/服务构造）收口到组合根 apps_services，router 只做依赖注入声明
@@ -57,14 +56,16 @@ def submit_apply(
     if tenant_id is None:
         raise ValidationError("无法识别租户")
     try:
-        apply_id = service.submit(SubmitApplyRequest(
-            tenant_id=tenant_id,
-            application_id=payload.application_id,
-            apply_type=payload.apply_type,
-            expect_text=payload.expect_text,
-            contact=payload.contact,
-            created_by=principal.user_id,
-        ))
+        apply_id = service.submit(
+            SubmitApplyRequest(
+                tenant_id=tenant_id,
+                application_id=payload.application_id,
+                apply_type=payload.apply_type,
+                expect_text=payload.expect_text,
+                contact=payload.contact,
+                created_by=principal.user_id,
+            )
+        )
     except ApplyError as exc:
         raise ValidationError(str(exc)) from exc
     uow.commit()
@@ -85,14 +86,17 @@ def list_my_applies(
 
 # ========== 运营侧：待审核列表 ==========
 @router.get("/pass-pending")
-def list_pass_pending(service: ApplyServiceDep) -> list[dict]:
+def list_pass_pending(
+    service: ApplyServiceDep,
+    _principal: PlatformAdminDep,
+) -> list[dict]:
     """运营查看待开通（PASS 状态）的申请单。"""
     return service.list_pass_pending_apply()
 
 
 @router.get("/sales-mine")
 def list_sales_mine(
-    principal: AdminAuthDep,
+    principal: PlatformAdminDep,
     service: ApplyServiceDep,
 ) -> list[dict]:
     """销售查看归属自己的申请单。"""
@@ -104,7 +108,7 @@ def list_sales_mine(
 def claim_apply(
     apply_id: UUID,
     uow: UowDep,
-    principal: AdminAuthDep,
+    principal: PlatformAdminDep,
     service: ApplyServiceDep,
 ) -> dict:
     """销售认领申请单。"""
@@ -131,22 +135,25 @@ async def pass_apply(
     apply_id: UUID,
     payload: PassApplyPayload,
     uow: UowDep,
-    principal: AdminAuthDep,
+    principal: PlatformAdminDep,
     service: ApplyServiceDep,
 ) -> dict:
     """审核通过申请单，可选同时开通授权。"""
     from internal.domain.auth.apply_service import PassApplyRequest
+
     try:
-        instance_id = await service.pass_apply(PassApplyRequest(
-            apply_id=apply_id,
-            operator_id=principal.user_id,
-            operator_name=principal.username,
-            audit_msg=payload.audit_msg,
-            contract_no=payload.contract_no,
-            grant_start_time=payload.grant_start_time,
-            grant_expire_time=payload.grant_expire_time,
-            grant_quota=payload.grant_quota,
-        ))
+        instance_id = await service.pass_apply(
+            PassApplyRequest(
+                apply_id=apply_id,
+                operator_id=principal.user_id,
+                operator_name=principal.username,
+                audit_msg=payload.audit_msg,
+                contract_no=payload.contract_no,
+                grant_start_time=payload.grant_start_time,
+                grant_expire_time=payload.grant_expire_time,
+                grant_quota=payload.grant_quota,
+            )
+        )
     except (ApplyError, GrantError) as exc:
         raise ValidationError(str(exc)) from exc
     uow.commit()
@@ -166,7 +173,7 @@ def reject_apply(
     apply_id: UUID,
     payload: RejectApplyPayload,
     uow: UowDep,
-    principal: AdminAuthDep,
+    principal: PlatformAdminDep,
     service: ApplyServiceDep,
 ) -> dict:
     """拒绝申请单。"""

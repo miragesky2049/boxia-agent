@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
-from internal.domain.auth.grant_service import GrantError, GrantService
+from internal.domain.auth.grant_service import GrantService
 from internal.domain.auth.service import AuthService
 from internal.domain.entity.auth_constants import (
     ApplyStatus,
@@ -72,30 +72,36 @@ class ApplyService:
         if self._repo.exists_active_grant(req.tenant_id, req.application_id):
             raise ApplyError("当前租户对该应用已有 ACTIVE 授权，无需重复申请")
 
-        apply_id = self._repo.create_apply({
-            "tenant_id": req.tenant_id,
-            "application_id": req.application_id,
-            "apply_type": req.apply_type,
-            "status": ApplyStatus.SUBMITTED.value,
-            "expect_text": req.expect_text,
-            "contact": req.contact,
-            "sales_user_id": None,
-            "created_by": req.created_by,
-        })
+        apply_id = self._repo.create_apply(
+            {
+                "tenant_id": req.tenant_id,
+                "application_id": req.application_id,
+                "apply_type": req.apply_type,
+                "status": ApplyStatus.SUBMITTED.value,
+                "expect_text": req.expect_text,
+                "contact": req.contact,
+                "sales_user_id": None,
+                "created_by": req.created_by,
+            }
+        )
 
-        self._repo.append_audit_log({
-            "tenant_id": req.tenant_id,
-            "actor_id": req.created_by,
-            "actor_username": "",
-            "action": AuthOperation.APPLY_SUBMIT.value,
-            "resource_type": "application_apply",
-            "resource_id": str(apply_id),
-            "detail": {
-                "before": None,
-                "after": {"status": ApplyStatus.SUBMITTED.value},
-            },
-        })
-        logger.info("申请单已提交: id=%s tenant=%s app=%s", apply_id, req.tenant_id, req.application_id)
+        self._repo.append_audit_log(
+            {
+                "tenant_id": req.tenant_id,
+                "actor_id": req.created_by,
+                "actor_username": "",
+                "action": AuthOperation.APPLY_SUBMIT.value,
+                "resource_type": "application_apply",
+                "resource_id": str(apply_id),
+                "detail": {
+                    "before": None,
+                    "after": {"status": ApplyStatus.SUBMITTED.value},
+                },
+            }
+        )
+        logger.info(
+            "申请单已提交: id=%s tenant=%s app=%s", apply_id, req.tenant_id, req.application_id
+        )
         return apply_id
 
     # ========== 销售/运营侧：认领申请单 ==========
@@ -107,20 +113,26 @@ class ApplyService:
             raise ApplyError(f"仅 SUBMITTED 状态可认领，当前状态: {row['status']}")
 
         before = {"status": row["status"], "sales_user_id": row.get("sales_user_id")}
-        self._repo.update_apply_status(apply_id, ApplyStatus.HANDLING.value)
-        # 更新 sales_user_id（复用 update 接口，audit_msg 透传）
-        self._repo.append_audit_log({
-            "tenant_id": row["tenant_id"],
-            "actor_id": sales_user_id,
-            "actor_username": operator_name,
-            "action": AuthOperation.APPLY_HANDLING.value,
-            "resource_type": "application_apply",
-            "resource_id": str(apply_id),
-            "detail": {
-                "before": before,
-                "after": {"status": ApplyStatus.HANDLING.value, "sales_user_id": str(sales_user_id)},
-            },
-        })
+        # CAS 认领：状态在读取后被他人抢先变更时 rowcount=0，避免覆盖归属
+        if not self._repo.claim_apply(apply_id, sales_user_id):
+            raise ApplyError("申请单状态已变更，请刷新后重试")
+        self._repo.append_audit_log(
+            {
+                "tenant_id": row["tenant_id"],
+                "actor_id": sales_user_id,
+                "actor_username": operator_name,
+                "action": AuthOperation.APPLY_HANDLING.value,
+                "resource_type": "application_apply",
+                "resource_id": str(apply_id),
+                "detail": {
+                    "before": before,
+                    "after": {
+                        "status": ApplyStatus.HANDLING.value,
+                        "sales_user_id": str(sales_user_id),
+                    },
+                },
+            }
+        )
 
     # ========== 运营侧：审核通过 ==========
     async def pass_apply(self, req: PassApplyRequest) -> UUID | None:
@@ -146,23 +158,26 @@ class ApplyService:
             contract_no=req.contract_no,
         )
 
-        self._repo.append_audit_log({
-            "tenant_id": row["tenant_id"],
-            "actor_id": req.operator_id,
-            "actor_username": req.operator_name,
-            "action": AuthOperation.APPLY_PASS.value,
-            "resource_type": "application_apply",
-            "resource_id": str(req.apply_id),
-            "detail": {
-                "before": before,
-                "after": {"status": ApplyStatus.PASS.value},
-                "audit_msg": req.audit_msg,
-            },
-        })
+        self._repo.append_audit_log(
+            {
+                "tenant_id": row["tenant_id"],
+                "actor_id": req.operator_id,
+                "actor_username": req.operator_name,
+                "action": AuthOperation.APPLY_PASS.value,
+                "resource_type": "application_apply",
+                "resource_id": str(req.apply_id),
+                "detail": {
+                    "before": before,
+                    "after": {"status": ApplyStatus.PASS.value},
+                    "audit_msg": req.audit_msg,
+                },
+            }
+        )
 
         # 若同时提供了开通参数，直接开通授权
         if req.grant_start_time is not None:
             from internal.domain.auth.grant_service import CreateGrantRequest
+
             grant_req = CreateGrantRequest(
                 tenant_id=row["tenant_id"],
                 app_id=row["application_id"],
@@ -179,7 +194,9 @@ class ApplyService:
         return None
 
     # ========== 运营侧：拒绝申请 ==========
-    def reject(self, apply_id: UUID, audit_msg: str, operator_id: UUID | None, operator_name: str) -> None:
+    def reject(
+        self, apply_id: UUID, audit_msg: str, operator_id: UUID | None, operator_name: str
+    ) -> None:
         row = self._repo.get_apply(apply_id)
         if row is None:
             raise ApplyError("申请单不存在")
@@ -189,19 +206,21 @@ class ApplyService:
         before = {"status": row["status"]}
         self._repo.update_apply_status(apply_id, ApplyStatus.REJECT.value, audit_msg=audit_msg)
 
-        self._repo.append_audit_log({
-            "tenant_id": row["tenant_id"],
-            "actor_id": operator_id,
-            "actor_username": operator_name,
-            "action": AuthOperation.APPLY_REJECT.value,
-            "resource_type": "application_apply",
-            "resource_id": str(apply_id),
-            "detail": {
-                "before": before,
-                "after": {"status": ApplyStatus.REJECT.value},
-                "audit_msg": audit_msg,
-            },
-        })
+        self._repo.append_audit_log(
+            {
+                "tenant_id": row["tenant_id"],
+                "actor_id": operator_id,
+                "actor_username": operator_name,
+                "action": AuthOperation.APPLY_REJECT.value,
+                "resource_type": "application_apply",
+                "resource_id": str(apply_id),
+                "detail": {
+                    "before": before,
+                    "after": {"status": ApplyStatus.REJECT.value},
+                    "audit_msg": audit_msg,
+                },
+            }
+        )
 
     # ========== 只读查询透传（五期从 applies / marketplace router 直构仓储收口） ==========
     def list_apply_by_tenant(self, tenant_id: UUID) -> list[dict]:

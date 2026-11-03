@@ -8,13 +8,13 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
-from internal.domain.entity.auth_constants import AuthStatus, ApplyStatus
 from internal.infrastructure.id.uuid7 import new_uuid
 
 
@@ -37,11 +37,14 @@ class AuthRepository:
               AND (expire_time IS NULL OR expire_time > :now)
             LIMIT 1
         """)
-        row = self._session.execute(stmt, {
-            "tid": tenant_id,
-            "aid": application_id,
-            "now": now,
-        }).first()
+        row = self._session.execute(
+            stmt,
+            {
+                "tid": tenant_id,
+                "aid": application_id,
+                "now": now,
+            },
+        ).first()
         return dict(row._mapping) if row else None
 
     def exists_active_grant(self, tenant_id: UUID, application_id: UUID) -> bool:
@@ -53,7 +56,10 @@ class AuthRepository:
               AND status = 'active'
             LIMIT 1
         """)
-        return self._session.execute(stmt, {"tid": tenant_id, "aid": application_id}).first() is not None
+        return (
+            self._session.execute(stmt, {"tid": tenant_id, "aid": application_id}).first()
+            is not None
+        )
 
     def get_grant(self, instance_id: UUID) -> dict | None:
         stmt = text("SELECT * FROM tenant_application_instance WHERE id = :id")
@@ -94,7 +100,8 @@ class AuthRepository:
         """新增授权记录。"""
         instance_id = new_uuid()
         data["id"] = instance_id
-        self._session.execute(text("""
+        self._session.execute(
+            text("""
             INSERT INTO tenant_application_instance
                 (id, tenant_id, application_id, status, source, auth_source, auth_type,
                  contract_no, quota_json, start_time, expire_time, apply_id, remark,
@@ -103,15 +110,20 @@ class AuthRepository:
                 (:id, :tenant_id, :application_id, :status, :source, :auth_source, :auth_type,
                  :contract_no, CAST(:quota_json AS JSONB), :start_time, :expire_time, :apply_id, :remark,
                  :granted_by, :granted_at)
-        """), data)
+        """),
+            data,
+        )
         return instance_id
 
     def update_grant_status(self, instance_id: UUID, status: str) -> None:
-        self._session.execute(text("""
+        self._session.execute(
+            text("""
             UPDATE tenant_application_instance
             SET status = :status, updated_at = NOW()
             WHERE id = :id
-        """), {"id": instance_id, "status": status})
+        """),
+            {"id": instance_id, "status": status},
+        )
 
     # ========== application_apply（申请单） ==========
     def get_apply(self, apply_id: UUID) -> dict | None:
@@ -122,14 +134,17 @@ class AuthRepository:
     def create_apply(self, data: dict[str, Any]) -> UUID:
         apply_id = new_uuid()
         data["id"] = apply_id
-        self._session.execute(text("""
+        self._session.execute(
+            text("""
             INSERT INTO application_apply
                 (id, tenant_id, application_id, apply_type, status, expect_text,
                  contact, sales_user_id, created_by)
             VALUES
                 (:id, :tenant_id, :application_id, :apply_type, :status, :expect_text,
                  :contact, :sales_user_id, :created_by)
-        """), data)
+        """),
+            data,
+        )
         return apply_id
 
     def list_apply_by_tenant(self, tenant_id: UUID) -> list[dict]:
@@ -189,14 +204,19 @@ class AuthRepository:
             WHERE tenant_id = :tid AND application_id = :aid
             ORDER BY created_at DESC LIMIT 1
         """)
-        row = self._session.execute(stmt, {
-            "tid": tenant_id, "aid": application_id,
-        }).first()
+        row = self._session.execute(
+            stmt,
+            {
+                "tid": tenant_id,
+                "aid": application_id,
+            },
+        ).first()
         return dict(row._mapping) if row else None
 
     def ops_dashboard_stats(self) -> dict[str, Any]:
         """运营仪表盘统计：各状态申请数 + 活跃授权数。"""
-        apply_row = self._session.execute(text("""
+        apply_row = self._session.execute(
+            text("""
             SELECT
                 COUNT(*) FILTER (WHERE status IN ('SUBMITTED','HANDLING')) AS pending_count,
                 COUNT(*) FILTER (WHERE status = 'PASS') AS pass_pending_count,
@@ -204,14 +224,17 @@ class AuthRepository:
                 COUNT(*) FILTER (WHERE status = 'REJECT') AS rejected_count,
                 COUNT(*) FILTER (WHERE created_at >= NOW() - INTERVAL '7 days') AS last_7d_count
             FROM application_apply
-        """)).first()
-        grant_row = self._session.execute(text("""
+        """)
+        ).first()
+        grant_row = self._session.execute(
+            text("""
             SELECT
                 COUNT(*) FILTER (WHERE status = 'active') AS active_grants,
                 COUNT(*) FILTER (WHERE status = 'wait_effect') AS wait_effect_grants,
                 COUNT(*) FILTER (WHERE status = 'expired') AS expired_grants
             FROM tenant_application_instance
-        """)).first()
+        """)
+        ).first()
         result: dict[str, Any] = {}
         if apply_row:
             result.update(dict(apply_row._mapping))
@@ -226,28 +249,53 @@ class AuthRepository:
         audit_msg: str = "",
         contract_no: str = "",
     ) -> None:
-        self._session.execute(text("""
+        self._session.execute(
+            text("""
             UPDATE application_apply
             SET status = :status,
                 audit_msg = CASE WHEN :audit_msg != '' THEN :audit_msg ELSE audit_msg END,
                 contract_no = CASE WHEN :contract_no != '' THEN :contract_no ELSE contract_no END,
                 updated_at = NOW()
             WHERE id = :id
-        """), {"id": apply_id, "status": status, "audit_msg": audit_msg, "contract_no": contract_no})
+        """),
+            {"id": apply_id, "status": status, "audit_msg": audit_msg, "contract_no": contract_no},
+        )
+
+    def claim_apply(self, apply_id: UUID, sales_user_id: UUID) -> bool:
+        """CAS 认领：仅仍处于 SUBMITTED 的行被更新，返回是否认领成功。
+
+        并发第二人认领时 rowcount=0，避免读-改-写竞态下覆盖他人归属。
+        """
+        result = cast(
+            CursorResult,
+            self._session.execute(
+                text("""
+            UPDATE application_apply
+            SET status = 'HANDLING', sales_user_id = :uid, updated_at = NOW()
+            WHERE id = :id AND status = 'SUBMITTED'
+        """),
+                {"id": apply_id, "uid": sales_user_id},
+            ),
+        )
+        return result.rowcount == 1
 
     # ========== audit_logs（审计日志） ==========
     def append_audit_log(self, data: dict[str, Any]) -> None:
         """复用 audit_logs 表写授权审计日志。"""
         import json as _json
+
         data = {**data, "id": new_uuid()}
         detail = data.get("detail")
         if not isinstance(detail, str):
             data["detail"] = _json.dumps(detail, ensure_ascii=False, default=str)
-        self._session.execute(text("""
+        self._session.execute(
+            text("""
             INSERT INTO audit_logs
                 (id, tenant_id, actor_id, actor_username, action, resource_type,
                  resource_id, detail)
             VALUES
                 (:id, :tenant_id, :actor_id, :actor_username, :action, :resource_type,
                  :resource_id, CAST(:detail AS JSONB))
-        """), data)
+        """),
+            data,
+        )
