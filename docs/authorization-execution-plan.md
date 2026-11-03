@@ -701,6 +701,8 @@ cd backend && python -m pytest tests/test_applies_auth.py -q
 
 ### 3.2 P1 — 后端统一 Entitlement（4–6 人日）
 
+> **执行状态（2026-11-03）**：P1-1…P1-11 全部完成。提交依次为 4e9eefe / c9d52c9 / de5079a / c5f7bcc / f79e610 / 704cc66 / 73a87fd / 6d149ce / ebe06ad / 9035df0 / 305a44c；最终回归 pytest 507、ruff 135、mypy 86（均低于基线 460/139/109 的允许水位且持续收敛）。
+
 #### P1-1 迁移 0055：权益生命周期 + 实例状态 CHECK
 
 | 项 | 内容 |
