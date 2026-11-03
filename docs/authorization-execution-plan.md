@@ -1082,6 +1082,8 @@ record_audit(
 
 ### 3.3 P2 — 前端双入口（4–6 人日）
 
+> **执行状态（2026-11-03）**：P2-1…P2-6 全部完成。提交依次为 123c256 / f5cfb79 / 1156106 / 5cb6d35 / 4fc1275 / e134cc0 / d6bccad / 6e3292c（P2-2 拆 a/b 分别交付整租户授权后端 HTTP 面与角色授权页，P2-4 拆 a/b 分别交付重新提交审核后端路径与资源页双视角）。P2-7 前端回归并入各提交执行：vitest 全量 67、typecheck/oxlint/prettier 全绿；`pnpm e2e` 因环境未设置 `E2E_PASSWORD` 仍阻塞，DoD 未全绿。
+>
 > 前端基线：React 18 + Ant Design 5 + Semi UI，包管理 `pnpm`。以下路径均已核实存在。
 
 #### P2-1 产品级「租户开通」页
@@ -1163,6 +1165,8 @@ cd frontend/admin && pnpm typecheck && pnpm lint && pnpm test && pnpm e2e
 ---
 
 ### 3.4 P3 — 运营增强（7–11 人日，按需）
+
+> **执行状态（2026-11-03）**：P3-1…P3-11 全部完成。按任务号提交映射：P3-1 `a1ac46f`、P3-2 `1bc483d`、P3-3 `78b8f7f`、P3-4 `87cdaed`、P3-5 `4de1864`、P3-6 `e3edfa8`、P3-7 `2fa2b7b`、P3-8 `d22604b`、P3-9 `7b7c751`、P3-10 `fae8e79`、P3-11 `6946d6d`（实际执行顺序 1→2→6→7→3→4→5→8→9→10→11）。与计划的偏差：P3-9 对账漂移分类中「权益指向已删除对象」因权益两表均有 FK + CASCADE 属库内结构性不可能，实际只扫三类（dangling/unapproved/orphan grants），理由已写入任务 docstring；P3-10 本仓暂无计量落点，`check_quota` 采用调用方传入 `used` 的契约而非自建计量。最终回归水位 pytest 550、mypy 86 持平、触及文件 ruff 干净。
 
 | ID | 任务 | 落地文件 | 要点 | 预估 |
 | --- | --- | --- | --- | --- |
