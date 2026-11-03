@@ -1,4 +1,4 @@
-"""P3-2 到期提醒：7/3/1 天分桶扫描、去重键 (tenant, object, days)、双表覆盖。"""
+"""P3-2 到期提醒 + P3-7 取消/恢复通知：分桶扫描去重与变更通知随批量事务落库。"""
 
 import asyncio
 from datetime import UTC, datetime, timedelta
@@ -9,7 +9,10 @@ from sqlalchemy import func, select
 
 from internal.application.apps.entitlement_service import EntitlementService
 from internal.application.entitlement_notify import (
+    CHANGE_NOTICE_ACTION,
     EXPIRY_REMINDER_ACTION,
+    NOTICE_MODE_RESTORED,
+    NOTICE_MODE_REVOKED,
     EntitlementNotifyService,
 )
 from internal.domain.entity.entitlement import EntitlementItem
@@ -123,3 +126,63 @@ def test_scan_skips_no_expire_and_revoked(uow, tenant):
     sent = notify.scan_expiry_reminders(now)
     assert sent == {"7": 0, "3": 0, "1": 0}
     assert _reminder_count(uow, tenant) == 0
+
+
+def _notice_rows(uow: SqlAlchemyUnitOfWork, tenant, notice_mode: str) -> list[dict]:
+    rows = (
+        uow.session.execute(
+            select(AuditLogModel.detail).where(
+                AuditLogModel.action == CHANGE_NOTICE_ACTION,
+                AuditLogModel.tenant_id == tenant,
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [detail for detail in rows if detail.get("notice_mode") == notice_mode]
+
+
+def test_revoke_and_restore_write_change_notices(uow, tenant):
+    """P3-7：新开通不发通知；撤销发 revoked、重新 grant 恢复发 restored、active 重复 grant 不再发。"""
+    now = datetime.now(UTC)
+    skill_id = _grant_with_expire(uow, tenant, now + timedelta(days=30))
+    assert _notice_rows(uow, tenant, NOTICE_MODE_REVOKED) == []
+    assert _notice_rows(uow, tenant, NOTICE_MODE_RESTORED) == []
+
+    asyncio.run(
+        _service(uow).apply_batch(
+            tenant,
+            "revoke",
+            [EntitlementItem("skill", skill_id)],
+            reason="欠费取消",
+            actor_id=_ACTOR_ID,
+            actor_username=_ACTOR,
+        )
+    )
+    revoked = _notice_rows(uow, tenant, NOTICE_MODE_REVOKED)
+    assert len(revoked) == 1
+    assert revoked[0]["reason"] == "欠费取消"
+    assert revoked[0]["name"] == "临期技能"
+    assert revoked[0]["object_id"] == str(skill_id)
+
+    asyncio.run(
+        _service(uow).apply_batch(
+            tenant,
+            "grant",
+            [EntitlementItem("skill", skill_id)],
+            actor_id=_ACTOR_ID,
+            actor_username=_ACTOR,
+        )
+    )
+    assert len(_notice_rows(uow, tenant, NOTICE_MODE_RESTORED)) == 1
+
+    asyncio.run(
+        _service(uow).apply_batch(
+            tenant,
+            "grant",
+            [EntitlementItem("skill", skill_id)],
+            actor_id=_ACTOR_ID,
+            actor_username=_ACTOR,
+        )
+    )
+    assert len(_notice_rows(uow, tenant, NOTICE_MODE_RESTORED)) == 1

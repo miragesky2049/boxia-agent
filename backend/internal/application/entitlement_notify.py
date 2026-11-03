@@ -16,7 +16,47 @@ from internal.domain.repository.apps_protocols import EntitlementRepositoryProto
 from internal.domain.repository.protocols import UnitOfWork
 
 EXPIRY_REMINDER_ACTION = "entitlement.expiry_reminder"
+CHANGE_NOTICE_ACTION = "entitlement.change_notice"
+NOTICE_MODE_REVOKED = "revoked"
+NOTICE_MODE_RESTORED = "restored"
 REMINDER_DAYS_BUCKETS = (7, 3, 1)
+
+
+def record_change_notice(
+    uow: UnitOfWork,
+    *,
+    tenant_id: UUID,
+    object_type: str,
+    object_id: str,
+    name: str,
+    notice_mode: str,
+    reason: str,
+    actor_username: str,
+    operated_at: datetime,
+) -> None:
+    """取消/恢复开通通知：复用到期提醒的审计载体管道，归属被通知租户（P3-7）。
+
+    与批量操作共享同一事务：批量回滚则通知不落库；重放会重复通知，
+    P3-8 幂等层落地后由 request_id 去重收口。
+    """
+    record_audit(
+        uow,
+        action=CHANGE_NOTICE_ACTION,
+        actor_username=actor_username,
+        resource_type=object_type,
+        resource_id=object_id,
+        tenant_id=tenant_id,
+        detail={
+            "notice_mode": notice_mode,
+            "tenant_id": str(tenant_id),
+            "object_type": object_type,
+            "object_id": object_id,
+            "name": name,
+            "reason": reason,
+            "operated_by": actor_username,
+            "operated_at": operated_at.isoformat(),
+        },
+    )
 
 
 class EntitlementNotifyService:

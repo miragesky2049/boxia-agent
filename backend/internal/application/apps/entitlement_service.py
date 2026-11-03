@@ -7,11 +7,16 @@ apply_batch/purge 自管事务边界（批量原子性要求先全量校验再�
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
 from internal.application.audit import record_audit
+from internal.application.entitlement_notify import (
+    NOTICE_MODE_RESTORED,
+    NOTICE_MODE_REVOKED,
+    record_change_notice,
+)
 from internal.domain.auth.service import AuthService
 from internal.domain.entity.common import Page
 from internal.domain.entity.entitlement import (
@@ -173,6 +178,9 @@ class EntitlementService:
                     "before": before,
                     "after": after,
                 },
+            )
+            self._record_change_notices(
+                tenant_id, mode, items, before, reason=reason, actor_username=actor_username
             )
             self._uow.commit()
         except Exception:
@@ -471,3 +479,33 @@ class EntitlementService:
             "quota": view.quota,
             "remark": view.remark,
         }
+
+    def _record_change_notices(
+        self,
+        tenant_id: UUID,
+        mode: str,
+        items: list[EntitlementItem],
+        before: list[dict[str, Any] | None],
+        *,
+        reason: str,
+        actor_username: str,
+    ) -> None:
+        """P3-7：取消/恢复开通随同一事务写租户通知；新开通（无行或 active）不发。"""
+        notice_mode = NOTICE_MODE_REVOKED if mode == MODE_REVOKE else NOTICE_MODE_RESTORED
+        now = datetime.now(UTC)
+        for item, snap in zip(items, before, strict=True):
+            if snap is None:
+                continue
+            if mode == MODE_GRANT and snap["status"] not in (STATUS_REVOKED, STATUS_EXPIRED):
+                continue
+            record_change_notice(
+                self._uow,
+                tenant_id=tenant_id,
+                object_type=item.object_type,
+                object_id=str(item.object_id),
+                name=str(snap["name"]),
+                notice_mode=notice_mode,
+                reason=reason,
+                actor_username=actor_username,
+                operated_at=now,
+            )
