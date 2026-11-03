@@ -628,6 +628,10 @@ class EntitlementRepositoryProtocol(Protocol):
         """更新 resource_grant 行持久状态（wait_effect→active / active→expired）。"""
         ...
 
+    def list_expiring(self, now: datetime, window_days: int) -> list[dict]:
+        """window_days 天内到期的有效权益行 {object_type, object_id, tenant_id, name, expire_time}（P3-2 提醒扫描）。"""
+        ...
+
     def affected_role_grants(
         self, tenant_id: UUID, object_type: str, object_id: UUID
     ) -> list[dict]:

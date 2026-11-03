@@ -17,6 +17,7 @@ def make_celery() -> Celery:
         include=[
             "internal.infrastructure.tasks.ingest_tasks",
             "internal.infrastructure.tasks.auth_tasks",
+            "internal.infrastructure.tasks.entitlement_tasks",
         ],
     )
     app.conf.update(
@@ -37,6 +38,10 @@ def make_celery() -> Celery:
             "auth-process-expired": {
                 "task": "auth.process_expired",
                 "schedule": 300.0,
+            },
+            "entitlement-scan-expiry-reminders": {
+                "task": "entitlement.scan_expiry_reminders",
+                "schedule": 86400.0,
             },
         },
     )

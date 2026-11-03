@@ -59,6 +59,28 @@ class PostgresAuditLogRepository:
         ).all()
         return [self._to_entity(row) for row in rows], int(total)
 
+    def exists_with_detail(
+        self,
+        action: str,
+        tenant_id: UUID,
+        resource_type: str,
+        resource_id: str,
+        detail: dict[str, Any],
+    ) -> bool:
+        """JSONB 包含判定（@>），用于到期提醒等系统记录的去重键查询（P3-2）。"""
+        found = self._session.scalar(
+            select(AuditLogModel.id)
+            .where(
+                AuditLogModel.action == action,
+                AuditLogModel.tenant_id == tenant_id,
+                AuditLogModel.resource_type == resource_type,
+                AuditLogModel.resource_id == resource_id,
+                AuditLogModel.detail.contains(detail),
+            )
+            .limit(1)
+        )
+        return found is not None
+
     def delete_all(self, tenant_id: UUID | None = None) -> int:
         """清空审计日志；tenant_id 非空时只清该租户，否则清空全部（平台级）。"""
         stmt = delete(AuditLogModel)

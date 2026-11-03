@@ -153,6 +153,16 @@ class AuditLogRepository(Protocol):
     ) -> tuple[list[AuditLog], int]:
         """分页查询审计记录；tenant_id 为 None 时查询全部（产品级）。"""
 
+    def exists_with_detail(
+        self,
+        action: str,
+        tenant_id: UUID,
+        resource_type: str,
+        resource_id: str,
+        detail: dict[str, Any],
+    ) -> bool:
+        """按 (action, tenant, resource, detail 包含) 判断是否已有记录（到期提醒去重，P3-2）。"""
+
 
 class ResourceRepository(Protocol[TResource]):
     """通用资源仓储（工具）。"""

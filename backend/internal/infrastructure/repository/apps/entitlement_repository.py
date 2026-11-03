@@ -8,7 +8,7 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import text
@@ -229,6 +229,31 @@ class EntitlementRepository:
             text("UPDATE resource_grant SET status = :status WHERE id = :id"),
             {"id": grant_id, "status": status},
         )
+
+    def list_expiring(self, now: datetime, window_days: int) -> list[dict]:
+        """双表中 window_days 天内到期的有效权益行（到期提醒扫描，P3-2）。"""
+        horizon = now + timedelta(days=window_days)
+        rows = self._session.execute(
+            text(
+                """
+                SELECT 'app' AS object_type, i.application_id AS object_id, i.tenant_id,
+                       a.name AS name, i.expire_time
+                FROM tenant_application_instance i
+                JOIN application a ON a.id = i.application_id
+                WHERE i.status IN ('active', 'wait_effect')
+                  AND i.expire_time IS NOT NULL AND i.expire_time > :now AND i.expire_time <= :horizon
+                UNION ALL
+                SELECT r.type, g.resource_id, g.tenant_id, r.name, g.expire_time
+                FROM resource_grant g
+                JOIN resource r ON r.id = g.resource_id
+                WHERE g.status IN ('active', 'wait_effect')
+                  AND g.expire_time IS NOT NULL AND g.expire_time > :now AND g.expire_time <= :horizon
+                ORDER BY tenant_id, object_type, object_id
+                """
+            ),
+            {"now": now, "horizon": horizon},
+        ).all()
+        return [dict(row._mapping) for row in rows]
 
     # ========== 内部 ==========
     def _grant_app(self, params: dict[str, Any], now: datetime):
