@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { App, Button, Input, Menu, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useAuth } from '../../auth/AuthContext'
@@ -55,6 +55,7 @@ export default function TenantEntitlementsPage() {
   const { hasPermission } = useAuth()
   const canManage = hasPermission('button:entitlement:manage')
   const [searchParams] = useSearchParams()
+  const navigate = useNavigate()
 
   const [tenants, setTenants] = useState<Tenant[]>([])
   const [tenantId, setTenantId] = useState<string | undefined>(undefined)
@@ -337,6 +338,8 @@ export default function TenantEntitlementsPage() {
             </Button>
           </>
         )}
+        {/* 后端权限目录未含申请工作台菜单码（P1-4 已定稿），从开通页头部跳转入口（P2-6） */}
+        <Button onClick={() => navigate('/apply-workbench')}>申请审批</Button>
       </Space>
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         <Menu

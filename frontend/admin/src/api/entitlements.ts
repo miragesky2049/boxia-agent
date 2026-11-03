@@ -144,3 +144,69 @@ export async function grantApplication(
     },
   )
 }
+
+export type ApplyStatus = 'SUBMITTED' | 'HANDLING' | 'PASS' | 'REJECT' | 'FINISH'
+
+export type ApplyType = 'TRIAL' | 'BUY'
+
+/** 运营工作台待审核申请单：application_apply 全列 + 应用名/销售用户名联查。 */
+export interface ApplyRow {
+  id: string
+  tenant_id: string
+  application_id: string
+  apply_type: ApplyType
+  status: ApplyStatus
+  expect_text: string
+  contact: string
+  sales_user_id: string | null
+  audit_msg: string
+  contract_no: string
+  created_at: string
+  updated_at: string
+  application_name: string
+  sales_username: string | null
+}
+
+export interface OpsDashboardStats {
+  pending_count: number
+  pass_pending_count: number
+  finished_count: number
+  rejected_count: number
+  last_7d_count: number
+  active_grants: number
+  wait_effect_grants: number
+  expired_grants: number
+}
+
+export interface PassApplyPayload {
+  audit_msg?: string
+  contract_no?: string
+  grant_start_time?: string | null
+  grant_expire_time?: string | null
+  grant_quota?: Record<string, unknown> | null
+}
+
+export async function listOpsPendingApplies(): Promise<ApplyRow[]> {
+  return request<ApplyRow[]>('/admin/applies/ops/pending')
+}
+
+export async function getOpsDashboardStats(): Promise<OpsDashboardStats> {
+  return request<OpsDashboardStats>('/admin/applies/ops/dashboard')
+}
+
+export async function passApply(
+  applyId: string,
+  payload: PassApplyPayload,
+): Promise<{ ok: boolean; instance_id: string | null }> {
+  return request<{ ok: boolean; instance_id: string | null }>(`/admin/applies/${applyId}/pass`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  })
+}
+
+export async function rejectApply(applyId: string, auditMsg: string): Promise<{ ok: boolean }> {
+  return request<{ ok: boolean }>(`/admin/applies/${applyId}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ audit_msg: auditMsg }),
+  })
+}
