@@ -7,6 +7,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime
 from typing import Any, cast
 from uuid import UUID
@@ -100,6 +101,8 @@ class AuthRepository:
         """新增授权记录。"""
         instance_id = new_uuid()
         data["id"] = instance_id
+        # psycopg3 不能直接适配 dict，JSONB 写入统一序列化为字符串后 CAST（与权益仓储同法）
+        data["quota_json"] = json.dumps(data.get("quota_json") or {}, ensure_ascii=False)
         self._session.execute(
             text("""
             INSERT INTO tenant_application_instance

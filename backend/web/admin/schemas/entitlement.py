@@ -28,6 +28,18 @@ class EntitlementBatchRequest(BaseModel):
     expire_time: datetime | None = None
 
 
+class GrantApplicationPayload(BaseModel):
+    """OPS 直开应用：start_time 必填（引擎据此判定 active/wait_effect），auth_source 服务端固定 OPS。"""
+
+    tenant_id: UUID
+    auth_type: Literal["FORMAL", "TRIAL", "GIFT"] = "FORMAL"
+    contract_no: str = ""
+    quota_json: dict[str, Any] = Field(default_factory=dict)
+    start_time: datetime
+    expire_time: datetime | None = None
+    remark: str = ""
+
+
 class EntitlementViewOut(BaseModel):
     """权益视图；status 为读侧时间计算后的有效状态。"""
 
@@ -73,6 +85,12 @@ class EntitlementBatchOut(BaseModel):
     updated: int
     failed: list[dict[str, Any]] = Field(default_factory=list)
     affected_role_grants: int = 0
+
+
+class GrantApplicationOut(BaseModel):
+    """直开结果：新建授权行 ID。"""
+
+    instance_id: UUID
 
 
 class EntitlementTenantRowOut(BaseModel):

@@ -50,4 +50,10 @@ def get_entitlement_service(
     return make_entitlement_service(uow, context)
 
 
+def get_grant_engine_service(uow: UowDep) -> GrantService:
+    """请求级 OPS 直开引擎装配（P1-7 router 消费）。"""
+    return make_grant_engine_service(uow)
+
+
 EntitlementServiceDep = Annotated[EntitlementService, Depends(get_entitlement_service)]
+GrantEngineServiceDep = Annotated[GrantService, Depends(get_grant_engine_service)]
