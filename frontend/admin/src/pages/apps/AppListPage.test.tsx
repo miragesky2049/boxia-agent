@@ -232,7 +232,7 @@ describe('AppListPage 删除能力', () => {
     expect(deleteButton).toBeTruthy()
     fireEvent.click(deleteButton as HTMLElement)
 
-    const popconfirm = await screen.findByText(/将永久删除该应用及其全部数据/)
+    const popconfirm = await screen.findByText(/将永久删除应用本体及其画布版本/)
     expect(popconfirm).toBeInTheDocument()
     expect(screen.getByText('不可恢复', { exact: false })).toBeInTheDocument()
 

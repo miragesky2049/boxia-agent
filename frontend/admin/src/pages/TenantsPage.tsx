@@ -26,7 +26,7 @@ import { passwordRule } from '../utils/password'
 const PLATFORM_TENANT_CODE = 'platform'
 
 const DELETE_SCOPE_DESC =
-  '将永久删除该租户及其全部数据且不可恢复，包括：账号/角色与权限、组织架构、租户自有应用与智能体、应用开通关系、会话与运行记录、文档知识库、用量账本、Webhook 及该租户的全部审计日志。租户开通的平台应用本体不会被删除。'
+  '将永久删除该租户的账号、组织架构、应用开通、会话与用量等全部数据且不可恢复；平台应用本体不受影响。'
 
 interface CreateFormValues {
   code: string

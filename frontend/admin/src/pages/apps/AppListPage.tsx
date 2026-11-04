@@ -37,7 +37,7 @@ import { useAuth } from '../../auth/AuthContext'
 import ObjectTenantsTab from '../entitlements/ObjectTenantsTab'
 
 const DELETE_SCOPE_DESC =
-  '将永久删除该应用及其全部数据且不可恢复，包括：应用本体、画布与全部历史版本、所有租户的开通关系与租户级配置、会话与消息、运行记录与节点执行、用量台账、Webhook、用户变量、可见范围设置，以及该应用在角色授权与权益套餐中的关联项。'
+  '将永久删除应用本体及其画布版本、全部租户开通关系，以及会话、运行与用量等关联数据，且不可恢复。'
 
 type TypeFilter = 'all' | FlowType
 

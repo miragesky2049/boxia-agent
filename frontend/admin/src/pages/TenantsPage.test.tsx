@@ -239,7 +239,7 @@ describe('TenantsPage 删除能力', () => {
     expect(deleteButton).toBeTruthy()
     fireEvent.click(deleteButton as HTMLElement)
 
-    const popconfirm = await screen.findByText(/将永久删除该租户及其全部数据/)
+    const popconfirm = await screen.findByText(/将永久删除该租户的账号/)
     expect(popconfirm).toBeInTheDocument()
     expect(screen.getByText('不可恢复', { exact: false })).toBeInTheDocument()
 
