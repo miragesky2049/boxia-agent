@@ -129,6 +129,7 @@ __pypackages__/
 
 # Celery stuff
 celerybeat-schedule
+celerybeat-schedule.*
 celerybeat.pid
 
 # Redis
@@ -226,7 +227,9 @@ node_modules/
 .env.*.local
 backend/.env.*
 !backend/.env.example
-frontend/*/.env.local
+# 前端各端仅跟踪共享开发配置 .env.dev 与 .env.*.example，.env.prod 等真实环境文件一律忽略
+frontend/*/.env.*
+!frontend/*/.env.dev
 !frontend/*/.env.*.example
 
 # 跨端运维本地文件
@@ -239,3 +242,7 @@ frontend/admin/playwright-report/
 frontend/admin/test-results/
 
 .playwright-mcp/
+
+# 本地实机截图与抓取素材（不入库；确需归档时用 git add -f 显式入库）
+/docs/assets/
+/docs/canvas-refs/

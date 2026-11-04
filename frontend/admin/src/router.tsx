@@ -8,11 +8,6 @@ import AdminLayout from './layouts/AdminLayout'
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'))
 const NotFoundPage = lazy(() => import('./pages/NotFoundPage'))
-const AgentListPage = lazy(() => import('./pages/agents/AgentListPage'))
-const AgentEditPage = lazy(() => import('./pages/agents/AgentEditPage'))
-const WorkflowListPage = lazy(() => import('./pages/workflows/WorkflowListPage'))
-const WorkflowEditPage = lazy(() => import('./pages/workflows/WorkflowEditPage'))
-const ToolListPage = lazy(() => import('./pages/tools/ToolListPage'))
 const UsersPage = lazy(() => import('./pages/UsersPage'))
 const DepartmentsPage = lazy(() => import('./pages/departments/DepartmentsPage'))
 const EmploymentsPage = lazy(() => import('./pages/employments/EmploymentsPage'))
@@ -20,10 +15,21 @@ const AdminUsersPage = lazy(() => import('./pages/AdminUsersPage'))
 const UserGrantsPage = lazy(() => import('./pages/grants/UserGrantsPage'))
 const TenantsPage = lazy(() => import('./pages/TenantsPage'))
 const TenantDetailPage = lazy(() => import('./pages/tenants/TenantDetailPage'))
+const TenantSettingsPage = lazy(() => import('./pages/tenants/TenantSettingsPage'))
 const RolesPage = lazy(() => import('./pages/RolesPage'))
 const RoleDetailPage = lazy(() => import('./pages/roles/RoleDetailPage'))
 const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
 const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
+const AppsIndexPage = lazy(() => import('./pages/apps/AppsIndexPage'))
+const AppEditPage = lazy(() => import('./pages/apps/AppEditPage'))
+const MarketplacePage = lazy(() => import('./pages/apps/MarketplacePage'))
+const RunPage = lazy(() => import('./pages/apps/RunPage'))
+const RunsPage = lazy(() => import('./pages/apps/RunsPage'))
+const ResourcesPage = lazy(() => import('./pages/apps/ResourcesPage'))
+const AuditLogsPage = lazy(() => import('./pages/AuditLogsPage'))
+const TenantEntitlementsPage = lazy(() => import('./pages/entitlements/TenantEntitlementsPage'))
+const ApplyWorkbench = lazy(() => import('./pages/entitlements/ApplyWorkbench'))
+const RoleAccessPage = lazy(() => import('./pages/roleAccess/RoleAccessPage'))
 
 export default function AppRouter() {
   return (
@@ -46,52 +52,18 @@ export default function AppRouter() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Navigate to="/agents" replace />} />
+            <Route path="/" element={<Navigate to="/apps" replace />} />
+            <Route path="/apps" element={<AppsIndexPage />} />
+            <Route path="/apps/:id/edit" element={<AppEditPage />} />
+            <Route path="/marketplace" element={<MarketplacePage />} />
+            <Route path="/marketplace/apps/:appId/run" element={<RunPage />} />
+            <Route path="/marketplace/apps/:appId/runs" element={<RunsPage />} />
+            <Route path="/resources" element={<ResourcesPage />} />
             <Route
-              path="/agents"
+              path="/audit"
               element={
-                <RequirePermission permission="page:agents">
-                  <AgentListPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/agents/new"
-              element={
-                <RequirePermission permission="page:agents">
-                  <AgentEditPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/agents/:id/edit"
-              element={
-                <RequirePermission permission="page:agents">
-                  <AgentEditPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/workflows"
-              element={
-                <RequirePermission permission="page:workflows">
-                  <WorkflowListPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/workflows/:id/edit"
-              element={
-                <RequirePermission permission="page:workflows">
-                  <WorkflowEditPage />
-                </RequirePermission>
-              }
-            />
-            <Route
-              path="/tools"
-              element={
-                <RequirePermission permission="page:tools">
-                  <ToolListPage />
+                <RequirePermission permission="page:audit">
+                  <AuditLogsPage />
                 </RequirePermission>
               }
             />
@@ -180,6 +152,38 @@ export default function AppRouter() {
               element={
                 <RequirePermission permission="page:tenants" platformOnly>
                   <TenantDetailPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/tenants/:id/settings"
+              element={
+                <RequirePermission permission="page:tenants" platformOnly>
+                  <TenantSettingsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/entitlements"
+              element={
+                <RequirePermission permission="page:entitlements" platformOnly>
+                  <TenantEntitlementsPage />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/apply-workbench"
+              element={
+                <RequirePermission permission="page:entitlements" platformOnly>
+                  <ApplyWorkbench />
+                </RequirePermission>
+              }
+            />
+            <Route
+              path="/role-access"
+              element={
+                <RequirePermission permission="page:role-access" tenantOnly>
+                  <RoleAccessPage />
                 </RequirePermission>
               }
             />

@@ -1,0 +1,129 @@
+"""权益统一读写模型：屏蔽 tenant_application_instance 与 tenant_resource_entitlement 两套存储。
+
+视图状态在读侧按 UTC 左闭右开区间 [start_time, expire_time) 计算（D-3），
+不依赖 Celery 定时任务的持久化 status 刷新，避免"已过期但仍可用"窗口。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+from typing import Any
+from uuid import UUID
+
+from internal.domain.errors import ValidationError
+
+OBJECT_TYPE_APP = "app"
+ENTITLEMENT_OBJECT_TYPES: tuple[str, ...] = ("app", "tool", "skill", "prompt", "knowledge")
+
+STATUS_ACTIVE = "active"
+STATUS_SUSPENDED = "suspended"
+STATUS_DISABLED = "disabled"
+STATUS_REVOKED = "revoked"
+STATUS_WAIT_EFFECT = "wait_effect"
+STATUS_EXPIRED = "expired"
+
+# 终态：时间不再参与计算，直接透出持久值（suspended/disabled 视为不可用）
+_TERMINAL_STATUSES = frozenset({STATUS_REVOKED, STATUS_SUSPENDED, STATUS_DISABLED})
+
+
+def effective_status(
+    status: str,
+    start_time: datetime | None,
+    expire_time: datetime | None,
+    now: datetime,
+    grace_days: int = 0,
+) -> str:
+    """读侧生效判定：revoked/suspended/disabled 原样透出；其余按时间区间归一到三态。
+
+    宽限期（P3-11）：grace_days>0 时到期后 N 天内仍显 expired（只读窗口，配置保留可恢复），
+    超过窗口读作 revoked，与定时流转口径一致；grace_days=0 关闭宽限期，行为同旧版。
+    """
+    if status in _TERMINAL_STATUSES:
+        return status
+    grace_over = (
+        grace_days > 0
+        and expire_time is not None
+        and expire_time <= now - timedelta(days=grace_days)
+    )
+    if status == STATUS_EXPIRED:
+        return STATUS_REVOKED if grace_over else STATUS_EXPIRED
+    if start_time is not None and start_time > now:
+        return STATUS_WAIT_EFFECT
+    if expire_time is not None and expire_time <= now:
+        return STATUS_REVOKED if grace_over else STATUS_EXPIRED
+    return STATUS_ACTIVE
+
+
+# 配额语义（P3-10）：quota_json 仅以下两个键参与执行点判定，缺失/None/0 均为不限；
+# 其余键（如 qps）为存储展示项，check_quota 不解释。seats=席位数，runs=累计次数。
+QUOTA_DIMENSIONS = ("seats", "runs")
+
+
+def quota_limit(quota: dict[str, Any], dimension: str) -> int | None:
+    """解析配额维度上限；非法配置（非负整数以外）抛 422，None 表示不限。"""
+    if dimension not in QUOTA_DIMENSIONS:
+        raise ValidationError(f"不支持的配额维度：{dimension}，仅支持 {'/'.join(QUOTA_DIMENSIONS)}")
+    value = quota.get(dimension)
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise ValidationError(f"配额配置非法：{dimension} 必须为非负整数，当前为 {value!r}")
+    return value if value > 0 else None
+
+
+@dataclass(frozen=True)
+class EntitlementItem:
+    """批量操作条目：一个对象（应用或资源）对当前租户的权益。"""
+
+    object_type: str
+    object_id: UUID
+
+    def to_dict(self) -> dict[str, str]:
+        """JSON 安全序列化，供审计 detail 使用。"""
+        return {"object_type": self.object_type, "object_id": str(self.object_id)}
+
+
+@dataclass(frozen=True)
+class EntitlementView:
+    """权益视图：status 为读侧时间计算后的有效状态。"""
+
+    object_type: str
+    object_id: UUID
+    name: str
+    status: str
+    auth_source: str
+    auth_type: str
+    start_time: datetime | None
+    expire_time: datetime | None
+    quota: dict[str, Any]
+    remark: str
+    granted_at: datetime | None
+    is_deprecated: bool = False
+
+
+@dataclass(frozen=True)
+class RemovePreviewItem:
+    """revoke 预览项：附带受影响的角色授权（D-3 软失效语义）。"""
+
+    view: EntitlementView
+    affected_role_grants: int = 0
+    affected_role_names: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class BatchPreview:
+    """dry-run 结果：不改库，仅给出将新增/将失效/无变化三组。"""
+
+    add: tuple[EntitlementView, ...] = ()
+    remove: tuple[RemovePreviewItem, ...] = ()
+    unchanged: tuple[EntitlementView, ...] = ()
+
+
+@dataclass(frozen=True)
+class BatchResult:
+    """apply_batch 结果：单事务，任一项校验失败整体不写入并返回 failed 明细。"""
+
+    updated: int = 0
+    failed: tuple[dict[str, Any], ...] = ()
+    affected_role_grants: int = 0

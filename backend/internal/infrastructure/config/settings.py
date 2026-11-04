@@ -69,6 +69,13 @@ class Settings(BaseSettings):
     access_token_minutes: int = Field(default=30, ge=1, le=120)
     refresh_token_days: int = Field(default=14, ge=1, le=90)
 
+    # 权益取消严格模式：角色授权仍引用该权益时整批拒绝（ENTITLEMENT_IN_USE，P1-5）
+    entitlement_revoke_strict: bool = False
+    # 取消权益时是否中断在跑任务：预留开关，P3 实现前恒为 False
+    entitlement_revoke_kill_running: bool = False
+    # 到期宽限期天数（P3-11）：expired 后 N 天内保留配置与恢复入口，超期由对账流转落 revoked；0=关闭
+    entitlement_grace_days: int = Field(default=30, ge=0, le=365)
+
     bcrypt_rounds: int = Field(default=12, ge=4, le=16)
     login_max_attempts: int = Field(default=5, ge=1, le=20)
     login_lock_minutes: int = Field(default=15, ge=1, le=1440)
@@ -78,11 +85,6 @@ class Settings(BaseSettings):
     password_min_length: int = Field(default=12, ge=8, le=64)
     password_max_bytes: int = Field(default=72, ge=32, le=72)
     password_min_categories: int = Field(default=3, ge=1, le=4)
-
-    # 技能包限制：文本类技能包，按文件数/单文件/总大小三重配额防止滥用。
-    skill_package_max_files: int = Field(default=200, ge=1, le=2000)
-    skill_package_max_file_bytes: int = Field(default=1_048_576, ge=1024, le=16_777_216)
-    skill_package_max_total_bytes: int = Field(default=8_388_608, ge=1024, le=67_108_864)
 
     # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
     # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
@@ -150,9 +152,25 @@ class Settings(BaseSettings):
     rag_query_rewrite_enabled: bool = True
     rag_query_rewrite_variants: int = Field(default=3, ge=1, le=5)
 
+    # T2：向量库 provider。memory=开发态内存（重启丢数据）；pgvector=复用 PG；milvus=独立集群
+    vector_store_provider: str = "memory"
+    milvus_uri: str = ""
+    milvus_token: str = ""
+
     # Celery 异步 ingest：broker / backend 独立 Redis DB，避免与短期记忆混用
     celery_broker_url: str = "redis://127.0.0.1:6379/1"
     celery_result_backend: str = "redis://127.0.0.1:6379/2"
+
+    # ============================================================
+    # A12：大 graph 对象存储（MinIO / S3 兼容）
+    # graph JSONB 超过 1MB 阈值时写入对象存储，DB 只存 URI 引用。
+    # 留空 endpoint 表示不启用对象存储，超过阈值时降级为内联写入并打 warning。
+    # ============================================================
+    object_storage_endpoint: str = ""  # 如 127.0.0.1:9000
+    object_storage_access_key: str = ""
+    object_storage_secret_key: SecretStr = SecretStr("")
+    object_storage_bucket: str = "boxia-graphs"
+    object_storage_secure: bool = False  # True 用 https
 
     # ============================================================
     # 产品级平台管理员自动初始化（部署产品级运营平台时开启）

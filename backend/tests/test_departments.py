@@ -3,7 +3,6 @@
 from fastapi.testclient import TestClient
 
 from tests.helpers import (
-    create_agent,
     create_tenant,
     create_user,
     list_roles,
@@ -242,26 +241,6 @@ def test_delete_protection(
     assert site.delete(
         f"/api/v1/admin/employments/{employment.json()['id']}", headers=headers
     ).status_code == 204
-
-    # 存在归属智能体时禁止删除
-    agent = create_agent(site, headers, "部门智能体")
-    bound = site.put(
-        f"/api/v1/admin/agents/{agent['id']}",
-        json={
-            "name": "部门智能体",
-            "avatar_url": "",
-            "description": "",
-            "is_enabled": True,
-            "config": {},
-            "tool_ids": [],
-            "skill_ids": [],
-            "department_id": root["id"],
-        },
-        headers=headers,
-    )
-    assert bound.status_code == 200, bound.text
-    assert site.delete(f"{DEPTS_URL}/{root['id']}", headers=headers).status_code == 409
-    assert site.delete(f"/api/v1/admin/agents/{agent['id']}", headers=headers).status_code == 204
     assert site.delete(f"{DEPTS_URL}/{root['id']}", headers=headers).status_code == 204
 
 

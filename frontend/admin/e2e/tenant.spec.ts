@@ -45,12 +45,16 @@ async function ensureTenant(request: APIRequestContext, token: string): Promise<
 /** 每次测试前把租户管理员重置为已知初始密码。租户管理员已并入 users，平台无法直接重置。 */
 async function resetTenantAdminPassword(request: APIRequestContext) {
   const tenantHeaders = { 'X-Tenant-Code': TENANT_CODE }
+  const attempts: string[] = []
   for (const password of [TENANT_PASSWORD, TENANT_NEW_PASSWORD]) {
     const login = await request.post('/api/v1/admin/auth/login', {
       headers: tenantHeaders,
       data: { username: TENANT_ADMIN, password },
     })
-    if (!login.ok()) continue
+    if (!login.ok()) {
+      attempts.push(`${password}:${login.status()}`)
+      continue
+    }
     if (password === TENANT_PASSWORD) return
 
     const token = ((await login.json()) as { access_token: string }).access_token
@@ -58,10 +62,10 @@ async function resetTenantAdminPassword(request: APIRequestContext) {
       headers: { ...tenantHeaders, Authorization: `Bearer ${token}` },
       data: { current_password: password, new_password: TENANT_PASSWORD },
     })
-    expect(changed.status()).toBe(204)
+    expect(changed.status(), await changed.text()).toBe(204)
     return
   }
-  throw new Error('无法重置租户管理员密码：尝试的密码均不可用')
+  throw new Error(`无法重置租户管理员密码：尝试的密码均不可用（可能已触发登录锁定） [${attempts.join(', ')}]`)
 }
 
 async function loginPlatform(page: Page) {
@@ -69,29 +73,24 @@ async function loginPlatform(page: Page) {
   await page.getByLabel('账号').fill(ADMIN_USERNAME)
   await page.getByLabel('密码').fill(ADMIN_PASSWORD!)
   await page.getByRole('button', { name: /登\s*录/ }).click()
-  await page.waitForURL(/\/(agents|change-password)$/)
+  await page.waitForURL(/\/(apps|change-password)$/)
 }
 
-/** 产品级登录页通过作用域下拉框切换到租户级。 */
-async function switchToTenant(page: Page) {
-  await page.locator('.login-card__scope-select').click()
-  await page.locator('.ant-select-item-option').filter({ hasText: TENANT_NAME }).click()
-  await expect(page.locator('.login-card__scope')).toContainText(TENANT_NAME)
-  // 租户级不再提供作用域下拉框
-  await expect(page.getByRole('combobox')).toHaveCount(0)
-}
-
-/** 租户级切换作用域只能通过 URL 上的 tenant 参数。 */
-async function openScopeByUrl(page: Page, code: string, expectedText: string) {
+/** 本地回环为 header 模式：通过 URL ?tenant= 切到租户作用域；租户级不再提供作用域下拉框。 */
+async function openTenantScope(page: Page, code = TENANT_CODE, expectedText = TENANT_NAME) {
   await page.goto(`/login?tenant=${code}`)
   await expect(page.locator('.login-card__scope')).toContainText(expectedText)
+  // 作用域下拉只在产品级出现；切回 platform 时下拉合法存在，由调用方断言数量
+  if (code !== 'platform') {
+    await expect(page.getByRole('combobox')).toHaveCount(0)
+  }
 }
 
 async function submitLogin(page: Page, password: string) {
   await page.getByLabel('账号').fill(TENANT_ADMIN)
   await page.getByLabel('密码').fill(password)
   await page.getByRole('button', { name: /登\s*录/ }).click()
-  await page.waitForURL(/\/(agents|change-password)$/)
+  await page.waitForURL(/\/(apps|change-password)$/)
 }
 
 /** 切换到租户作用域并完成登录；首登会先完成强制改密。 */
@@ -99,8 +98,7 @@ async function loginTenant(page: Page, request: APIRequestContext, token: string
   await ensureTenant(request, token)
   await resetTenantAdminPassword(request)
 
-  await page.goto('/login')
-  await switchToTenant(page)
+  await openTenantScope(page)
   await submitLogin(page, TENANT_PASSWORD)
 
   if (page.url().endsWith('/change-password')) {
@@ -110,11 +108,10 @@ async function loginTenant(page: Page, request: APIRequestContext, token: string
     await page.getByRole('button', { name: '确认修改' }).click()
     await expect(page).toHaveURL(/\/login/)
 
-    await openScopeByUrl(page, TENANT_CODE, TENANT_NAME)
-    await expect(page.getByRole('combobox')).toHaveCount(0)
+    await openTenantScope(page)
     await submitLogin(page, TENANT_NEW_PASSWORD)
   }
-  await expect(page).toHaveURL(/\/agents$/)
+  await expect(page).toHaveURL(/\/apps$/)
 }
 
 test.describe('多租户', () => {
@@ -140,10 +137,10 @@ test.describe('多租户', () => {
 
     const row = page.getByRole('row', { name: new RegExp(TENANT_CODE) })
     try {
-      await row.getByRole('button', { name: '编辑' }).click()
+      await row.getByRole('button', { name: /编\s*辑/ }).click()
       const dialog = page.getByRole('dialog', { name: '编辑租户' })
       await dialog.getByLabel('租户名称').fill(editedName)
-      await dialog.getByRole('button', { name: '保存' }).click()
+      await dialog.getByRole('button', { name: /保\s*存/ }).click()
       await expect(page.getByRole('cell', { name: editedName })).toBeVisible()
     } finally {
       await request.patch(`/api/v1/admin/tenants/${tenantId}`, {
@@ -160,7 +157,6 @@ test.describe('多租户', () => {
     await page.goto(`http://${TENANT_CODE}.localhost:5173/login`)
     await expect(page.locator('.login-card__scope')).toContainText(TENANT_NAME)
     await expect(page.locator('.login-card__hint')).toContainText('按域名解析作用域')
-    // 子域名模式不再提供作用域下拉框
     await expect(page.getByRole('combobox')).toHaveCount(0)
   })
 
@@ -169,11 +165,12 @@ test.describe('多租户', () => {
     await ensureTenant(request, token)
 
     await page.goto('/login')
-    // 产品级登录页提供作用域下拉框
+    // 产品级登录页在本地回环（header 模式）提供作用域下拉框
     await expect(page.getByRole('combobox')).toHaveCount(1)
-    await switchToTenant(page)
 
-    await openScopeByUrl(page, 'platform', '产品级')
+    await openTenantScope(page, TENANT_CODE, TENANT_NAME)
+
+    await openTenantScope(page, 'platform', '产品级')
     await expect(page.getByRole('combobox')).toHaveCount(1)
   })
 
@@ -188,45 +185,46 @@ test.describe('多租户', () => {
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
   })
 
-  test('平台智能体授权给租户后才可见', async ({ page, request }) => {
+  test('平台开通应用后租户才可见', async ({ page, request }) => {
     const token = await adminToken(request)
     const tenantId = await ensureTenant(request, token)
-    const name = `平台授权智能体 ${Date.now()}`
+    const name = `平台开通应用 ${Date.now()}`
 
-    const created = await request.post('/api/v1/admin/agents', {
+    const created = await request.post('/api/v1/admin/apps', {
       headers: { Authorization: `Bearer ${token}` },
-      data: { name, description: '产品级维护', is_enabled: true, config: {} },
+      data: { name, description: '产品级维护' },
     })
     expect(created.status()).toBe(201)
-    const agentId = ((await created.json()) as { id: string }).id
+    const appId = ((await created.json()) as { application_id: string }).application_id
 
     try {
       await loginTenant(page, request, token)
-      await page.goto('/agents')
-      const search = page.getByPlaceholder('搜索智能体名称或描述')
-      await search.fill(name)
-      await search.press('Enter')
-      await expect(page.getByRole('row', { name: new RegExp(name) })).toHaveCount(0)
+      await page.goto('/apps')
+      await expect(page.getByText(name)).toHaveCount(0)
 
-      const grant = await request.put(
-        `/api/v1/admin/grants?resource_type=agent&resource_id=${agentId}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-          data: { grants: [{ tenant_id: tenantId, role_id: null }] },
-        },
-      )
-      expect(grant.ok()).toBeTruthy()
-
-      await search.fill(name)
-      await search.press('Enter')
-      const row = page.getByRole('row', { name: new RegExp(name) })
-      await expect(row).toBeVisible()
-      await expect(row.getByText('平台级')).toBeVisible()
-      await expect(row.getByText('只读')).toBeVisible()
-      await expect(row.getByRole('button', { name: /删\s*除/ })).toHaveCount(0)
-    } finally {
-      await request.delete(`/api/v1/admin/agents/${agentId}`, {
+      const granted = await request.post('/api/v1/admin/entitlements/batch', {
         headers: { Authorization: `Bearer ${token}` },
+        data: {
+          tenant_id: tenantId,
+          mode: 'grant',
+          items: [{ object_type: 'app', object_id: appId }],
+        },
+      })
+      expect(granted.ok()).toBeTruthy()
+
+      await page.reload()
+      const card = page.locator('.ant-card', { hasText: name })
+      await expect(card).toBeVisible()
+      await expect(card).toContainText('已开通')
+    } finally {
+      // 应用无物理删除端点：回收权益即可让租户侧不可见
+      await request.post('/api/v1/admin/entitlements/batch', {
+        headers: { Authorization: `Bearer ${token}` },
+        data: {
+          tenant_id: tenantId,
+          mode: 'revoke',
+          items: [{ object_type: 'app', object_id: appId }],
+        },
       })
     }
   })
@@ -244,20 +242,17 @@ test.describe('多租户', () => {
     const dialog = page.getByRole('dialog', { name: '新建角色' })
     await dialog.getByLabel('角色编码').fill(`e2e-role-${suffix}`)
     await dialog.getByLabel('角色名称').fill(roleName)
-    await dialog.getByRole('button', { name: '保存' }).click()
+    await dialog.getByRole('button', { name: /保\s*存/ }).click()
     await expect(page.getByText('角色已创建')).toBeVisible()
 
     const row = page.getByRole('row', { name: new RegExp(roleName) })
     await expect(row).toBeVisible()
     await row.getByRole('button', { name: /删\s*除/ }).click()
-    await page
-      .locator('.ant-popconfirm')
-      .getByRole('button', { name: /删\s*除/ })
-      .click()
+    await page.locator('.ant-popconfirm').locator('.ant-btn-primary').click()
     await expect(page.getByText('角色已删除')).toBeVisible()
 
     await page.getByRole('menuitem', { name: '用户管理' }).click()
-    await expect(page.getByRole('heading', { name: '用户管理' })).toBeVisible()
+    await expect(page.getByText('用户管理').first()).toBeVisible()
     await expect(page.getByRole('button', { name: '新建用户' })).toBeVisible()
   })
 })

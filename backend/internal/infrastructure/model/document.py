@@ -26,17 +26,12 @@ class DocumentModel(Base):
     """documents 表：知识库文档元数据；原文内容不存本表，仅存 source_uri / content_hash。"""
 
     __tablename__ = "documents"
-    __table_args__ = (Index("ix_documents_tenant_agent", "tenant_id", "agent_id"),)
+    __table_args__ = (Index("ix_documents_tenant", "tenant_id"),)
 
     id: Mapped[UuidPrimaryKey]
     # tenant_id 非空：产品级知识库 = PLATFORM_TENANT_ID（全零 UUID）；租户知识库 = 真实租户 ID。
     tenant_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
-    )
-    # 所属智能体；文档可被多个智能体通过 agent.config.retrieval.document_ids 引用，
-    # 这里 agent_id 仅用于默认归属与权限收敛，不做唯一约束。
-    agent_id: Mapped[UUID | None] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("agents.id", ondelete="CASCADE"), nullable=True
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
     # 来源类型：text / markdown / pdf / docx

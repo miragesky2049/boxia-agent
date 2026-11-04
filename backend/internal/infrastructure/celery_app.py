@@ -14,7 +14,12 @@ def make_celery() -> Celery:
         "boxia_agent",
         broker=settings.celery_broker_url,
         backend=settings.celery_result_backend,
-        include=["internal.infrastructure.tasks.ingest_tasks"],
+        include=[
+            "internal.infrastructure.tasks.ingest_tasks",
+            "internal.infrastructure.tasks.auth_tasks",
+            "internal.infrastructure.tasks.entitlement_tasks",
+            "internal.infrastructure.tasks.entitlement_reconcile",
+        ],
     )
     app.conf.update(
         task_default_queue="rag",
@@ -26,6 +31,28 @@ def make_celery() -> Celery:
         task_acks_late=True,
         worker_prefetch_multiplier=1,
         task_track_started=True,
+        beat_schedule={
+            "auth-process-wait-effective": {
+                "task": "auth.process_wait_effective",
+                "schedule": 300.0,
+            },
+            "auth-process-expired": {
+                "task": "auth.process_expired",
+                "schedule": 300.0,
+            },
+            "entitlement-scan-expiry-reminders": {
+                "task": "entitlement.scan_expiry_reminders",
+                "schedule": 86400.0,
+            },
+            "entitlement-reconcile": {
+                "task": "entitlement.reconcile",
+                "schedule": 86400.0,
+            },
+            "entitlement-process-grace-revoked": {
+                "task": "entitlement.process_grace_revoked",
+                "schedule": 86400.0,
+            },
+        },
     )
     return app
 

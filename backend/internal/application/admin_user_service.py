@@ -13,12 +13,11 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
-from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import Role, User
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
-from internal.domain.entity.common import Page
+from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.permission import CONSOLE_ACCESS, DATA_ALL
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
@@ -542,3 +541,9 @@ class AuditService:
             page, page_size, action, actor_id, self._context.tenant_id
         )
         return Page(items=items, total=total, page=page, page_size=page_size)
+
+    def clear(self) -> int:
+        """清空审计日志：产品级清空全部，租户级只清本租户。返回删除条数。"""
+        count = self._uow.audit_logs.delete_all(self._context.tenant_id)
+        self._uow.commit()
+        return count

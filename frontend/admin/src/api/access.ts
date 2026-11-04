@@ -77,10 +77,9 @@ export const rolesApi = {
     })
   },
   async removePermission(id: string, code: string): Promise<void> {
-    await request<void>(
-      `/admin/roles/${id}/permissions/${encodeURIComponent(code)}`,
-      { method: 'DELETE' },
-    )
+    await request<void>(`/admin/roles/${id}/permissions/${encodeURIComponent(code)}`, {
+      method: 'DELETE',
+    })
   },
   async grantSummary(id: string): Promise<RoleGrantSummary> {
     return request<RoleGrantSummary>(`/admin/roles/${id}/grants/summary`)
@@ -96,9 +95,7 @@ export const rolesApi = {
       granted_only: String(params.granted_only ?? false),
     })
     if (params.keyword) query.set('keyword', params.keyword)
-    return request<PageResult<RoleGrantResource>>(
-      `/admin/roles/${id}/grants?${query.toString()}`,
-    )
+    return request<PageResult<RoleGrantResource>>(`/admin/roles/${id}/grants?${query.toString()}`)
   },
   async addGrants(
     id: string,
@@ -110,13 +107,14 @@ export const rolesApi = {
       body: JSON.stringify({ resource_ids: resourceIds }),
     })
   },
-  async removeGrant(
-    id: string,
-    resourceType: ResourceType,
-    resourceId: string,
-  ): Promise<void> {
+  async removeGrant(id: string, resourceType: ResourceType, resourceId: string): Promise<void> {
     await request<void>(`/admin/roles/${id}/grants/${resourceType}/${resourceId}`, {
       method: 'DELETE',
+    })
+  },
+  async setTenantWide(id: string, resourceType: ResourceType, resourceId: string): Promise<void> {
+    await request<void>(`/admin/roles/${id}/grants/${resourceType}/${resourceId}/tenant-wide`, {
+      method: 'PUT',
     })
   },
 }

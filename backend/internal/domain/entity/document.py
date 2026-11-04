@@ -26,7 +26,6 @@ class Document:
     created_at: datetime
     updated_at: datetime
     tenant_id: UUID
-    agent_id: UUID | None = None
 
     @property
     def is_platform(self) -> bool:

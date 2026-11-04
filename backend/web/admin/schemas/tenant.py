@@ -43,59 +43,41 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
-class TenantAgentOut(BaseModel):
-    """租户详情页的产品智能体及其开通状态。"""
-
-    id: UUID
-    name: str
-    avatar_url: str
-    description: str
-    is_enabled: bool
-    is_opened: bool
-    opened_at: datetime | None = None
-    opened_by: UUID | None = None
-
-
-class TenantAgentOpenRequest(BaseModel):
-    """开通或关闭租户对产品智能体的访问。"""
-
-    opened: bool
-
-
-class TenantAgentOpenOut(BaseModel):
-    """开通/关闭操作结果。"""
-
-    agent_id: UUID
-    tenant_id: UUID
-    is_opened: bool
-    opened_at: datetime | None = None
-
-
-class TenantAgentBatchOpenRequest(BaseModel):
-    """批量开通或关闭租户对产品智能体的访问。"""
-
-    agent_ids: list[UUID] = Field(min_length=1, max_length=100)
-    opened: bool
-
-
-class TenantAgentBatchOpenOut(BaseModel):
-    """批量开通/关闭操作结果。"""
+class TenantDeleteOut(BaseModel):
+    """单租户删除结果。"""
 
     tenant_id: UUID
-    opened: bool
-    count: int
-    agent_ids: list[UUID]
-
-
-class AgentOpenedTenantOut(BaseModel):
-    """智能体详情页展示的已开通租户。"""
-
-    id: UUID
     code: str
-    name: str
-    is_active: bool
-    opened_at: datetime
-    opened_by: UUID | None = None
+    audit_id: UUID
+    deleted: dict[str, int] = Field(default_factory=dict)
+
+
+class TenantBatchDeleteRequest(BaseModel):
+    """批量删除租户请求；confirm 必须显式传 true。"""
+
+    tenant_ids: list[UUID] = Field(min_length=1, max_length=100)
+    confirm: bool = False
+    reason: str = Field(default="", max_length=200)
+
+
+class TenantBatchDeleteItemOut(BaseModel):
+    """批量删除单项结果。"""
+
+    tenant_id: UUID
+    code: str | None = None
+    success: bool
+    audit_id: UUID | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+class TenantBatchDeleteOut(BaseModel):
+    """批量删除汇总结果（部分成功时 HTTP 仍为 200）。"""
+
+    total: int
+    succeeded: int
+    failed: int
+    items: list[TenantBatchDeleteItemOut]
 
 
 class PasswordPolicyOut(BaseModel):

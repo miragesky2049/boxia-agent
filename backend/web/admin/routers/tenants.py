@@ -1,22 +1,24 @@
 """租户管理接口（仅产品级运营管理平台）。"""
 
+from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from pydantic import BaseModel, Field
 
-from internal.application.tenant_service import TenantAgentView
+from internal.application.apps.tenant_settings_service import TenantSettingsService
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import (
-    TenantAgentBatchOpenOut,
-    TenantAgentBatchOpenRequest,
-    TenantAgentOpenOut,
-    TenantAgentOpenRequest,
-    TenantAgentOut,
+    TenantBatchDeleteOut,
+    TenantBatchDeleteRequest,
     TenantCreateRequest,
+    TenantDeleteOut,
     TenantOut,
     TenantUpdateRequest,
 )
+from web.deps.apps_services import make_tenant_settings_service
 from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
+from web.deps.db import UowDep
 from web.deps.services import TenantServiceDep
 
 router = APIRouter(
@@ -118,101 +120,91 @@ def update_tenant(
     return TenantOut.model_validate(tenant)
 
 
-@router.get(
-    "/{tenant_id}/agents",
-    response_model=PageOut[TenantAgentOut],
-    dependencies=[Depends(require_permission("page:tenants"))],
+@router.delete(
+    "/{tenant_id}",
+    response_model=TenantDeleteOut,
+    dependencies=[Depends(require_permission("button:tenant:delete"))],
 )
-def list_tenant_agents(
+def delete_tenant(
     tenant_id: UUID,
+    request: Request,
     service: TenantServiceDep,
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    keyword: str | None = Query(None, max_length=100),
-    is_enabled: bool | None = Query(None),
-    opened_only: bool = Query(False),
-) -> PageOut[TenantAgentOut]:
-    """分页查询产品智能体及该租户的开通状态。"""
-    result = service.list_agents(tenant_id, page, page_size, keyword, is_enabled, opened_only)
-    return PageOut[TenantAgentOut](
-        items=[_to_tenant_agent_out(item) for item in result.items],
-        total=result.total,
-        page=result.page,
-        page_size=result.page_size,
+    principal: AdminAuthDep,
+    confirm: bool = Query(..., description="二次确认位，必须为 true"),
+) -> TenantDeleteOut:
+    """物理删除租户及其全部关联数据（仅平台 superadmin，不可逆）。"""
+    ip, user_agent = _client_meta(request)
+    result = service.delete(
+        tenant_id,
+        confirm=confirm,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        ip=ip,
+        user_agent=user_agent,
     )
+    return TenantDeleteOut.model_validate(result)
 
 
 @router.post(
-    "/{tenant_id}/agents/batch",
-    response_model=TenantAgentBatchOpenOut,
-    dependencies=[Depends(require_permission("button:tenant:update"))],
+    "/batch",
+    response_model=TenantBatchDeleteOut,
+    dependencies=[Depends(require_permission("button:tenant:delete"))],
 )
-def set_tenant_agents_opened(
-    tenant_id: UUID,
-    payload: TenantAgentBatchOpenRequest,
+def batch_delete_tenants(
+    payload: TenantBatchDeleteRequest,
     request: Request,
     service: TenantServiceDep,
     principal: AdminAuthDep,
-) -> TenantAgentBatchOpenOut:
-    """批量开通或关闭租户对产品智能体的访问。"""
+) -> TenantBatchDeleteOut:
+    """批量物理删除租户：逐租户独立事务，部分成功，返回每项明细。"""
     ip, user_agent = _client_meta(request)
-    agent_ids = service.set_agents_opened(
-        tenant_id,
-        payload.agent_ids,
-        payload.opened,
+    result = service.batch_delete(
+        payload.tenant_ids,
+        confirm=payload.confirm,
         actor_id=principal.user_id,
         actor_username=principal.username,
+        actor_role_code=principal.role_code,
         ip=ip,
         user_agent=user_agent,
+        reason=payload.reason,
     )
-    return TenantAgentBatchOpenOut(
-        tenant_id=tenant_id,
-        opened=payload.opened,
-        count=len(agent_ids),
-        agent_ids=agent_ids,
-    )
+    return TenantBatchDeleteOut.model_validate(result)
+
+
+# ========== T16 租户运行时配置（默认模型 + 插件白名单）==========
+class TenantSettingsUpdateRequest(BaseModel):
+    default_model_catalog_id: UUID | None = Field(None, description="默认模型 catalog id；置空表示走平台默认")
+    allowed_catalog_ids: list[UUID] = Field(default_factory=list, description="允许该租户可见的模型白名单；空数组=全量可见")
+    plugin_whitelist: list[str] = Field(default_factory=list, description="允许调用的工具名白名单；空数组=全量可见")
+
+
+def _get_settings_service(uow: UowDep) -> TenantSettingsService:
+    return make_tenant_settings_service(uow.session)
+
+
+@router.get(
+    "/{tenant_id}/settings",
+    dependencies=[Depends(require_permission("page:tenants"))],
+)
+def get_tenant_settings(tenant_id: UUID, uow: UowDep) -> dict[str, Any]:
+    """读取租户运行时配置。"""
+    return _get_settings_service(uow).get(tenant_id)
 
 
 @router.put(
-    "/{tenant_id}/agents/{agent_id}",
-    response_model=TenantAgentOpenOut,
+    "/{tenant_id}/settings",
     dependencies=[Depends(require_permission("button:tenant:update"))],
 )
-def set_tenant_agent_opened(
+def update_tenant_settings(
     tenant_id: UUID,
-    agent_id: UUID,
-    payload: TenantAgentOpenRequest,
-    request: Request,
-    service: TenantServiceDep,
-    principal: AdminAuthDep,
-) -> TenantAgentOpenOut:
-    """开通或关闭租户对产品智能体的访问。"""
-    ip, user_agent = _client_meta(request)
-    opening = service.set_agent_opened(
+    payload: TenantSettingsUpdateRequest,
+    uow: UowDep,
+) -> dict[str, Any]:
+    """upsert 租户运行时配置（覆盖式写入）。"""
+    return _get_settings_service(uow).update(
         tenant_id,
-        agent_id,
-        payload.opened,
-        actor_id=principal.user_id,
-        actor_username=principal.username,
-        ip=ip,
-        user_agent=user_agent,
-    )
-    return TenantAgentOpenOut(
-        agent_id=agent_id,
-        tenant_id=tenant_id,
-        is_opened=opening is not None,
-        opened_at=opening.opened_at if opening else None,
-    )
-
-
-def _to_tenant_agent_out(item: TenantAgentView) -> TenantAgentOut:
-    return TenantAgentOut(
-        id=item.agent.id,
-        name=item.agent.name,
-        avatar_url=item.agent.avatar_url,
-        description=item.agent.description,
-        is_enabled=item.agent.is_enabled,
-        is_opened=item.is_opened,
-        opened_at=item.opening.opened_at if item.opening else None,
-        opened_by=item.opening.opened_by if item.opening else None,
+        default_model_catalog_id=payload.default_model_catalog_id,
+        allowed_catalog_ids=payload.allowed_catalog_ids,
+        plugin_whitelist=payload.plugin_whitelist,
     )

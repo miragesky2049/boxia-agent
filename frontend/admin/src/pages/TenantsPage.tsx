@@ -1,14 +1,32 @@
-import { PlusOutlined, RobotOutlined } from '@ant-design/icons'
-import { App, Button, Divider, Form, Input, Modal, Space, Switch, Table, Tag, Typography } from 'antd'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
+import {
+  App,
+  Button,
+  Divider,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  Typography,
+} from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { createTenant, listTenants, updateTenant } from '../api/tenant'
-import type { Tenant } from '../api/types'
+import { batchDeleteTenants, createTenant, deleteTenant, listTenants, updateTenant } from '../api/tenant'
+import type { Tenant, TenantBatchDeleteItem } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
+
+const PLATFORM_TENANT_CODE = 'platform'
+
+const DELETE_SCOPE_DESC =
+  '将永久删除该租户的账号、组织架构、应用开通、会话与用量等全部数据且不可恢复；平台应用本体不受影响。'
 
 interface CreateFormValues {
   code: string
@@ -24,10 +42,11 @@ interface EditFormValues {
 
 export default function TenantsPage() {
   const navigate = useNavigate()
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const { hasPermission } = useAuth()
   const canCreate = hasPermission('button:tenant:create')
   const canUpdate = hasPermission('button:tenant:update')
+  const canDelete = hasPermission('button:tenant:delete')
   const { context } = useTenant()
   const [items, setItems] = useState<Tenant[]>([])
   const [total, setTotal] = useState(0)
@@ -40,6 +59,9 @@ export default function TenantsPage() {
   const [createForm] = Form.useForm<CreateFormValues>()
   const [editing, setEditing] = useState<Tenant | null>(null)
   const [editForm] = Form.useForm<EditFormValues>()
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [batchBusy, setBatchBusy] = useState(false)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -115,6 +137,68 @@ export default function TenantsPage() {
     }
   }
 
+  const handleDelete = async (record: Tenant) => {
+    setDeletingId(record.id)
+    try {
+      await deleteTenant(record.id)
+      message.success(`租户「${record.name}」已永久删除`)
+      setSelectedKeys((keys) => keys.filter((key) => key !== record.id))
+      await load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const showBatchFailures = (failed: TenantBatchDeleteItem[]) => {
+    modal.error({
+      title: `${failed.length} 个租户删除失败`,
+      content: (
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {failed.map((item) => (
+            <li key={item.tenant_id}>
+              {item.code ?? item.tenant_id}：{item.error ?? '未知错误'}
+            </li>
+          ))}
+        </ul>
+      ),
+      okText: '知道了',
+    })
+  }
+
+  const handleBatchDelete = () => {
+    const targets = items.filter(
+      (item) => selectedKeys.includes(item.id) && item.code !== PLATFORM_TENANT_CODE
+    )
+    if (targets.length === 0) return
+    modal.confirm({
+      title: `确认永久删除选中的 ${targets.length} 个租户？`,
+      content: DELETE_SCOPE_DESC,
+      okText: '永久删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setBatchBusy(true)
+        try {
+          const result = await batchDeleteTenants(targets.map((item) => item.id))
+          if (result.failed === 0) {
+            message.success(`已永久删除 ${result.succeeded} 个租户`)
+          } else {
+            message.warning(`成功 ${result.succeeded} 个，失败 ${result.failed} 个`)
+            showBatchFailures(result.items.filter((item) => !item.success))
+          }
+          setSelectedKeys([])
+          await load()
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '批量删除失败')
+        } finally {
+          setBatchBusy(false)
+        }
+      },
+    })
+  }
+
   const columns: ColumnsType<Tenant> = [
     {
       title: '租户',
@@ -162,34 +246,51 @@ export default function TenantsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 250,
-      render: (_: unknown, record: Tenant) => (
-        <Space size={4}>
-          <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
-            详情
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<RobotOutlined />}
-            onClick={() => navigate(`/tenants/${record.id}?tab=agents`)}
-          >
-            开通智能体
-          </Button>
-          {canUpdate && (
-            <Button
-              type="link"
-              size="small"
-              onClick={() => {
-                setEditing(record)
-                editForm.setFieldsValue({ name: record.name })
-              }}
-            >
-              编辑
+      width: 220,
+      render: (_: unknown, record: Tenant) => {
+        const isPlatformTenant = record.code === PLATFORM_TENANT_CODE
+        return (
+          <Space size={4}>
+            <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
+              详情
             </Button>
-          )}
-        </Space>
-      ),
+            {canUpdate && (
+              <Button
+                type="link"
+                size="small"
+                onClick={() => {
+                  setEditing(record)
+                  editForm.setFieldsValue({ name: record.name })
+                }}
+              >
+                编辑
+              </Button>
+            )}
+            {canDelete && (
+              <Popconfirm
+                title={`确认删除租户「${record.name}」？`}
+                description={DELETE_SCOPE_DESC}
+                okText="永久删除"
+                okButtonProps={{ danger: true, loading: deletingId === record.id }}
+                cancelText="取消"
+                disabled={isPlatformTenant}
+                onConfirm={() => handleDelete(record)}
+              >
+                <Button
+                  type="link"
+                  size="small"
+                  danger
+                  icon={<DeleteOutlined />}
+                  disabled={isPlatformTenant}
+                  title={isPlatformTenant ? '系统内置租户不可删除' : undefined}
+                >
+                  删除
+                </Button>
+              </Popconfirm>
+            )}
+          </Space>
+        )
+      },
     },
   ]
 
@@ -224,11 +325,22 @@ export default function TenantsPage() {
           onSearch={(value) => {
             setKeyword(value.trim())
             setPage(1)
+            setSelectedKeys([])
           }}
         />
         <Tag color="blue" bordered={false}>
           共 {total} 个租户
         </Tag>
+        {canDelete && selectedKeys.length > 0 && (
+          <Button
+            danger
+            icon={<DeleteOutlined />}
+            loading={batchBusy}
+            onClick={handleBatchDelete}
+          >
+            批量删除（{selectedKeys.length}）
+          </Button>
+        )}
       </div>
 
       <Table<Tenant>
@@ -236,6 +348,17 @@ export default function TenantsPage() {
         columns={columns}
         dataSource={items}
         loading={loading}
+        rowSelection={
+          canDelete
+            ? {
+                selectedRowKeys: selectedKeys,
+                onChange: (keys) => setSelectedKeys(keys as string[]),
+                getCheckboxProps: (record) => ({
+                  disabled: record.code === PLATFORM_TENANT_CODE,
+                }),
+              }
+            : undefined
+        }
         pagination={{
           current: page,
           pageSize,
@@ -246,6 +369,7 @@ export default function TenantsPage() {
           onChange: (nextPage, nextSize) => {
             setPage(nextSize !== pageSize ? 1 : nextPage)
             setPageSize(nextSize)
+            setSelectedKeys([])
           },
         }}
       />
@@ -261,7 +385,7 @@ export default function TenantsPage() {
         forceRender
         width={560}
       >
-        <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+        <Form<CreateFormValues> form={createForm} name="tenant-create" layout="vertical" requiredMark={false}>
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             租户信息
           </Divider>
@@ -327,7 +451,7 @@ export default function TenantsPage() {
         cancelText="取消"
         forceRender
       >
-        <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+        <Form<EditFormValues> form={editForm} name="tenant-edit" layout="vertical" requiredMark={false}>
           <Form.Item label="租户编码">
             <Input value={editing?.code} disabled />
           </Form.Item>

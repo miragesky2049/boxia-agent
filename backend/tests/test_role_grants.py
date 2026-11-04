@@ -1,14 +1,10 @@
 """角色详情页授权：有效授权、写保护、候选门槛与跨租户隔离。"""
 
-import importlib.util
-from pathlib import Path
 from uuid import UUID
 
 from fastapi.testclient import TestClient
-from sqlalchemy import text
 
-from internal.infrastructure.id.uuid7 import new_uuid
-from internal.infrastructure.model.database import get_engine
+from internal.domain.entity.access import RESOURCE_TYPES as _RESOURCE_TYPES
 from tests.helpers import (
     USER_PASSWORD,
     create_tenant,
@@ -17,17 +13,40 @@ from tests.helpers import (
     tenant_admin_client,
 )
 
-_RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
+_TOOL_CONFIG = {"url": "https://example.com/api", "method": "GET"}
 
 
-def _skill_payload(name: str) -> dict:
-    return {"name": name, "description": "", "content": "", "config": {}}
-
-
-def _create_skill(site: TestClient, headers: dict[str, str], name: str) -> dict:
-    response = site.post("/api/v1/admin/skills", json=_skill_payload(name), headers=headers)
+def _create_tenant_tool(
+    client: TestClient,
+    headers: dict[str, str],
+    tenant_id: UUID,
+    name: str,
+) -> dict:
+    """平台管理员创建归属于指定租户的工具（resource 表）。"""
+    response = client.post(
+        "/api/v1/admin/resources",
+        json={
+            "type": "tool",
+            "name": name,
+            "config": _TOOL_CONFIG,
+            "owner_type": "tenant",
+            "owner_id": str(tenant_id),
+        },
+        headers=headers,
+    )
     assert response.status_code == 201, response.text
-    return response.json()
+    return {"id": response.json()["resource_id"], "name": name}
+
+
+def _create_platform_tool(client: TestClient, headers: dict[str, str], name: str) -> dict:
+    """平台管理员创建产品级工具（resource 表）。"""
+    response = client.post(
+        "/api/v1/admin/resources",
+        json={"type": "tool", "name": name, "config": _TOOL_CONFIG},
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    return {"id": response.json()["resource_id"], "name": name}
 
 
 def _create_admin_with_role(
@@ -53,9 +72,7 @@ def _create_admin_with_role(
 
 
 def _summary(site: TestClient, headers: dict[str, str], role_id: UUID) -> dict[str, int]:
-    response = site.get(
-        f"/api/v1/admin/roles/{role_id}/grants/summary", headers=headers
-    )
+    response = site.get(f"/api/v1/admin/roles/{role_id}/grants/summary", headers=headers)
     assert response.status_code == 200, response.text
     return response.json()["counts"]
 
@@ -81,9 +98,7 @@ def _grant_items(
     return response.json()["items"]
 
 
-def test_role_detail_and_grant_lifecycle(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_role_detail_and_grant_lifecycle(client: TestClient, auth_headers, tenant_client) -> None:
     tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -102,31 +117,31 @@ def test_role_detail_and_grant_lifecycle(
     )
     assert platform_detail.status_code == 403
 
-    skill = _create_skill(site, headers, "角色授权技能")
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "角色授权技能")
     skill_id = skill["id"]
     assert _summary(site, headers, viewer_id) == {item: 0 for item in _RESOURCE_TYPES}
 
     added = site.post(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [skill_id]},
         headers=headers,
     )
     assert added.status_code == 200, added.text
     assert added.json()["updated"] == 1
-    assert _summary(site, headers, viewer_id)["skill"] == 1
+    assert _summary(site, headers, viewer_id)["tool"] == 1
 
-    granted = _grant_items(site, headers, viewer_id, "skill")
+    granted = _grant_items(site, headers, viewer_id, "tool")
     assert [item["resource_id"] for item in granted] == [skill_id]
     assert granted[0]["is_granted"] is True
     assert granted[0]["is_platform"] is False
 
-    candidates = _grant_items(site, headers, viewer_id, "skill", granted_only=False)
+    candidates = _grant_items(site, headers, viewer_id, "tool", granted_only=False)
     assert [item["resource_id"] for item in candidates] == [skill_id]
     assert candidates[0]["is_granted"] is True
 
     # 重复追加不重复写入
     again = site.post(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [skill_id]},
         headers=headers,
     )
@@ -134,61 +149,59 @@ def test_role_detail_and_grant_lifecycle(
     assert again.json()["updated"] == 0
 
     removed = site.delete(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill/{skill_id}",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}",
         headers=headers,
     )
     assert removed.status_code == 204, removed.text
-    assert _summary(site, headers, viewer_id)["skill"] == 0
-    assert _grant_items(site, headers, viewer_id, "skill") == []
+    assert _summary(site, headers, viewer_id)["tool"] == 0
+    assert _grant_items(site, headers, viewer_id, "tool") == []
 
     # 整体替换可一次授权多个资源，空数组表示清空
-    second = _create_skill(site, headers, "第二个技能")
+    second = _create_tenant_tool(client, auth_headers, tenant["id"], "第二个技能")
     replaced = site.put(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [skill_id, second["id"]]},
         headers=headers,
     )
     assert replaced.status_code == 200, replaced.text
     assert replaced.json()["updated"] == 2
-    assert _summary(site, headers, viewer_id)["skill"] == 2
+    assert _summary(site, headers, viewer_id)["tool"] == 2
 
     cleared = site.put(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": []},
         headers=headers,
     )
     assert cleared.status_code == 200, cleared.text
     assert cleared.json()["updated"] == 0
-    assert _summary(site, headers, viewer_id)["skill"] == 0
+    assert _summary(site, headers, viewer_id)["tool"] == 0
 
 
-def test_superadmin_role_grants_read_only(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
-    create_tenant(client, auth_headers)
+def test_superadmin_role_grants_read_only(client: TestClient, auth_headers, tenant_client) -> None:
+    tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
     superadmin_id = roles["superadmin"]["id"]
-    skill = _create_skill(site, headers, "超管技能")
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "超管技能")
 
-    assert _summary(site, headers, superadmin_id)["skill"] == 1
+    assert _summary(site, headers, superadmin_id)["tool"] == 1
 
     added = site.post(
-        f"/api/v1/admin/roles/{superadmin_id}/grants/skill",
+        f"/api/v1/admin/roles/{superadmin_id}/grants/tool",
         json={"resource_ids": [skill["id"]]},
         headers=headers,
     )
     assert added.status_code == 422
 
     replaced = site.put(
-        f"/api/v1/admin/roles/{superadmin_id}/grants/skill",
+        f"/api/v1/admin/roles/{superadmin_id}/grants/tool",
         json={"resource_ids": [skill["id"]]},
         headers=headers,
     )
     assert replaced.status_code == 422
 
     removed = site.delete(
-        f"/api/v1/admin/roles/{superadmin_id}/grants/skill/{skill['id']}",
+        f"/api/v1/admin/roles/{superadmin_id}/grants/tool/{skill['id']}",
         headers=headers,
     )
     assert removed.status_code == 422
@@ -212,7 +225,7 @@ def test_role_grants_require_tenant_superadmin(
     assert (
         site.get(
             f"/api/v1/admin/roles/{viewer_id}/grants",
-            params={"resource_type": "skill"},
+            params={"resource_type": "tool"},
             headers=admin_headers,
         ).status_code
         == 403
@@ -228,26 +241,31 @@ def test_role_grants_platform_resource_candidate_gate(
     viewer_id = roles["viewer"]["id"]
     admin_id = roles["admin"]["id"]
 
-    platform_skill = client.post(
-        "/api/v1/admin/skills", json=_skill_payload("平台技能"), headers=auth_headers
-    )
-    assert platform_skill.status_code == 201, platform_skill.text
-    platform_skill_id = platform_skill.json()["id"]
+    platform_skill_id = _create_platform_tool(client, auth_headers, "平台技能")["id"]
 
-    # 未下发本租户的平台资源不可出现在候选集，也不能被授权
-    candidates = _grant_items(site, headers, viewer_id, "skill", granted_only=False)
+    # 未下发本租户的平台资源不可出现在候选集，也不能被授权（P1-8：未开通给专属 422 码）
+    candidates = _grant_items(site, headers, viewer_id, "tool", granted_only=False)
     assert platform_skill_id not in {item["resource_id"] for item in candidates}
     rejected = site.post(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [platform_skill_id]},
         headers=headers,
     )
-    assert rejected.status_code == 404
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
+
+    # 授权≠开通：下发（复数 resource_grants）之外还需开通租户权益（tenant_resource_entitlement）
+    entitlement = client.post(
+        f"/api/v1/admin/resources/{platform_skill_id}/grants",
+        json={"tenant_id": tenant["id"]},
+        headers=auth_headers,
+    )
+    assert entitlement.status_code == 201, entitlement.text
 
     grant_resource(
         client,
         auth_headers,
-        resource_type="skill",
+        resource_type="tool",
         resource_id=platform_skill_id,
         grants=[{"tenant_id": tenant["id"], "role_id": None}],
     )
@@ -255,16 +273,16 @@ def test_role_grants_platform_resource_candidate_gate(
     # 整租户授权计入有效授权，并出现在候选集
     assert platform_skill_id in {
         item["resource_id"]
-        for item in _grant_items(site, headers, viewer_id, "skill", granted_only=False)
+        for item in _grant_items(site, headers, viewer_id, "tool", granted_only=False)
     }
-    assert _summary(site, headers, viewer_id)["skill"] == 1
-    granted = _grant_items(site, headers, viewer_id, "skill")
+    assert _summary(site, headers, viewer_id)["tool"] == 1
+    granted = _grant_items(site, headers, viewer_id, "tool")
     assert granted[0]["resource_id"] == platform_skill_id
     assert granted[0]["is_platform"] is True
 
     # 已整租户授权的资源无需重复写入
     skipped = site.post(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
         json={"resource_ids": [platform_skill_id]},
         headers=headers,
     )
@@ -273,35 +291,79 @@ def test_role_grants_platform_resource_candidate_gate(
 
     # 取消单个角色时把整租户授权拆成其余角色的显式授权
     removed = site.delete(
-        f"/api/v1/admin/roles/{viewer_id}/grants/skill/{platform_skill_id}",
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{platform_skill_id}",
         headers=headers,
     )
     assert removed.status_code == 204, removed.text
-    assert _summary(site, headers, viewer_id)["skill"] == 0
-    assert _summary(site, headers, admin_id)["skill"] == 1
+    assert _summary(site, headers, viewer_id)["tool"] == 0
+    assert _summary(site, headers, admin_id)["tool"] == 1
 
-    admin_headers = _create_admin_with_role(site, headers, "platform-admin", admin_id)
-    visible = site.get("/api/v1/admin/skills", headers=admin_headers)
-    assert visible.status_code == 200, visible.text
-    assert platform_skill_id in {item["id"] for item in visible.json()["items"]}
+
+def test_role_grants_tenant_wide_toggle(client: TestClient, auth_headers, tenant_client) -> None:
+    tenant = create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+    roles = list_roles(site, headers)
+    viewer_id = roles["viewer"]["id"]
+    admin_id = roles["admin"]["id"]
+
+    # 未对租户开通的资源不能设为全员可见，门槛与角色档授权一致
+    platform_skill_id = _create_platform_tool(client, auth_headers, "全员可见平台技能")["id"]
+    rejected = site.put(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{platform_skill_id}/tenant-wide",
+        headers=headers,
+    )
+    assert rejected.status_code == 422, rejected.text
+    assert rejected.json()["code"] == "RESOURCE_NOT_ENTITLED"
+
+    # 已有 role 档授权时设全员可见：role 档被 tenant 档取代，任意角色有效授权都计入
+    skill = _create_tenant_tool(client, auth_headers, tenant["id"], "全员可见技能")
+    skill_id = skill["id"]
+    site.post(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool",
+        json={"resource_ids": [skill_id]},
+        headers=headers,
+    )
+    response = site.put(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}/tenant-wide", headers=headers
+    )
+    assert response.status_code == 204, response.text
+    assert (
+        site.put(
+            f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}/tenant-wide", headers=headers
+        ).status_code
+        == 204
+    )  # 幂等
+    items = _grant_items(site, headers, admin_id, "tool", granted_only=False)
+    target = next(item for item in items if item["resource_id"] == skill_id)
+    assert target["is_tenant_wide"] is True
+    assert target["is_granted"] is True
+    assert _summary(site, headers, viewer_id)["tool"] == 1
+
+    # 取消全员可见 = 单角色移除触发降级：tenant 档清除，其余角色保留显式 role 档
+    removed = site.delete(
+        f"/api/v1/admin/roles/{viewer_id}/grants/tool/{skill_id}", headers=headers
+    )
+    assert removed.status_code == 204, removed.text
+    items = _grant_items(site, headers, admin_id, "tool", granted_only=False)
+    target = next(item for item in items if item["resource_id"] == skill_id)
+    assert target["is_tenant_wide"] is False
+    assert target["is_granted"] is True
+    assert _summary(site, headers, viewer_id)["tool"] == 0
 
 
 def test_role_grants_cross_tenant_isolation(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     tenant_a = create_tenant(client, auth_headers, code="acme", name="Acme")
-    create_tenant(client, auth_headers, code="beta", name="Beta")
+    tenant_b = create_tenant(client, auth_headers, code="beta", name="Beta")
     site_a, headers_a, _ = tenant_admin_client(tenant_client, "acme")
     roles_a = list_roles(site_a, headers_a)
     viewer_a_id = roles_a["viewer"]["id"]
 
     site_b, headers_b, _ = tenant_admin_client(tenant_client, "beta")
-    skill_b = _create_skill(site_b, headers_b, "Beta 技能")
+    skill_b = _create_tenant_tool(client, auth_headers, tenant_b["id"], "Beta 技能")
 
-    assert (
-        site_b.get(f"/api/v1/admin/roles/{viewer_a_id}", headers=headers_b).status_code
-        == 404
-    )
+    assert site_b.get(f"/api/v1/admin/roles/{viewer_a_id}", headers=headers_b).status_code == 404
     assert (
         site_b.get(
             f"/api/v1/admin/roles/{viewer_a_id}/grants/summary", headers=headers_b
@@ -310,17 +372,17 @@ def test_role_grants_cross_tenant_isolation(
     )
     assert (
         site_b.post(
-            f"/api/v1/admin/roles/{viewer_a_id}/grants/skill",
+            f"/api/v1/admin/roles/{viewer_a_id}/grants/tool",
             json={"resource_ids": [skill_b["id"]]},
             headers=headers_b,
         ).status_code
         == 404
     )
 
-    skill_a = _create_skill(site_a, headers_a, "Acme 技能")
+    skill_a = _create_tenant_tool(client, auth_headers, tenant_a["id"], "Acme 技能")
     assert (
         site_b.post(
-            f"/api/v1/admin/roles/{viewer_a_id}/grants/skill",
+            f"/api/v1/admin/roles/{viewer_a_id}/grants/tool",
             json={"resource_ids": [skill_a["id"]]},
             headers=headers_b,
         ).status_code
@@ -333,103 +395,3 @@ def test_role_grants_cross_tenant_isolation(
         headers=auth_headers,
     )
     assert platform_detail.status_code == 403
-
-
-def _load_migration_module():
-    path = (
-        Path(__file__).resolve().parents[1]
-        / "migrations"
-        / "versions"
-        / "0009_strict_rbac_grants.py"
-    )
-    spec = importlib.util.spec_from_file_location("migration_0009_strict_rbac", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-def _run_backfill(statements: list[str]) -> None:
-    """在当前 schema 上重放历史迁移 SQL。
-
-    历史迁移的 INSERT 不写 id，依赖当时的主键默认值；主键改为应用层 UUID 后
-    不再有默认值，这里临时挂 gen_random_uuid()，重放结束后恢复原状。
-    """
-    with get_engine().begin() as conn:
-        conn.execute(
-            text(
-                "ALTER TABLE resource_grants ALTER COLUMN id "
-                "SET DEFAULT gen_random_uuid()"
-            )
-        )
-        try:
-            for statement in statements:
-                conn.execute(text(statement))
-        finally:
-            conn.execute(text("ALTER TABLE resource_grants ALTER COLUMN id DROP DEFAULT"))
-
-
-def _skill_grant_role_ids(skill_id: UUID) -> set[str | None]:
-    with get_engine().connect() as conn:
-        rows = conn.execute(
-            text(
-                "SELECT role_id FROM resource_grants "
-                "WHERE resource_type = 'skill' AND resource_id = :resource_id"
-            ),
-            {"resource_id": skill_id},
-        ).scalars()
-        return {None if item is None else str(item) for item in rows}
-
-
-def test_migration_backfills_zero_grant_resources_idempotently(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
-    create_tenant(client, auth_headers)
-    site, headers, _ = tenant_admin_client(tenant_client, "acme")
-    roles = list_roles(site, headers)
-    all_role_ids = {role["id"] for role in roles.values()}
-
-    empty_skill = _create_skill(site, headers, "零授权技能")
-    narrowed_skill = _create_skill(site, headers, "已收窄技能")
-
-    with get_engine().begin() as conn:
-        conn.execute(
-            text(
-                "DELETE FROM resource_grants "
-                "WHERE resource_type = 'skill' AND resource_id = :resource_id"
-            ),
-            {"resource_id": UUID(empty_skill["id"])},
-        )
-        conn.execute(
-            text(
-                "DELETE FROM resource_grants "
-                "WHERE resource_type = 'skill' AND resource_id = :resource_id"
-            ),
-            {"resource_id": UUID(narrowed_skill["id"])},
-        )
-        conn.execute(
-            text(
-                "INSERT INTO resource_grants "
-                "(id, resource_type, resource_id, tenant_id, role_id) "
-                "VALUES (:id, 'skill', :resource_id, :tenant_id, :role_id)"
-            ),
-            {
-                "id": new_uuid(),
-                "resource_id": UUID(narrowed_skill["id"]),
-                "tenant_id": UUID(roles["viewer"]["tenant_id"]),
-                "role_id": UUID(roles["viewer"]["id"]),
-            },
-        )
-
-    module = _load_migration_module()
-    _run_backfill(module._UPGRADE)
-
-    # 零授权资源按该租户全部现有关键角色回填
-    assert _skill_grant_role_ids(UUID(empty_skill["id"])) == all_role_ids
-    # 已按角色收窄的资源不会被放大
-    assert _skill_grant_role_ids(UUID(narrowed_skill["id"])) == {roles["viewer"]["id"]}
-
-    # 重复执行保持幂等
-    _run_backfill(module._UPGRADE)
-    assert _skill_grant_role_ids(UUID(empty_skill["id"])) == all_role_ids
-    assert _skill_grant_role_ids(UUID(narrowed_skill["id"])) == {roles["viewer"]["id"]}

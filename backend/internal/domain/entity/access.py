@@ -13,7 +13,29 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
+# 应用权益存于 application / tenant_application_instance，不在 resource 表
+APP_RESOURCE_TYPE = "app"
+# 统一资源表（resource）承载的类型
+RESOURCE_TABLE_TYPES = ("tool", "skill", "prompt", "knowledge")
+# RBAC 资源授权可选的全部类型
+RESOURCE_TYPES = (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
+
+# 角色授权写侧拦截原因码（P1-8）：候选仓储 diagnose 返回码，服务层映射为领域错误
+GRANT_BLOCK_NOT_ENTITLED = "not_entitled"
+GRANT_BLOCK_NOT_APPROVED = "not_approved"
+GRANT_BLOCK_DEPRECATED = "deprecated"
+
+
+@dataclass(frozen=True)
+class AppGrantRow:
+    """应用授权行：application 表映射为与 resource 仓储输出对齐的候选/汇总结构。"""
+
+    id: UUID
+    name: str
+    description: str
+    tenant_id: UUID
+    is_enabled: bool
+    updated_at: datetime
 
 
 @dataclass(frozen=True)
@@ -46,7 +68,7 @@ class User:
     password_hash: str
     display_name: str
     is_active: bool
-    role_id: UUID
+    role_id: UUID | None
     last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -73,7 +95,9 @@ class User:
 
     def effective_role_ids(self) -> tuple[UUID, ...]:
         """返回完整角色集合；旧数据未写入关联表时退回主角色。"""
-        return self.role_ids or (self.role_id,)
+        if self.role_ids:
+            return self.role_ids
+        return (self.role_id,) if self.role_id is not None else ()
 
 
 @dataclass(frozen=True)
@@ -96,7 +120,7 @@ class UserRefreshToken:
 
 @dataclass(frozen=True)
 class ResourceGrant:
-    """资源授权：role_id 为空表示授予整个租户。"""
+    """资源授权：subject_type='tenant'（role_id 为空）授予整个租户，'role' 授予指定角色。"""
 
     id: UUID
     resource_type: str
@@ -105,17 +129,7 @@ class ResourceGrant:
     role_id: UUID | None
     granted_by: UUID | None
     created_at: datetime
-
-
-@dataclass(frozen=True)
-class AgentTenantOpening:
-    """平台智能体对租户的开通关系；不代表角色级可见性。"""
-
-    id: UUID
-    agent_id: UUID
-    tenant_id: UUID
-    opened_by: UUID | None
-    opened_at: datetime
+    subject_type: str = "role"
 
 
 @dataclass(frozen=True)
@@ -136,6 +150,9 @@ class AccessScope:
     role_ids: tuple[UUID, ...] = ()
     apply_role_filter: bool = True
     is_platform: bool = False
+    # 新增：PRIVATE / TENANT_GROUP 可见性判定需要的当前用户与租户组
+    user_id: UUID | None = None
+    tenant_group_id: UUID | None = None
 
     @property
     def has_role_filter(self) -> bool:

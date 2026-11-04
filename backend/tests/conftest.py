@@ -35,6 +35,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 from sqlalchemy import text  # noqa: E402
 
 from internal.domain.constants import PLATFORM_TENANT_ID  # noqa: E402
+from internal.domain.entity.access import RESOURCE_TABLE_TYPES  # noqa: E402
 from internal.domain.entity.permission import (  # noqa: E402
     PERMISSION_CATALOG,
     PLATFORM_ADMIN_CODES,
@@ -53,6 +54,9 @@ USER_APP = create_app("user")
 ADMIN_USERNAME = "admin"
 ADMIN_PASSWORD = "Admin-password-123"
 ADMIN_HASH = hash_password(ADMIN_PASSWORD)
+
+# 资源类型目录展示名（与迁移 0061 种子一致），供用例级重建
+_TYPE_CATALOG_NAMES = {"tool": "工具", "skill": "技能", "prompt": "提示词", "knowledge": "知识库"}
 
 
 def _recreate_test_database() -> None:
@@ -92,7 +96,7 @@ def _reset_data():
         tables = ", ".join(sorted(existing))
         if tables:
             conn.execute(text(f"TRUNCATE {tables} RESTART IDENTITY CASCADE"))
-        # TRUNCATE 会清掉迁移种子，需重建产品级平台租户、权限目录、平台系统角色与角色权限关系。
+        # TRUNCATE 会清掉迁移种子，需重建产品级平台租户、权限目录、资源类型目录、平台系统角色与角色权限关系。
         # 主键已改为应用层 UUID v7，原生 INSERT 必须显式写入 id。
         conn.execute(
             text(
@@ -119,6 +123,20 @@ def _reset_data():
                     "sort_order": item.sort_order,
                 }
                 for item in PERMISSION_CATALOG
+            ],
+        )
+        conn.execute(
+            text(
+                "INSERT INTO resource_type_catalog (code, name, sort_order) "
+                "VALUES (:code, :name, :sort_order)"
+            ),
+            [
+                {
+                    "code": code,
+                    "name": _TYPE_CATALOG_NAMES[code],
+                    "sort_order": order,
+                }
+                for order, code in enumerate(RESOURCE_TABLE_TYPES, start=1)
             ],
         )
         conn.execute(

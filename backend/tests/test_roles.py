@@ -91,7 +91,7 @@ def test_referenced_role_cannot_be_deleted(
 
 
 def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client) -> None:
-    create_tenant(client, auth_headers)
+    tenant = create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     role = site.post(
         "/api/v1/admin/roles",
@@ -102,13 +102,21 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
         },
         headers=headers,
     ).json()
-    skill = site.post(
-        "/api/v1/admin/skills",
-        json={"name": "销售技能", "description": "", "content": "", "config": {}},
-        headers=headers,
-    ).json()
+    created_skill = client.post(
+        "/api/v1/admin/resources",
+        json={
+            "type": "tool",
+            "name": "销售技能",
+            "config": {},
+            "owner_type": "tenant",
+            "owner_id": tenant["id"],
+        },
+        headers=auth_headers,
+    )
+    assert created_skill.status_code == 201, created_skill.text
+    skill = {"id": created_skill.json()["resource_id"]}
     granted = site.post(
-        f"/api/v1/admin/roles/{role['id']}/grants/skill",
+        f"/api/v1/admin/roles/{role['id']}/grants/tool",
         json={"resource_ids": [skill["id"]]},
         headers=headers,
     )
@@ -129,11 +137,11 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
         f"/api/v1/admin/roles/{copy['id']}/grants/summary", headers=headers
     )
     assert summary.status_code == 200, summary.text
-    assert summary.json()["counts"]["skill"] == 1
+    assert summary.json()["counts"]["tool"] == 1
 
     grants = site.get(
         f"/api/v1/admin/roles/{copy['id']}/grants",
-        params={"resource_type": "skill", "granted_only": True, "page_size": 100},
+        params={"resource_type": "tool", "granted_only": True, "page_size": 100},
         headers=headers,
     )
     assert grants.status_code == 200, grants.text
@@ -198,7 +206,7 @@ def test_create_role_has_no_permissions_and_copy_inherits_permissions(
         ).json()["codes"]
     )
     assert copied_codes == admin_codes
-    assert "skill:read" in copied_codes
+    assert "page:resources" in copied_codes
 
 
 def test_copy_role_is_tenant_isolated(

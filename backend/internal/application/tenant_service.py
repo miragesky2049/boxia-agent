@@ -2,54 +2,40 @@
 
 from __future__ import annotations
 
+import logging
 import re
-from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
+    AppError,
     ConflictError,
     ForbiddenError,
     NotFoundError,
     ValidationError,
 )
-from internal.application.resource_service import MAX_PAGE_SIZE
-from internal.domain.entity.access import SYSTEM_ROLE_SEEDS, AgentTenantOpening
-from internal.domain.entity.common import Page
+from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.entity.access import SYSTEM_ROLE_SEEDS
 from internal.domain.entity.hr_dictionary_seed import DEFAULT_HR_DICTIONARY_ITEMS
 from internal.domain.entity.permission import DEFAULT_ROLE_PERMISSION_CODES
 from internal.domain.entity.request_context import RequestContext
-from internal.domain.entity.resource import Agent
 from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.id.uuid7 import new_uuid
+from internal.infrastructure.repository.postgres_tenant_purge_repository import (
+    PostgresTenantPurgeRepository,
+)
 from internal.infrastructure.security.password import hash_password, validate_password_strength
+
+logger = logging.getLogger(__name__)
+
+_BATCH_DELETE_LIMIT = 100
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _RESERVED_CODES = {"www", "api", "admin", "static", "assets", "platform"}
-
-
-@dataclass(frozen=True)
-class TenantAgentView:
-    """租户视角的产品智能体及其开通状态。"""
-
-    agent: Agent
-    opening: AgentTenantOpening | None
-
-    @property
-    def is_opened(self) -> bool:
-        """是否已对当前租户开通。"""
-        return self.opening is not None
-
-
-@dataclass(frozen=True)
-class AgentTenantView:
-    """智能体视角的已开通租户及开通信息。"""
-
-    tenant: Tenant
-    opening: AgentTenantOpening
 
 
 class TenantService:
@@ -121,7 +107,6 @@ class TenantService:
             )
             for code, role_name, description in SYSTEM_ROLE_SEEDS
         }
-        # 内置角色按默认权限集合初始化，后续可通过角色授权接口调整
         for code, role in roles.items():
             self._uow.role_permissions.add_for_role(
                 role.id,
@@ -143,7 +128,6 @@ class TenantService:
             }
         )
         self._uow.users.replace_roles(admin_user.id, tenant.id, [roles["superadmin"].id])
-        # 为新租户预置默认 HR 字典（雇佣类型/岗位职级/岗位序列），与迁移 0019 清单一致
         for category, code, name, sort_order in DEFAULT_HR_DICTIONARY_ITEMS:
             self._uow.hr_dictionaries.create(
                 {
@@ -218,141 +202,156 @@ class TenantService:
         self._uow.commit()
         return updated
 
-    def list_agents(
+    def delete(
         self,
         tenant_id: UUID,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        is_enabled: bool | None,
-        opened_only: bool,
-    ) -> Page[TenantAgentView]:
-        """分页查询产品智能体及该租户的开通状态。"""
-        self._require_platform()
-        self._require_tenant_exists(tenant_id)
-        page = max(page, 1)
-        page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        items, total = self._uow.agent_openings.list_for_tenant(
-            tenant_id, page, page_size, keyword, is_enabled, opened_only
-        )
-        return Page(
-            items=[TenantAgentView(agent=agent, opening=opening) for agent, opening in items],
-            total=total,
-            page=page,
-            page_size=page_size,
-        )
-
-    def set_agent_opened(
-        self,
-        tenant_id: UUID,
-        agent_id: UUID,
-        opened: bool,
         *,
+        confirm: bool,
         actor_id: UUID,
         actor_username: str,
+        actor_role_code: str,
         ip: str | None = None,
         user_agent: str | None = None,
-    ) -> AgentTenantOpening | None:
-        """开通或关闭产品智能体；关闭时同时清理该租户的角色授权。"""
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """物理删除租户及其全部关联数据（不可逆）。
+
+        仅平台 superadmin，confirm=True 为二次确认位；平台内置租户禁止删除。
+        返回删除计数与审计 id。
+        """
         self._require_platform()
-        self._require_tenant_exists(tenant_id)
-        if self._uow.agent_openings.get_platform_agent(agent_id) is None:
-            raise NotFoundError("产品智能体不存在")
-
-        if opened:
-            opening = self._uow.agent_openings.open(agent_id, tenant_id, actor_id)
-        else:
-            self._uow.agent_openings.close(agent_id, tenant_id)
-            # 关闭后清空角色授权，避免重新开通时把历史授权自动复活
-            self._uow.resource_grants.replace_for_tenant("agent", agent_id, tenant_id, [], actor_id)
-            opening = None
-        record_audit(
-            self._uow,
-            action="agent.opened" if opened else "agent.closed",
-            actor_id=actor_id,
-            actor_username=actor_username,
-            resource_type="agent",
-            resource_id=str(agent_id),
-            ip=ip,
-            user_agent=user_agent,
-            detail={"tenant_id": tenant_id, "opened": opened},
-            tenant_id=None,
-        )
-        self._uow.commit()
-        return opening
-
-    def set_agents_opened(
-        self,
-        tenant_id: UUID,
-        agent_ids: list[UUID],
-        opened: bool,
-        *,
-        actor_id: UUID,
-        actor_username: str,
-        ip: str | None = None,
-        user_agent: str | None = None,
-    ) -> list[UUID]:
-        """批量开通或关闭产品智能体；关闭时同样清理角色授权。"""
-        self._require_platform()
-        self._require_tenant_exists(tenant_id)
-        unique_ids = list(dict.fromkeys(agent_ids))
-        existing = self._uow.agent_openings.list_platform_agent_ids(unique_ids)
-        missing = [agent_id for agent_id in unique_ids if agent_id not in existing]
-        if missing:
-            raise NotFoundError(
-                f"产品智能体不存在：{', '.join(str(agent_id) for agent_id in missing)}"
-            )
-
-        if opened:
-            self._uow.agent_openings.open_many(unique_ids, tenant_id, actor_id)
-        else:
-            self._uow.agent_openings.close_many(unique_ids, tenant_id)
-            # 与单个关闭保持一致：先锁资源再清理该租户角色授权，避免并发写入复活历史授权
-            self._uow.resource_grants.lock_resources("agent", unique_ids)
-            self._uow.resource_grants.delete_for_tenant_resources("agent", unique_ids, tenant_id)
-
-        record_audit(
-            self._uow,
-            action="agent.batch_opened" if opened else "agent.batch_closed",
-            actor_id=actor_id,
-            actor_username=actor_username,
-            resource_type="agent",
-            ip=ip,
-            user_agent=user_agent,
-            detail={"tenant_id": tenant_id, "opened": opened, "agent_ids": unique_ids},
-            tenant_id=None,
-        )
-        self._uow.commit()
-        return unique_ids
-
-    def list_agent_tenants(
-        self,
-        agent_id: UUID,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-    ) -> Page[AgentTenantView]:
-        """分页查询已开通某产品智能体的租户。"""
-        self._require_platform()
-        if self._uow.agent_openings.get_platform_agent(agent_id) is None:
-            raise NotFoundError("产品智能体不存在")
-        page = max(page, 1)
-        page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
-        items, total = self._uow.agent_openings.list_opened_tenants(
-            agent_id, page, page_size, keyword
-        )
-        return Page(
-            items=[AgentTenantView(tenant=tenant, opening=opening) for tenant, opening in items],
-            total=total,
-            page=page,
-            page_size=page_size,
-        )
-
-    def _require_tenant_exists(self, tenant_id: UUID) -> Tenant:
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("租户删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除租户为不可逆操作，需显式二次确认")
+        if tenant_id == PLATFORM_TENANT_ID:
+            raise ForbiddenError("平台租户为系统内置租户，禁止删除")
         tenant = self._uow.tenants.get_by_id(tenant_id)
         if tenant is None:
             raise NotFoundError("租户不存在")
-        return tenant
+
+        try:
+            purge = PostgresTenantPurgeRepository(self._uow.session)
+            purge.configure_timeouts()
+            snapshot = purge.snapshot(tenant_id)
+            deleted = purge.purge_business_data(tenant_id)
+            audit_id = record_audit(
+                self._uow,
+                action="tenant.deleted",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="tenant",
+                resource_id=str(tenant_id),
+                ip=ip,
+                user_agent=user_agent,
+                detail={
+                    "code": tenant.code,
+                    "name": tenant.name,
+                    "reason": reason,
+                    "snapshot": snapshot,
+                    "deleted": deleted,
+                },
+                tenant_id=None,
+            )
+            # 平台侧审计先落库，再清除被删租户自身审计行
+            self._uow.session.flush()
+            deleted["audit_logs"] = purge.delete_audit_logs(tenant_id)
+            purge.delete_tenant_row(tenant_id)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+        return {
+            "tenant_id": str(tenant_id),
+            "code": tenant.code,
+            "audit_id": str(audit_id),
+            "deleted": deleted,
+        }
+
+    def batch_delete(
+        self,
+        tenant_ids: list[UUID],
+        *,
+        confirm: bool,
+        actor_id: UUID,
+        actor_username: str,
+        actor_role_code: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """批量物理删除租户：逐租户独立事务，部分成功，返回每项明细。"""
+        self._require_platform()
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("租户删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除租户为不可逆操作，需显式二次确认")
+        unique_ids = list(dict.fromkeys(tenant_ids))
+        if not unique_ids:
+            raise ValidationError("待删除租户列表不能为空")
+        if len(unique_ids) > _BATCH_DELETE_LIMIT:
+            raise ValidationError(f"单次批量删除不能超过 {_BATCH_DELETE_LIMIT} 个租户")
+
+        items: list[dict[str, Any]] = []
+        succeeded = 0
+        for tenant_id in unique_ids:
+            code: str | None = None
+            existing = self._uow.tenants.get_by_id(tenant_id)
+            if existing is not None:
+                code = existing.code
+            try:
+                result = self.delete(
+                    tenant_id,
+                    confirm=True,
+                    actor_id=actor_id,
+                    actor_username=actor_username,
+                    actor_role_code=actor_role_code,
+                    ip=ip,
+                    user_agent=user_agent,
+                    reason=reason,
+                )
+            except AppError as exc:
+                items.append(
+                    {
+                        "tenant_id": str(tenant_id),
+                        "code": code,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": exc.code,
+                        "error": exc.message,
+                    }
+                )
+                continue
+            except Exception:
+                logger.exception("批量删除租户失败 tenant_id=%s", tenant_id)
+                items.append(
+                    {
+                        "tenant_id": str(tenant_id),
+                        "code": code,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": "INTERNAL_ERROR",
+                        "error": "删除失败，请稍后重试",
+                    }
+                )
+                continue
+            succeeded += 1
+            items.append(
+                {
+                    "tenant_id": result["tenant_id"],
+                    "code": result["code"],
+                    "success": True,
+                    "audit_id": result["audit_id"],
+                    "error_code": None,
+                    "error": None,
+                }
+            )
+        return {
+            "total": len(unique_ids),
+            "succeeded": succeeded,
+            "failed": len(unique_ids) - succeeded,
+            "items": items,
+        }
 
     def _require_platform(self) -> None:
         if not self._context.is_platform:

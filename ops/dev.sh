@@ -3,7 +3,7 @@
 #   - 自动拉起 PostgreSQL / Redis（docker compose）
 #   - 清理上次残留的 Vite / Uvicorn 端口占用
 #   - uv sync + alembic 迁移
-#   - 后台启动后端（热重载）+ Celery RAG worker
+#   - 后台启动后端（热重载）+ Celery RAG worker + beat 定时调度器
 #   - 前台启动 Vite 开发服务器
 # 用法：./ops/dev.sh [admin|user|all]，缺省为 all。
 # 注意：仍需先执行一次 `uv run python -m scripts.create_admin` 创建管理员。
@@ -22,11 +22,13 @@ esac
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 BACKEND_PIDS=()
 CELERY_PID=""
+CELERY_BEAT_PID=""
 
 cleanup() {
   echo
   echo "正在停止本次启动的进程..."
   [ -n "$CELERY_PID" ] && kill "$CELERY_PID" 2>/dev/null || true
+  [ -n "$CELERY_BEAT_PID" ] && kill "$CELERY_BEAT_PID" 2>/dev/null || true
   for pid in "${BACKEND_PIDS[@]:-}"; do
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
@@ -58,6 +60,9 @@ uv sync
 uv run alembic upgrade head
 
 # ---------- 4. 后台启动后端 ----------
+# --reload 不可去掉：Windows 上 uvicorn 单进程模式会强制 ProactorEventLoop，
+# psycopg async（LangGraph AsyncPostgresSaver）在该循环上无法建连，试运行会直接报错；
+# 带 --reload 时服务跑在子进程的 SelectorEventLoop 上才可用（Linux 无此问题）
 for site in "${SITES[@]}"; do
   case "$site" in
     admin) module=web.app_admin:app; port=8000 ;;
@@ -68,7 +73,7 @@ for site in "${SITES[@]}"; do
   echo "已启动 ${site} 后端 http://127.0.0.1:${port}"
 done
 
-# ---------- 5. 后台启动 Celery RAG worker ----------
+# ---------- 5. 后台启动 Celery RAG worker + beat ----------
 # Windows（Git Bash / MSYS）下 prefork 池会因 billiard 子进程权限/信号问题崩溃，
 # 改用 solo 池（单进程，调试友好）；*nix 仍用默认 prefork。
 case "$(uname -s)" in
@@ -84,6 +89,13 @@ echo "==> 启动 Celery RAG worker（队列 rag，pool=${CELERY_POOL:-prefork}�
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag $CELERY_POOL &
 CELERY_PID=$!
 echo "已启动 Celery worker PID=${CELERY_PID}"
+
+# beat 只投递定时任务（权益生效/到期流转、到期提醒、宽限期回收、每日对账），不使用执行池，
+# 全环境统一命令即可；必须保证只启动一个实例，多实例会重复投递
+echo "==> 启动 Celery beat 定时调度器（单实例）"
+uv run celery -A internal.infrastructure.celery_app beat --loglevel=info &
+CELERY_BEAT_PID=$!
+echo "已启动 Celery beat PID=${CELERY_BEAT_PID}"
 
 # ---------- 6. 前台启动 Vite ----------
 cd "$ROOT/frontend"

@@ -1,5 +1,6 @@
-"""写入本地演示数据（仅开发/演示环境，幂等；资源归属产品级平台）。"""
+"""写入本地演示数据（仅开发/演示环境，幂等；工具归属产品级平台）。"""
 
+import json
 import sys
 
 from sqlalchemy import text
@@ -7,87 +8,41 @@ from sqlalchemy import text
 from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import dispose_engine, get_engine
 
-_DEMO_RESOURCES = {
-    "skills": [
-        ("知识检索", "从知识库检索相关文档片段", "SELECT ...", "{}"),
-        ("意图识别", "识别用户问题意图", "class Intent ...", "{}"),
-    ],
-    "tools": [
-        ("天气查询", "查询指定城市天气", "http", '{"method": "GET"}'),
-        ("工单创建", "创建售后工单", "http", '{"method": "POST"}'),
-    ],
-    "components": [
-        ("信息卡片", "展示结构化信息", "card", "{}"),
-        ("快捷操作", "展示操作按钮组", "actions", "{}"),
-    ],
-    "prompts": [
-        ("客服问候", "客服首轮问候语", "你好，我是智能助手", "[]", "chat"),
-        ("摘要生成", "生成对话摘要", "请总结以下内容：{{content}}", '["content"]', "summary"),
-    ],
-}
+# (name, description, config)
+_DEMO_TOOLS = (
+    ("天气查询", "查询指定城市天气", {"method": "GET"}),
+    ("工单创建", "创建售后工单", {"method": "POST"}),
+)
 
 
 def main() -> int:
-    """按名称幂等补充演示资源。"""
+    """按名称幂等补充产品级演示工具。"""
     engine = get_engine()
     try:
         with engine.begin() as conn:
-            for table, rows in _DEMO_RESOURCES.items():
-                for row in rows:
-                    name = row[0]
-                    exists = conn.execute(
-                        text(
-                            f"SELECT 1 FROM {table} "
-                            "WHERE lower(name) = lower(:name) AND tenant_id IS NULL"
-                        ),
-                        {"name": name},
-                    ).first()
-                    if exists:
-                        continue
-                    if table == "prompts":
-                        conn.execute(
-                            text(
-                                "INSERT INTO prompts "
-                                "(id, name, description, content, variables, category) "
-                                "VALUES (:id, :name, :desc, :content, CAST(:variables AS JSONB), :category)"
-                            ),
-                            {
-                                "id": new_uuid(),
-                                "name": row[0],
-                                "desc": row[1],
-                                "content": row[2],
-                                "variables": row[3],
-                                "category": row[4],
-                            },
-                        )
-                    elif table == "skills":
-                        conn.execute(
-                            text(
-                                "INSERT INTO skills (id, name, description, content, config) "
-                                "VALUES (:id, :name, :desc, :content, CAST(:config AS JSONB))"
-                            ),
-                            {
-                                "id": new_uuid(),
-                                "name": row[0],
-                                "desc": row[1],
-                                "content": row[2],
-                                "config": row[3],
-                            },
-                        )
-                    else:
-                        conn.execute(
-                            text(
-                                f"INSERT INTO {table} (id, name, description, type, config) "
-                                "VALUES (:id, :name, :desc, :type, CAST(:config AS JSONB))"
-                            ),
-                            {
-                                "id": new_uuid(),
-                                "name": row[0],
-                                "desc": row[1],
-                                "type": row[2],
-                                "config": row[3],
-                            },
-                        )
+            for name, description, extra_config in _DEMO_TOOLS:
+                exists = conn.execute(
+                    text(
+                        "SELECT 1 FROM resource "
+                        "WHERE type = 'tool' AND owner_type = 'platform' "
+                        "AND lower(name) = lower(:name)"
+                    ),
+                    {"name": name},
+                ).first()
+                if exists:
+                    continue
+                config = {"description": description, **extra_config}
+                conn.execute(
+                    text(
+                        "INSERT INTO resource (id, type, owner_type, owner_id, name, config) "
+                        "VALUES (:id, 'tool', 'platform', NULL, :name, CAST(:config AS JSONB))"
+                    ),
+                    {
+                        "id": new_uuid(),
+                        "name": name,
+                        "config": json.dumps(config),
+                    },
+                )
         print("演示数据写入完成")
     except Exception as exc:  # 演示脚本需要给出可读失败原因
         print(f"写入演示数据失败: {exc}", file=sys.stderr)

@@ -376,3 +376,29 @@ def remove_role_grant(
         ip=ip,
         user_agent=user_agent,
     )
+
+
+@router.put(
+    "/{role_id}/grants/{resource_type}/{resource_id}/tenant-wide",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[_GRANT_ROLES],
+)
+def set_role_grant_tenant_wide(
+    role_id: UUID,
+    resource_type: str,
+    resource_id: UUID,
+    principal: AdminAuthDep,
+    request: Request,
+    service: RoleGrantServiceDep,
+) -> None:
+    """将资源设为整租户授权（全员可见），仅租户角色可用；取消走单资源移除的降级路径。"""
+    ip, user_agent = client_meta(request)
+    service.set_tenant_wide(
+        role_id,
+        resource_type,
+        resource_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )

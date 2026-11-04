@@ -127,6 +127,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "tenant" if role_id is None else "role",
                         "granted_by": granted_by,
                     }
                     for tenant_id, role_id in grants
@@ -161,6 +162,7 @@ class PostgresResourceGrantRepository:
                     resource_id=resource_id,
                     tenant_id=tenant_id,
                     role_id=None,
+                    subject_type="tenant",
                     granted_by=granted_by,
                 )
             )
@@ -175,6 +177,7 @@ class PostgresResourceGrantRepository:
                             "resource_id": resource_id,
                             "tenant_id": tenant_id,
                             "role_id": role_id,
+                            "subject_type": "role",
                             "granted_by": granted_by,
                         }
                         for role_id in unique_role_ids
@@ -241,57 +244,109 @@ class PostgresResourceGrantRepository:
     def list_effective_granted_resource_ids(
         self, role_id: UUID, tenant_id: UUID, resource_type: str
     ) -> set[UUID]:
-        """读取角色有效授权的资源 ID：本角色显式授权或整租户授权。"""
+        """读取角色有效授权的资源 ID：本角色 role 档显式授权或 tenant 档整租户授权。"""
         rows = self._session.scalars(
             select(ResourceGrantModel.resource_id).where(
                 ResourceGrantModel.tenant_id == tenant_id,
                 ResourceGrantModel.resource_type == resource_type,
                 or_(
-                    ResourceGrantModel.role_id == role_id,
-                    ResourceGrantModel.role_id.is_(None),
+                    and_(
+                        ResourceGrantModel.subject_type == "role",
+                        ResourceGrantModel.role_id == role_id,
+                    ),
+                    ResourceGrantModel.subject_type == "tenant",
                 ),
             )
         ).all()
         return set(rows)
 
     def count_effective_granted(self, role_id: UUID, tenant_id: UUID, resource_type: str) -> int:
-        """统计角色在某类资源上的有效授权数量。"""
+        """统计角色在某类资源上的有效授权数量（role 档命中 + tenant 档）。"""
         count = self._session.scalar(
             select(func.count(distinct(ResourceGrantModel.resource_id))).where(
                 ResourceGrantModel.tenant_id == tenant_id,
                 ResourceGrantModel.resource_type == resource_type,
                 or_(
-                    ResourceGrantModel.role_id == role_id,
-                    ResourceGrantModel.role_id.is_(None),
+                    and_(
+                        ResourceGrantModel.subject_type == "role",
+                        ResourceGrantModel.role_id == role_id,
+                    ),
+                    ResourceGrantModel.subject_type == "tenant",
                 ),
             )
         )
         return int(count or 0)
 
     def list_tenant_wide_resource_ids(self, tenant_id: UUID, resource_type: str) -> set[UUID]:
-        """读取某租户整租户授权的资源 ID。"""
+        """读取某租户 tenant 档（整租户授权）的资源 ID。"""
         rows = self._session.scalars(
             select(ResourceGrantModel.resource_id).where(
                 ResourceGrantModel.tenant_id == tenant_id,
                 ResourceGrantModel.resource_type == resource_type,
-                ResourceGrantModel.role_id.is_(None),
+                ResourceGrantModel.subject_type == "tenant",
             )
         ).all()
         return set(rows)
 
     def has_tenant_wide(self, resource_type: str, resource_id: UUID, tenant_id: UUID) -> bool:
-        """资源是否存在对指定租户的整租户授权。"""
+        """资源是否存在对指定租户的 tenant 档授权。"""
         row = self._session.scalar(
             select(ResourceGrantModel.id)
             .where(
                 ResourceGrantModel.tenant_id == tenant_id,
                 ResourceGrantModel.resource_type == resource_type,
                 ResourceGrantModel.resource_id == resource_id,
-                ResourceGrantModel.role_id.is_(None),
+                ResourceGrantModel.subject_type == "tenant",
             )
             .limit(1)
         )
         return row is not None
+
+    def set_tenant_wide(
+        self,
+        resource_type: str,
+        resource_id: UUID,
+        tenant_id: UUID,
+        granted_by: UUID | None,
+    ) -> None:
+        """整租户授权（tenant 档）：清除该租户对此资源的 role 档行，并幂等写入 tenant 档行。"""
+        self._session.execute(
+            delete(ResourceGrantModel).where(
+                ResourceGrantModel.resource_type == resource_type,
+                ResourceGrantModel.resource_id == resource_id,
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.subject_type == "role",
+            )
+        )
+        self._session.execute(
+            pg_insert(ResourceGrantModel)
+            .values(
+                resource_type=resource_type,
+                resource_id=resource_id,
+                tenant_id=tenant_id,
+                role_id=None,
+                subject_type="tenant",
+                granted_by=granted_by,
+            )
+            .on_conflict_do_nothing(
+                index_elements=["resource_type", "resource_id", "tenant_id"],
+                # 必须与 ux_resource_grants_tenant_subject 的部分索引谓词完全一致
+                index_where=ResourceGrantModel.subject_type == "tenant",
+            )
+        )
+        self._session.flush()
+
+    def unset_tenant_wide(self, resource_type: str, resource_id: UUID, tenant_id: UUID) -> None:
+        """仅移除该租户对此资源的 tenant 档行，不影响 role 档授权。"""
+        self._session.execute(
+            delete(ResourceGrantModel).where(
+                ResourceGrantModel.resource_type == resource_type,
+                ResourceGrantModel.resource_id == resource_id,
+                ResourceGrantModel.tenant_id == tenant_id,
+                ResourceGrantModel.subject_type == "tenant",
+            )
+        )
+        self._session.flush()
 
     def list_for_role(self, role_id: UUID, resource_type: str) -> list[ResourceGrant]:
         """读取角色在某类资源上的全部授权明细。"""
@@ -331,6 +386,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -359,6 +415,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": tenant_id,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -366,7 +423,8 @@ class PostgresResourceGrantRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["resource_type", "resource_id", "tenant_id", "role_id"],
-                index_where=ResourceGrantModel.role_id.is_not(None),
+                # 必须与 ux_resource_grants_role_subject 的部分索引谓词完全一致
+                index_where=ResourceGrantModel.subject_type == "role",
             )
             .returning(ResourceGrantModel.id)
         )
@@ -437,6 +495,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -464,6 +523,7 @@ class PostgresResourceGrantRepository:
                         "resource_id": resource_id,
                         "tenant_id": PLATFORM_TENANT_ID,
                         "role_id": role_id,
+                        "subject_type": "role",
                         "granted_by": granted_by,
                     }
                     for resource_id in unique_ids
@@ -471,10 +531,10 @@ class PostgresResourceGrantRepository:
             )
             .on_conflict_do_nothing(
                 index_elements=["resource_type", "resource_id", "role_id"],
-                # 必须与 ux_resource_grants_platform_role 的部分索引谓词完全一致
+                # 必须与 ux_resource_grants_platform_role_subject 的部分索引谓词完全一致
                 index_where=and_(
+                    ResourceGrantModel.subject_type == "role",
                     ResourceGrantModel.tenant_id == PLATFORM_TENANT_ID,
-                    ResourceGrantModel.role_id.is_not(None),
                 ),
             )
             .returning(ResourceGrantModel.id)
@@ -511,4 +571,5 @@ class PostgresResourceGrantRepository:
             role_id=row.role_id,
             granted_by=row.granted_by,
             created_at=row.created_at,
+            subject_type=row.subject_type,
         )

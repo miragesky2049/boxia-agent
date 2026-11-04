@@ -45,14 +45,14 @@ export default function LoginPage() {
 
   const currentScopeCode = isPlatform ? PLATFORM_TENANT_CODE : (context?.tenant?.code ?? '')
   const scopeOptions = [
-    { label: '产品级运营管理平台', value: PLATFORM_TENANT_CODE },
+    { label: '产品级平台', value: PLATFORM_TENANT_CODE },
     ...selectableTenants.map((tenant) => ({ label: tenant.name, value: tenant.code })),
   ]
   // 部署环境只认域名（none）；本地回环主机走 header，本地子域名走域名跳转
   const canSwitchScope = context?.tenant_switch_mode !== 'none' && isPlatform
 
   if (user) {
-    return <Navigate to={user.must_change_password ? '/change-password' : '/agents'} replace />
+    return <Navigate to={user.must_change_password ? '/change-password' : '/apps'} replace />
   }
 
   const handleSubmit = async (values: LoginFormValues) => {
@@ -64,7 +64,7 @@ export default function LoginPage() {
         navigate('/change-password', { replace: true })
         return
       }
-      const next = safeNextPath(location.search, '/agents')
+      const next = safeNextPath(location.search, '/apps')
       navigate(next, { replace: true })
     } catch (err) {
       if (err instanceof ApiError) {
@@ -118,7 +118,7 @@ export default function LoginPage() {
           )}
           <h2>欢迎回来</h2>
           <p className="login-card__subtitle">
-            {isPlatform ? '登录产品级运营管理平台，维护全部租户' : '登录本租户运营管理平台'}
+            {isPlatform ? '登录产品级平台，维护全部租户' : '登录本租户平台'}
           </p>
 
           {canSwitchScope && (

@@ -13,7 +13,6 @@ class DocumentPayload(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     source_type: str = Field(default="text", max_length=32)
     content: str = Field(default="", max_length=200_000)
-    agent_id: UUID | None = Field(default=None)
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -24,7 +23,6 @@ class DocumentOut(BaseModel):
 
     id: UUID
     tenant_id: UUID | None = None
-    agent_id: UUID | None = None
     title: str
     source_type: str
     source_uri: str

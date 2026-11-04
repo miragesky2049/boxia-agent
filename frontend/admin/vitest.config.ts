@@ -8,6 +8,8 @@ export default defineConfig({
     globals: true,
     setupFiles: ['./src/test/setup.ts'],
     include: ['src/**/*.test.{ts,tsx}'],
+    // antd 表单/表格在 jsdom 下渲染较慢；全量并行时单用例可达 30s+，20s 会误报超时
+    testTimeout: 60000,
     coverage: {
       provider: 'v8',
       reporter: ['text', 'lcov'],

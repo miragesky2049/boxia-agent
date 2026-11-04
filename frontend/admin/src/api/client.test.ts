@@ -32,7 +32,7 @@ afterEach(() => {
 describe('request', () => {
   it('204 响应返回 undefined', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response(null, { status: 204 })))
-    await expect(request('/admin/skills/1', { method: 'DELETE' })).resolves.toBeUndefined()
+    await expect(request('/admin/resources/1', { method: 'DELETE' })).resolves.toBeUndefined()
   })
 
   it('错误响应携带 request_id、错误码与 Retry-After', async () => {

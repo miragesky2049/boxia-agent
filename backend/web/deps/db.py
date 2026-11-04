@@ -21,4 +21,7 @@ def get_uow(context: RequestContextDep) -> Iterator[SqlAlchemyUnitOfWork]:
         uow.close()
 
 
+# DDD 五期决策：UowDep 在 web 边界保持具体 SqlAlchemyUnitOfWork 类型（而非 UnitOfWork Protocol）。
+# 理由：8 个 router 与 apps_services 组合根工厂需要 `.session` 做 session-per-repo 装配，
+# Protocol 不暴露 session；组合根本就允许点名具体类，此处不视为依赖违规。
 UowDep = Annotated[SqlAlchemyUnitOfWork, Depends(get_uow)]

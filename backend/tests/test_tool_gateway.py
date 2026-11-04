@@ -10,8 +10,8 @@ import httpx
 import pytest
 
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.engine.context import AgentRunContext
-from internal.engine.tool_gateway import (
+from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.agent.tool_gateway import (
     DEFAULT_RESPONSE_CLIP_BYTES,
     GatewayConfig,
     ToolClientError,
@@ -24,7 +24,7 @@ from internal.engine.tool_gateway import (
     _classify_http_response,
     _clip_response,
 )
-from internal.engine.tools import ToolExecutionError
+from internal.domain.agent.tools import ToolExecutionError
 
 
 def _run(coro: Any) -> Any:

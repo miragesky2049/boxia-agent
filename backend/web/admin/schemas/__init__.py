@@ -1,19 +1,5 @@
 """管理端请求/响应模型统一出口。"""
 
-from web.admin.schemas.agent import (
-    AgentConfig,
-    AgentOut,
-    AgentPayload,
-    AgentSummaryOut,
-    ChannelSettings,
-    ConversationSettings,
-    FaqItem,
-    KnowledgeSettings,
-    MemorySettings,
-    ModelSettings,
-    OtherSettings,
-    PromptSettings,
-)
 from web.admin.schemas.audit import AuditLogOut
 from web.admin.schemas.auth import (
     AdminUserCreateRequest,
@@ -27,17 +13,6 @@ from web.admin.schemas.auth import (
 )
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.context import AdminContextOut, PublicContextOut
-from web.admin.schemas.resource import (
-    ComponentOut,
-    ComponentPayload,
-    PromptOut,
-    PromptPayload,
-    ResourcePayload,
-    SkillOut,
-    SkillPayload,
-    ToolOut,
-    ToolPayload,
-)
 from web.admin.schemas.tenant import (
     AppEnv,
     PasswordPolicyOut,
@@ -54,39 +29,18 @@ __all__ = [
     "AdminUserOut",
     "AdminUserResetPasswordRequest",
     "AdminUserUpdateRequest",
-    "AgentConfig",
-    "AgentOut",
-    "AgentPayload",
-    "AgentSummaryOut",
     "AppEnv",
     "AuditLogOut",
     "ChangePasswordRequest",
-    "ChannelSettings",
-    "ComponentOut",
-    "ComponentPayload",
-    "ConversationSettings",
-    "FaqItem",
-    "KnowledgeSettings",
     "LoginRequest",
     "LoginResponse",
-    "MemorySettings",
-    "ModelSettings",
-    "OtherSettings",
     "PageOut",
     "PasswordPolicyOut",
-    "PromptOut",
-    "PromptPayload",
-    "PromptSettings",
     "PublicContextOut",
     "RefreshRequest",
-    "ResourcePayload",
-    "SkillOut",
-    "SkillPayload",
     "TenantCreateRequest",
     "TenantOut",
     "TenantResolution",
     "TenantSwitchMode",
     "TenantUpdateRequest",
-    "ToolOut",
-    "ToolPayload",
 ]

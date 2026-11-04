@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.audit_log import AuditLog
@@ -27,13 +27,15 @@ class PostgresAuditLogRepository:
     def __init__(self, session: Session):
         self._session = session
 
-    def record(self, values: dict[str, Any]) -> None:
-        """写入审计记录（调用方负责提交）。"""
+    def record(self, values: dict[str, Any]) -> UUID:
+        """写入审计记录并返回记录 ID（调用方负责提交；purge 快照需回填 audit_id，P3-6）。"""
         payload = dict(values)
         # JSONB 列由 psycopg 用标准 json 序列化，UUID 需先转为字符串
         payload["detail"] = _json_safe(payload.get("detail"))
-        self._session.add(AuditLogModel(**payload))
+        model = AuditLogModel(**payload)
+        self._session.add(model)
         self._session.flush()
+        return model.id
 
     def list_page(
         self,
@@ -58,6 +60,37 @@ class PostgresAuditLogRepository:
             .limit(page_size)
         ).all()
         return [self._to_entity(row) for row in rows], int(total)
+
+    def exists_with_detail(
+        self,
+        action: str,
+        tenant_id: UUID,
+        resource_type: str,
+        resource_id: str,
+        detail: dict[str, Any],
+    ) -> bool:
+        """JSONB 包含判定（@>），用于到期提醒等系统记录的去重键查询（P3-2）。"""
+        found = self._session.scalar(
+            select(AuditLogModel.id)
+            .where(
+                AuditLogModel.action == action,
+                AuditLogModel.tenant_id == tenant_id,
+                AuditLogModel.resource_type == resource_type,
+                AuditLogModel.resource_id == resource_id,
+                AuditLogModel.detail.contains(detail),
+            )
+            .limit(1)
+        )
+        return found is not None
+
+    def delete_all(self, tenant_id: UUID | None = None) -> int:
+        """清空审计日志；tenant_id 非空时只清该租户，否则清空全部（平台级）。"""
+        stmt = delete(AuditLogModel)
+        if tenant_id is not None:
+            stmt = stmt.where(AuditLogModel.tenant_id == tenant_id)
+        result = self._session.execute(stmt)
+        self._session.flush()
+        return int(result.rowcount or 0)
 
     @staticmethod
     def _to_entity(row: AuditLogModel) -> AuditLog:

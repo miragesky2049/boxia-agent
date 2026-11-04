@@ -24,8 +24,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.model.base import Base, UuidPrimaryKey
 
-RESOURCE_TYPES = ("agent", "skill", "tool", "component", "prompt")
-
 
 class RoleModel(Base):
     """roles 表：tenant_id 非空；平台角色 = PLATFORM_TENANT_ID（全零 UUID），租户角色 = 真实租户 ID。"""
@@ -66,7 +64,7 @@ class RoleModel(Base):
 
 
 class UserModel(Base):
-    """users 表：租户最终用户，绑定租户角色。"""
+    """users 表：租户最终用户；角色可暂缺，授权在「用户授权」统一维护。"""
 
     __tablename__ = "users"
     __table_args__ = (
@@ -97,7 +95,7 @@ class UserModel(Base):
     password_hash: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    role_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    role_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
@@ -173,21 +171,27 @@ class UserRefreshTokenModel(Base):
 
 
 class ResourceGrantModel(Base):
-    """resource_grants 表：资源对租户或租户角色的授权。
+    """resource_grants 表（旧 RBAC 风格）：资源对租户或租户角色的授权。
+
+    与 v4 的 tenant_resource_entitlement（原名单数 resource_grant）表区别：
+    - tenant_resource_entitlement：v4 市场场景，resource_id + tenant_id 直接授权
+    - resource_grants（复数，本表）：旧管理后台 RBAC 场景，按 resource_type + role_id 粒度授权
 
     tenant_id 非空；产品级授权 = PLATFORM_TENANT_ID（全零 UUID），租户授权 = 真实租户 ID。
-    role_id 为空表示授予整个租户；非空表示仅授予该租户的指定角色。
+    subject_type='tenant' 表示授予整个租户（role_id 必须为空，全员可见+新增角色自动继承）；
+    subject_type='role' 表示仅授予指定角色（role_id 非空）。0057 起以 subject_type 显式表达。
     """
 
     __tablename__ = "resource_grants"
     __table_args__ = (
         CheckConstraint(
-            "resource_type IN ('agent', 'skill', 'tool', 'component', 'prompt')",
+            "resource_type IN ('app', 'tool', 'skill', 'prompt', 'knowledge')",
             name="ck_resource_grants_type",
         ),
         CheckConstraint(
-            "role_id IS NOT NULL OR tenant_id IS NOT NULL",
-            name="ck_resource_grants_scope",
+            "(subject_type = 'tenant' AND role_id IS NULL) "
+            "OR (subject_type = 'role' AND role_id IS NOT NULL)",
+            name="ck_resource_grants_subject",
         ),
         ForeignKeyConstraint(
             ["role_id", "tenant_id"],
@@ -198,31 +202,29 @@ class ResourceGrantModel(Base):
         Index("ix_resource_grants_resource", "resource_type", "resource_id"),
         Index("ix_resource_grants_tenant_role", "tenant_id", "resource_type", "role_id"),
         Index(
-            "ux_resource_grants_tenant_wide",
+            "ux_resource_grants_tenant_subject",
             "resource_type",
             "resource_id",
             "tenant_id",
             unique=True,
-            postgresql_where=text("role_id IS NULL"),
+            postgresql_where=text("subject_type = 'tenant'"),
         ),
         Index(
-            "ux_resource_grants_role",
+            "ux_resource_grants_role_subject",
             "resource_type",
             "resource_id",
             "tenant_id",
             "role_id",
             unique=True,
-            postgresql_where=text("role_id IS NOT NULL"),
+            postgresql_where=text("subject_type = 'role'"),
         ),
         Index(
-            "ux_resource_grants_platform_role",
+            "ux_resource_grants_platform_role_subject",
             "resource_type",
             "resource_id",
             "role_id",
             unique=True,
-            postgresql_where=text(
-                f"tenant_id = '{PLATFORM_TENANT_ID}' AND role_id IS NOT NULL"
-            ),
+            postgresql_where=text(f"subject_type = 'role' AND tenant_id = '{PLATFORM_TENANT_ID}'"),
         ),
     )
 
@@ -234,6 +236,9 @@ class ResourceGrantModel(Base):
     )
     role_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("roles.id", ondelete="CASCADE")
+    )
+    subject_type: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="role", server_default="role"
     )
     # 授权人可能是平台管理员（admin_users）或租户账号（users），无法用单一外键约束
     granted_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))

@@ -54,7 +54,7 @@ def test_login_response_no_store(client: TestClient) -> None:
 
 
 def test_error_body_contains_request_id(client: TestClient) -> None:
-    response = client.get("/api/v1/admin/skills")
+    response = client.get("/api/v1/admin/resources")
 
     assert response.status_code == 401
     assert response.json()["request_id"] == response.headers["X-Request-ID"]

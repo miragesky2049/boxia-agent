@@ -65,6 +65,34 @@ def test_user_crud_and_duplicate_username(
     assert site.get("/api/v1/admin/users", headers=headers).json()["total"] == 1
 
 
+def test_user_can_be_created_without_role(
+    client: TestClient, auth_headers, tenant_client, user_tenant_client
+) -> None:
+    create_tenant(client, auth_headers)
+    site, headers, _ = tenant_admin_client(tenant_client, "acme")
+
+    response = site.post(
+        "/api/v1/admin/users",
+        json={
+            "username": "norole",
+            "password": USER_PASSWORD,
+            "display_name": "无角色用户",
+        },
+        headers=headers,
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["role_id"] is None
+    assert created["role_ids"] == []
+
+    listed = site.get("/api/v1/admin/users", headers=headers)
+    assert listed.status_code == 200
+    assert "norole" in {item["username"] for item in listed.json()["items"]}
+
+    # 未分配角色前不可登录，需先在「用户授权」中授权
+    assert _login_user(user_tenant_client, "norole").status_code == 403
+
+
 def test_user_role_must_belong_to_tenant(
     client: TestClient, auth_headers, tenant_client
 ) -> None:

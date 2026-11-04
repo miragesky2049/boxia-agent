@@ -14,14 +14,14 @@ from internal.application.errors import (
     NotFoundError,
     ValidationError,
 )
-from internal.application.resource_service import MAX_PAGE_SIZE
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import (
+    APP_RESOURCE_TYPE,
     RESOURCE_TYPES,
     GrantSummary,
     ResourceGrant,
 )
-from internal.domain.entity.common import Page
+from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.request_context import RequestContext
 from internal.domain.repository.protocols import UnitOfWork
 
@@ -129,13 +129,6 @@ class GrantService:
             self._uow.resource_grants.replace_for_resource(
                 resource_type, resource_id, normalized, actor_id
             )
-            if resource_type == "agent":
-                # 兼容旧的产品级授权入口：授权中的租户即视为已开通该产品智能体
-                self._uow.agent_openings.sync_for_resource(
-                    resource_id,
-                    {tenant_id for tenant_id, _ in normalized},
-                    actor_id,
-                )
             tenant_id = None
         else:
             if resource.tenant_id == PLATFORM_TENANT_ID:
@@ -204,15 +197,14 @@ class GrantService:
         for resource_id in ids:
             before = before_by_resource.get(resource_id, [])
             new_roles = self._merge_roles(mode, scope_roles, before)
-            self._uow.resource_grants.replace_for_tenant(
-                resource_type, resource_id, target_tenant, new_roles, actor_id
-            )
-            if resource_type == "agent" and self._context.is_platform:
-                # 批量授权同时维护开通关系：清空授权即关闭，其余模式一律保持开通
-                if new_roles == []:
-                    self._uow.agent_openings.close(resource_id, target_tenant)
-                else:
-                    self._uow.agent_openings.open(resource_id, target_tenant, actor_id)
+            if new_roles is None:
+                self._uow.resource_grants.set_tenant_wide(
+                    resource_type, resource_id, target_tenant, actor_id
+                )
+            else:
+                self._uow.resource_grants.replace_for_tenant(
+                    resource_type, resource_id, target_tenant, new_roles, actor_id
+                )
             record_audit(
                 self._uow,
                 action="grant.updated",
@@ -363,9 +355,14 @@ class GrantService:
             return []
         if mode == "replace":
             return scope_roles
-        if scope_roles is None or any(grant.role_id is None for grant in before):
+        if scope_roles is None or any(grant.subject_type == "tenant" for grant in before):
             return None
-        existing_roles = {grant.role_id for grant in before if grant.role_id is not None}
+        # role 档 role_id 必非空（0057 CHECK 保证），判空仅为收窄 Optional 类型
+        existing_roles = {
+            grant.role_id
+            for grant in before
+            if grant.subject_type == "role" and grant.role_id is not None
+        }
         return sorted(existing_roles | set(scope_roles))
 
     def _to_overview(self, resource: Any, summary: GrantSummary | None) -> ResourceGrantOverview:
@@ -386,14 +383,9 @@ class GrantService:
         """按资源类型返回当前作用域的仓储。"""
         if resource_type not in RESOURCE_TYPES:
             raise ValidationError(f"资源类型必须是 {', '.join(RESOURCE_TYPES)} 之一")
-        repositories = {
-            "agent": self._uow.agents,
-            "skill": self._uow.skills,
-            "tool": self._uow.tools,
-            "component": self._uow.components,
-            "prompt": self._uow.prompts,
-        }
-        return repositories[resource_type]
+        if resource_type == APP_RESOURCE_TYPE:
+            return self._uow.app_grants
+        return self._uow.resource_repo(resource_type)
 
     def _require_resource(self, resource_type: str, resource_id: UUID) -> Any:
         resource = self._resource_repository(resource_type).get(resource_id)
@@ -439,11 +431,20 @@ class GrantService:
         return self._context.tenant_id
 
 
-def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, UUID | None]]:
-    return [{"tenant_id": grant.tenant_id, "role_id": grant.role_id} for grant in grants]
+def _grant_views(grants: list[ResourceGrant]) -> list[dict[str, Any]]:
+    return [
+        {
+            "tenant_id": grant.tenant_id,
+            "role_id": grant.role_id,
+            "subject_type": grant.subject_type,
+        }
+        for grant in grants
+    ]
 
 
-def _after_view(tenant_id: UUID, role_ids: list[UUID] | None) -> list[dict[str, UUID | None]]:
+def _after_view(tenant_id: UUID, role_ids: list[UUID] | None) -> list[dict[str, Any]]:
     if role_ids is None:
-        return [{"tenant_id": tenant_id, "role_id": None}]
-    return [{"tenant_id": tenant_id, "role_id": role_id} for role_id in role_ids]
+        return [{"tenant_id": tenant_id, "role_id": None, "subject_type": "tenant"}]
+    return [
+        {"tenant_id": tenant_id, "role_id": role_id, "subject_type": "role"} for role_id in role_ids
+    ]
