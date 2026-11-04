@@ -1,23 +1,36 @@
 # boxia-agent 项目手册
 
+[![License: AGPL-3.0 + Commercial](https://img.shields.io/badge/license-AGPL--3.0%20%2B%20Commercial-blue.svg)](./OPEN-SOURCE-POLICY.md)
+
 > 面向企业内部的 **AI 应用编排与运营平台**。管理员在管理端用可视化画布组合模型、提示词、工具与知识库，把编排好的应用发布到市场，按租户与角色授权给最终用户使用。
 >
 > 内置 RAG 检索增强（pgvector + bge embedding + cross-encoder rerank）、统一工具治理网关（熔断 / 限流 / 重试 / 连接池 / SSRF 防护）、HTTP 与 MCP 双工具协议、多租户行级数据隔离、RBAC 权限、审计日志与 OpenTelemetry 可观测性。技术栈为 FastAPI + React 19 + PostgreSQL 17 + Redis + Celery，Docker Compose 一键拉起。
 
 ---
 
-## 📜 开源协议（双授权）
+## 📜 开源协议
 
-本项目采用 **AGPL-3.0 + 商业授权** 双授权模式，两种授权互斥，须二选一：
+**个人学习、研究、非商业使用免费；企业闭源商用、对外提供 SaaS 须购买商业授权。**
+本项目采用 **AGPL-3.0 + 商业授权** 双授权，两者互斥、二选一：
 
-- **选项 A：AGPL-3.0** —— 遵守 AGPL-3.0 全部条款（衍生代码同协议开源、网络对外提供服务也须公开源码）即可免费使用。协议全文见 [LICENSE-AGPL](./LICENSE-AGPL)，双授权说明见 [LICENSE](./LICENSE)。
-- **选项 B：商业授权** —— 不想开源衍生代码、需闭源集成 / SaaS 托管 / 私有化部署 / 商业支持时，需向作者购买商业授权。档位、权利、限制与购买方式见 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
+| 你的场景 | 适用授权 | 是否付费 |
+| --- | --- | --- |
+| 个人学习 / 研究 / 毕设 / 技术验证 | AGPL-3.0 | **免费** |
+| 个人开源项目，代码本来就公开 | AGPL-3.0 | **免费** |
+| 企业内部使用，愿意公开修改后的源码 | AGPL-3.0 | **免费** |
+| 企业内部使用，不愿公开源码 | 商业授权 | **付费** |
+| 闭源集成 / SaaS 托管 / 白标转售 | 商业授权 | **付费** |
+
+- 协议全文：[LICENSE](./LICENSE)（AGPL-3.0）
+- 授权选择指南：[OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md)
+- 商业授权条款与价格：[COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)
+- 商业授权联系：**zhm2049@163.com**
 
 ### 归属声明（Attribution）
 
 本项目的工作流画布与节点 DSL 设计参考了 [coze-studio](https://github.com/coze-dev/coze-studio)（Apache License 2.0）。依据 Apache 2.0 第 4(b) 条，本项目在分发时保留了原作者版权声明与协议文本：
 
-- Apache 2.0 协议全文：[LICENSE-APACHE](./LICENSE-APACHE)
+- Apache 2.0 协议全文：[third_party/coze-studio/APACHE-2.0.txt](./third_party/coze-studio/APACHE-2.0.txt)
 - 归属与衍生说明：[NOTICE](./NOTICE)
 - 原项目：https://github.com/coze-dev/coze-studio
 
@@ -181,4 +194,5 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 ## 15. 许可证
 
-本项目代码采用 [Apache License 2.0](./LICENSE-APACHE)；整体分发另见顶部双授权说明与 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
+主协议为 [AGPL-3.0](./LICENSE)，商业使用另见 [OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md) 与 [COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)。
+第三方组件（coze-studio，Apache-2.0）的版权与协议声明见 [NOTICE](./NOTICE)。
