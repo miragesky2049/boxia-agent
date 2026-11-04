@@ -12,13 +12,9 @@
 
 本项目采用 [Apache License 2.0](./LICENSE) 开源，可自由使用、修改、分发，包括商业用途，只需保留版权与许可声明。
 
-### 归属声明（Attribution）
+### 兼容性与出处
 
-本项目的工作流画布与节点 DSL 设计参考了 [coze-studio](https://github.com/coze-dev/coze-studio)（Apache License 2.0）。依据 Apache 2.0 第 4(b) 条，本项目在分发时保留了原作者版权声明与协议文本：
-
-- 协议全文：[LICENSE](./LICENSE)
-- 归属与衍生说明：[NOTICE](./NOTICE)
-- 原项目：https://github.com/coze-dev/coze-studio
+本项目的画布 DSL（节点类型编码、字段命名）与 Coze 画布格式保持兼容，格式定义参考 [coze-studio](https://github.com/coze-dev/coze-studio)（Apache-2.0）。本项目未包含其源代码，相关出处说明见 [NOTICE](./NOTICE)。
 
 ---
 
