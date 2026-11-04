@@ -5,15 +5,15 @@ Copyright (c) 2026-present boxia-agent contributors
 归属声明 (Attribution Notice)
 ================================================================
 
-本项目的工作流画布（workflow canvas）与节点 DSL 设计参考了
-coze-studio（https://github.com/coze-dev/coze-studio）的开源实现。
+本项目的画布（workflow canvas）与节点 DSL 在格式上兼容
+coze-studio（https://github.com/coze-dev/coze-studio）的画布格式。
 
 coze-studio 采用 Apache License 2.0 协议发布：
   - 原作者：coze-dev Authors
   - 源代码：https://github.com/coze-dev/coze-studio
 
-依据 Apache License 2.0 第 4(b) 条，本衍生作品在分发时保留了
-原项目的版权声明、专利声明、商标声明与协议文本，未删除原作者归属。
+本项目未包含 coze-studio 的源代码，仅与其画布格式保持兼容；
+此处保留出处与版权归属说明，以便追溯格式来源。
 
 注意：
   - 参考自 coze-studio 的设计文档、DSL 定义、节点类型枚举等，
