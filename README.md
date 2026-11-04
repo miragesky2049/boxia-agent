@@ -1,6 +1,6 @@
 # boxia-agent 项目手册
 
-[![License: AGPL-3.0 + Commercial](https://img.shields.io/badge/license-AGPL--3.0%20%2B%20Commercial-blue.svg)](./OPEN-SOURCE-POLICY.md)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 
 > 面向企业内部的 **AI 应用编排与运营平台**。管理员在管理端用可视化画布组合模型、提示词、工具与知识库，把编排好的应用发布到市场，按租户与角色授权给最终用户使用。
 >
@@ -10,27 +10,13 @@
 
 ## 📜 开源协议
 
-**个人学习、研究、非商业使用免费；企业闭源商用、对外提供 SaaS 须购买商业授权。**
-本项目采用 **AGPL-3.0 + 商业授权** 双授权，两者互斥、二选一：
-
-| 你的场景 | 适用授权 | 是否付费 |
-| --- | --- | --- |
-| 个人学习 / 研究 / 毕设 / 技术验证 | AGPL-3.0 | **免费** |
-| 个人开源项目，代码本来就公开 | AGPL-3.0 | **免费** |
-| 企业内部使用，愿意公开修改后的源码 | AGPL-3.0 | **免费** |
-| 企业内部使用，不愿公开源码 | 商业授权 | **付费** |
-| 闭源集成 / SaaS 托管 / 白标转售 | 商业授权 | **付费** |
-
-- 协议全文：[LICENSE](./LICENSE)（AGPL-3.0）
-- 授权选择指南：[OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md)
-- 商业授权条款与价格：[COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)
-- 商业授权联系：**zhm2049@163.com**
+本项目采用 [Apache License 2.0](./LICENSE) 开源，可自由使用、修改、分发，包括商业用途，只需保留版权与许可声明。
 
 ### 归属声明（Attribution）
 
 本项目的工作流画布与节点 DSL 设计参考了 [coze-studio](https://github.com/coze-dev/coze-studio)（Apache License 2.0）。依据 Apache 2.0 第 4(b) 条，本项目在分发时保留了原作者版权声明与协议文本：
 
-- Apache 2.0 协议全文：[third_party/coze-studio/APACHE-2.0.txt](./third_party/coze-studio/APACHE-2.0.txt)
+- 协议全文：[LICENSE](./LICENSE)
 - 归属与衍生说明：[NOTICE](./NOTICE)
 - 原项目：https://github.com/coze-dev/coze-studio
 
@@ -194,5 +180,4 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 ## 15. 许可证
 
-主协议为 [AGPL-3.0](./LICENSE)，商业使用另见 [OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md) 与 [COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)。
-第三方组件（coze-studio，Apache-2.0）的版权与协议声明见 [NOTICE](./NOTICE)。
+本项目采用 [Apache License 2.0](./LICENSE) 开源。第三方组件（coze-studio，Apache-2.0）的版权与归属声明见 [NOTICE](./NOTICE)。
