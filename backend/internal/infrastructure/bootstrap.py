@@ -21,7 +21,7 @@ def ensure_platform_admin(settings: Settings) -> None:
     仅当 admin_auto_init_enabled（开关开启 + 密码已配置）且 admin_users 表为空时执行：
     1. 校验初始密码强度
     2. 查找配置的平台角色（默认 superadmin）
-    3. 插入首个平台管理员账号
+    3. 插入首个平台管理员账号（ON CONFLICT 兜底多副本并发首启竞态）
     """
     if not settings.admin_auto_init_enabled:
         if settings.admin_auto_init:
@@ -61,12 +61,13 @@ def ensure_platform_admin(settings: Settings) -> None:
             return
 
         password_hash = hash_password(raw_password)
-        conn.execute(
+        result = conn.execute(
             text(
                 "INSERT INTO admin_users "
                 "(id, username, password_hash, display_name, role_id, is_active, "
                 "must_change_password, password_changed_at) "
-                "VALUES (:id, :username, :hash, :name, :role_id, TRUE, :must_change, now())"
+                "VALUES (:id, :username, :hash, :name, :role_id, TRUE, :must_change, now()) "
+                "ON CONFLICT (username) DO NOTHING"
             ),
             {
                 "id": new_uuid(),
@@ -77,7 +78,10 @@ def ensure_platform_admin(settings: Settings) -> None:
                 "must_change": must_change,
             },
         )
-        logger.info("自动初始化平台管理员账号成功: %s", username)
+        if result.rowcount == 1:
+            logger.info("自动初始化平台管理员账号成功: %s", username)
+        else:
+            logger.info("平台管理员 %s 已由并发启动的其他实例创建，本实例跳过", username)
 
 
 def ensure_model_catalog() -> None:

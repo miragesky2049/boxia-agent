@@ -336,7 +336,9 @@ ADMIN_INITIAL_MUST_CHANGE_PASSWORD=true
 1. `ADMIN_AUTO_INIT=true`
 2. `ADMIN_INITIAL_PASSWORD` 非空
 
-执行时若 `admin_users` 表为空（首次部署），会自动创建首个平台管理员账号；表中已有账号则跳过。密码不符合策略、角色不存在时跳过并输出告警日志。
+执行时若 `admin_users` 表为空（首次部署），会自动创建首个平台管理员账号；表中已有账号则跳过。密码不符合策略、角色不存在时跳过并输出告警日志。多副本同时首启时由 `username` 唯一索引兜底，仅一个实例实际写入。
+
+> **首次登录改密成功后**，从 env 文件移除 `ADMIN_INITIAL_PASSWORD`（或关闭 `ADMIN_AUTO_INIT`）并重启；该配置仅空表时生效一次，移除不影响已建账号，避免初始密码长期残留在 env 文件和容器环境中。
 
 **方式 B：手动脚本（适合本地调试或自动化流水线）**
 

@@ -184,7 +184,7 @@ boxia-agent/
 | `OBJECT_STORAGE_ACCESS_KEY` / `OBJECT_STORAGE_SECRET_KEY` | 空 | 否 | 对象存储凭据                                                                                                                                          |
 | `OBJECT_STORAGE_BUCKET`       | 空                  | 否       | 对象存储桶名                                                                                                                                          |
 | `OBJECT_STORAGE_SECURE`       | `true`              | 否       | 是否使用 HTTPS 访问对象存储                                                                                                                           |
-| `ADMIN_AUTO_INIT`             | `false`             | 否       | 部署时是否自动初始化首个平台管理员（仅 admin 站点启动时生效）                                                                                          |
+| `ADMIN_AUTO_INIT`             | `false`             | 否       | 部署时是否自动初始化首个平台管理员（仅 admin 站点启动时生效；仅空表执行一次，首登改密后建议关闭）                                                          |
 | `ADMIN_INITIAL_USERNAME`      | `admin`             | 否       | 自动初始化的平台管理员用户名                                                                                                                          |
 | `ADMIN_INITIAL_DISPLAY_NAME`  | `系统管理员`        | 否       | 自动初始化的平台管理员显示名                                                                                                                          |
 | `ADMIN_INITIAL_PASSWORD`      | 空                  | 否       | 自动初始化的平台管理员密码；为空时跳过初始化                                                                                                          |

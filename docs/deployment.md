@@ -246,7 +246,9 @@ ADMIN_INITIAL_ROLE=superadmin
 ADMIN_INITIAL_MUST_CHANGE_PASSWORD=true
 ```
 
-**必须同时配置 `ADMIN_AUTO_INIT=true` 和 `ADMIN_INITIAL_PASSWORD` 才会执行**；只开开关不配密码会被跳过并输出日志。首次登录会强制改密。表中已有账号时自动跳过，不影响存量账号；密码不符合策略或角色不存在时跳过并输出告警日志。
+**必须同时配置 `ADMIN_AUTO_INIT=true` 和 `ADMIN_INITIAL_PASSWORD` 才会执行**；只开开关不配密码会被跳过并输出日志。首次登录会强制改密。表中已有账号时自动跳过，不影响存量账号；密码不符合策略或角色不存在时跳过并输出告警日志。多副本同时首启时依赖 `username` 唯一索引 + `ON CONFLICT DO NOTHING` 兜底，仅一个实例实际写入，不会产生重复账号。
+
+> **首次登录并改密成功后**，请从 `ops/.env.prod` 移除 `ADMIN_INITIAL_PASSWORD`（或直接关闭 `ADMIN_AUTO_INIT`）并重新部署。该配置只在 `admin_users` 表为空时生效一次，移除不影响已创建的账号；保留它会让初始密码长期残留在 env 文件、容器环境（`docker inspect` 可见）和部署记录中。
 
 **方式 B：手动脚本**
 
