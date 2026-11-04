@@ -151,6 +151,27 @@ boxia-agent/
 
 改对后 traceback 中的路径应全部落在 `boxia-agent\backend\.venv` 下。
 
+#### 常见坑：Windows 启动用户端（8001）与残留 worker
+
+用户端标准启动方式（在 `backend/` 目录下）：
+
+```bash
+uv run python -m web.app_user
+```
+
+`web/app_user.py` 的 `__main__` 内部调用 `uvicorn.run(..., reload=True)`，Windows 下由 uvicorn 切换到 selector 事件循环。**不要**直接执行 `uvicorn web.app_user:app`：Windows 默认 ProactorEventLoop，psycopg 异步连接会报 `Psycopg cannot use the 'ProactorEventLoop'`。
+
+修改后端代码后若仍复现旧错误，先确认没有残留 worker 占用 8001：
+
+```bash
+netstat -ano | grep ":8001.*LISTENING"
+powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Select-Object ProcessId,ParentProcessId,CommandLine"
+```
+
+父进程已不存在的 `multiprocessing-fork` 子进程是 reload 遗留的孤儿 worker，会继续用旧代码响应请求；用 `taskkill //F //PID <pid>` 清理后重启。
+
+此外，`AsyncPostgresSaver` 禁止在事件循环主线程调用同步接口，LangGraph 的 state 查询必须使用 `aget_state` / `aget_state_history` / `alist`，否则会报 `Synchronous calls to AsyncPostgresSaver are only allowed from a different thread`。
+
 ---
 
 ## 6. 配置说明

@@ -42,7 +42,7 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   'admin-users': { icon: <UserSwitchOutlined />, label: '管理员账号' },
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
   audit: { icon: <FileSearchOutlined />, label: '审计日志' },
-  entitlements: { icon: <GiftOutlined />, label: '租户开通' },
+  entitlements: { icon: <GiftOutlined />, label: '开通授权' },
   'role-access': { icon: <KeyOutlined />, label: '角色授权' },
 }
 

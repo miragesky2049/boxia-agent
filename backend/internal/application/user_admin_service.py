@@ -82,7 +82,7 @@ class UserAdminService:
         username: str,
         password: str,
         display_name: str,
-        role_ids: Sequence[UUID],
+        role_ids: Sequence[UUID] | None,
         is_active: bool,
         actor_id: UUID,
         actor_username: str,
@@ -96,35 +96,38 @@ class UserAdminService:
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> User:
-        """创建最终用户并绑定本租户角色。"""
+        """创建最终用户；角色可选，未指定时由「用户授权」页面统一分配。"""
         tenant_id = self._require_tenant()
         normalized = username.strip()
         if not _USERNAME_PATTERN.match(normalized):
             raise ValidationError("用户名需为 3-64 位字母、数字、下划线、点或短横线")
-        resolved_role_ids = self._require_roles(role_ids, tenant_id)
+        resolved_role_ids = (
+            self._require_roles(role_ids, tenant_id) if role_ids is not None else None
+        )
         if self._uow.users.username_exists(tenant_id, normalized):
             raise ConflictError("用户名已存在")
         validate_password_strength(password, normalized)
 
-        user = self._uow.users.create(
-            {
-                "tenant_id": tenant_id,
-                "username": normalized,
-                "password_hash": hash_password(password),
-                "display_name": display_name.strip() or normalized,
-                "is_active": is_active,
-                "role_id": resolved_role_ids[0],
-                "employee_no": employee_no.strip() if employee_no else None,
-                "phone": phone.strip() if phone else None,
-                "email": email.strip() if email else None,
-                "gender": gender,
-                "birth_date": birth_date,
-                "avatar_url": avatar_url,
-                "remark": remark,
-            }
-        )
-        self._uow.users.replace_roles(user.id, tenant_id, resolved_role_ids)
-        user = self._uow.users.get_by_id(user.id) or user
+        values: dict = {
+            "tenant_id": tenant_id,
+            "username": normalized,
+            "password_hash": hash_password(password),
+            "display_name": display_name.strip() or normalized,
+            "is_active": is_active,
+            "employee_no": employee_no.strip() if employee_no else None,
+            "phone": phone.strip() if phone else None,
+            "email": email.strip() if email else None,
+            "gender": gender,
+            "birth_date": birth_date,
+            "avatar_url": avatar_url,
+            "remark": remark,
+        }
+        if resolved_role_ids is not None:
+            values["role_id"] = resolved_role_ids[0]
+        user = self._uow.users.create(values)
+        if resolved_role_ids is not None:
+            self._uow.users.replace_roles(user.id, tenant_id, resolved_role_ids)
+            user = self._uow.users.get_by_id(user.id) or user
         record_audit(
             self._uow,
             action="user.created",
@@ -134,7 +137,7 @@ class UserAdminService:
             resource_id=str(user.id),
             ip=ip,
             user_agent=user_agent,
-            detail={"username": normalized, "role_ids": resolved_role_ids},
+            detail={"username": normalized, "role_ids": list(resolved_role_ids or ())},
             tenant_id=tenant_id,
         )
         self._uow.commit()

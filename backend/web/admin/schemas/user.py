@@ -16,7 +16,7 @@ class UserOut(BaseModel):
     username: str
     display_name: str
     is_active: bool
-    role_id: UUID
+    role_id: UUID | None = None
     role_ids: list[UUID] = []
     current_department_id: UUID | None = None
     current_department_name: str | None = None
@@ -53,7 +53,8 @@ class UserCreateRequest(BaseModel):
     username: str = Field(min_length=3, max_length=64)
     password: str = Field(min_length=1, max_length=128)
     display_name: str = Field(default="", max_length=64)
-    role_ids: list[UUID] = Field(min_length=1)
+    # 角色授权统一在「用户授权」页面维护，创建时可不指定角色
+    role_ids: list[UUID] | None = Field(default=None, min_length=1)
     is_active: bool = True
     # HR 基础字段
     employee_no: str | None = Field(default=None, max_length=64)

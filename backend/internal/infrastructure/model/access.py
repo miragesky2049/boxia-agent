@@ -64,7 +64,7 @@ class RoleModel(Base):
 
 
 class UserModel(Base):
-    """users 表：租户最终用户，绑定租户角色。"""
+    """users 表：租户最终用户；角色可暂缺，授权在「用户授权」统一维护。"""
 
     __tablename__ = "users"
     __table_args__ = (
@@ -95,7 +95,7 @@ class UserModel(Base):
     password_hash: Mapped[str] = mapped_column(String(100), nullable=False)
     display_name: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    role_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    role_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True), nullable=True)
     token_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     failed_login_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     locked_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
