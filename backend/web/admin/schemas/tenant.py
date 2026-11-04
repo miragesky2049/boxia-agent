@@ -43,6 +43,43 @@ class TenantUpdateRequest(BaseModel):
     is_active: bool | None = None
 
 
+class TenantDeleteOut(BaseModel):
+    """单租户删除结果。"""
+
+    tenant_id: UUID
+    code: str
+    audit_id: UUID
+    deleted: dict[str, int] = Field(default_factory=dict)
+
+
+class TenantBatchDeleteRequest(BaseModel):
+    """批量删除租户请求；confirm 必须显式传 true。"""
+
+    tenant_ids: list[UUID] = Field(min_length=1, max_length=100)
+    confirm: bool = False
+    reason: str = Field(default="", max_length=200)
+
+
+class TenantBatchDeleteItemOut(BaseModel):
+    """批量删除单项结果。"""
+
+    tenant_id: UUID
+    code: str | None = None
+    success: bool
+    audit_id: UUID | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+class TenantBatchDeleteOut(BaseModel):
+    """批量删除汇总结果（部分成功时 HTTP 仍为 200）。"""
+
+    total: int
+    succeeded: int
+    failed: int
+    items: list[TenantBatchDeleteItemOut]
+
+
 class PasswordPolicyOut(BaseModel):
     """密码策略，前端表单与后端校验共用同一份配置。"""
 

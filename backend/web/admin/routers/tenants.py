@@ -9,7 +9,10 @@ from pydantic import BaseModel, Field
 from internal.application.apps.tenant_settings_service import TenantSettingsService
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import (
+    TenantBatchDeleteOut,
+    TenantBatchDeleteRequest,
     TenantCreateRequest,
+    TenantDeleteOut,
     TenantOut,
     TenantUpdateRequest,
 )
@@ -115,6 +118,58 @@ def update_tenant(
         user_agent=user_agent,
     )
     return TenantOut.model_validate(tenant)
+
+
+@router.delete(
+    "/{tenant_id}",
+    response_model=TenantDeleteOut,
+    dependencies=[Depends(require_permission("button:tenant:delete"))],
+)
+def delete_tenant(
+    tenant_id: UUID,
+    request: Request,
+    service: TenantServiceDep,
+    principal: AdminAuthDep,
+    confirm: bool = Query(..., description="二次确认位，必须为 true"),
+) -> TenantDeleteOut:
+    """物理删除租户及其全部关联数据（仅平台 superadmin，不可逆）。"""
+    ip, user_agent = _client_meta(request)
+    result = service.delete(
+        tenant_id,
+        confirm=confirm,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return TenantDeleteOut.model_validate(result)
+
+
+@router.post(
+    "/batch",
+    response_model=TenantBatchDeleteOut,
+    dependencies=[Depends(require_permission("button:tenant:delete"))],
+)
+def batch_delete_tenants(
+    payload: TenantBatchDeleteRequest,
+    request: Request,
+    service: TenantServiceDep,
+    principal: AdminAuthDep,
+) -> TenantBatchDeleteOut:
+    """批量物理删除租户：逐租户独立事务，部分成功，返回每项明细。"""
+    ip, user_agent = _client_meta(request)
+    result = service.batch_delete(
+        payload.tenant_ids,
+        confirm=payload.confirm,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        ip=ip,
+        user_agent=user_agent,
+        reason=payload.reason,
+    )
+    return TenantBatchDeleteOut.model_validate(result)
 
 
 # ========== T16 租户运行时配置（默认模型 + 插件白名单）==========

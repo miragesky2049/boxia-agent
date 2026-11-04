@@ -612,6 +612,8 @@ ingest 状态机：`pending → queued → processing → ready` 或 `failed`（
 | PATCH | `/admin/tenants/{id}`         | 修改租户名称或启用状态               |
 | GET   | `/admin/tenants/{id}/settings`| 读取租户运行时配置（默认模型/白名单）|
 | PUT   | `/admin/tenants/{id}/settings`| 覆盖式写入租户运行时配置             |
+| DELETE | `/admin/tenants/{id}?confirm=true` | 永久删除租户并级联清除其全部数据（`button:tenant:delete`，仅平台 superadmin；平台内置租户禁止删除）|
+| POST   | `/admin/tenants/batch`       | 批量永久删除（1-100 个，逐租户独立事务、部分成功，恒返回 200 与逐项明细；同上权限）|
 
 组织架构：
 

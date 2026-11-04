@@ -22,6 +22,29 @@ export interface Tenant {
   updated_at: string
 }
 
+export interface TenantDeleteResult {
+  tenant_id: string
+  code: string
+  audit_id: string
+  deleted: Record<string, number>
+}
+
+export interface TenantBatchDeleteItem {
+  tenant_id: string
+  code: string | null
+  success: boolean
+  audit_id: string | null
+  error_code: string | null
+  error: string | null
+}
+
+export interface TenantBatchDeleteResult {
+  total: number
+  succeeded: number
+  failed: number
+  items: TenantBatchDeleteItem[]
+}
+
 export interface PasswordPolicy {
   min_length: number
   max_bytes: number

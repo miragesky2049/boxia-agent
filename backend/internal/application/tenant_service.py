@@ -2,17 +2,21 @@
 
 from __future__ import annotations
 
+import logging
 import re
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from internal.application.audit import record_audit
 from internal.application.errors import (
+    AppError,
     ConflictError,
     ForbiddenError,
     NotFoundError,
     ValidationError,
 )
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import SYSTEM_ROLE_SEEDS
 from internal.domain.entity.hr_dictionary_seed import DEFAULT_HR_DICTIONARY_ITEMS
 from internal.domain.entity.permission import DEFAULT_ROLE_PERMISSION_CODES
@@ -21,7 +25,14 @@ from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.id.uuid7 import new_uuid
+from internal.infrastructure.repository.postgres_tenant_purge_repository import (
+    PostgresTenantPurgeRepository,
+)
 from internal.infrastructure.security.password import hash_password, validate_password_strength
+
+logger = logging.getLogger(__name__)
+
+_BATCH_DELETE_LIMIT = 100
 
 _CODE_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
 _RESERVED_CODES = {"www", "api", "admin", "static", "assets", "platform"}
@@ -190,6 +201,157 @@ class TenantService:
         )
         self._uow.commit()
         return updated
+
+    def delete(
+        self,
+        tenant_id: UUID,
+        *,
+        confirm: bool,
+        actor_id: UUID,
+        actor_username: str,
+        actor_role_code: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """物理删除租户及其全部关联数据（不可逆）。
+
+        仅平台 superadmin，confirm=True 为二次确认位；平台内置租户禁止删除。
+        返回删除计数与审计 id。
+        """
+        self._require_platform()
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("租户删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除租户为不可逆操作，需显式二次确认")
+        if tenant_id == PLATFORM_TENANT_ID:
+            raise ForbiddenError("平台租户为系统内置租户，禁止删除")
+        tenant = self._uow.tenants.get_by_id(tenant_id)
+        if tenant is None:
+            raise NotFoundError("租户不存在")
+
+        try:
+            purge = PostgresTenantPurgeRepository(self._uow.session)
+            purge.configure_timeouts()
+            snapshot = purge.snapshot(tenant_id)
+            deleted = purge.purge_business_data(tenant_id)
+            audit_id = record_audit(
+                self._uow,
+                action="tenant.deleted",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="tenant",
+                resource_id=str(tenant_id),
+                ip=ip,
+                user_agent=user_agent,
+                detail={
+                    "code": tenant.code,
+                    "name": tenant.name,
+                    "reason": reason,
+                    "snapshot": snapshot,
+                    "deleted": deleted,
+                },
+                tenant_id=None,
+            )
+            # 平台侧审计先落库，再清除被删租户自身审计行
+            self._uow.session.flush()
+            deleted["audit_logs"] = purge.delete_audit_logs(tenant_id)
+            purge.delete_tenant_row(tenant_id)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+        return {
+            "tenant_id": str(tenant_id),
+            "code": tenant.code,
+            "audit_id": str(audit_id),
+            "deleted": deleted,
+        }
+
+    def batch_delete(
+        self,
+        tenant_ids: list[UUID],
+        *,
+        confirm: bool,
+        actor_id: UUID,
+        actor_username: str,
+        actor_role_code: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """批量物理删除租户：逐租户独立事务，部分成功，返回每项明细。"""
+        self._require_platform()
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("租户删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除租户为不可逆操作，需显式二次确认")
+        unique_ids = list(dict.fromkeys(tenant_ids))
+        if not unique_ids:
+            raise ValidationError("待删除租户列表不能为空")
+        if len(unique_ids) > _BATCH_DELETE_LIMIT:
+            raise ValidationError(f"单次批量删除不能超过 {_BATCH_DELETE_LIMIT} 个租户")
+
+        items: list[dict[str, Any]] = []
+        succeeded = 0
+        for tenant_id in unique_ids:
+            code: str | None = None
+            existing = self._uow.tenants.get_by_id(tenant_id)
+            if existing is not None:
+                code = existing.code
+            try:
+                result = self.delete(
+                    tenant_id,
+                    confirm=True,
+                    actor_id=actor_id,
+                    actor_username=actor_username,
+                    actor_role_code=actor_role_code,
+                    ip=ip,
+                    user_agent=user_agent,
+                    reason=reason,
+                )
+            except AppError as exc:
+                items.append(
+                    {
+                        "tenant_id": str(tenant_id),
+                        "code": code,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": exc.code,
+                        "error": exc.message,
+                    }
+                )
+                continue
+            except Exception:
+                logger.exception("批量删除租户失败 tenant_id=%s", tenant_id)
+                items.append(
+                    {
+                        "tenant_id": str(tenant_id),
+                        "code": code,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": "INTERNAL_ERROR",
+                        "error": "删除失败，请稍后重试",
+                    }
+                )
+                continue
+            succeeded += 1
+            items.append(
+                {
+                    "tenant_id": result["tenant_id"],
+                    "code": result["code"],
+                    "success": True,
+                    "audit_id": result["audit_id"],
+                    "error_code": None,
+                    "error": None,
+                }
+            )
+        return {
+            "total": len(unique_ids),
+            "succeeded": succeeded,
+            "failed": len(unique_ids) - succeeded,
+            "items": items,
+        }
 
     def _require_platform(self) -> None:
         if not self._context.is_platform:

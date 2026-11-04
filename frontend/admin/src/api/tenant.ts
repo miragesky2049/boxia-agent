@@ -4,7 +4,9 @@ import type {
   PageResult,
   PublicContext,
   Tenant,
+  TenantBatchDeleteResult,
   TenantCreatePayload,
+  TenantDeleteResult,
   TenantUpdatePayload,
 } from './types'
 
@@ -49,5 +51,18 @@ export async function updateTenant(id: string, payload: TenantUpdatePayload): Pr
   return request<Tenant>(`/admin/tenants/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  })
+}
+
+export async function deleteTenant(id: string): Promise<TenantDeleteResult> {
+  return request<TenantDeleteResult>(`/admin/tenants/${id}?confirm=true`, {
+    method: 'DELETE',
+  })
+}
+
+export async function batchDeleteTenants(tenantIds: string[]): Promise<TenantBatchDeleteResult> {
+  return request<TenantBatchDeleteResult>('/admin/tenants/batch', {
+    method: 'POST',
+    body: JSON.stringify({ tenant_ids: tenantIds, confirm: true }),
   })
 }
