@@ -32,7 +32,7 @@
 - **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
 - **管理端**：React 19 + TypeScript + Ant Design + ReactFlow，负责应用画布、市场、资源、工具、授权、租户与审计管理。
 - **用户端**：React + TypeScript，最终用户登录后浏览可见应用并直接对话。
-- **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（记忆 / Celery）+ Celery（知识库异步 ingest）。
+- **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（记忆 / Celery）+ Celery（知识库异步 ingest + 权益周期任务）。
 
 ### 1.3 核心能力
 
@@ -115,7 +115,7 @@
 | 部分     | 主要技术                                                                     |
 |----------|------------------------------------------------------------------------------|
 | 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17（pgvector HNSW）、Alembic、PyJWT + bcrypt |
-| 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2），用于文档 ingest      |
+| 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2）：worker 执行文档 ingest 与权益周期任务，beat 负责定时投递 |
 | RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写）；向量库支持 pgvector / Milvus |
 | 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5、@xyflow/react（画布）、zustand（画布状态） |
 | 用户端   | React 19、TypeScript、Vite                                                   |
@@ -393,14 +393,14 @@ uv run uvicorn web.app_admin:app --reload
 # 用户端后端（端口 8001，另开一个终端执行）
 uv run uvicorn web.app_user:app --reload --port 8001
 
-# RAG 文档 ingest 异步 worker（另开终端，仅使用知识库时需要）
+# Celery worker（另开终端；执行知识库 ingest 与权益周期任务，建议常驻）
 uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag
 
 # 定时任务调度器 beat（另开终端；驱动权益生效/到期流转、到期提醒、宽限期回收、每日对账）
 uv run celery -A internal.infrastructure.celery_app beat --loglevel=info
 ```
 
-终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。Celery worker 依赖 Redis（默认 `redis://127.0.0.1:6379/1`），未启动 worker 时文档 ingest 会一直停在 `queued` 状态。beat 只负责按周期把定时任务投入队列，任务实际由上面的 worker 执行，因此两个进程都要启动；beat 必须全局只运行一个实例，多实例会导致定时任务重复投递。
+终端会被占用，属于正常现象；关闭终端或按 `Ctrl + C` 就会停止后端。管理端后端地址是 `http://127.0.0.1:8000`，用户端后端是 `http://127.0.0.1:8001`。Celery worker 依赖 Redis（默认 `redis://127.0.0.1:6379/1`）：未启动 worker 时文档 ingest 会一直停在 `queued` 状态，beat 投递的权益生效 / 到期流转等周期任务也不会执行。beat 只负责按周期把定时任务投入队列，任务实际由上面的 worker 执行，因此两个进程都要启动；beat 必须全局只运行一个实例，多实例会导致定时任务重复投递。
 
 **6）验证后端**
 
@@ -580,7 +580,7 @@ docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 # 启动后端（控制台 1）
 cd backend && uv run uvicorn web.app_admin:app --reload                # 管理端 8000
 cd backend && uv run uvicorn web.app_user:app --reload --port 8001     # 用户端 8001
-cd backend && uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # RAG ingest worker
+cd backend && uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # Celery worker（ingest + 权益周期任务）
 cd backend && uv run celery -A internal.infrastructure.celery_app beat --loglevel=info             # 定时任务调度器（单实例）
 
 # 启动前端（控制台 2）

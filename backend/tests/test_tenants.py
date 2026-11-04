@@ -562,6 +562,23 @@ def test_local_bootstrap_host_allows_platform_header(monkeypatch: pytest.MonkeyP
     assert context.resolution == "header"
 
 
+def test_local_bootstrap_host_treats_admin_subdomain_as_platform(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """浏览器残留平台子域名保留字时归一化为产品级，而不是当作租户编码报 404。"""
+    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
+    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
+    _patch_tenant_loader(monkeypatch, {})
+
+    context = get_request_context(
+        _request("localhost:5173", {TENANT_HEADER: "adminsystem"})
+    )
+
+    assert context.scope == PLATFORM_SCOPE
+    assert context.tenant is None
+    assert context.resolution == "header"
+
+
 def test_local_default_tenant_code_applies_to_localhost(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

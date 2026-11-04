@@ -91,7 +91,10 @@ export interface Provider {
 
 // ========== 市场接口（租户端） ==========
 export async function listMarketplace(): Promise<MarketplaceItem[]> {
-  return request<MarketplaceItem[]>('/admin/marketplace/applications')
+  const data = await request<{ items: MarketplaceItem[]; next_cursor: string | null }>(
+    '/admin/marketplace/applications',
+  )
+  return data.items ?? []
 }
 
 export async function subscribeApplication(applicationId: string): Promise<{

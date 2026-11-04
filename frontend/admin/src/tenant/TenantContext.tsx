@@ -36,10 +36,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
   const [selectableTenants, setSelectableTenants] = useState<Tenant[]>([])
 
   const load = useCallback(async (): Promise<PublicContext | null> => {
-    setLoading(true)
-    setError('')
-    try {
-      const result = await fetchPublicContext()
+    const applyContext = (result: PublicContext) => {
       setContext(result)
       // 只有产品级平台需要在页面切换作用域，租户级只展示当前租户名称
       if (result.tenant_switch_mode !== 'none' && result.scope === 'platform') {
@@ -49,8 +46,27 @@ export function TenantProvider({ children }: { children: ReactNode }) {
       } else {
         setSelectableTenants([])
       }
+    }
+
+    setLoading(true)
+    setError('')
+    try {
+      const result = await fetchPublicContext()
+      applyContext(result)
       return result
     } catch (err) {
+      // 本地残留的 X-Tenant-Code（平台子域名保留字或已删除租户编码）会让 context 直接 404，
+      // 清空残留值后重试一次，避免站点死在错误页
+      if (getTenantCode()) {
+        setTenantCode('')
+        try {
+          const retried = await fetchPublicContext()
+          applyContext(retried)
+          return retried
+        } catch (retryErr) {
+          err = retryErr
+        }
+      }
       setContext(null)
       setError(err instanceof ApiError ? err.message : '无法识别当前访问域名')
       return null
@@ -86,10 +102,14 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      const target = urlTenant || PLATFORM_TENANT_CODE
+      // 平台子域名保留字（如 adminsystem）不是租户编码，归一化为产品级
+      const target =
+        urlTenant && urlTenant !== result.platform_admin_subdomain
+          ? urlTenant
+          : PLATFORM_TENANT_CODE
       if (target === (getTenantCode() || PLATFORM_TENANT_CODE)) return
 
-      setTenantCode(urlTenant)
+      setTenantCode(target === PLATFORM_TENANT_CODE ? PLATFORM_TENANT_CODE : target)
       // 切换作用域后旧令牌不再适用，回到登录页重新认证
       clearSession()
       if (window.location.pathname !== '/login') {

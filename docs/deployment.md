@@ -23,14 +23,16 @@ backend-admin / backend-user 容器（FastAPI）
    │              │
    │              └──► Redis（DB 0 短期记忆 / DB 1 Celery broker / DB 2 Celery result）
    ▲                          ▲
-   └──────── celery-worker 容器（消费 RAG ingest 队列，独立进程）
+   ├─── celery-worker 容器（消费 RAG ingest 与权益周期任务队列，独立进程）
+   └─── celery-beat 容器（定时投递权益周期任务，必须单副本）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
 - 入口使用泛域名 `*.example.com`：`adminsystem.example.com` 为产品级平台，其余子域为租户。
-- `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker` 不发布端口，只走 Compose 内部网络。
+- `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker`、`celery-beat` 不发布端口，只走 Compose 内部网络。
 - 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
-- `celery-worker` 与 backend 镜像同包，仅启动命令不同；不使用知识库时可以不启动。
+- `celery-worker` 与 backend 镜像同包，仅启动命令不同；它同时消费知识库 ingest 与权益周期任务（生效 / 到期流转、宽限期回收、对账），生产环境应保持运行。
+- `celery-beat` 同样与 backend 镜像同包，只按周期投递任务、不执行任务；**必须保持单副本**，多实例会导致定时任务重复投递。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
 ### 14.2 服务器准备
@@ -182,7 +184,7 @@ ENV_FILE=.env.dev docker compose --env-file .env.dev up -d --build
 ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 ```
 
-> `ENV_FILE` 只决定 `db` / `migrate` / `backend-admin` / `backend-user` 容器读取哪个 env_file。`HTTP_PORT`、`USER_HTTP_PORT`（端口映射）、`WEB_CONCURRENCY`（compose 的 `environment`）和镜像变量属于 Compose 自身的插值，只写进 env_file 不会生效，必须像上面这样用 `--env-file` 提供；也可以把这些变量导出到当前 shell。
+> `ENV_FILE` 决定 `db` / `migrate` / `backend-admin` / `backend-user` / `celery-worker` / `celery-beat` 容器读取哪个 env_file。`HTTP_PORT`、`USER_HTTP_PORT`（端口映射）、`WEB_CONCURRENCY`（compose 的 `environment`）和镜像变量属于 Compose 自身的插值，只写进 env_file 不会生效，必须像上面这样用 `--env-file` 提供；也可以把这些变量导出到当前 shell。
 
 服务说明：
 
@@ -193,14 +195,16 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 | `redis`         | Redis 7，DB 0 短期记忆 / DB 1 Celery broker / DB 2 Celery result | 否                              |
 | `backend-admin` | 管理端 FastAPI，仅 admin 路由                 | 否                              |
 | `backend-user`  | 用户端 FastAPI，仅 user 路由                  | 否                              |
-| `celery-worker` | RAG ingest 异步 worker，消费队列 `rag`（与 backend 同镜像，仅启动命令不同） | 否                              |
+| `celery-worker` | RAG ingest 与权益周期任务 worker，消费队列 `rag`（与 backend 同镜像，仅启动命令不同） | 否                              |
+| `celery-beat` | 定时任务调度器，按周期投递权益生效 / 到期流转、到期提醒、宽限期回收、每日对账（与 backend 同镜像，仅启动命令不同；**强制单副本**） | 否                              |
 | `frontend-admin` | 管理端 Nginx 静态站点 + `/api` 反代           | 是（`HTTP_PORT:8080`）          |
 | `frontend-user` | 用户端 Nginx 静态站点 + `/api` 反代           | 是（`USER_HTTP_PORT:8080`）     |
 
-除一次性执行的 `migrate` 外，其他服务都配置了健康检查；所有服务都有日志轮转和内存上限。
+`db`、`redis`、`backend-admin`、`backend-user` 与两个前端服务配置了健康检查；`migrate` 为一次性任务，`celery-worker` / `celery-beat` 为后台进程，不提供 HTTP 探活，依靠 `restart: unless-stopped` 兜底；所有服务都有日志轮转和内存上限。
 
-> **不使用知识库时**：可以不启动 `celery-worker`，并把 `RAG_RERANK_ENABLED` / `RAG_QUERY_REWRITE_ENABLED` 置为 `false`。`redis` 服务仍需保留（短期记忆依赖它）。
+> **不使用知识库时**：可把 `RAG_RERANK_ENABLED` / `RAG_QUERY_REWRITE_ENABLED` 置为 `false`，但 `celery-worker` 与 `celery-beat` 仍建议保持运行——权益的未来生效、到期流转、宽限期回收与每日对账都由 beat 投递、worker 执行；停掉后这些状态只能等下次进程恢复时补扫。`redis` 服务始终需要保留（短期记忆依赖它）。
 > **celery-worker 启动命令**：与 backend 同镜像，启动命令为 `celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag`；如需在 compose 外单独跑，宿主机先 `pip install celery[redis]` 后用同一份 `.env.prod` 启动即可。
+> **celery-beat 启动命令**：与 backend 同镜像，启动命令为 `celery -A internal.infrastructure.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule`（compose 服务已内置该命令）。beat 只负责投递、不执行任务，必须与 worker 同时存在；全局只能运行一个实例，切勿 `docker compose up --scale celery-beat=2`，否则定时任务会被重复投递。
 
 > CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend-admin`、`-backend-user`、`-frontend-admin`、`-frontend-user`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
 
@@ -227,7 +231,7 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 如果生产环境已经有现成的 PostgreSQL（含 pgvector）或 Redis（如云托管 RDS / ElastiCache / 公司内部实例），不需要起 compose 自带的 `db` / `redis` 容器：
 
 1. 在 `ops/.env.prod` 中把 `DATABASE_URL` / `REDIS_URL` / `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` 指向外部地址（参考本地开发 3.1 节的连接串写法）。
-2. 在 `ops/docker-compose.yml` 中**注释掉 `db` 和 `redis` 两个服务**，并把 `backend-admin` / `backend-user` / `migrate` / `celery-worker` 的 `depends_on` 中对应行删掉（否则 compose 会等一个不会启动的容器健康）。
+2. 在 `ops/docker-compose.yml` 中**注释掉 `db` 和 `redis` 两个服务**，并把 `backend-admin` / `backend-user` / `migrate` / `celery-worker` / `celery-beat` 的 `depends_on` 中对应行删掉（否则 compose 会等一个不会启动的容器健康）。
 3. 外部 PostgreSQL 必须先 `CREATE EXTENSION IF NOT EXISTS vector;`；外部 Redis 需要开放 DB 0/1/2 三个逻辑库（或找运维开多 DB）。
 4. `migrate` 一次性任务仍由 compose 触发，它会直接连外部库执行 Alembic 升级，不需要改代码。
 

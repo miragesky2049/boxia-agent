@@ -61,7 +61,7 @@
          ▼              ▼              ▼               ▼
    ┌──────────┐  ┌──────────┐  ┌──────────┐    ┌──────────────┐
    │ Postgres │  │  Redis   │  │  Celery  │    │  大模型服务   │
-   │  17+pgv  │  │ 记忆/队列 │  │ (RAG切分)│    │ OpenAI兼容    │
+   │  17+pgv  │  │ 记忆/队列 │  │(RAG/权益)│    │ OpenAI兼容    │
    │  :5432   │  │  :6379   │  │          │    │              │
    └──────────┘  └──────────┘  └──────────┘    └──────────────┘
                          │
@@ -102,7 +102,7 @@ uv run python -m scripts.create_admin
 # 5. 启动后端（四个终端，或用一键脚本）
 uv run uvicorn web.app_admin:app --reload                       # 终端 A：管理端 :8000
 uv run uvicorn web.app_user:app --reload --port 8001            # 终端 B：用户端 :8001
-uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # 终端 C：RAG worker
+uv run celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag  # 终端 C：异步任务 worker（RAG ingest + 权益周期任务）
 uv run celery -A internal.infrastructure.celery_app beat --loglevel=info           # 终端 D：定时任务调度器
 
 # 6. 启动前端（新终端，回到仓库根目录）
@@ -112,7 +112,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 浏览器打开 <http://localhost:5173>，用 `admin` + 第 4 步设置的密码登录，**首次登录强制改密**。
 
-> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery RAG worker 与 beat 定时调度器（权益生效/到期流转、宽限期回收、对账），以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
+> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery worker（RAG + 权益周期任务）与 beat 定时调度器（权益生效/到期流转、宽限期回收、对账），以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
 
 ### 端口速查
 
@@ -170,7 +170,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | 分册 | 内容 | 适合谁 |
 | --- | --- | --- |
 | [docs/getting-started.md](docs/getting-started.md) | 1-4 章：项目定位、准备软件、第一次启动、新手常见问题 | 第一次跑起来 |
-| [docs/development.md](docs/development.md) | 5-9 章：目录结构、配置、权限安全、接口手册、数据库迁移 | 改代码、查配置 |
+| [docs/development.md](docs/development.md) | 5-9 章：目录结构、断点调试、配置、权限安全、接口手册、数据库迁移 | 改代码、查配置 |
 | [docs/features.md](docs/features.md) | 10 章：管理端功能（画布编排 / 工具接入 5 分钟上手） | 搭第一个应用 |
 | [docs/testing.md](docs/testing.md) | 11 章：测试与质量门禁 | CI / 提交前 |
 | [docs/architecture.md](docs/architecture.md) | 12 章：系统运行流程（启动、多租户、登录、应用运行、令牌轮换、迁移） | 讲架构 |

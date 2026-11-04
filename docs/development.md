@@ -94,6 +94,63 @@ boxia-agent/
 | 调整登录/令牌逻辑    | `backend/internal/application/auth_service.py`、`backend/internal/infrastructure/security/tokens.py`、前端 `src/api/client.ts`                                                  |
 | 调整数据库结构       | 修改 ORM 模型 → `uv run alembic revision --autogenerate -m "说明"` → 检查生成的迁移 → `uv run alembic upgrade head`                                                              |
 
+### 5.5 本地断点调试
+
+前端 Vite 会把 `/api` 代理到 `127.0.0.1:8000`（管理端 `web.app_admin:app`），断点打在对应路由即可，例如 `backend/web/admin/routers/public.py` 的 `get_public_context`。
+
+**关键：调试启动时不要加 `--reload`**。reload 会 fork 子进程，IDE 断点落在父进程上不生效。
+
+#### PyCharm
+
+方式一：运行配置启动（推荐）
+
+1. 右上角运行配置下拉 → **Edit Configurations…** → **+** → **Python**
+2. 勾选 **Module name**（不是 Script path），填 `uvicorn`
+3. **Parameters**：`web.app_admin:app --host 127.0.0.1 --port 8000`
+4. **Working directory**：`D:\OtherCode\PythonProject\boxia-agent\backend`
+5. **Python interpreter**：必须选 `backend\.venv` 的解释器（见下方「常见坑」）
+6. 打断点后 Shift+F9（Debug）启动，访问 <http://localhost:5173/api/v1/public/context> 即命中
+
+方式二：直接调试测试。光标放到测试函数内，Ctrl+Shift+F9 跑该用例，断点打在被测接口 / 服务上即可，适合跟逻辑。
+
+方式三：附加进程。若坚持用命令行 `--reload` 启动，Run → **Attach to Process…**，选中监听 8000 端口的 uvicorn 子进程（不是 reload 父进程）。
+
+#### VS Code
+
+仓库根目录新建 `.vscode/launch.json`：
+
+```json
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Debug admin (8000)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["web.app_admin:app", "--host", "127.0.0.1", "--port", "8000"],
+      "cwd": "${workspaceFolder}/backend",
+      "python": "${workspaceFolder}/backend/.venv/Scripts/python.exe",
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}
+```
+
+打断点后 F5 启动即可。用户端把模块换成 `web.app_user:app`、端口改成 `8001`。
+
+#### 常见坑：Python 解释器选错
+
+报错形如 `ModuleNotFoundError: No module named 'uuid6'`，且 traceback 里 site-packages 路径指向**其他项目**的 venv（如 `D:\GitlabCode\...\.venv`），说明 IDE 用了别的项目的解释器——只是工作目录指到了本仓库，能找到源码却找不到依赖。
+
+修复：
+
+- PyCharm：**File → Settings → Project → Python Interpreter**，Add Local Interpreter → Existing，指向 `backend\.venv\Scripts\python.exe`；运行配置里的 Python interpreter 同步修改。
+- VS Code：Ctrl+Shift+P → **Python: Select Interpreter**，选 `backend\.venv`。
+
+改对后 traceback 中的路径应全部落在 `boxia-agent\backend\.venv` 下。
+
 ---
 
 ## 6. 配置说明

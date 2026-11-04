@@ -1,11 +1,13 @@
-import { App, Avatar, Button, Card, Empty, List, Spin, Tag, Typography } from 'antd'
+import { App, Avatar, Button, Card, Empty, List, Spin, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listMarketplace, listMyApps, subscribeApplication } from '../../api/apps'
+import { useTenant } from '../../tenant/TenantContext'
 
 export default function MarketplacePage() {
   const { message } = App.useApp()
   const navigate = useNavigate()
+  const { isPlatform } = useTenant()
   const [loading, setLoading] = useState(true)
   const [marketplace, setMarketplace] = useState<
     Array<{ id: string; name: string; avatar_url: string | null; description: string }>
@@ -81,14 +83,19 @@ export default function MarketplacePage() {
                         运行
                       </Button>
                     ) : (
-                      <Button
+                      <Tooltip
                         key="subscribe"
-                        type="link"
-                        loading={subscribingId === item.id}
-                        onClick={() => handleSubscribe(item.id, item.name)}
+                        title={isPlatform ? '产品级作用域不可开通，请切换到租户作用域' : undefined}
                       >
-                        立即开通
-                      </Button>
+                        <Button
+                          type="link"
+                          disabled={isPlatform}
+                          loading={subscribingId === item.id}
+                          onClick={() => handleSubscribe(item.id, item.name)}
+                        >
+                          立即开通
+                        </Button>
+                      </Tooltip>
                     ),
                     subscribed ? (
                       <Button
