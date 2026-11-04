@@ -185,7 +185,7 @@ export interface User {
   username: string
   display_name: string
   is_active: boolean
-  role_id: string
+  role_id: string | null
   role_ids: string[]
   current_department_id: string | null
   current_department_name: string | null
@@ -358,7 +358,8 @@ export interface UserCreatePayload {
   username: string
   password: string
   display_name: string
-  role_ids: string[]
+  // 角色授权统一在「用户授权」页面维护
+  role_ids?: string[]
   is_active: boolean
   // HR 基础字段
   employee_no?: string | null

@@ -68,7 +68,7 @@ class User:
     password_hash: str
     display_name: str
     is_active: bool
-    role_id: UUID
+    role_id: UUID | None
     last_login_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -95,7 +95,9 @@ class User:
 
     def effective_role_ids(self) -> tuple[UUID, ...]:
         """返回完整角色集合；旧数据未写入关联表时退回主角色。"""
-        return self.role_ids or (self.role_id,)
+        if self.role_ids:
+            return self.role_ids
+        return (self.role_id,) if self.role_id is not None else ()
 
 
 @dataclass(frozen=True)

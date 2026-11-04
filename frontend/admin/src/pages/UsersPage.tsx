@@ -3,7 +3,6 @@ import { App, Button, DatePicker, Divider, Form, Input, Modal, Popconfirm, Selec
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { rolesApi } from '../api/access'
 import { departmentsApi } from '../api/department'
 import type { Department, User } from '../api/types'
 import { usersApi } from '../api/users'
@@ -16,7 +15,6 @@ interface CreateFormValues {
   username: string
   password: string
   display_name: string
-  role_ids: string[]
   is_active: boolean
   employee_no?: string | null
   phone?: string | null
@@ -29,7 +27,6 @@ interface CreateFormValues {
 
 interface EditFormValues {
   display_name: string
-  role_ids: string[]
   is_active: boolean
   employee_no?: string | null
   phone?: string | null
@@ -66,7 +63,6 @@ export default function UsersPage() {
   const [keyword, setKeyword] = useState('')
   const [departmentTree, setDepartmentTree] = useState<Department[]>([])
   const [filterDepartmentId, setFilterDepartmentId] = useState<string | undefined>(undefined)
-  const [roleOptions, setRoleOptions] = useState<{ label: string; value: string }[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
@@ -111,19 +107,6 @@ export default function UsersPage() {
     [departmentTree],
   )
 
-  useEffect(() => {
-    rolesApi
-      .list()
-      .then((roles) =>
-        setRoleOptions(
-          roles
-            .filter((role) => role.is_active)
-            .map((role) => ({ label: role.name, value: role.id })),
-        ),
-      )
-      .catch(() => setRoleOptions([]))
-  }, [])
-
   const handleCreate = async () => {
     const values = await createForm.validateFields()
     setSaving(true)
@@ -131,8 +114,7 @@ export default function UsersPage() {
       await usersApi.create({
         username: values.username.trim(),
         password: values.password,
-        display_name: values.display_name.trim() || values.username.trim(),
-        role_ids: values.role_ids,
+        display_name: values.display_name?.trim() || values.username.trim(),
         is_active: values.is_active,
         employee_no: values.employee_no?.trim() || null,
         phone: values.phone?.trim() || null,
@@ -160,7 +142,6 @@ export default function UsersPage() {
     try {
       await usersApi.update(editing.id, {
         display_name: values.display_name.trim(),
-        role_ids: values.role_ids,
         is_active: values.is_active,
         employee_no: values.employee_no?.trim() || null,
         phone: values.phone?.trim() || null,
@@ -218,20 +199,22 @@ export default function UsersPage() {
 
   const columns: ColumnsType<User> = [
     {
-      title: '账号',
+      title: '用户账号',
       key: 'account',
       width: 220,
       render: (_: unknown, record: User) => (
         <div>
           <div className="resource-name">
-            {record.display_name || record.username}
+            {record.username}
             {record.id === currentUser?.id && (
               <Tag color="green" bordered={false} style={{ marginLeft: 8 }}>
                 当前账号
               </Tag>
             )}
           </div>
-          <div className="resource-desc">{record.username}</div>
+          {record.display_name && record.display_name !== record.username && (
+            <div className="resource-desc">{record.display_name}</div>
+          )}
         </div>
       ),
     },
@@ -309,7 +292,6 @@ export default function UsersPage() {
                       setEditing(record)
                       editForm.setFieldsValue({
                         display_name: record.display_name,
-                        role_ids: record.role_ids,
                         is_active: record.is_active,
                         employee_no: record.employee_no,
                         phone: record.phone,
@@ -365,7 +347,7 @@ export default function UsersPage() {
             icon={<PlusOutlined />}
             onClick={() => {
               createForm.resetFields()
-              createForm.setFieldsValue({ is_active: true, display_name: '', role_ids: [] })
+              createForm.setFieldsValue({ is_active: true, display_name: '' })
               setCreateOpen(true)
             }}
           >
@@ -428,7 +410,7 @@ export default function UsersPage() {
         width={640}
         forceRender
       >
-        <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
+        <Form<CreateFormValues> form={createForm} layout="vertical">
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             账号信息
           </Divider>
@@ -492,18 +474,6 @@ export default function UsersPage() {
           </div>
 
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            权限配置
-          </Divider>
-          <Form.Item
-            name="role_ids"
-            label="角色"
-            rules={[{ required: true, message: '请至少选择一个角色' }]}
-            extra="赋予超级管理员或管理员角色后，该账号可登录管理端。"
-          >
-            <Select mode="multiple" options={roleOptions} />
-          </Form.Item>
-
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             其他
           </Divider>
           <Form.Item name="remark" label="备注">
@@ -523,11 +493,14 @@ export default function UsersPage() {
         width={640}
         forceRender
       >
-        <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
+        <Form<EditFormValues> form={editForm} layout="vertical">
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             账号信息
           </Divider>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '0 16px' }}>
+            <Form.Item label="登录账号">
+              <Input value={editing?.username ?? ''} disabled />
+            </Form.Item>
             <Form.Item
               name="display_name"
               label="显示名"
@@ -569,18 +542,6 @@ export default function UsersPage() {
               <Input maxLength={128} />
             </Form.Item>
           </div>
-
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            权限配置
-          </Divider>
-          <Form.Item
-            name="role_ids"
-            label="角色"
-            rules={[{ required: true, message: '请至少选择一个角色' }]}
-            extra="修改角色会立即使该用户现有会话失效。"
-          >
-            <Select mode="multiple" options={roleOptions} />
-          </Form.Item>
 
           <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
             其他

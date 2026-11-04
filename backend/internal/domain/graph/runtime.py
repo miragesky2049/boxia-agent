@@ -500,8 +500,8 @@ class GraphRuntime:
             return []
         await self._ensure_compiled()
         result: list[dict[str, Any]] = []
-        # langgraph get_state_history 返回同步 generator（非 async）
-        for snapshot in self._compiled.get_state_history(self._config(), limit=limit):
+        # AsyncPostgresSaver 禁止在主线程走同步 state 接口，必须用异步 generator
+        async for snapshot in self._compiled.aget_state_history(self._config(), limit=limit):
             interrupts: list[dict[str, Any]] = []
             for task in getattr(snapshot, "tasks", []) or []:
                 for it in getattr(task, "interrupts", []) or []:
