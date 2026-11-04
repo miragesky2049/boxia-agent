@@ -113,3 +113,40 @@ class DebugResumePayload(BaseModel):
     approval: dict[str, Any] | None = None
     # 问答节点回答等自由载荷：{"answer": "..."}
     resume: dict[str, Any] | None = None
+
+
+class AppDeleteOut(BaseModel):
+    """单应用删除结果。"""
+
+    application_id: UUID
+    name: str
+    audit_id: UUID
+    deleted: dict[str, int] = Field(default_factory=dict)
+
+
+class AppBatchDeleteRequest(BaseModel):
+    """批量删除应用请求；confirm 必须显式传 true。"""
+
+    application_ids: list[UUID] = Field(min_length=1, max_length=100)
+    confirm: bool = False
+    reason: str = Field(default="", max_length=200)
+
+
+class AppBatchDeleteItemOut(BaseModel):
+    """批量删除单项结果。"""
+
+    application_id: UUID
+    name: str | None = None
+    success: bool
+    audit_id: UUID | None = None
+    error_code: str | None = None
+    error: str | None = None
+
+
+class AppBatchDeleteOut(BaseModel):
+    """批量删除汇总结果（部分成功时 HTTP 仍为 200）。"""
+
+    total: int
+    succeeded: int
+    failed: int
+    items: list[AppBatchDeleteItemOut]

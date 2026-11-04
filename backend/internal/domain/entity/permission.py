@@ -140,6 +140,7 @@ PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
         "page:entitlements",
         "button:entitlement:manage",
         "button:resource:review",
+        "button:app:delete",
     }
 )
 # 平台作用域不展示租户用户、用户授权、组织架构与角色授权菜单：平台授权入口在资源/角色详情内

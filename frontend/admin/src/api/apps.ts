@@ -474,6 +474,42 @@ export async function updateApp(
   })
 }
 
+export interface AppDeleteResult {
+  application_id: string
+  name: string
+  audit_id: string
+  deleted: Record<string, number>
+}
+
+export interface AppBatchDeleteItem {
+  application_id: string
+  name: string | null
+  success: boolean
+  audit_id: string | null
+  error_code: string | null
+  error: string | null
+}
+
+export interface AppBatchDeleteResult {
+  total: number
+  succeeded: number
+  failed: number
+  items: AppBatchDeleteItem[]
+}
+
+export async function deleteApp(applicationId: string): Promise<AppDeleteResult> {
+  return request<AppDeleteResult>(`/admin/apps/${applicationId}?confirm=true`, {
+    method: 'DELETE',
+  })
+}
+
+export async function batchDeleteApps(applicationIds: string[]): Promise<AppBatchDeleteResult> {
+  return request<AppBatchDeleteResult>('/admin/apps/batch', {
+    method: 'POST',
+    body: JSON.stringify({ application_ids: applicationIds, confirm: true }),
+  })
+}
+
 export async function getAppGraph(applicationId: string): Promise<{
   graph: Graph
   runtime_mode: 'dag' | 'agent_loop'

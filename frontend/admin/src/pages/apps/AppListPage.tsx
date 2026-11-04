@@ -1,3 +1,4 @@
+import { DeleteOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
@@ -8,8 +9,10 @@ import {
   Empty,
   Input,
   Modal,
+  Popconfirm,
   Row,
   Segmented,
+  Space,
   Spin,
   Switch,
   Table,
@@ -20,14 +23,21 @@ import {
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
+  batchDeleteApps,
   createApp,
+  deleteApp,
   listApps,
   setAppEnabled,
   setAppListing,
+  type AppBatchDeleteItem,
   type Application,
   type FlowType,
 } from '../../api/apps'
+import { useAuth } from '../../auth/AuthContext'
 import ObjectTenantsTab from '../entitlements/ObjectTenantsTab'
+
+const DELETE_SCOPE_DESC =
+  '将永久删除该应用及其全部数据且不可恢复，包括：应用本体、画布与全部历史版本、所有租户的开通关系与租户级配置、会话与消息、运行记录与节点执行、用量台账、Webhook、用户变量、可见范围设置，以及该应用在角色授权与权益套餐中的关联项。'
 
 type TypeFilter = 'all' | FlowType
 
@@ -60,6 +70,8 @@ const FLOW_TYPE_OPTIONS: Array<{
 export default function AppListPage() {
   const navigate = useNavigate()
   const { message, modal } = App.useApp()
+  const { hasPermission } = useAuth()
+  const canDelete = hasPermission('button:app:delete')
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Application[]>([])
   const [keyword, setKeyword] = useState('')
@@ -67,6 +79,9 @@ export default function AppListPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detailApp, setDetailApp] = useState<Application | null>(null)
+  const [selectedKeys, setSelectedKeys] = useState<string[]>([])
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [batchBusy, setBatchBusy] = useState(false)
 
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
@@ -149,6 +164,66 @@ export default function AppListPage() {
     }
   }
 
+  const handleDelete = async (record: Application) => {
+    setDeletingId(record.id)
+    try {
+      await deleteApp(record.id)
+      message.success(`应用「${record.name}」已永久删除`)
+      setSelectedKeys((keys) => keys.filter((key) => key !== record.id))
+      void load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '删除失败')
+    } finally {
+      setDeletingId(null)
+    }
+  }
+
+  const showBatchFailures = (failed: AppBatchDeleteItem[]) => {
+    modal.error({
+      title: `${failed.length} 个应用删除失败`,
+      content: (
+        <ul style={{ margin: 0, paddingLeft: 18 }}>
+          {failed.map((item) => (
+            <li key={item.application_id}>
+              {item.name ?? item.application_id}：{item.error ?? '未知错误'}
+            </li>
+          ))}
+        </ul>
+      ),
+      okText: '知道了',
+    })
+  }
+
+  const handleBatchDelete = () => {
+    const targets = filtered.filter((item) => selectedKeys.includes(item.id))
+    if (targets.length === 0) return
+    modal.confirm({
+      title: `确认永久删除选中的 ${targets.length} 个应用？`,
+      content: DELETE_SCOPE_DESC,
+      okText: '永久删除',
+      okButtonProps: { danger: true },
+      cancelText: '取消',
+      onOk: async () => {
+        setBatchBusy(true)
+        try {
+          const result = await batchDeleteApps(targets.map((item) => item.id))
+          if (result.failed === 0) {
+            message.success(`已永久删除 ${result.succeeded} 个应用`)
+          } else {
+            message.warning(`成功 ${result.succeeded} 个，失败 ${result.failed} 个`)
+            showBatchFailures(result.items.filter((item) => !item.success))
+          }
+          setSelectedKeys([])
+          void load()
+        } catch (error) {
+          message.error(error instanceof Error ? error.message : '批量删除失败')
+        } finally {
+          setBatchBusy(false)
+        }
+      },
+    })
+  }
+
   if (loading) {
     return (
       <div className="page-card" style={{ textAlign: 'center', padding: 80 }}>
@@ -167,9 +242,21 @@ export default function AppListPage() {
           <Typography.Text type="secondary">平台统一发布，租户通过应用市场自助开通</Typography.Text>
         </Col>
         <Col>
-          <Button type="primary" onClick={() => setCreateOpen(true)}>
-            新建应用
-          </Button>
+          <Space>
+            {canDelete && selectedKeys.length > 0 && (
+              <Button
+                danger
+                icon={<DeleteOutlined />}
+                loading={batchBusy}
+                onClick={handleBatchDelete}
+              >
+                批量删除（{selectedKeys.length}）
+              </Button>
+            )}
+            <Button type="primary" onClick={() => setCreateOpen(true)}>
+              新建应用
+            </Button>
+          </Space>
         </Col>
       </Row>
 
@@ -177,7 +264,10 @@ export default function AppListPage() {
         <Col>
           <Segmented
             value={typeFilter}
-            onChange={(value) => setTypeFilter(value as TypeFilter)}
+            onChange={(value) => {
+              setTypeFilter(value as TypeFilter)
+              setSelectedKeys([])
+            }}
             options={[
               { label: '全部', value: 'all' },
               { label: '工作流', value: 'workflow' },
@@ -189,7 +279,10 @@ export default function AppListPage() {
           <Input
             placeholder="按名称过滤"
             value={keyword}
-            onChange={(e) => setKeyword(e.target.value)}
+            onChange={(e) => {
+              setKeyword(e.target.value)
+              setSelectedKeys([])
+            }}
             allowClear
             style={{ width: 260 }}
           />
@@ -203,6 +296,14 @@ export default function AppListPage() {
           rowKey="id"
           dataSource={filtered}
           pagination={false}
+          rowSelection={
+            canDelete
+              ? {
+                  selectedRowKeys: selectedKeys,
+                  onChange: (keys) => setSelectedKeys(keys as string[]),
+                }
+              : undefined
+          }
           columns={[
             {
               title: '名称',
@@ -263,8 +364,11 @@ export default function AppListPage() {
             },
             {
               title: '操作',
+              key: 'actions',
+              width: 210,
+              onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
               render: (_, record) => (
-                <>
+                <Space size={4} style={{ whiteSpace: 'nowrap' }}>
                   <Button type="link" size="small" onClick={() => setDetailApp(record)}>
                     详情
                   </Button>
@@ -275,7 +379,26 @@ export default function AppListPage() {
                   >
                     编辑画布
                   </Button>
-                </>
+                  {canDelete && (
+                    <Popconfirm
+                      title={`确认删除应用「${record.name}」？`}
+                      description={DELETE_SCOPE_DESC}
+                      okText="永久删除"
+                      okButtonProps={{ danger: true, loading: deletingId === record.id }}
+                      cancelText="取消"
+                      onConfirm={() => handleDelete(record)}
+                    >
+                      <Button
+                        type="link"
+                        size="small"
+                        danger
+                        icon={<DeleteOutlined />}
+                      >
+                        删除
+                      </Button>
+                    </Popconfirm>
+                  )}
+                </Space>
               ),
             },
           ]}

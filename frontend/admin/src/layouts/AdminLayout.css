@@ -7,13 +7,19 @@
 }
 
 .admin-sider {
-  position: relative;
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  z-index: 10;
+  height: 100vh;
+  overflow: hidden;
   transition: width 0.2s ease;
 }
 
 .admin-sider .ant-layout-sider-children {
   display: flex;
   flex-direction: column;
+  height: 100%;
   padding-top: 8px;
 }
 
@@ -67,9 +73,11 @@
 
 .admin-sider__menu {
   flex: 1;
+  min-height: 0;
   border-inline-end: none;
   padding: 8px 8px 0;
   overflow-x: hidden;
+  overflow-y: auto;
 }
 
 .admin-sider.ant-layout-sider-collapsed .admin-sider__menu {

@@ -483,6 +483,8 @@ Authorization: Bearer <access_token>
 | POST   | `/admin/apps`                            | 新建应用，返回 201                                         |
 | GET    | `/admin/apps/{id}`                       | 应用详情                                                   |
 | PATCH  | `/admin/apps/{id}`                       | 更新基础信息 / 启用状态 / 上下架                           |
+| DELETE | `/admin/apps/{id}?confirm=true`          | 物理删除应用及全部关联数据（仅平台 superadmin，含全部租户开通关系） |
+| POST   | `/admin/apps/batch`                      | 批量物理删除（1-100，逐项独立事务，部分成功返回明细）     |
 | GET    | `/admin/apps/{id}/graph`                 | 读取草稿图 `{schema_json, graph_schema_version, runtime_mode}` |
 | PUT    | `/admin/apps/{id}/graph`                 | 保存草稿图（整图覆盖）                                     |
 | POST   | `/admin/apps/validate-graph`             | 校验图：环检测、Start/End 唯一性、变量类型，不落库          |

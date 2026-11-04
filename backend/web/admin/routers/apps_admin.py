@@ -9,7 +9,7 @@ from functools import partial
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
 
 from internal.application.apps.application_service import ApplicationService
@@ -18,7 +18,10 @@ from internal.application.errors import ValidationError
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphRuntime
 from web.admin.schemas.apps import (
+    AppBatchDeleteOut,
+    AppBatchDeleteRequest,
     AppCreatePayload,
+    AppDeleteOut,
     AppUpdatePayload,
     DebugConversationPayload,
     DebugNodeRunPayload,
@@ -36,7 +39,7 @@ from web.admin.schemas.apps import (
     VisibilityPayload,
 )
 from web.deps.apps_services import make_application_service, make_conversation_admin_service
-from web.deps.auth import PlatformAdminDep, require_platform_admin
+from web.deps.auth import AdminAuthDep, PlatformAdminDep, require_permission, require_platform_admin
 from web.deps.db import UowDep
 from web.deps.graph import (
     make_canvas_debug_runtime,
@@ -65,6 +68,12 @@ def get_app_service(uow: UowDep) -> ApplicationService:
 
 
 AppServiceDep = Depends(get_app_service)
+
+
+def _client_meta(request: Request) -> tuple[str | None, str | None]:
+    ip = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent", "")[:255] or None
+    return ip, user_agent
 
 
 @router.get("")
@@ -161,6 +170,58 @@ def update_app(
         flow_type=payload.flow_type,
     )
     return {"ok": True}
+
+
+@router.post(
+    "/batch",
+    response_model=AppBatchDeleteOut,
+    dependencies=[Depends(require_permission("button:app:delete"))],
+)
+def batch_delete_apps(
+    payload: AppBatchDeleteRequest,
+    request: Request,
+    principal: AdminAuthDep,
+    service: ApplicationService = AppServiceDep,
+) -> AppBatchDeleteOut:
+    """批量物理删除应用：逐应用独立事务，部分成功，返回每项明细。"""
+    ip, user_agent = _client_meta(request)
+    result = service.batch_delete_applications(
+        payload.application_ids,
+        confirm=payload.confirm,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        ip=ip,
+        user_agent=user_agent,
+        reason=payload.reason,
+    )
+    return AppBatchDeleteOut.model_validate(result)
+
+
+@router.delete(
+    "/{application_id}",
+    response_model=AppDeleteOut,
+    dependencies=[Depends(require_permission("button:app:delete"))],
+)
+def delete_app(
+    application_id: UUID,
+    request: Request,
+    principal: AdminAuthDep,
+    confirm: bool = Query(..., description="二次确认位，必须为 true"),
+    service: ApplicationService = AppServiceDep,
+) -> AppDeleteOut:
+    """物理删除应用及其全部关联数据（仅平台 superadmin，不可逆）。"""
+    ip, user_agent = _client_meta(request)
+    result = service.delete_application(
+        application_id,
+        confirm=confirm,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        actor_role_code=principal.role_code,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return AppDeleteOut.model_validate(result)
 
 
 @router.get("/{application_id}/variables")

@@ -16,7 +16,8 @@ from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
-from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
+from internal.application.audit import record_audit
+from internal.application.errors import AppError, ForbiddenError, NotFoundError, ValidationError
 from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.canvas.variable_types import coerce as coerce_variable
@@ -24,6 +25,9 @@ from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.repository.apps_protocols import ApplicationRepositoryProtocol
 from internal.domain.repository.protocols import UnitOfWork
 from internal.domain.storage.object_storage import ObjectStorage
+from internal.infrastructure.repository.apps.app_purge_repository import (
+    PostgresAppPurgeRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -42,6 +46,8 @@ def _infer_runtime_mode(graph: dict[str, Any]) -> str:
 FLOW_TYPE_WORKFLOW = "workflow"
 FLOW_TYPE_CHATFLOW = "chatflow"
 SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW})
+
+_BATCH_DELETE_LIMIT = 100
 
 # ========== 变量体系（应用 / 用户 / 系统） ==========
 VARIABLE_TYPES = frozenset({"string", "number", "boolean", "object", "array"})
@@ -1011,3 +1017,152 @@ class ApplicationService:
                 logging.getLogger(__name__).warning("graph cache invalidate failed: %s", exc)
             return
         loop.create_task(_run())
+
+    # ========== 应用删除（硬删除 + 关联数据级联） ==========
+    def delete_application(
+        self,
+        application_id: UUID,
+        *,
+        confirm: bool,
+        actor_id: UUID,
+        actor_username: str,
+        actor_role_code: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """物理删除平台应用及其全部关联数据（不可逆）。
+
+        仅平台 superadmin，confirm=True 为二次确认位；租户自有应用不在此删除。
+        返回删除计数与审计 id。
+        """
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("应用删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除应用为不可逆操作，需显式二次确认")
+        app = self._repo.get_application(application_id)
+        if app is None:
+            raise NotFoundError("应用不存在")
+        if app.get("owner_type") != "platform":
+            raise ValidationError("管理端仅支持删除平台应用")
+
+        try:
+            purge = PostgresAppPurgeRepository(self._uow.session)
+            purge.configure_timeouts()
+            snapshot = purge.snapshot(application_id)
+            deleted = purge.purge_business_data(application_id)
+            audit_id = record_audit(
+                self._uow,
+                action="app.deleted",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="app",
+                resource_id=str(application_id),
+                ip=ip,
+                user_agent=user_agent,
+                detail={
+                    "name": app["name"],
+                    "flow_type": app.get("flow_type"),
+                    "reason": reason,
+                    "snapshot": snapshot,
+                    "deleted": deleted,
+                },
+                tenant_id=None,
+            )
+            # 审计先落库，再删 application 行触发全部 CASCADE
+            self._uow.session.flush()
+            purge.delete_application_row(application_id)
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+        return {
+            "application_id": str(application_id),
+            "name": app["name"],
+            "audit_id": str(audit_id),
+            "deleted": deleted,
+        }
+
+    def batch_delete_applications(
+        self,
+        application_ids: list[UUID],
+        *,
+        confirm: bool,
+        actor_id: UUID,
+        actor_username: str,
+        actor_role_code: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """批量物理删除应用：逐应用独立事务，部分成功，返回每项明细。"""
+        if actor_role_code != "superadmin":
+            raise ForbiddenError("应用删除仅限平台 superadmin")
+        if not confirm:
+            raise ValidationError("删除应用为不可逆操作，需显式二次确认")
+        unique_ids = list(dict.fromkeys(application_ids))
+        if not unique_ids:
+            raise ValidationError("待删除应用列表不能为空")
+        if len(unique_ids) > _BATCH_DELETE_LIMIT:
+            raise ValidationError(f"单次批量删除不能超过 {_BATCH_DELETE_LIMIT} 个应用")
+
+        items: list[dict[str, Any]] = []
+        succeeded = 0
+        for application_id in unique_ids:
+            name: str | None = None
+            existing = self._repo.get_application(application_id)
+            if existing is not None:
+                name = existing["name"]
+            try:
+                result = self.delete_application(
+                    application_id,
+                    confirm=True,
+                    actor_id=actor_id,
+                    actor_username=actor_username,
+                    actor_role_code=actor_role_code,
+                    ip=ip,
+                    user_agent=user_agent,
+                    reason=reason,
+                )
+            except AppError as exc:
+                items.append(
+                    {
+                        "application_id": str(application_id),
+                        "name": name,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": exc.code,
+                        "error": exc.message,
+                    }
+                )
+                continue
+            except Exception:
+                logger.exception("批量删除应用失败 application_id=%s", application_id)
+                items.append(
+                    {
+                        "application_id": str(application_id),
+                        "name": name,
+                        "success": False,
+                        "audit_id": None,
+                        "error_code": "INTERNAL_ERROR",
+                        "error": "删除失败，请稍后重试",
+                    }
+                )
+                continue
+            succeeded += 1
+            items.append(
+                {
+                    "application_id": result["application_id"],
+                    "name": result["name"],
+                    "success": True,
+                    "audit_id": result["audit_id"],
+                    "error_code": None,
+                    "error": None,
+                }
+            )
+        return {
+            "total": len(unique_ids),
+            "succeeded": succeeded,
+            "failed": len(unique_ids) - succeeded,
+            "items": items,
+        }
