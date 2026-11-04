@@ -9,24 +9,20 @@ Copyright (c) 2026-present boxia-agent contributors
 coze-studio（https://github.com/coze-dev/coze-studio）的开源实现。
 
 coze-studio 采用 Apache License 2.0 协议发布：
-  - 协议全文：见 third_party/coze-studio/APACHE-2.0.txt
   - 原作者：coze-dev Authors
   - 源代码：https://github.com/coze-dev/coze-studio
 
 依据 Apache License 2.0 第 4(b) 条，本衍生作品在分发时保留了
 原项目的版权声明、专利声明、商标声明与协议文本，未删除原作者归属。
 
-----------------------------------------------------------------
-本项目自身的双授权策略
-----------------------------------------------------------------
-
-boxia-agent 主代码采用 AGPL-3.0 + 商业授权双授权：
-  - AGPL-3.0 全文：见根目录 LICENSE
-  - 授权选择指南：见根目录 OPEN-SOURCE-POLICY.md
-  - 商业授权条款：见根目录 COMMERCIAL-LICENSE.md
-
 注意：
   - 参考自 coze-studio 的设计文档、DSL 定义、节点类型枚举等，
-    其原始版权归 coze-dev 所有，遵循 Apache 2.0。
-  - boxia-agent 自身新增/重写的代码（Python 后端、React 前端、
-    多租户与 RBAC 模块等）遵循上述双授权策略。
+    其原始版权归 coze-dev 所有，遵循 Apache License 2.0。
+
+----------------------------------------------------------------
+本项目协议
+----------------------------------------------------------------
+
+boxia-agent 自身新增/重写的代码（Python 后端、React 前端、
+多租户与 RBAC 模块等）采用 Apache License 2.0 发布：
+  - 协议全文：见根目录 LICENSE
