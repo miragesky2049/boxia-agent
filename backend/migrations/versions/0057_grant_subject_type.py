@@ -4,7 +4,7 @@ Revision ID: 0057_grant_subject_type
 Revises: 0056_resource_review
 Create Date: 2026-11-03
 
-设计要点（见 docs/authorization-execution-plan.md §2.4，D-2 路线 1 / D-1 已随 0054 交付）：
+设计要点（D-2 路线 1 / D-1 已随 0054 交付）：
 - 停机维护窗口内单次完成：加列 → 回填 → 换 CHECK → 重建索引，无旧代码撞新 CHECK 的窗口。
 - role_id IS NULL 回填 subject_type='tenant'（全员可见+新增角色自动继承语义不变），其余 'role'。
 - 本迁移不删除任何数据；downgrade 恢复旧 ck_resource_grants_scope 与三个旧部分唯一索引。

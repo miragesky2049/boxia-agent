@@ -4,7 +4,7 @@ Revision ID: 0055_resource_grant_lifecycle
 Revises: 0054_grant_resource_type_unify
 Create Date: 2026-11-03
 
-设计要点（见 docs/authorization-execution-plan.md §2.2，含原 P0-5）：
+设计要点（含原 P0-5）：
 - resource_grant（单数，产品级资源开放给租户）从"只有 granted_at"升级为完整生命周期模型：
   status / auth_source / auth_type / start_time / expire_time / quota_json / remark / granted_by。
 - tenant_application_instance 的 ck_instance_status 原缺 wait_effect / expired 两个状态

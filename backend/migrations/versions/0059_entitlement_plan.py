@@ -4,7 +4,7 @@ Revision ID: 0059_entitlement_plan
 Revises: 0058_entitlement_permissions
 Create Date: 2026-11-03
 
-设计要点（见 docs/authorization-execution-plan.md P3-3）：
+设计要点：
 - 模板 = 条目集合（五类对象）+ 默认 auth_type / 期限（duration_days）/ 默认 quota；
   开通走 EntitlementService.apply_plan → 复用 apply_batch，权益行仍落双表，模板不落权益。
 - code 全局唯一（平台级定义，不区分租户）；duration_days NULL 表示默认不限期。

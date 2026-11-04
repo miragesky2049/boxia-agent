@@ -244,11 +244,5 @@ frontend/admin/test-results/
 .playwright-mcp/
 
 # 本地实机截图与抓取素材（不入库；确需归档时用 git add -f 显式入库）
-*.png
-*.jpg
-*.jpeg
-*.webp
-*.pw-*
-.ref-*.png
 /docs/assets/
 /docs/canvas-refs/

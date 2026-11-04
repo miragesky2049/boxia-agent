@@ -4,7 +4,7 @@ Revision ID: 0058_entitlement_permissions
 Revises: 0057_grant_subject_type
 Create Date: 2026-11-03
 
-设计要点（见 docs/authorization-execution-plan.md §2.5 与 P1-4）：
+设计要点（P1-4）：
 - 平台侧 4 码（entitlements + resource:review）授平台租户（全零 UUID）下的 superadmin/admin；
   租户侧 4 码（role-access + resource:create）授真实租户下的 superadmin/admin；viewer 均不授予。
 - 写法沿用 0038：_PERMISSIONS + ON CONFLICT DO NOTHING + INSERT ... SELECT 按角色 code 匹配，不写死 UUID。

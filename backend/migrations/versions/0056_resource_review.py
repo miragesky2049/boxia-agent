@@ -4,7 +4,7 @@ Revision ID: 0056_resource_review
 Revises: 0055_resource_grant_lifecycle
 Create Date: 2026-11-03
 
-设计要点（见 docs/authorization-execution-plan.md §2.3，假设 A5）：
+设计要点（假设 A5）：
 - review_status 默认 'approved'，存量行由 DEFAULT 直接回填，平台资源保持 approved；
   租户自建资源写入 pending（P1-9 审核流），审核通过后角色授权候选才可见。
 - created_by 存量置 NULL（历史无记录来源）；新建资源必须写入当前管理员 ID，
