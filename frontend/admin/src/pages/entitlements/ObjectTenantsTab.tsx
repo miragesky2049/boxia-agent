@@ -18,7 +18,7 @@ interface Props {
 
 const PAGE_SIZE = 20
 
-/** 对象反查 Tab：展示持有该对象权益的租户，点击租户名跳转到该租户开通页（P2-5）。 */
+/** 对象反查 Tab：展示持有该对象权益的租户，点击租户名跳转到该开通授权页（P2-5）。 */
 export default function ObjectTenantsTab({ objectType, objectId }: Props) {
   const navigate = useNavigate()
   const [rows, setRows] = useState<EntitlementTenantRow[]>([])

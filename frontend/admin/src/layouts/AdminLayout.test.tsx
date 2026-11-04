@@ -101,18 +101,18 @@ afterEach(() => {
 })
 
 describe('AdminLayout 双入口菜单', () => {
-  it('平台作用域展示租户开通、不展示角色授权', async () => {
+  it('平台作用域展示开通授权、不展示角色授权', async () => {
     vi.stubGlobal(
       'fetch',
       mockContext('platform', ['entitlements', 'roles'], ['page:entitlements']),
     )
     renderLayout()
 
-    expect(await screen.findByText('租户开通', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText('开通授权', {}, { timeout: 3000 })).toBeInTheDocument()
     expect(screen.queryByText('角色授权')).not.toBeInTheDocument()
   })
 
-  it('租户作用域展示角色授权、不展示租户开通', async () => {
+  it('租户作用域展示角色授权、不展示开通授权', async () => {
     vi.stubGlobal(
       'fetch',
       mockContext('tenant', ['role-access'], ['page:role-access', 'button:role:grant']),
@@ -120,6 +120,6 @@ describe('AdminLayout 双入口菜单', () => {
     renderLayout()
 
     expect(await screen.findByText('角色授权', {}, { timeout: 3000 })).toBeInTheDocument()
-    expect(screen.queryByText('租户开通')).not.toBeInTheDocument()
+    expect(screen.queryByText('开通授权')).not.toBeInTheDocument()
   })
 })

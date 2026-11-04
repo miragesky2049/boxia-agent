@@ -1,4 +1,4 @@
-import { DeleteOutlined, PlusOutlined, RobotOutlined } from '@ant-design/icons'
+import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
@@ -246,21 +246,13 @@ export default function TenantsPage() {
     {
       title: '操作',
       key: 'actions',
-      width: 300,
+      width: 220,
       render: (_: unknown, record: Tenant) => {
         const isPlatformTenant = record.code === PLATFORM_TENANT_CODE
         return (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
               详情
-            </Button>
-            <Button
-              type="link"
-              size="small"
-              icon={<RobotOutlined />}
-              onClick={() => navigate(`/tenants/${record.id}?tab=agents`)}
-            >
-              开通智能体
             </Button>
             {canUpdate && (
               <Button

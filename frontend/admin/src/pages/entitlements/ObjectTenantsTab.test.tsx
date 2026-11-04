@@ -60,7 +60,7 @@ afterEach(() => {
 })
 
 describe('ObjectTenantsTab', () => {
-  it('反查列表展示状态与来源并可跳转租户开通页', async () => {
+  it('反查列表展示状态与来源并可跳转开通授权页', async () => {
     const captured: Captured = { objectUrls: [] }
     vi.stubGlobal('fetch', mockApi(captured))
     render(
