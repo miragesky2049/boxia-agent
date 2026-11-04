@@ -1,7 +1,7 @@
 # boxia-agent 商业授权条款（Commercial License）
 
 > 本文件是 AGPL-3.0 + 商业授权双授权中「商业授权」的完整条款。
-> 不确定自己该选哪种授权时，请先阅读 [LICENSING.md](./LICENSING.md) 的授权选择指南。
+> 不确定自己该选哪种授权时，请先阅读 [OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md) 的授权选择指南。
 
 ## 一、为什么需要商业授权
 

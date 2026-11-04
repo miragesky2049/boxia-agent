@@ -52,8 +52,8 @@ A：需要按 AGPL-3.0 提供完整对应源码（含你的修改），不只是
 | 文件 | 作用 |
 | --- | --- |
 | [LICENSE](./LICENSE) | AGPL-3.0 协议全文（权威文本） |
-| LICENSING.md | 本文件，授权选择指南 |
-| [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md) | 商业授权条款、价格档位与购买方式 |
+| OPEN-SOURCE-POLICY.md | 本文件，授权选择指南 |
+| [COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md) | 商业授权条款、价格档位与购买方式 |
 | [NOTICE](./NOTICE) | 版权归属与第三方组件声明 |
 | [third_party/coze-studio/APACHE-2.0.txt](./third_party/coze-studio/APACHE-2.0.txt) | 第三方组件（coze-studio）Apache-2.0 全文 |
 

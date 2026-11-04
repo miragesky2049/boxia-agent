@@ -1,6 +1,6 @@
 # boxia-agent 项目手册
 
-[![License: AGPL-3.0 + Commercial](https://img.shields.io/badge/license-AGPL--3.0%20%2B%20Commercial-blue.svg)](./LICENSING.md)
+[![License: AGPL-3.0 + Commercial](https://img.shields.io/badge/license-AGPL--3.0%20%2B%20Commercial-blue.svg)](./OPEN-SOURCE-POLICY.md)
 
 > 面向企业内部的 **AI 应用编排与运营平台**。管理员在管理端用可视化画布组合模型、提示词、工具与知识库，把编排好的应用发布到市场，按租户与角色授权给最终用户使用。
 >
@@ -22,8 +22,8 @@
 | 闭源集成 / SaaS 托管 / 白标转售 | 商业授权 | **付费** |
 
 - 协议全文：[LICENSE](./LICENSE)（AGPL-3.0）
-- 授权选择指南：[LICENSING.md](./LICENSING.md)
-- 商业授权条款与价格：[COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)
+- 授权选择指南：[OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md)
+- 商业授权条款与价格：[COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)
 - 商业授权联系：**zhm2049@163.com**
 
 ### 归属声明（Attribution）
@@ -194,5 +194,5 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 ## 15. 许可证
 
-主协议为 [AGPL-3.0](./LICENSE)，商业使用另见 [LICENSING.md](./LICENSING.md) 与 [COMMERCIAL-LICENSE.md](./COMMERCIAL-LICENSE.md)。
+主协议为 [AGPL-3.0](./LICENSE)，商业使用另见 [OPEN-SOURCE-POLICY.md](./OPEN-SOURCE-POLICY.md) 与 [COMMERCIAL-TERMS.md](./COMMERCIAL-TERMS.md)。
 第三方组件（coze-studio，Apache-2.0）的版权与协议声明见 [NOTICE](./NOTICE)。
