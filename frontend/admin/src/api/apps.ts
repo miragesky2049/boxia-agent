@@ -474,6 +474,18 @@ export async function updateApp(
   })
 }
 
+export interface AppCopyResult {
+  application_id: string
+  name: string
+  source_application_id: string
+}
+
+export async function copyApp(applicationId: string): Promise<AppCopyResult> {
+  return request<AppCopyResult>(`/admin/apps/${applicationId}/copy`, {
+    method: 'POST',
+  })
+}
+
 export interface AppDeleteResult {
   application_id: string
   name: string

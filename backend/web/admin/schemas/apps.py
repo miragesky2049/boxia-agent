@@ -150,3 +150,11 @@ class AppBatchDeleteOut(BaseModel):
     succeeded: int
     failed: int
     items: list[AppBatchDeleteItemOut]
+
+
+class AppCopyOut(BaseModel):
+    """复制应用结果。"""
+
+    application_id: UUID
+    name: str
+    source_application_id: UUID

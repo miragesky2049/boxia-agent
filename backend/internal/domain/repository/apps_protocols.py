@@ -154,6 +154,56 @@ class ApplicationRepositoryProtocol(Protocol):
         """user 端可见应用卡片列表：租户自建 + 已开通实例，叠加 visibility 白名单/部门过滤。"""
         ...
 
+    def count_copies(self, source_name: str) -> int:
+        """统计以「{source_name}的副本」或「{source_name}的副本N」命名的应用数（用于生成副本序号）。"""
+        ...
+
+    def get_full_application(self, application_id: UUID) -> dict | None:
+        """读取应用主行全部列（复制用），与 get_application 列集不同。"""
+        ...
+
+    def insert_application_row(self, data: dict[str, Any]) -> UUID:
+        """按显式字段集插入 application 行（复制路径专用，不复用 create_application 的精简列）。"""
+        ...
+
+    def get_graph_row(self, application_id: UUID) -> dict | None:
+        """读取 application_graph 当前整行（复制用）。"""
+        ...
+
+    def insert_graph_row(self, application_id: UUID, graph: dict, runtime_mode: str) -> None:
+        """向 application_graph 写入一行（复制路径专用）。"""
+        ...
+
+    def get_latest_graph_version_row(self, application_id: UUID) -> dict | None:
+        """读取 application_graph_version 最新整行（复制用）。"""
+        ...
+
+    def insert_graph_version_row(
+        self,
+        application_id: UUID,
+        version: int,
+        graph: dict,
+        runtime_mode: str,
+        changelog: str = "",
+        created_by: UUID | None = None,
+    ) -> UUID:
+        """向 application_graph_version 写入一行（复制路径专用，与 insert_graph_version 等价但显式命名）。"""
+        ...
+
+    def get_visibility_detail(self, application_id: UUID) -> dict:
+        """读取可见范围完整行集 {mode, departments: [{department_id, include_subtree}], users: [UUID]}（复制用）。"""
+        ...
+
+    def insert_visibility_rows(
+        self,
+        application_id: UUID,
+        mode: str,
+        departments: list[dict],
+        users: list[UUID],
+    ) -> None:
+        """整体写入可见范围行（复制路径专用，调用方已保证目标应用无残留行）。"""
+        ...
+
 
 class ModelRepositoryProtocol(Protocol):
     """model_provider / model_catalog 仓储端口。"""

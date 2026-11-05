@@ -1,4 +1,4 @@
-import { DeleteOutlined } from '@ant-design/icons'
+import { CopyOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
@@ -7,6 +7,7 @@ import {
   Descriptions,
   Drawer,
   Empty,
+  Form,
   Input,
   Modal,
   Popconfirm,
@@ -24,11 +25,13 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   batchDeleteApps,
+  copyApp,
   createApp,
   deleteApp,
   listApps,
   setAppEnabled,
   setAppListing,
+  updateApp,
   type AppBatchDeleteItem,
   type Application,
   type FlowType,
@@ -86,6 +89,12 @@ export default function AppListPage() {
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
   const [newFlowType, setNewFlowType] = useState<FlowType>('workflow')
+
+  // 编辑应用基本信息（名称/描述）
+  const [editForm] = Form.useForm<{ name: string; description: string }>()
+  const [editTarget, setEditTarget] = useState<Application | null>(null)
+  const [editSaving, setEditSaving] = useState(false)
+  const [copyingId, setCopyingId] = useState<string | null>(null)
 
   const load = async () => {
     setLoading(true)
@@ -175,6 +184,47 @@ export default function AppListPage() {
       message.error(error instanceof Error ? error.message : '删除失败')
     } finally {
       setDeletingId(null)
+    }
+  }
+
+  const openEditModal = (record: Application) => {
+    setEditTarget(record)
+    // Modal 还未打开时 Form 未挂载，用 requestAnimationFrame 等渲染后再 setFieldsValue
+    requestAnimationFrame(() => {
+      editForm.setFieldsValue({ name: record.name, description: record.description ?? '' })
+    })
+  }
+
+  const handleEditSave = async () => {
+    if (!editTarget) return
+    try {
+      const values = await editForm.validateFields()
+      setEditSaving(true)
+      await updateApp(editTarget.id, {
+        name: values.name.trim(),
+        description: values.description?.trim() ?? '',
+      })
+      message.success('应用信息已更新')
+      setEditTarget(null)
+      void load()
+    } catch (error) {
+      if (error && (error as { errorFields?: unknown }).errorFields) return
+      message.error(error instanceof Error ? error.message : '保存失败')
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
+  const handleCopy = async (record: Application) => {
+    setCopyingId(record.id)
+    try {
+      const result = await copyApp(record.id)
+      message.success(`已复制为「${result.name}」`)
+      void load()
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '复制失败')
+    } finally {
+      setCopyingId(null)
     }
   }
 
@@ -365,7 +415,7 @@ export default function AppListPage() {
             {
               title: '操作',
               key: 'actions',
-              width: 210,
+              width: 300,
               onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
               render: (_, record) => (
                 <Space size={4} style={{ whiteSpace: 'nowrap' }}>
@@ -375,9 +425,35 @@ export default function AppListPage() {
                   <Button
                     type="link"
                     size="small"
+                    icon={<EditOutlined />}
+                    onClick={() => openEditModal(record)}
+                  >
+                    编辑
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
                     onClick={() => navigate(`/apps/${record.id}/edit`)}
                   >
                     编辑画布
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    icon={<CopyOutlined />}
+                    loading={copyingId === record.id}
+                    onClick={() =>
+                      modal.confirm({
+                        title: `确认复制应用「${record.name}」？`,
+                        content:
+                          '将复制应用名称、描述、画布、变量定义与可见范围；副本默认未启用、未上架、未发布。',
+                        okText: '复制',
+                        cancelText: '取消',
+                        onOk: () => handleCopy(record),
+                      })
+                    }
+                  >
+                    复制
                   </Button>
                   {canDelete && (
                     <Popconfirm
@@ -547,6 +623,39 @@ export default function AppListPage() {
           />
         )}
       </Drawer>
+
+      <Modal
+        title={editTarget ? `编辑应用：${editTarget.name}` : '编辑应用'}
+        open={!!editTarget}
+        onCancel={() => setEditTarget(null)}
+        onOk={handleEditSave}
+        confirmLoading={editSaving}
+        okText="保存"
+        cancelText="取消"
+        destroyOnClose
+        width={560}
+      >
+        <Form form={editForm} layout="vertical" preserve={false}>
+          <Form.Item
+            label="应用名称"
+            name="name"
+            rules={[
+              { required: true, message: '请输入应用名称' },
+              { max: 50, message: '名称不超过 50 个字符' },
+            ]}
+          >
+            <Input placeholder="给应用起个名字" maxLength={50} showCount />
+          </Form.Item>
+          <Form.Item label="应用描述" name="description" rules={[{ max: 200 }]}>
+            <Input.TextArea
+              placeholder="简单描述应用的用途（选填）"
+              rows={3}
+              maxLength={200}
+              showCount
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   )
 }

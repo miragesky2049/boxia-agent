@@ -644,3 +644,221 @@ class ApplicationRepository:
             }
             for r in rows
         ]
+
+    # ========== 复制应用（copy）专用 ==========
+    def count_copies(self, source_name: str) -> int:
+        """统计以「{source_name}的副本」或「{source_name}的副本N」命名的应用数。
+
+        用 ILIKE 前缀匹配避免正则元字符注入；source_name 中的 %/_ 需转义。
+        """
+        escaped = source_name.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        prefix = f"{escaped}的副本%"
+        rows = self._session.execute(
+            text(
+                "SELECT name FROM application "
+                "WHERE owner_type = 'platform' AND name ILIKE :prefix ESCAPE '\\'"
+            ),
+            {"prefix": prefix},
+        ).all()
+        return len(rows)
+
+    def get_full_application(self, application_id: UUID) -> dict | None:
+        """读取 application 主行全部列（复制用）。"""
+        row = self._session.execute(
+            text(
+                "SELECT id, owner_type, owner_id, name, avatar_url, description, "
+                "is_enabled, is_listed_in_market, sale_mode, support_trial, doc_url, "
+                "ext_json, visibility_mode, published_graph_version, flow_type, "
+                "variables, created_by, created_at, updated_at "
+                "FROM application WHERE id = :aid"
+            ),
+            {"aid": application_id},
+        ).first()
+        if row is None:
+            return None
+        return dict(row._mapping)
+
+    def insert_application_row(self, data: dict[str, Any]) -> UUID:
+        """按显式字段集插入 application 行（复制路径专用）。"""
+        app_id = new_uuid()
+        variables_raw = data.get("variables")
+        if isinstance(variables_raw, (dict, list)):
+            variables_str = json.dumps(variables_raw, ensure_ascii=False, default=str)
+        elif variables_raw is None:
+            variables_str = "[]"
+        else:
+            variables_str = str(variables_raw)
+
+        ext_json_raw = data.get("ext_json") or {}
+        ext_json_str = (
+            json.dumps(ext_json_raw, ensure_ascii=False, default=str)
+            if isinstance(ext_json_raw, (dict, list))
+            else str(ext_json_raw)
+        )
+
+        self._session.execute(
+            text(
+                "INSERT INTO application ("
+                "id, owner_type, owner_id, name, avatar_url, description, "
+                "is_enabled, is_listed_in_market, sale_mode, support_trial, doc_url, "
+                "ext_json, visibility_mode, published_graph_version, flow_type, "
+                "variables, created_by"
+                ") VALUES ("
+                ":id, :owner_type, :owner_id, :name, :avatar_url, :description, "
+                ":is_enabled, :is_listed_in_market, :sale_mode, :support_trial, :doc_url, "
+                "CAST(:ext_json AS JSONB), :visibility_mode, :published_graph_version, :flow_type, "
+                "CAST(:variables AS JSONB), :created_by"
+                ")"
+            ),
+            {
+                "id": app_id,
+                "owner_type": data.get("owner_type", "platform"),
+                "owner_id": data.get("owner_id"),
+                "name": data["name"],
+                "avatar_url": data.get("avatar_url"),
+                "description": data.get("description", ""),
+                "is_enabled": bool(data.get("is_enabled", False)),
+                "is_listed_in_market": bool(data.get("is_listed_in_market", False)),
+                "sale_mode": int(data.get("sale_mode", 1)),
+                "support_trial": bool(data.get("support_trial", False)),
+                "doc_url": data.get("doc_url", ""),
+                "ext_json": ext_json_str,
+                "visibility_mode": data.get("visibility_mode", "all"),
+                "published_graph_version": data.get("published_graph_version"),
+                "flow_type": data.get("flow_type", "workflow"),
+                "variables": variables_str,
+                "created_by": data.get("created_by"),
+            },
+        )
+        return app_id
+
+    def get_graph_row(self, application_id: UUID) -> dict | None:
+        """读取 application_graph 当前整行（复制用）。"""
+        row = self._session.execute(
+            text(
+                "SELECT application_id, schema_json AS graph, graph_schema_version, runtime_mode "
+                "FROM application_graph WHERE application_id = :aid"
+            ),
+            {"aid": application_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def insert_graph_row(self, application_id: UUID, graph: dict, runtime_mode: str) -> None:
+        """向 application_graph 写入一行（复制路径专用，目标应用无残留行）。"""
+        self._session.execute(
+            text(
+                "INSERT INTO application_graph "
+                "(application_id, schema_json, runtime_mode) "
+                "VALUES (:aid, CAST(:graph AS JSONB), :mode)"
+            ),
+            {
+                "aid": application_id,
+                "graph": json.dumps(graph, ensure_ascii=False, default=str),
+                "mode": runtime_mode,
+            },
+        )
+
+    def get_latest_graph_version_row(self, application_id: UUID) -> dict | None:
+        """读取最新 graph 版本整行（复制用）。"""
+        row = self._session.execute(
+            text(
+                "SELECT id, application_id, version, schema_json AS graph, runtime_mode, changelog "
+                "FROM application_graph_version "
+                "WHERE application_id = :aid ORDER BY version DESC LIMIT 1"
+            ),
+            {"aid": application_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def insert_graph_version_row(
+        self,
+        application_id: UUID,
+        version: int,
+        graph: dict,
+        runtime_mode: str,
+        changelog: str = "",
+        created_by: UUID | None = None,
+    ) -> UUID:
+        """写入 graph 版本行（复制路径专用）。"""
+        vid = new_uuid()
+        self._session.execute(
+            text(
+                "INSERT INTO application_graph_version "
+                "(id, application_id, version, schema_json, runtime_mode, changelog, created_by) "
+                "VALUES (:id, :aid, :ver, CAST(:graph AS JSONB), :mode, :log, :by)"
+            ),
+            {
+                "id": vid,
+                "aid": application_id,
+                "ver": version,
+                "graph": json.dumps(graph, ensure_ascii=False, default=str),
+                "mode": runtime_mode,
+                "log": changelog,
+                "by": created_by,
+            },
+        )
+        return vid
+
+    def get_visibility_detail(self, application_id: UUID) -> dict:
+        """读取可见范围完整行集（复制用）。"""
+        mode_row = self._session.execute(
+            text("SELECT visibility_mode FROM application WHERE id = :aid"),
+            {"aid": application_id},
+        ).first()
+        mode = mode_row._mapping["visibility_mode"] if mode_row else "all"
+        dept_rows = self._session.execute(
+            text(
+                "SELECT department_id, include_subtree FROM application_visibility_departments "
+                "WHERE application_id = :aid ORDER BY created_at"
+            ),
+            {"aid": application_id},
+        ).all()
+        user_rows = self._session.execute(
+            text(
+                "SELECT user_id FROM application_visibility_users "
+                "WHERE application_id = :aid ORDER BY created_at"
+            ),
+            {"aid": application_id},
+        ).all()
+        return {
+            "mode": mode,
+            "departments": [
+                {
+                    "department_id": r._mapping["department_id"],
+                    "include_subtree": r._mapping["include_subtree"],
+                }
+                for r in dept_rows
+            ],
+            "users": [r._mapping["user_id"] for r in user_rows],
+        }
+
+    def insert_visibility_rows(
+        self,
+        application_id: UUID,
+        mode: str,
+        departments: list[dict],
+        users: list[UUID],
+    ) -> None:
+        """整体写入可见范围行（复制路径专用，目标应用为新建、无残留行）。"""
+        if mode == "custom":
+            for dept in departments:
+                self._session.execute(
+                    text(
+                        "INSERT INTO application_visibility_departments "
+                        "(application_id, department_id, include_subtree) "
+                        "VALUES (:aid, :did, :sub)"
+                    ),
+                    {
+                        "aid": application_id,
+                        "did": dept["department_id"],
+                        "sub": dept.get("include_subtree", True),
+                    },
+                )
+            for uid in users:
+                self._session.execute(
+                    text(
+                        "INSERT INTO application_visibility_users (application_id, user_id) "
+                        "VALUES (:aid, :uid)"
+                    ),
+                    {"aid": application_id, "uid": uid},
+                )
