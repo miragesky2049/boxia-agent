@@ -20,5 +20,5 @@ class Tenant:
 
     @property
     def is_platform(self) -> bool:
-        """是否为产品级平台内置租户（全零 UUID）。"""
+        """是否为产品级平台内置租户。"""
         return self.id == PLATFORM_TENANT_ID

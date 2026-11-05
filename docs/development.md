@@ -217,6 +217,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 | `PASSWORD_MIN_CATEGORIES`     | `3`                 | 否       | 至少包含的字符类别数（1-4）                                                                                                                           |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）                                              |
 | `PLATFORM_ADMIN_SUBDOMAIN`    | `platform`       | 否       | 产品级平台子域名前缀，最终为 `platform.<ROOT_DOMAIN>`                                                                                              |
+| `PLATFORM_TENANT_ID`          | `00000000-0000-0000-0000-000000100000` | 否 | 产品级租户 UUID，首次部署确定后不可再更改；历史全零 UUID 由迁移 0067 刷新                                          |
 | `PLATFORM_NAME`               | `AI智能体运营管理平台` | 否    | 管理端展示的平台名称                                                                                                                                  |
 | `DEFAULT_TENANT_CODE`         | 空                  | 否       | 访问根域名时默认进入的租户；留空则拒绝根域名访问                                                                                                      |
 | `ALLOW_TENANT_HEADER`         | `false`             | 否       | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**                                                                                          |
@@ -286,7 +287,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 后端启动前会按 `APP_ENV` 检查多租户配置，不合格直接拒绝启动：
 
-- 所有环境：`PLATFORM_ADMIN_SUBDOMAIN` 必须是一级域名标签（字母、数字、连字符）。
+- 所有环境：`PLATFORM_ADMIN_SUBDOMAIN` 必须是一级域名标签（字母、数字、连字符），`PLATFORM_TENANT_ID` 必须是合法 UUID。
 - `dev` / `test` / `prod`：必须配置 `ROOT_DOMAIN`，且不能是 `localhost`、`*.localhost` 或 IP 地址；禁止开启 `ALLOW_TENANT_HEADER`。
 - `prod` 额外要求：`JWT_SECRET` 至少 32 字符且不能是示例占位值；`CORS_ORIGINS` 不允许 `*`。
 
@@ -326,7 +327,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 **数据隔离规则**
 
-- 业务表统一带 `tenant_id`：产品级统一使用全零 UUID（`PLATFORM_TENANT_ID`），租户使用真实租户 ID；仓储过滤为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。
+- 业务表统一带 `tenant_id`：产品级统一使用配置的产品级租户 UUID（`PLATFORM_TENANT_ID`），租户使用真实租户 ID；仓储过滤为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。
 - 应用通过 `tenant_application_instance` 开通：未开通的租户看不到该应用；开通时可钉住图版本、配置配额与有效期。
 - 工具资源通过 `resource_grant` 授权给租户；应用与工具授权都只在授权作用域内生效。
 - 用户的数据范围由角色 + 管理单元（`user_mgmt_unit_grants`）决定；应用还支持按部门（含子树）/指定人员配置实例级可见范围。
@@ -888,7 +889,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 
 约定：
 
-- 业务表统一带 `tenant_id`，产品级使用全零 UUID（`PLATFORM_TENANT_ID`）；仓储过滤为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。
+- 业务表统一带 `tenant_id`，产品级使用配置的产品级租户 UUID（`PLATFORM_TENANT_ID`）；仓储过滤为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。
 - 资源名称与用户名按作用域唯一，不同租户可以同名。
 - 所有表都有 `created_at` / `updated_at`，`updated_at` 由触发器维护。
 - 列表默认按 `updated_at DESC, id DESC` 排序。

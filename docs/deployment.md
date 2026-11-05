@@ -70,6 +70,8 @@ ROOT_DOMAIN=example.com
 APP_ENV=prod
 # 产品级平台子域名前缀，最终为 platform.example.com
 PLATFORM_ADMIN_SUBDOMAIN=platform
+# 产品级租户 UUID，首次部署确定后不可再更改
+PLATFORM_TENANT_ID=00000000-0000-0000-0000-000000100000
 PLATFORM_NAME=AI智能体运营管理平台
 # 部署环境只按域名识别租户；生产开启该项会拒绝启动
 ALLOW_TENANT_HEADER=false

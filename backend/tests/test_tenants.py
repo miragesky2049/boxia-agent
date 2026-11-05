@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 
 from internal.application.errors import NotFoundError
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.request_context import PLATFORM_SCOPE, TENANT_SCOPE
 from internal.domain.entity.tenant import Tenant
 from internal.infrastructure.config.settings import Settings
@@ -94,6 +95,32 @@ def test_tenant_context_and_login(
     assert context.status_code == 200, context.text
     assert context.json()["scope"] == "tenant"
     assert context.json()["user"]["username"] == f"{TENANT_A}-admin"
+
+
+def test_platform_tenant_listed_once_and_protected(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    response = client.get("/api/v1/admin/tenants?page_size=100", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    platform_rows = [item for item in response.json()["items"] if item["is_platform"]]
+
+    assert len(platform_rows) == 1
+    assert platform_rows[0]["id"] == str(PLATFORM_TENANT_ID)
+    assert platform_rows[0]["code"] == "platform"
+    assert platform_rows[0]["is_active"] is True
+
+    patch_response = client.patch(
+        f"/api/v1/admin/tenants/{PLATFORM_TENANT_ID}",
+        json={"is_active": False},
+        headers=auth_headers,
+    )
+    assert patch_response.status_code == 403, patch_response.text
+
+    delete_response = client.delete(
+        f"/api/v1/admin/tenants/{PLATFORM_TENANT_ID}?confirm=true",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 403, delete_response.text
 
 
 def test_tenant_admin_password_change_clears_force_flag(

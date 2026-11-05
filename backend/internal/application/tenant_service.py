@@ -46,9 +46,13 @@ class TenantService:
         self._context = context
 
     def list_tenants(self, keyword: str | None = None) -> list[Tenant]:
-        """产品级平台查询全部租户，列表头部注入虚拟产品级平台租户。"""
+        """产品级平台查询全部租户，列表头部注入系统产品级租户。"""
         self._require_platform()
-        tenants = self._uow.tenants.search(keyword)
+        tenants = [
+            tenant
+            for tenant in self._uow.tenants.search(keyword)
+            if tenant.id != PLATFORM_TENANT_ID
+        ]
         platform_tenant = self._build_platform_tenant()
         if self._platform_tenant_matches(keyword, platform_tenant):
             return [platform_tenant, *tenants]
@@ -56,7 +60,7 @@ class TenantService:
 
     @staticmethod
     def _build_platform_tenant() -> Tenant:
-        """构造虚拟产品级平台租户（不入库，仅用于列表展示与作用域标识）。"""
+        """构造系统产品级租户展示对象。"""
         settings = get_settings()
         return Tenant(
             id=PLATFORM_TENANT_ID,
@@ -118,8 +122,17 @@ class TenantService:
             raise ConflictError("管理员用户名已被产品级账号占用")
         validate_password_strength(admin_password, username)
 
+        tenant_id = new_uuid()
+        if tenant_id == PLATFORM_TENANT_ID or self._uow.tenants.get_by_id(tenant_id) is not None:
+            raise ConflictError("租户 UUID 已存在，请重试")
+
         tenant = self._uow.tenants.create(
-            {"code": normalized_code, "name": normalized_name, "is_active": True}
+            {
+                "id": tenant_id,
+                "code": normalized_code,
+                "name": normalized_name,
+                "is_active": True,
+            }
         )
         roles = {
             code: self._uow.roles.create(
