@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from starlette.requests import Request
 
 from internal.application.errors import NotFoundError
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.request_context import PLATFORM_SCOPE, TENANT_SCOPE
 from internal.domain.entity.tenant import Tenant
 from internal.infrastructure.config.settings import Settings
@@ -70,8 +71,8 @@ def test_platform_context(client: TestClient) -> None:
     assert body["tenant_resolution"] == "host"
     assert body["tenant_switch_mode"] == "none"
     assert body["root_domain"] == "example.com"
-    assert body["platform_admin_subdomain"] == "adminsystem"
-    assert body["platform_admin_host"] == "adminsystem.example.com"
+    assert body["platform_admin_subdomain"] == "platform"
+    assert body["platform_admin_host"] == "platform.example.com"
     assert body["platform_name"] == "AI智能体运营管理平台"
 
 
@@ -94,6 +95,32 @@ def test_tenant_context_and_login(
     assert context.status_code == 200, context.text
     assert context.json()["scope"] == "tenant"
     assert context.json()["user"]["username"] == f"{TENANT_A}-admin"
+
+
+def test_platform_tenant_listed_once_and_protected(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    response = client.get("/api/v1/admin/tenants?page_size=100", headers=auth_headers)
+    assert response.status_code == 200, response.text
+    platform_rows = [item for item in response.json()["items"] if item["is_platform"]]
+
+    assert len(platform_rows) == 1
+    assert platform_rows[0]["id"] == str(PLATFORM_TENANT_ID)
+    assert platform_rows[0]["code"] == "platform"
+    assert platform_rows[0]["is_active"] is True
+
+    patch_response = client.patch(
+        f"/api/v1/admin/tenants/{PLATFORM_TENANT_ID}",
+        json={"is_active": False},
+        headers=auth_headers,
+    )
+    assert patch_response.status_code == 403, patch_response.text
+
+    delete_response = client.delete(
+        f"/api/v1/admin/tenants/{PLATFORM_TENANT_ID}?confirm=true",
+        headers=auth_headers,
+    )
+    assert delete_response.status_code == 403, delete_response.text
 
 
 def test_tenant_admin_password_change_clears_force_flag(
@@ -439,7 +466,7 @@ def test_deployed_environment_ignores_tenant_header_by_default(
     )
     monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
 
-    request = _request("adminsystem.example.com", {"X-Tenant-Code": "acme"})
+    request = _request("platform.example.com", {"X-Tenant-Code": "acme"})
 
     context = get_request_context(request)
 
@@ -562,22 +589,6 @@ def test_local_bootstrap_host_allows_platform_header(monkeypatch: pytest.MonkeyP
     assert context.resolution == "header"
 
 
-def test_local_bootstrap_host_treats_admin_subdomain_as_platform(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """浏览器残留平台子域名保留字时归一化为产品级，而不是当作租户编码报 404。"""
-    settings = _build_settings(app_env="local", root_domain="", allow_tenant_header=True)
-    monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
-    _patch_tenant_loader(monkeypatch, {})
-
-    context = get_request_context(
-        _request("localhost:5173", {TENANT_HEADER: "adminsystem"})
-    )
-
-    assert context.scope == PLATFORM_SCOPE
-    assert context.tenant is None
-    assert context.resolution == "header"
-
 
 def test_local_default_tenant_code_applies_to_localhost(
     monkeypatch: pytest.MonkeyPatch,
@@ -624,7 +635,7 @@ def test_tenant_switch_mode_by_host(monkeypatch: pytest.MonkeyPatch) -> None:
 
     deployed_settings = _build_settings()
     monkeypatch.setattr(tenant_deps, "get_settings", lambda: deployed_settings)
-    deployed_context = get_request_context(_request("adminsystem.example.com"))
+    deployed_context = get_request_context(_request("platform.example.com"))
     assert tenant_deps.tenant_switch_mode(deployed_settings, deployed_context) == "none"
 
 
@@ -647,7 +658,7 @@ def test_host_normalized_with_case_port_and_trailing_dot(
     settings = _build_settings()
     monkeypatch.setattr(tenant_deps, "get_settings", lambda: settings)
 
-    context = get_request_context(_request("ADMINSYSTEM.Example.COM.:443"))
+    context = get_request_context(_request("PLATFORM.Example.COM.:443"))
 
     assert context.scope == PLATFORM_SCOPE
     assert context.tenant is None

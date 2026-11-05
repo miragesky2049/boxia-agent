@@ -135,7 +135,7 @@ QUERIES = [
 async def main() -> None:
     settings = get_settings()
     ctx = RequestContext(
-        scope="platform", tenant=None, host="adminsystem.localhost", resolution="default"
+        scope="platform", tenant=None, host="platform.localhost", resolution="default"
     )
 
     print("=" * 60)

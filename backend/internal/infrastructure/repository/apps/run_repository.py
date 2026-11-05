@@ -39,12 +39,13 @@ class RunRepository:
         graph_snapshot: dict[str, Any],
         input_data: dict[str, Any],
         thread_id: str,
+        user_id: UUID | None = None,
     ) -> None:
         self._session.execute(
             text(
                 "INSERT INTO run (id, tenant_id, workflow_id, graph_snapshot, input, "
-                "thread_id, execute_status) VALUES "
-                "(:id, :tid, :wid, CAST(:snapshot AS JSONB), CAST(:input AS JSONB), :thread, 'running')"
+                "thread_id, execute_status, user_id) VALUES "
+                "(:id, :tid, :wid, CAST(:snapshot AS JSONB), CAST(:input AS JSONB), :thread, 'running', :uid)"
             ),
             {
                 "id": run_id,
@@ -53,6 +54,7 @@ class RunRepository:
                 "snapshot": json.dumps(graph_snapshot),
                 "input": json.dumps(input_data),
                 "thread": thread_id,
+                "uid": user_id,
             },
         )
 
@@ -64,10 +66,11 @@ class RunRepository:
         output: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> None:
+        # 流转到终态（success/error）时清空中断快照，run 行只保留最近一次中断的 payload
         self._session.execute(
             text(
                 "UPDATE run SET execute_status = :status, output = CAST(:output AS JSONB), "
-                "error_message = :error, finished_at = now() WHERE id = :id"
+                "error_message = :error, interrupt_payload = NULL, finished_at = now() WHERE id = :id"
             ),
             {
                 "id": run_id,
@@ -77,11 +80,21 @@ class RunRepository:
             },
         )
 
+    def update_run_interrupt(self, run_id: UUID, payload: dict[str, Any]) -> None:
+        """人审中断：标记 interrupted 并冗余保存中断 payload（assignee_role/instructions/snapshot）。"""
+        self._session.execute(
+            text(
+                "UPDATE run SET execute_status = 'interrupted', "
+                "interrupt_payload = CAST(:payload AS JSONB), finished_at = now() WHERE id = :id"
+            ),
+            {"id": run_id, "payload": json.dumps(payload)},
+        )
+
     def get_run(self, run_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
-                "SELECT id, tenant_id, workflow_id, input, output, execute_status, error_message, "
-                "thread_id, started_at, finished_at FROM run WHERE id = :id"
+                "SELECT id, tenant_id, workflow_id, user_id, input, output, execute_status, error_message, "
+                "thread_id, interrupt_payload, started_at, finished_at FROM run WHERE id = :id"
             ),
             {"id": run_id},
         ).first()
@@ -96,7 +109,7 @@ class RunRepository:
         """按 thread_id 查找该租户该应用下最近一条未结束的 run（用于 resume 复用 run_id）。"""
         row = self._session.execute(
             text(
-                "SELECT id, execute_status FROM run "
+                "SELECT id, execute_status, interrupt_payload FROM run "
                 "WHERE tenant_id = :tid AND workflow_id = :wid "
                 "AND thread_id = :thread "
                 "AND execute_status IN ('running', 'interrupted') "
@@ -111,16 +124,45 @@ class RunRepository:
         tenant_id: UUID,
         *,
         workflow_id: UUID | None = None,
+        user_id: UUID | None = None,
         limit: int = 50,
     ) -> list[dict]:
         sql = (
-            "SELECT id, workflow_id, thread_id, execute_status, input, output, error_message, started_at, finished_at "
+            "SELECT id, workflow_id, user_id, thread_id, execute_status, input, output, error_message, "
+            "interrupt_payload, started_at, finished_at "
             "FROM run WHERE tenant_id = :tid"
         )
         params: dict[str, Any] = {"tid": tenant_id}
         if workflow_id is not None:
             sql += " AND workflow_id = :wid"
             params["wid"] = workflow_id
+        if user_id is not None:
+            sql += " AND user_id = :uid"
+            params["uid"] = user_id
+        sql += " ORDER BY started_at DESC LIMIT :limit"
+        params["limit"] = limit
+        rows = self._session.execute(text(sql), params).all()
+        return [dict(r._mapping) for r in rows]
+
+    def list_interrupted(
+        self,
+        tenant_id: UUID,
+        workflow_id: UUID,
+        *,
+        assignee_role: str | None = None,
+        limit: int = 50,
+    ) -> list[dict]:
+        """列出某应用下处于人审中断的 run；assignee_role 非空时按中断 payload 的审批角色过滤。"""
+        sql = (
+            "SELECT id, workflow_id, user_id, thread_id, execute_status, input, "
+            "interrupt_payload, started_at, finished_at "
+            "FROM run WHERE tenant_id = :tid AND workflow_id = :wid "
+            "AND execute_status = 'interrupted' AND interrupt_payload IS NOT NULL"
+        )
+        params: dict[str, Any] = {"tid": tenant_id, "wid": workflow_id}
+        if assignee_role is not None:
+            sql += " AND interrupt_payload ->> 'assignee_role' = :role"
+            params["role"] = assignee_role
         sql += " ORDER BY started_at DESC LIMIT :limit"
         params["limit"] = limit
         rows = self._session.execute(text(sql), params).all()

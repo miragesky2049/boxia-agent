@@ -20,6 +20,7 @@ from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.common import MAX_PAGE_SIZE, Page
 from internal.domain.entity.permission import CONSOLE_ACCESS, DATA_ALL
 from internal.domain.entity.request_context import RequestContext
+from internal.domain.entity.tenant import Tenant
 from internal.domain.repository.protocols import UnitOfWork
 from internal.infrastructure.security.password import hash_password, validate_password_strength
 
@@ -45,6 +46,30 @@ class AdminUserService:
             items, total = self._uow.admin_users.list_page(page, page_size, keyword)
             return Page(items=items, total=total, page=page, page_size=page_size)
         tenant_id = self._require_tenant()
+        return self._list_tenant_admins(tenant_id, page, page_size, keyword)
+
+    def list_for_tenant(
+        self,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+    ) -> Page[AdminUser]:
+        """产品级管理员查询指定租户的管理员列表。"""
+        self._require_platform()
+        self._get_tenant_or_404(tenant_id)
+        page = max(page, 1)
+        page_size = min(max(page_size, 1), MAX_PAGE_SIZE)
+        return self._list_tenant_admins(tenant_id, page, page_size, keyword)
+
+    def _list_tenant_admins(
+        self,
+        tenant_id: UUID,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+    ) -> Page[AdminUser]:
+        """按 tenant_id 分页查询拥有管理端访问权限的用户。"""
         rows, total = self._uow.users.list_admin_page(
             tenant_id, page, page_size, keyword, CONSOLE_ACCESS
         )
@@ -85,7 +110,40 @@ class AdminUserService:
                 ip,
                 user_agent,
             )
+        tenant_id = self._require_tenant()
         return self._create_tenant_admin(
+            tenant_id,
+            normalized,
+            password,
+            display_name,
+            role_id,
+            actor_id,
+            actor_username,
+            ip,
+            user_agent,
+        )
+
+    def create_for_tenant(
+        self,
+        tenant_id: UUID,
+        *,
+        username: str,
+        password: str,
+        display_name: str,
+        role_id: UUID,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> AdminUser:
+        """产品级管理员为指定租户创建管理员账号。"""
+        self._require_platform()
+        self._get_tenant_or_404(tenant_id)
+        normalized = username.strip()
+        if not _USERNAME_PATTERN.match(normalized):
+            raise ValidationError("用户名需为 3-64 位字母、数字、下划线、点或短横线")
+        return self._create_tenant_admin(
+            tenant_id,
             normalized,
             password,
             display_name,
@@ -120,7 +178,37 @@ class AdminUserService:
                 ip,
                 user_agent,
             )
+        tenant_id = self._require_tenant()
         return self._update_tenant_admin(
+            tenant_id,
+            user_id,
+            display_name,
+            role_id,
+            is_active,
+            actor_id,
+            actor_username,
+            ip,
+            user_agent,
+        )
+
+    def update_for_tenant(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        display_name: str | None,
+        role_id: UUID | None,
+        is_active: bool | None,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> AdminUser:
+        """产品级管理员调整指定租户的管理员。"""
+        self._require_platform()
+        self._get_tenant_or_404(tenant_id)
+        return self._update_tenant_admin(
+            tenant_id,
             user_id,
             display_name,
             role_id,
@@ -151,15 +239,64 @@ class AdminUserService:
                 user_id, hash_password(new_password), True, datetime.now(UTC)
             )
             self._uow.refresh_tokens.revoke_all_for_user(user_id)
-            tenant_id = None
-        else:
-            tenant_id = self._require_tenant()
-            tenant_admin = self._get_tenant_admin(user_id, tenant_id)
-            validate_password_strength(new_password, tenant_admin.username)
-            self._uow.users.update_password(
-                user_id, hash_password(new_password), True, datetime.now(UTC)
+            record_audit(
+                self._uow,
+                action="admin_user.password_reset",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="admin_user",
+                resource_id=str(user_id),
+                ip=ip,
+                user_agent=user_agent,
+                tenant_id=None,
             )
-            self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
+            self._uow.commit()
+            return
+        tenant_id = self._require_tenant()
+        self._reset_tenant_admin_password(
+            tenant_id, user_id, new_password=new_password,
+            actor_id=actor_id, actor_username=actor_username,
+            ip=ip, user_agent=user_agent,
+        )
+
+    def reset_password_for_tenant(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        new_password: str,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """产品级管理员重置指定租户管理员的密码。"""
+        self._require_platform()
+        self._get_tenant_or_404(tenant_id)
+        self._reset_tenant_admin_password(
+            tenant_id, user_id, new_password=new_password,
+            actor_id=actor_id, actor_username=actor_username,
+            ip=ip, user_agent=user_agent,
+        )
+
+    def _reset_tenant_admin_password(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        new_password: str,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None,
+        user_agent: str | None,
+    ) -> None:
+        """租户管理员密码重置的共享实现，由调用方保证 tenant_id 已校验。"""
+        tenant_admin = self._get_tenant_admin(user_id, tenant_id)
+        validate_password_strength(new_password, tenant_admin.username)
+        self._uow.users.update_password(
+            user_id, hash_password(new_password), True, datetime.now(UTC)
+        )
+        self._uow.user_refresh_tokens.revoke_all_for_user(user_id)
         record_audit(
             self._uow,
             action="admin_user.password_reset",
@@ -189,18 +326,66 @@ class AdminUserService:
                 raise NotFoundError("管理员不存在")
             if target.id == actor_id:
                 raise ValidationError("不能删除当前登录账号")
-            tenant_id = None
             username = target.username
             if not self._uow.admin_users.delete(user_id):
                 raise NotFoundError("管理员不存在")
-        else:
-            tenant_id = self._require_tenant()
-            tenant_admin = self._get_tenant_admin(user_id, tenant_id)
-            if tenant_admin.id == actor_id:
-                raise ValidationError("不能删除当前登录账号")
-            username = tenant_admin.username
-            if not self._uow.users.delete(user_id):
-                raise NotFoundError("管理员不存在")
+            record_audit(
+                self._uow,
+                action="admin_user.deleted",
+                actor_id=actor_id,
+                actor_username=actor_username,
+                resource_type="admin_user",
+                resource_id=str(user_id),
+                ip=ip,
+                user_agent=user_agent,
+                detail={"username": username},
+                tenant_id=None,
+            )
+            self._uow.commit()
+            return
+        tenant_id = self._require_tenant()
+        self._delete_tenant_admin(
+            tenant_id, user_id,
+            actor_id=actor_id, actor_username=actor_username,
+            ip=ip, user_agent=user_agent,
+        )
+
+    def delete_for_tenant(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None = None,
+        user_agent: str | None = None,
+    ) -> None:
+        """产品级管理员删除指定租户的管理员账号。"""
+        self._require_platform()
+        self._get_tenant_or_404(tenant_id)
+        self._delete_tenant_admin(
+            tenant_id, user_id,
+            actor_id=actor_id, actor_username=actor_username,
+            ip=ip, user_agent=user_agent,
+        )
+
+    def _delete_tenant_admin(
+        self,
+        tenant_id: UUID,
+        user_id: UUID,
+        *,
+        actor_id: UUID,
+        actor_username: str,
+        ip: str | None,
+        user_agent: str | None,
+    ) -> None:
+        """租户管理员删除的共享实现，由调用方保证 tenant_id 已校验。"""
+        tenant_admin = self._get_tenant_admin(user_id, tenant_id)
+        if tenant_admin.id == actor_id:
+            raise ValidationError("不能删除当前登录账号")
+        username = tenant_admin.username
+        if not self._uow.users.delete(user_id):
+            raise NotFoundError("管理员不存在")
         record_audit(
             self._uow,
             action="admin_user.deleted",
@@ -264,6 +449,7 @@ class AdminUserService:
 
     def _create_tenant_admin(
         self,
+        tenant_id: UUID,
         username: str,
         password: str,
         display_name: str,
@@ -274,7 +460,6 @@ class AdminUserService:
         user_agent: str | None,
     ) -> AdminUser:
         """在 users 中创建租户管理员，并绑定具备管理端访问权限的角色。"""
-        tenant_id = self._require_tenant()
         matched_role = self._resolve_tenant_admin_role(tenant_id, role_id)
         if self._uow.users.username_exists(tenant_id, username):
             raise ConflictError("用户名已存在")
@@ -363,6 +548,7 @@ class AdminUserService:
 
     def _update_tenant_admin(
         self,
+        tenant_id: UUID,
         user_id: UUID,
         display_name: str | None,
         role_id: UUID | None,
@@ -373,7 +559,6 @@ class AdminUserService:
         user_agent: str | None,
     ) -> AdminUser:
         """调整租户管理员；角色变更会整体替换其角色集合。"""
-        tenant_id = self._require_tenant()
         target = self._get_tenant_admin(user_id, tenant_id)
         values: dict = {}
         resolved_role: Role | None = None
@@ -481,6 +666,18 @@ class AdminUserService:
         if self._context.is_platform:
             raise ForbiddenError("租户管理员仅可由租户平台维护")
         return tenant_id
+
+    def _require_platform(self) -> None:
+        """跨租户操作要求当前登录人是产品级平台管理员。"""
+        if not self._context.is_platform:
+            raise ForbiddenError("仅产品级管理员可跨租户操作")
+
+    def _get_tenant_or_404(self, tenant_id: UUID) -> Tenant:
+        """校验目标租户存在，供平台级跨租户操作复用。"""
+        tenant = self._uow.tenants.get_by_id(tenant_id)
+        if tenant is None:
+            raise NotFoundError("租户不存在")
+        return tenant
 
     def _resolve_platform_role(self, role_id: UUID) -> Role:
         """解析平台账号绑定角色，必须是启用的平台角色。"""

@@ -73,8 +73,8 @@ function mockApi(captured: Captured, options: MockApiOptions) {
     tenant_resolution: 'host',
     tenant_switch_mode: 'none',
     root_domain: 'example.com',
-    platform_admin_subdomain: 'adminsystem',
-    platform_admin_host: 'adminsystem.example.com',
+    platform_admin_subdomain: 'platform',
+    platform_admin_host: 'platform.example.com',
     platform_name: 'Boxia',
     password_policy: passwordPolicy,
   }
@@ -90,8 +90,8 @@ function mockApi(captured: Captured, options: MockApiOptions) {
     tenant_resolution: 'host',
     tenant_switch_mode: 'none',
     root_domain: 'example.com',
-    platform_admin_subdomain: 'adminsystem',
-    platform_admin_host: 'adminsystem.example.com',
+    platform_admin_subdomain: 'platform',
+    platform_admin_host: 'platform.example.com',
     platform_name: 'Boxia',
     password_policy: passwordPolicy,
   }

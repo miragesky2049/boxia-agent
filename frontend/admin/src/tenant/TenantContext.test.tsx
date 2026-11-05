@@ -13,8 +13,8 @@ const platformContext = {
   tenant_resolution: 'header',
   tenant_switch_mode: 'header',
   root_domain: 'localhost',
-  platform_admin_subdomain: 'adminsystem',
-  platform_admin_host: 'adminsystem.localhost',
+  platform_admin_subdomain: 'platform',
+  platform_admin_host: 'platform.localhost',
   platform_name: 'Boxia',
   password_policy: { min_length: 10, max_bytes: 72, min_categories: 3 },
 }
@@ -49,14 +49,14 @@ describe('TenantContext 作用域容错', () => {
     vi.restoreAllMocks()
   })
 
-  it('残留 X-Tenant-Code=adminsystem 致 context 404 时，清空脏值并重试恢复', async () => {
-    setTenantCode('adminsystem')
+  it('残留 X-Tenant-Code 致 context 404 时，清空脏值并重试恢复', async () => {
+    setTenantCode('legacy-admin')
     const fetchMock = vi.fn(async (_input: RequestInfo | URL, init?: RequestInit) => {
       const headers = new Headers(init?.headers)
       const pathname = new URL(String(_input), 'http://localhost').pathname
       if (pathname.endsWith('/public/context')) {
         return headers.get('x-tenant-code')
-          ? jsonResponse({ detail: '租户不存在：adminsystem', code: 'NOT_FOUND' }, 404)
+          ? jsonResponse({ detail: '租户不存在：legacy-admin', code: 'NOT_FOUND' }, 404)
           : jsonResponse(platformContext)
       }
       if (pathname.endsWith('/public/tenants')) return jsonResponse([])
@@ -75,12 +75,12 @@ describe('TenantContext 作用域容错', () => {
     expect(contextCalls).toHaveLength(2)
     const firstHeaders = new Headers((contextCalls[0]![1] as RequestInit).headers)
     const secondHeaders = new Headers((contextCalls[1]![1] as RequestInit).headers)
-    expect(firstHeaders.get('x-tenant-code')).toBe('adminsystem')
+    expect(firstHeaders.get('x-tenant-code')).toBe('legacy-admin')
     expect(secondHeaders.get('x-tenant-code')).toBeNull()
   })
 
-  it('?tenant=adminsystem 归一化为产品级，不写入保留字', async () => {
-    window.history.replaceState({}, '', '/login?tenant=adminsystem')
+  it('?tenant=platform 归一化为产品级，不写入保留字', async () => {
+    window.history.replaceState({}, '', '/login?tenant=platform')
     vi.stubGlobal(
       'fetch',
       vi.fn(async (input: RequestInfo | URL) => {
@@ -94,6 +94,6 @@ describe('TenantContext 作用域容错', () => {
     renderGate()
 
     await waitFor(() => expect(screen.getByText('gate-ok')).toBeTruthy())
-    expect(window.localStorage.getItem(STORAGE_KEY)).not.toBe('adminsystem')
+    expect(window.localStorage.getItem(STORAGE_KEY)).not.toBe('platform')
   })
 })

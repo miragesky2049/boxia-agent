@@ -5,6 +5,7 @@ import re
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from uuid import UUID
 
 from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -89,7 +90,10 @@ class Settings(BaseSettings):
     # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
     # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
     root_domain: str = ""
-    platform_admin_subdomain: str = "adminsystem"
+    platform_admin_subdomain: str = "platform"
+    # 产品级租户 UUID：部署后不可更改，所有业务表 tenant_id 引用此值。
+    # 默认 00000000-0000-0000-0000-000000100000，避开全零 UUID（全零通常被 ORM/框架保留）。
+    platform_tenant_id: str = "00000000-0000-0000-0000-000000100000"
     default_tenant_code: str = ""
     # 仅 local 环境允许用 X-Tenant-Code 请求头覆盖作用域；开发/测试/线上启动时禁止开启。
     allow_tenant_header: bool = False
@@ -239,6 +243,13 @@ class Settings(BaseSettings):
         if self.password_min_length > self.password_max_bytes:
             raise ValueError("PASSWORD_MIN_LENGTH 不能大于 PASSWORD_MAX_BYTES")
 
+        # 产品级租户 UUID：必须是合法 UUID
+        try:
+            parsed_uuid = UUID(self.platform_tenant_id.strip())
+        except ValueError:
+            raise ValueError("PLATFORM_TENANT_ID 必须是合法 UUID") from None
+        self.platform_tenant_id = str(parsed_uuid)
+
         root = self.normalized_root_domain
         if self.is_local:
             if root and not _DOMAIN_PATTERN.match(root):
@@ -267,8 +278,13 @@ class Settings(BaseSettings):
 
 @lru_cache(maxsize=1)
 def get_settings() -> Settings:
-    """获取进程级配置单例。"""
-    return Settings()  # type: ignore[call-arg]
+    """获取进程级配置单例，并同步产品级租户 UUID 到领域常量。"""
+    settings = Settings()  # type: ignore[call-arg]
+    # 延迟导入避免循环依赖：settings → constants → settings
+    from internal.domain.constants import init_platform_tenant_id
+
+    init_platform_tenant_id(settings.platform_tenant_id)
+    return settings
 
 
 def reset_settings() -> None:

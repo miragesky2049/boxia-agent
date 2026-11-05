@@ -1166,3 +1166,126 @@ class ApplicationService:
             "failed": len(unique_ids) - succeeded,
             "items": items,
         }
+
+    # ========== 复制应用 ==========
+    def copy_application(
+        self,
+        application_id: UUID,
+        *,
+        actor_id: UUID | None = None,
+        actor_username: str = "",
+    ) -> dict[str, Any]:
+        """复制产品级应用的全部定义数据为一个新应用。
+
+        复制范围（应用「定义」层）：
+        - application 主行（owner_type/owner_id/avatar_url/description/flow_type/
+          variables/visibility_mode/sale_mode/support_trial/doc_url/ext_json）
+        - application_graph 当前整图
+        - application_graph_version 最新一版（作为副本的 v1）
+        - application_visibility_departments / users 可见范围白名单
+
+        不复制（运行态/租户关系数据）：
+        - tenant_application_instance、tenant_application_config、application_user_variable
+        - conversation、message、run、run_node_execution、tenant_usage_ledger
+        - event_webhook、resource_grants、entitlement_plan_item、application_apply
+
+        副本默认 is_enabled=False、is_listed_in_market=False、published_graph_version=NULL，
+        由运营在副本上自行启用/上架/发布。名称格式：「{原名}的副本」或「{原名}的副本N」。
+        """
+        source = self._repo.get_full_application(application_id)
+        if source is None:
+            raise NotFoundError("应用不存在")
+        if source.get("owner_type") != "platform":
+            raise ValidationError("仅产品级应用支持复制")
+
+        source_name = str(source.get("name") or "").strip()
+        if not source_name:
+            raise ValidationError("源应用名称为空，无法复制")
+
+        existing_copies = self._repo.count_copies(source_name)
+        if existing_copies == 0:
+            new_name = f"{source_name}的副本"
+        else:
+            new_name = f"{source_name}的副本{existing_copies + 1}"
+        # 名称长度兜底（application.name 列长度 200）
+        if len(new_name) > 200:
+            new_name = new_name[:197] + "..."
+
+        try:
+            new_app_id = self._repo.insert_application_row({
+                "owner_type": "platform",
+                "owner_id": None,
+                "name": new_name,
+                "avatar_url": source.get("avatar_url"),
+                "description": source.get("description", ""),
+                "is_enabled": False,
+                "is_listed_in_market": False,
+                "sale_mode": source.get("sale_mode", 1),
+                "support_trial": source.get("support_trial", False),
+                "doc_url": source.get("doc_url", ""),
+                "ext_json": source.get("ext_json") or {},
+                "visibility_mode": source.get("visibility_mode", "all"),
+                "published_graph_version": None,
+                "flow_type": source.get("flow_type", "workflow"),
+                "variables": source.get("variables") or [],
+                "created_by": actor_id,
+            })
+
+            # 复制当前 graph（application_graph 行）
+            graph_row = self._repo.get_graph_row(application_id)
+            runtime_mode = "dag"
+            graph_payload: dict[str, Any] = {}
+            if graph_row is not None:
+                graph_payload = _parse_graph(graph_row.get("graph"), self._storage) or {}
+                runtime_mode = graph_row.get("runtime_mode") or "dag"
+                if graph_payload:
+                    self._repo.insert_graph_row(new_app_id, graph_payload, runtime_mode)
+
+            # 复制最新 graph 版本（作为副本的 v1，changelog 标注来源）
+            latest_version = self._repo.get_latest_graph_version_row(application_id)
+            if latest_version is not None and graph_payload:
+                self._repo.insert_graph_version_row(
+                    application_id=new_app_id,
+                    version=1,
+                    graph=graph_payload,
+                    runtime_mode=latest_version.get("runtime_mode") or runtime_mode,
+                    changelog=f"复制自应用 {source_name}（源版本 v{latest_version.get('version')}）",
+                    created_by=actor_id,
+                )
+
+            # 复制可见范围
+            visibility = self._repo.get_visibility_detail(application_id)
+            self._repo.insert_visibility_rows(
+                new_app_id,
+                mode=visibility.get("mode", "all"),
+                departments=visibility.get("departments") or [],
+                users=visibility.get("users") or [],
+            )
+
+            # 写审计日志
+            self._uow.audit_logs.record({
+                "actor_id": actor_id,
+                "actor_username": actor_username,
+                "action": "APP_COPY",
+                "resource_type": "application",
+                "resource_id": str(new_app_id),
+                "tenant_id": PLATFORM_TENANT_ID,
+                "detail": {
+                    "source_application_id": str(application_id),
+                    "source_name": source_name,
+                    "new_application_id": str(new_app_id),
+                    "new_name": new_name,
+                    "flow_type": source.get("flow_type"),
+                },
+            })
+
+            self._uow.commit()
+        except Exception:
+            self._uow.rollback()
+            raise
+
+        return {
+            "application_id": str(new_app_id),
+            "name": new_name,
+            "source_application_id": str(application_id),
+        }

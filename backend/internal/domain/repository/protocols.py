@@ -4,6 +4,8 @@ from datetime import datetime
 from typing import Any, Protocol, TypeVar
 from uuid import UUID
 
+from sqlalchemy.orm import Session
+
 from internal.domain.entity.access import (
     GrantSummary,
     ResourceGrant,
@@ -833,6 +835,11 @@ class UnitOfWork(Protocol):
     @property
     def tenant_id(self) -> UUID | None:
         """当前工作单元绑定的租户 ID（只读成员，实现可将 None 归一化为平台租户）。"""
+        ...
+
+    @property
+    def session(self) -> Session:
+        """当前事务会话，仅删除租户等裸 SQL 场景使用。"""
         ...
 
     tenants: TenantRepository

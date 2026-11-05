@@ -1,9 +1,10 @@
 """审计日志的 PostgreSQL 仓储实现。"""
 
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import delete, func, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.audit_log import AuditLog
@@ -88,7 +89,7 @@ class PostgresAuditLogRepository:
         stmt = delete(AuditLogModel)
         if tenant_id is not None:
             stmt = stmt.where(AuditLogModel.tenant_id == tenant_id)
-        result = self._session.execute(stmt)
+        result = cast(CursorResult[Any], self._session.execute(stmt))
         self._session.flush()
         return int(result.rowcount or 0)
 

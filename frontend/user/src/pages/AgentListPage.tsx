@@ -1,4 +1,4 @@
-import { MessageOutlined, RightOutlined } from '@ant-design/icons'
+import { MessageOutlined, NodeIndexOutlined, RightOutlined } from '@ant-design/icons'
 import { Alert, Card, Col, Empty, Input, Pagination, Row, Skeleton, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
@@ -25,9 +25,10 @@ function AgentAvatar({ agent }: { agent: UserAgentSummary }) {
 }
 
 function AgentCard({ agent }: { agent: UserAgentSummary }) {
+  const isWorkflow = agent.flow_type === 'workflow'
   return (
     <Col xs={24} sm={12} lg={8} xl={6}>
-      <Link to={`/agents/${agent.id}/chat`} style={{ display: 'block', height: '100%' }}>
+      <Link to={`/agents/${agent.id}/${isWorkflow ? 'workflow' : 'chat'}`} style={{ display: 'block', height: '100%' }}>
         <Card className="agent-card" styles={{ body: { height: '100%', display: 'flex', flexDirection: 'column' } }}>
           <div className="agent-card__head">
             <AgentAvatar agent={agent} />
@@ -48,8 +49,12 @@ function AgentCard({ agent }: { agent: UserAgentSummary }) {
             {formatDescription(agent.description)}
           </Typography.Paragraph>
           <Typography.Text className="agent-card__link" style={{ color: '#2f6bff' }}>
-            <MessageOutlined style={{ marginRight: 4, fontSize: 12 }} />
-            发起对话 <RightOutlined style={{ fontSize: 11 }} />
+            {isWorkflow ? (
+              <NodeIndexOutlined style={{ marginRight: 4, fontSize: 12 }} />
+            ) : (
+              <MessageOutlined style={{ marginRight: 4, fontSize: 12 }} />
+            )}
+            {isWorkflow ? '开始运行' : '发起对话'} <RightOutlined style={{ fontSize: 11 }} />
           </Typography.Text>
         </Card>
       </Link>

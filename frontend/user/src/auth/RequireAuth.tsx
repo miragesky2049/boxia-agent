@@ -6,6 +6,11 @@ export default function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   const location = useLocation()
 
+  // 仅 dev 构建生效：?wfMock= 静态版工作台不访问真实接口，供 UI 验收截图免登录
+  if (import.meta.env.DEV && location.search.includes('wfMock=')) {
+    return <>{children}</>
+  }
+
   if (loading) {
     return (
       <main className="page-state">

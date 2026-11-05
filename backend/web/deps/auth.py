@@ -116,7 +116,7 @@ def require_permission(code: str) -> Callable[..., AdminPrincipal]:
 def require_platform_admin(
     principal: Annotated[AdminPrincipal, Depends(require_admin)],
 ) -> AdminPrincipal:
-    """产品级平台作用域校验：仅 adminsystem 子域名可用。"""
+    """产品级平台作用域校验：仅 platform 子域名可用。"""
     if not principal.is_platform:
         raise ForbiddenError("该操作仅产品级运营管理平台可用")
     return principal

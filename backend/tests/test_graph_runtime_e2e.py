@@ -50,6 +50,9 @@ class FakeRunRepo:
     def update_run_status(self, run_id, execute_status, output=None, error_message=None):
         self.status_updates.append({"run_id": run_id, "status": execute_status, "output": output, "error": error_message})
 
+    def update_run_interrupt(self, run_id, payload):
+        self.status_updates.append({"run_id": run_id, "status": "interrupted", "payload": payload})
+
     def insert_node_execution(self, **kwargs):
         self.node_executions.append(kwargs)
 

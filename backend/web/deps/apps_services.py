@@ -16,6 +16,7 @@ from internal.application.apps.resource_service import AppResourceService
 from internal.application.apps.run_service import RunService
 from internal.application.apps.tenant_settings_service import TenantSettingsService
 from internal.application.apps.webhook_service import WebhookService
+from internal.application.apps.workflow_service import WorkflowService
 from internal.domain.auth.apply_service import ApplyService
 from internal.domain.auth.grant_service import GrantService
 from internal.domain.auth.service import AuthService
@@ -108,3 +109,16 @@ def make_message_repository(session: Session) -> MessageRepository:
 
 def make_run_repository(session: Session) -> RunRepository:
     return RunRepository(session)
+
+
+def make_workflow_service(uow: SqlAlchemyUnitOfWork, principal: object) -> WorkflowService:
+    """用户端 workflow 编排服务装配：runner_factory 延迟 import 避免与 web/deps/graph.py 循环。"""
+    from web.deps.graph import build_runner
+
+    return WorkflowService(
+        uow=uow,
+        principal=principal,
+        runner_factory=build_runner,
+        app_service=make_application_service(uow),
+        run_repo=RunRepository(uow.session),
+    )

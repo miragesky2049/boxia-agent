@@ -28,7 +28,7 @@ backend-admin / backend-user 容器（FastAPI）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
-- 入口使用泛域名 `*.example.com`：`adminsystem.example.com` 为产品级平台，其余子域为租户。
+- 入口使用泛域名 `*.example.com`：`platform.example.com` 为产品级平台，其余子域为租户。
 - `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker`、`celery-beat` 不发布端口，只走 Compose 内部网络。
 - 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
 - `celery-worker` 与 backend 镜像同包，仅启动命令不同；它同时消费知识库 ingest 与权益周期任务（生效 / 到期流转、宽限期回收、对账），生产环境应保持运行。
@@ -68,8 +68,10 @@ ROOT_DOMAIN=example.com
 
 # ===== 按部署形态确认 =====
 APP_ENV=prod
-# 产品级平台子域名前缀，最终为 adminsystem.example.com
-PLATFORM_ADMIN_SUBDOMAIN=adminsystem
+# 产品级平台子域名前缀，最终为 platform.example.com
+PLATFORM_ADMIN_SUBDOMAIN=platform
+# 产品级租户 UUID，首次部署确定后不可再更改
+PLATFORM_TENANT_ID=00000000-0000-0000-0000-000000100000
 PLATFORM_NAME=AI智能体运营管理平台
 # 部署环境只按域名识别租户；生产开启该项会拒绝启动
 ALLOW_TENANT_HEADER=false
@@ -280,7 +282,7 @@ docker compose -f ops/docker-compose.yml run --rm \
 
 ### 14.6 配置 HTTPS
 
-推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再按域名转发：`adminsystem.<根域名>` 到 `frontend-admin`，根域名与租户子域名到 `frontend-user`。
+推荐用云负载均衡或宿主机 Nginx/Caddy 终止 TLS，再按域名转发：`platform.<根域名>` 到 `frontend-admin`，根域名与租户子域名到 `frontend-user`。
 
 多租户使用泛域名，证书必须同时覆盖根域和所有子域（如 `example.com` + `*.example.com`）。Let's Encrypt 的泛域名证书只能通过 DNS-01 验证申请。
 
@@ -297,7 +299,7 @@ server {
 # 管理端：仅平台子域名
 server {
     listen 443 ssl http2;
-    server_name adminsystem.example.com;
+    server_name platform.example.com;
 
     ssl_certificate     /etc/letsencrypt/live/example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/example.com/privkey.pem;
@@ -330,7 +332,7 @@ server {
 }
 ```
 
-`adminsystem.example.com` 是精确匹配，优先级高于 `*.example.com`，顺序不影响结果。
+`platform.example.com` 是精确匹配，优先级高于 `*.example.com`，顺序不影响结果。
 
 对应地把 `.env.prod` 的 `HTTP_PORT` / `USER_HTTP_PORT` 分别改为 `127.0.0.1:8080` / `127.0.0.1:8081`，让两个前端容器端口只绑定本机。
 
@@ -373,7 +375,7 @@ docker compose -f ops/docker-compose.yml logs migrate
 
 然后在浏览器中：
 
-- [ ] 通过 HTTPS 打开 `https://adminsystem.<根域名>`，使用首个管理员登录并完成改密
+- [ ] 通过 HTTPS 打开 `https://platform.<根域名>`，使用首个管理员登录并完成改密
 - [ ] 在「租户管理」创建一个租户，确认租户子域名可正常打开
 - [ ] 用该租户管理员登录租户子域名，确认看不到「租户管理」入口
 - [ ] 在平台侧创建一个产品级应用并发布版本，确认未开通时租户市场不可见；在「应用市场」开通给租户后，租户可看到实例但只能用自己的配置
@@ -459,12 +461,12 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 | 磁盘占满                                              | 检查数据库 volume、备份目录和容器日志轮转                                                                                                    |
 | 时间不对导致令牌异常                                  | 检查服务器 NTP 时间同步                                                                                                                      |
 | 租户子域名返回 404 / 403                              | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用                                          |
-| 未知域名也返回 404                                    | 这是预期行为：部署环境只认 `adminsystem.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
+| 未知域名也返回 404                                    | 这是预期行为：部署环境只认 `platform.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
 | 启动失败：`必须配置 ROOT_DOMAIN`                      | 除 `local` 外，`dev` / `test` / `prod` 都必须配置完整域名                                                                      |
 | 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机                                                                               |
 | 所有子域名都进入平台作用域                            | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名                                                            |
 | 本地 `acme.localhost` 打不开                          | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理）                                               |
-| 登录提示账号不属于该租户                              | 账号只能登录其所属作用域：产品级账号走 `adminsystem`，租户账号走本租户子域名                                                                 |
+| 登录提示账号不属于该租户                              | 账号只能登录其所属作用域：产品级账号走 `platform`，租户账号走本租户子域名                                                                 |
 
 ---
 

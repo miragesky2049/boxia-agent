@@ -1,12 +1,12 @@
 """请求级租户上下文：按域名解析租户，请求头仅作为本地调试逃生口。
 
 解析优先级（所有环境一致，域名优先）：
-1. ``adminsystem.<ROOT_DOMAIN>`` → 产品级平台（跨租户）；
+1. ``platform.<ROOT_DOMAIN>`` → 产品级平台（跨租户）；
 2. ``<tenant>.<ROOT_DOMAIN>`` → 对应租户；
 3. 根域名 ``<ROOT_DOMAIN>`` → 可配置默认租户，未配置则拒绝访问；
 4. local 环境的回环/本机主机（``localhost``、``127.0.0.1``、局域网 IP 等）
    在开启 ``ALLOW_TENANT_HEADER`` 时可用 ``X-Tenant-Code`` 临时切换，``platform``
-   或平台管理子域名保留字（默认 ``adminsystem``）表示产品级；
+   表示产品级；
 5. local 环境兜底为默认租户或产品级平台；其余环境无法识别的 Host 一律 404，
    绝不静默回退产品级平台。
 """
@@ -105,17 +105,9 @@ def _resolve_from_header(request: Request, settings: Settings) -> RequestContext
     if not code:
         return None
     host = _host_without_port(request)
-    # platform 与平台管理子域名保留字都表示产品级作用域，
-    # 避免浏览器残留 adminsystem 等子域名字样时被误当租户编码
-    if code in _platform_header_values(settings):
+    if code == PLATFORM_HEADER_VALUE:
         return RequestContext(PLATFORM_SCOPE, None, host, resolution="header")
     return RequestContext(TENANT_SCOPE, _load_tenant(code), host, resolution="header")
-
-
-def _platform_header_values(settings: Settings) -> set[str]:
-    """请求头中代表产品级作用域的全部取值：platform 与平台子域名保留字。"""
-    subdomain = settings.platform_admin_subdomain.strip().lower()
-    return {PLATFORM_HEADER_VALUE, subdomain} if subdomain else {PLATFORM_HEADER_VALUE}
 
 
 def _resolve_from_host(request: Request) -> RequestContext | None:
