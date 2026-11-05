@@ -114,5 +114,9 @@ export function workflowReducer(
       return { ...state, phase: 'error', error: { message: evt.data.message, code: evt.data.code } }
     case 'final':
       return state
+    default:
+      // 后端可能 output_message / prompt_text / tool_call_* 等节点侧事件，
+      // workflow 工作台不消费但不能让 reducer 返回 undefined 污染 state
+      return state
   }
 }

@@ -91,7 +91,10 @@ export function useWorkflowRun(
     const pending = pendingTokensRef.current
     pendingTokensRef.current = {}
     for (const [nodeId, delta] of Object.entries(pending)) {
-      setState((prev) => workflowReducer(prev, { event: 'llm_token', data: { node_id: nodeId, delta } }))
+      setState((prev) => {
+        const next = workflowReducer(prev, { event: 'llm_token', data: { node_id: nodeId, delta } })
+        return next ?? prev
+      })
     }
   }, [])
 
@@ -110,7 +113,10 @@ export function useWorkflowRun(
         return
       }
       flushTokens()
-      setState((prev) => workflowReducer(prev, evt))
+      setState((prev) => {
+        const next = workflowReducer(prev, evt)
+        return next ?? prev
+      })
     },
     [flushTokens],
   )
