@@ -4,7 +4,7 @@
 
 > 面向企业内部的 **AI 应用编排与运营平台**。管理员在管理端用可视化画布组合模型、提示词、工具与知识库，把编排好的应用发布到市场，按租户与角色授权给最终用户使用。
 >
-> 内置 RAG 检索增强（pgvector + bge embedding + cross-encoder rerank）、统一工具治理网关（熔断 / 限流 / 重试 / 连接池 / SSRF 防护）、HTTP 与 MCP 双工具协议、多租户行级数据隔离、RBAC 权限、审计日志与 OpenTelemetry 可观测性。技术栈为 FastAPI + React 19 + PostgreSQL 17 + Redis + Celery，Docker Compose 一键拉起。
+> 内置 RAG 检索增强（pgvector / Milvus + bge embedding + cross-encoder rerank）、统一工具治理网关（熔断 / 限流 / 重试 / 连接池 / SSRF 防护）、HTTP 与 MCP 双工具协议、多租户行级数据隔离、RBAC 权限、审计日志与 OpenTelemetry 可观测性。技术栈为 FastAPI + React 18 + PostgreSQL 17 + Redis + Celery，Docker Compose 一键拉起。
 
 ---
 
@@ -67,10 +67,10 @@
                   └──────────────┘
 ```
 
-- **后端**：Python + FastAPI，两个独立站点（admin / user），共享同一套业务与引擎层
-- **管理端前端**：React 19 + Ant Design 5 + ReactFlow 画布
-- **用户端前端**：React 19
-- **数据库**：PostgreSQL 17（Docker 启动，不用自己装）+ Redis + Celery
+- **后端**：Python 3.12 + FastAPI，两个独立站点（admin / user），共享同一套业务与引擎层
+- **管理端前端**：React 18 + Ant Design 5 + Semi UI + @flowgram.ai 画布
+- **用户端前端**：React 18 + Ant Design 5 + react-markdown 对话渲染
+- **数据库**：PostgreSQL 17（pgvector）+ Redis 7 + Celery（RAG ingest / 权益周期任务）
 
 ### 5 分钟把项目跑起来
 
@@ -127,8 +127,33 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 - 想给应用接外部接口（HTTP/MCP）→ [工具接入 5 分钟上手](docs/features.md#工具接入-5-分钟上手)
 - 卡住了 → [新手常见问题](docs/getting-started.md#4-新手常见问题)
 - 想改代码 → [目录结构与代码分层](docs/development.md#5-目录结构与代码分层)
+- 想看完整依赖版本 → [技术栈清单](docs/development.md#技术栈清单)
 - 想部署上线 → [生产环境落地部署](docs/deployment.md#14-生产环境落地部署)
 - 想面试讲清楚 → [面试讲解指南](docs/interview.md#13-面试讲解指南)
+
+---
+
+## 🧰 技术栈一览
+
+| 层 | 关键选型 | 用在哪 |
+| --- | --- | --- |
+| **后端运行时** | Python 3.12、FastAPI 0.115、Uvicorn | `web.app_admin:app` / `web.app_user:app` 两个 ASGI 站点 |
+| **ORM / 迁移** | SQLAlchemy 2.0、Alembic、psycopg 3 | 仓储、UnitOfWork、行级多租户过滤 |
+| **图运行时** | LangGraph 1.2、langgraph-checkpoint-postgres | DAG 编译执行、断点续跑、调试 / 试运行 SSE |
+| **Agent 与工具** | FastMCP 4、httpx（HTTP/2 + keep-alive） | ReAct 对话循环、MCP client、统一工具治理网关 |
+| **RAG** | pgvector、pymilvus（可选）、pypdf、python-docx | 文档切分 → embedding → 向量召回 → cross-encoder 精排 |
+| **异步任务** | Celery 5（Redis broker）、celery beat | RAG ingest、权益生效 / 到期 / 宽限期回收 / 对账 |
+| **缓存 / 短期记忆** | Redis 7（hiredis） | 多 DB 用途：短期记忆、Celery broker、结果后端 |
+| **认证** | PyJWT、bcrypt | Access Token（30 min）+ Refresh Token（DB 存 SHA-256） |
+| **可观测性** | OpenTelemetry（OTLP HTTP）、Prometheus、python-json-logger | 链路追踪、`/metrics`、结构化日志、请求 ID |
+| **管理端前端** | React 18、TypeScript 5.8、Vite 5、Ant Design 5、Semi UI、@flowgram.ai/free-layout-editor、Zustand、Inversify、react-router 7 | 画布编排、资源 / 工具 / 授权 / 租户 / 审计管理 |
+| **用户端前端** | React 18、Ant Design 5、react-markdown + remark-gfm、highlight.js、react-router 7 | 应用市场卡片、对话流式渲染、Markdown + GFM |
+| **对象存储** | MinIO（可切本地 fake） | 知识库原文、上传文件 |
+| **生产反代** | Nginx 1.27-alpine（unprivileged） | SPA 静态资源、`/api` 反代、限流、安全响应头 |
+| **容器与编排** | Docker（python:3.12-slim / node:24-alpine）、Docker Compose | `ops/docker-compose.yml` 一键起 db / redis / migrate / backend / celery / frontend |
+| **质量门禁** | ruff、mypy、pytest、pre-commit（后端）；oxlint、prettier、vitest、Playwright（前端） | 提交前与 CI 统一检查 |
+
+> 详细的版本、依赖清单与目录映射见 [docs/development.md §技术栈清单](docs/development.md#技术栈清单)。
 
 ---
 

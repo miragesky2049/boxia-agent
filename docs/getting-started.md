@@ -30,7 +30,7 @@
 ```
 
 - **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
-- **管理端**：React 19 + TypeScript + Ant Design + ReactFlow，负责应用画布、市场、资源、工具、授权、租户与审计管理。
+- **管理端**：React 18 + TypeScript + Ant Design 5 + Semi UI + @flowgram.ai/free-layout-editor，负责应用画布、市场、资源、工具、授权、租户与审计管理。
 - **用户端**：React + TypeScript，最终用户登录后浏览可见应用并直接对话。
 - **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（记忆 / Celery）+ Celery（知识库异步 ingest + 权益周期任务）。
 
@@ -38,7 +38,7 @@
 
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
-| 应用编排     | 可视化画布（ReactFlow，节点 / 连线 / 小地图 / 缩放）；节点覆盖 Start、End、LLM、HTTP、API 插件、Code、Dataset 检索、IF、Loop、Sub-workflow、Set Variable、Variable Merge、Text、JSON、Batch、Conversation、Agent Loop、Human Approval 等（节点类型与 coze 数字编码对齐，未实现类型在转换阶段显式报错） |
+| 应用编排     | 可视化画布（@flowgram.ai/free-layout-editor，节点 / 连线 / 小地图 / 缩放）；节点覆盖 Start、End、LLM、HTTP、API 插件、Code、Dataset 检索、IF、Loop、Sub-workflow、Set Variable、Variable Merge、Text、JSON、Batch、Conversation、Agent Loop、Human Approval 等（节点类型与 coze 数字编码对齐，未实现类型在转换阶段显式报错） |
 | 图执行引擎   | LangGraph 运行时：DAG 编译、拓扑校验（环检测 / 多 Start / 变量类型）、节点级状态机、checkpoint 断点续跑、调试运行（整图 / 单节点 / 流式 SSE）、运行记录与节点耗时用量 |
 | 应用发布     | 草稿图与不可变发布版本分离；发布生成 graph version，可回滚；租户可钉住发布版本；上架市场、上下架、启用/停用 |
 | 应用市场     | 平台应用上架后，租户可浏览、申请/订阅、试用；租户开通生成 `tenant_application_instance`（授权方式、配额、有效期、钉住版本） |
@@ -117,8 +117,8 @@
 | 后端     | Python 3.12、FastAPI、SQLAlchemy 2.0、PostgreSQL 17（pgvector HNSW）、Alembic、PyJWT + bcrypt |
 | 异步任务 | Celery 5 + Redis（broker DB=1 / result backend DB=2）：worker 执行文档 ingest 与权益周期任务，beat 负责定时投递 |
 | RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写）；向量库支持 pgvector / Milvus |
-| 管理端   | React 19、TypeScript 6、Vite 8、Ant Design 5、@xyflow/react（画布）、zustand（画布状态） |
-| 用户端   | React 19、TypeScript、Vite                                                   |
+| 管理端   | React 18.2、TypeScript 5.8、Vite 5、Ant Design 5、Semi UI、@flowgram.ai/free-layout-editor（画布）、Zustand、Inversify |
+| 用户端   | React 18.2、TypeScript 5.8、Vite 5、Ant Design 5、react-markdown + remark-gfm、highlight.js |
 | 图执行引擎 | LangGraph 运行时（checkpoint 断点续跑）、节点编译与拓扑校验、SSE 流式调试 |
 | 工具协议 | MCP（Model Context Protocol）Streamable HTTP/SSE；HTTP 工具走统一治理网关 |
 | 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标、租户用量账本         |

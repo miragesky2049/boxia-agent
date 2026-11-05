@@ -2,6 +2,71 @@
 
 ## 5. 目录结构与代码分层
 
+### 技术栈清单
+
+按「后端 / 前端 / 基建 / 工程化」四块列出。版本号取自 `backend/pyproject.toml`、`frontend/admin/package.json`、`frontend/user/package.json` 与 `ops/docker-compose.yml`，依赖新增或升级时需同步更新本表。
+
+#### 后端（`backend/`）
+
+| 类别 | 依赖 | 版本约束 | 用途 |
+| --- | --- | --- | --- |
+| 运行时 | Python | `>=3.12`（Docker 镜像 `python:3.12-slim`） | ASGI 服务、Celery worker / beat |
+| Web 框架 | fastapi | `>=0.115` | 双站点路由、依赖注入、Pydantic 校验 |
+| ASGI 服务器 | uvicorn[standard] | `>=0.32` | 开发 `--reload`，生产由 `WEB_CONCURRENCY` 控制 worker 数 |
+| 数据校验 | pydantic-settings、python-dotenv | `>=2.6 / >=1.0` | 环境变量配置、`.env` 加载 |
+| ORM / 迁移 | sqlalchemy、sqlalchemy-utils、alembic、psycopg[binary] | `>=2.0.36 / >=0.41 / >=1.14 / >=3.2` | 仓储、UnitOfWork、行级多租户过滤、Alembic 迁移 |
+| 图运行时 | langgraph、langgraph-checkpoint-postgres | `>=1.2.18 / >=3.2.0` | DAG 编译、断点续跑、`AsyncPostgresSaver` |
+| Agent / 工具 | fastmcp、httpx | `>=4.0.0 / >=0.28` | MCP client、统一工具治理网关（HTTP/2 + 连接池） |
+| RAG | pgvector、pymilvus、pypdf、python-docx | `>=0.3 / >=2.4 / >=5.1 / >=1.1` | 向量召回双实现、PDF / Word 文档解析 |
+| 异步任务 | celery[redis] | `>=5.4` | RAG ingest 队列、beat 周期任务（权益生效 / 到期 / 宽限 / 对账） |
+| 缓存 | redis[hiredis] | `>=5.0` | 短期记忆 DB 0、Celery broker DB 1、结果后端 DB 2 |
+| 认证 | pyjwt、bcrypt | `>=2.10 / >=4.2` | JWT Access Token、密码哈希 |
+| 可观测性 | opentelemetry-*（api / sdk / exporter-otlp-proto-http / instrumentation-fastapi / logging / sqlalchemy）、prometheus-client、python-json-logger | `>=1.44 / >=0.65b0 / >=0.21 / >=3.2` | 链路追踪 OTLP 上报、`/metrics`、结构化 JSON 日志 |
+| 其他 | uuid6 | `>=2024.7` | 有序 UUID（主键） |
+| 开发依赖 | mypy、pytest、pytest-cov、ruff、pre-commit | `>=1.13 / >=8.3 / >=6 / >=0.8 / >=4` | 类型检查、单测、覆盖率、lint、提交钩子 |
+
+#### 前端（`frontend/admin`、`frontend/user`）
+
+| 类别 | 依赖 | 版本 | 用途 |
+| --- | --- | --- | --- |
+| 运行时 | React、React-DOM | `^18.2.37` | 两个前端工程均使用 React 18 |
+| 语言 | TypeScript | `~5.8.2` | 严格模式类型检查 |
+| 构建 | Vite | `^5.4.11` | Dev server + 生产构建 |
+| 包管理 | pnpm | `11.25.0`（`packageManager` 字段固定） | monorepo（`pnpm-workspace.yaml`） |
+| UI 基础 | antd、@ant-design/icons | `^5.29.3 / ^5.6.1` | 两个前端共用的组件库 |
+| UI 增强 | @douyinfe/semi-ui、@douyinfe/semi-icons | `^2.72.3` | 两个前端共用（表单 / 日期 / 反馈） |
+| 画布编辑器 | @flowgram.ai/free-layout-editor | `0.1.28` | 仅 admin：节点 / 连线 / 小地图 / 缩放 |
+| 状态管理 | zustand | `^5.0.16` | 仅 admin：画布与全局状态 |
+| 依赖注入 | inversify、reflect-metadata | `^6.0.1 / ~0.2.2` | 仅 admin：服务容器 |
+| 路由 | react-router-dom | `^7.18.4` | 两个前端共用 |
+| 代码编辑 | react-simple-code-editor | `^0.14.1` | 仅 admin：HTTP body / 代码节点编辑 |
+| 截图 | modern-screenshot | `^4.7.0` | 仅 admin：画布导出图片 |
+| 对话渲染 | react-markdown、remark-gfm、highlight.js | `^10.1.0 / ^4.0.1 / ^11.12.0` | 仅 user：Markdown + GFM + 代码高亮 |
+| 时间 | dayjs | `^1.11.23` | 两个前端共用 |
+| 单测 | vitest、@vitest/coverage-v8、@testing-library/*、jsdom | `^2.1.8 / ^5.0.5 / ^6 / ^25.0.1` | 组件单测、覆盖率 |
+| E2E | @playwright/test | `^1.64.1` | 仅 admin：端到端用例（`e2e/`） |
+| Lint / 格式 | oxlint、prettier | `^1.88.0 / ^3.9.10` | 前端静态检查（替代 ESLint） |
+
+#### 基建与部署（`ops/`、`backend/docker/`）
+
+| 组件 | 镜像 / 版本 | 用途 |
+| --- | --- | --- |
+| 关系数据库 | `pgvector/pgvector:pg17` | PostgreSQL 17 + pgvector 扩展（HNSW 索引） |
+| 缓存 | `redis:7-alpine` | AOF 持久化、`maxmemory 256mb`、`allkeys-lru` |
+| 对象存储 | MinIO（可选，本地可切 fake_storage） | 知识库原文、上传文件 |
+| 向量库（可选） | Milvus 2.4 | 通过 `pymilvus` 接入，`vector_store/factory.py` 按配置切换 |
+| 生产反代 | `nginxinc/nginx-unprivileged:1.27-alpine` | SPA 静态资源、`/api` 反代、限流、安全响应头 |
+| 构建镜像 | `python:3.12-slim`、`node:24-alpine` | 后端运行、前端构建 |
+| 编排 | Docker Compose（`ops/docker-compose.yml`） | db / redis / migrate / backend-admin / backend-user / celery-worker / celery-beat / frontend-admin / frontend-user |
+
+#### 安全与运维基线
+
+- 后端容器：`read_only: true`、`cap_drop: ALL`、`no-new-privileges:true`、`tmpfs:/tmp`、`mem_limit 512m`。
+- 前端容器：同上，`mem_limit 128m`，非 root Nginx 镜像。
+- 网络：`edge`（前端 / 反代接入）+ `internal`（数据库 / 后端 / Celery，`internal: true` 不对外）。
+- 健康检查：`/health/ready`（后端）、`/healthz`（前端 Nginx）。
+- 日志：所有服务统一 `json-file` 驱动，`max-size 10m`、`max-file 3`。
+
 ### 5.1 目录树
 
 ```text
