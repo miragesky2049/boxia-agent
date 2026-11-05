@@ -121,7 +121,7 @@ interface StreamOptions {
 }
 
 /** 以 SSE 方式发起 POST：EventSource 不支持 POST，这里用 fetch + ReadableStream 解析。 */
-async function postSseStream<TEvent>(
+export async function postSseStream<TEvent>(
   url: string,
   body: unknown,
   onEvent: (evt: TEvent) => void,
