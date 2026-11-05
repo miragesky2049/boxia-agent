@@ -56,6 +56,7 @@ class RunService:
         graph_snapshot: dict[str, Any],
         input_data: dict[str, Any],
         thread_id: str,
+        user_id: UUID | None = None,
     ) -> None:
         """fork 前落一条新 run 记录（提交时机由调用端点控制）。"""
         self._repo.insert_run(
@@ -65,4 +66,5 @@ class RunService:
             graph_snapshot=graph_snapshot,
             input_data=input_data,
             thread_id=thread_id,
+            user_id=user_id,
         )

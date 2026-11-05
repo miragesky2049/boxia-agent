@@ -300,6 +300,7 @@ class RunRepositoryProtocol(Protocol):
         graph_snapshot: dict[str, Any],
         input_data: dict[str, Any],
         thread_id: str,
+        user_id: UUID | None = None,
     ) -> None: ...
 
     def update_run_status(
@@ -310,6 +311,8 @@ class RunRepositoryProtocol(Protocol):
         output: dict[str, Any] | None = None,
         error_message: str | None = None,
     ) -> None: ...
+
+    def update_run_interrupt(self, run_id: UUID, payload: dict[str, Any]) -> None: ...
 
     def get_run(self, run_id: UUID) -> dict | None: ...
 
@@ -325,6 +328,16 @@ class RunRepositoryProtocol(Protocol):
         tenant_id: UUID,
         *,
         workflow_id: UUID | None = None,
+        user_id: UUID | None = None,
+        limit: int = 50,
+    ) -> list[dict]: ...
+
+    def list_interrupted(
+        self,
+        tenant_id: UUID,
+        workflow_id: UUID,
+        *,
+        assignee_role: str | None = None,
         limit: int = 50,
     ) -> list[dict]: ...
 

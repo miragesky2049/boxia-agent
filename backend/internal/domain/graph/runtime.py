@@ -20,9 +20,9 @@ from langgraph.types import Command
 
 from internal.domain.canvas.convert import convert_canvas
 from internal.domain.canvas.model import CanvasGraph
+from internal.domain.graph.checkpoint import get_checkpointer
 from internal.domain.graph.compiler import Compiler
 from internal.domain.graph.node_base import RuntimeEnv, ServiceRegistry
-from internal.domain.graph.checkpoint import get_checkpointer
 
 logger = logging.getLogger(__name__)
 
@@ -217,6 +217,7 @@ class GraphRuntime:
                 graph_snapshot=self.canvas_json,
                 input_data=input_data,
                 thread_id=self.thread_id,
+                user_id=self.user_id,
             )
         except Exception:  # noqa: BLE001
             logger.exception("写 run 记录失败")
@@ -280,13 +281,11 @@ class GraphRuntime:
 
             duration_ms = int((time.time() - started_at) * 1000)
 
-            # 人审中断：标记 run 为 interrupted，抛 GraphInterrupted
+            # 人审中断：标记 run 为 interrupted 并冗余 payload，抛 GraphInterrupted
             if interrupt_payload is not None:
                 if self.run_repo is not None:
                     try:
-                        self.run_repo.update_run_status(
-                            self.run_id, execute_status="interrupted",
-                        )
+                        self.run_repo.update_run_interrupt(self.run_id, interrupt_payload)
                     except Exception:  # noqa: BLE001
                         logger.exception("更新 run 状态为 interrupted 失败")
                 raise GraphInterrupted(interrupt_payload, self.thread_id)
@@ -312,6 +311,9 @@ class GraphRuntime:
             logger.info("运行完成: run=%s duration=%sms", self.run_id, duration_ms)
             return output
 
+        except GraphInterrupted:
+            # 中断分支已写 update_run_interrupt，不能再落入通用异常处理把 run 改成 error
+            raise
         except Exception as e:
             duration_ms = int((time.time() - started_at) * 1000)
             if self.run_repo is not None:
@@ -449,9 +451,7 @@ class GraphRuntime:
                         interrupt_payload = task.interrupts[0].value
                         if self.run_repo is not None:
                             try:
-                                self.run_repo.update_run_status(
-                                    self.run_id, execute_status="interrupted",
-                                )
+                                self.run_repo.update_run_interrupt(self.run_id, interrupt_payload)
                             except Exception:  # noqa: BLE001
                                 logger.exception("更新 run 状态为 interrupted 失败")
                         raise GraphInterrupted(interrupt_payload, self.thread_id)
@@ -479,6 +479,9 @@ class GraphRuntime:
             })
             return output
 
+        except GraphInterrupted:
+            # 二次人审中断：状态已写 update_run_interrupt，直接向上抛
+            raise
         except Exception as e:
             duration_ms = int((time.time() - started_at) * 1000)
             if self.run_repo is not None:
@@ -489,6 +492,19 @@ class GraphRuntime:
                 except Exception:  # noqa: BLE001
                     logger.exception("更新 run 错误状态失败")
             raise
+
+    async def get_interrupt_state(self) -> dict[str, Any] | None:
+        """读取当前 thread 挂起的人审 payload；无中断或无 checkpointer 时返回 None。"""
+        if self._checkpointer_override is None:
+            return None
+        await self._ensure_compiled()
+        snapshot = await self._compiled.aget_state(self._config())
+        for task in getattr(snapshot, "tasks", None) or []:
+            interrupts = getattr(task, "interrupts", None) or []
+            if interrupts:
+                value = getattr(interrupts[0], "value", None)
+                return value if isinstance(value, dict) else None
+        return None
 
     async def list_state_history(self, limit: int = 20) -> list[dict[str, Any]]:
         """A13：列出当前 thread 的 checkpoint 历史（按时间倒序），用于历史重放 / 审计。

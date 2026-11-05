@@ -3,7 +3,9 @@
 环境变量必须在导入 web.app 之前设置，因为 Settings / Engine 均为进程级缓存。
 """
 
+import asyncio
 import os
+import sys
 from pathlib import Path
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -42,11 +44,17 @@ from internal.domain.entity.permission import (  # noqa: E402
     PLATFORM_SUPERADMIN_CODES,
     PLATFORM_VIEWER_CODES,
 )
+from internal.infrastructure.cache.factory import set_kv_cache_override  # noqa: E402
+from internal.infrastructure.cache.redis_kv_cache import InMemoryKvCache  # noqa: E402
 from internal.infrastructure.id.uuid7 import new_uuid  # noqa: E402
 from internal.infrastructure.model.database import dispose_engine, get_engine  # noqa: E402
 from internal.infrastructure.security.password import hash_password  # noqa: E402
 from internal.infrastructure.trace.exporter import get_tracer_provider  # noqa: E402
 from web.app import create_app  # noqa: E402
+
+# TestClient 每请求/每客户端使用不同事件循环，redis.asyncio 连接池绑定首个循环，
+# 跨循环复用必炸；测试进程统一用内存缓存（无跨进程广播诉求）
+set_kv_cache_override(InMemoryKvCache())
 
 ADMIN_APP = create_app("admin")
 USER_APP = create_app("user")
@@ -240,6 +248,39 @@ def user_tenant_client():
         return TestClient(USER_APP, base_url=f"http://{tenant_code}.example.com")
 
     return _factory
+
+
+@pytest.fixture(scope="session")
+def persistent_user_tenant_client():
+    """会话级常驻用户站点客户端：同一租户子域名全程共享一个事件循环。
+
+    工厂版 user_tenant_client 未进入 with，每个请求新建 portal/循环，
+    无法承载绑定首个循环的进程级 AsyncPostgresSaver；真实图执行类用例必须用本夹具。
+    """
+    clients: dict[str, TestClient] = {}
+
+    def _factory(tenant_code: str) -> TestClient:
+        if tenant_code not in clients:
+            # 仅让该客户端的 portal 跑在 SelectorEventLoop 上（psycopg async 要求）；
+            # 切回默认策略，避免影响依赖 ProactorEventLoop 子进程能力的 code node 用例
+            if sys.platform == "win32":
+                previous_policy = asyncio.get_event_loop_policy()
+                asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
+            try:
+                managed = TestClient(
+                    USER_APP, base_url=f"http://{tenant_code}.example.com"
+                )
+                managed.__enter__()
+            finally:
+                if sys.platform == "win32":
+                    asyncio.set_event_loop_policy(previous_policy)
+            clients[tenant_code] = managed
+        return clients[tenant_code]
+
+    yield _factory
+
+    for managed in clients.values():
+        managed.__exit__(None, None, None)
 
 
 @pytest.fixture
