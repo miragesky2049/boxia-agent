@@ -55,12 +55,12 @@ export default function TenantDetailPage() {
   }, [tenantId, load, navigate])
 
   useEffect(() => {
-    if (!tenantId) return
+    if (!tenantId || !tenant || tenant.is_platform) return
     rolesApi
       .list({ tenant_id: tenantId })
       .then((items) => setRoles(items.filter((role) => role.is_active)))
       .catch(() => setRoles([]))
-  }, [tenantId])
+  }, [tenantId, tenant])
 
   const loadAdmins = useCallback(async () => {
     setAdminsLoading(true)
@@ -80,9 +80,9 @@ export default function TenantDetailPage() {
   }, [tenantId, adminsPage, adminsPageSize, adminsKeyword, message])
 
   useEffect(() => {
-    if (!tenantId) return
+    if (!tenantId || !tenant || tenant.is_platform) return
     void loadAdmins()
-  }, [tenantId, loadAdmins])
+  }, [tenantId, loadAdmins, tenant])
 
   return (
     <div className="page-card">
@@ -131,7 +131,7 @@ export default function TenantDetailPage() {
         )}
       </Spin>
 
-      {tenant && (
+      {tenant && !tenant.is_platform && (
         <div style={{ marginTop: 16 }}>
           <FormSection
             title="管理员账号"
