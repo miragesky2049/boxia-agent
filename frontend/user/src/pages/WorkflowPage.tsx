@@ -104,7 +104,7 @@ function WorkflowRealView() {
       approvals={history.approvals}
       historyOpen={historyOpen}
       onHistoryOpenChange={setHistoryOpen}
-      onBack={() => navigate(agentId ? `/agents/${agentId}` : '/')}
+      onBack={() => navigate('/')}
       onRun={run.run}
       onStop={run.stop}
       onApprove={run.approve}
@@ -118,7 +118,6 @@ function WorkflowRealView() {
 }
 
 function WorkflowMockView({ scenario }: { scenario: MockScenario }) {
-  const { agentId } = useParams<{ agentId: string }>()
   const navigate = useNavigate()
   const [state, setState] = useState<WorkflowRunState>(buildMockRunState(scenario))
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -209,7 +208,7 @@ function WorkflowMockView({ scenario }: { scenario: MockScenario }) {
       approvals={mockApprovals}
       historyOpen={historyOpen}
       onHistoryOpenChange={setHistoryOpen}
-      onBack={() => navigate(agentId ? `/agents/${agentId}` : '/')}
+      onBack={() => navigate('/')}
       onRun={handleRun}
       onStop={() =>
         setState((prev) => ({ ...prev, phase: 'error', error: { message: '已手动停止运行。', code: 'cancelled' } }))

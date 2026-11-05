@@ -8,7 +8,7 @@ import type {
   FreeLayoutPluginContext,
 } from '@flowgram.ai/free-layout-editor';
 import '@flowgram.ai/free-layout-editor/index.css';
-import { useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Modal, message } from 'antd';
 import { ExclamationCircleFilled } from '@ant-design/icons';
@@ -150,6 +150,7 @@ function collectGraphTypeKeys(graph: WorkflowJSON): Array<{ typeKey: string }> {
 
 export default function AppEditPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const [initialData, setInitialData] = useState<WorkflowJSON | null>(null);
   const [nodeMetaReady, setNodeMetaReady] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -1905,6 +1906,7 @@ export default function AppEditPage() {
             setPanelTab('history');
             setPanelOpen(true);
           }}
+          onBack={() => navigate('/apps')}
         />
 
         <PublishBar

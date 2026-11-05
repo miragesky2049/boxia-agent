@@ -1,10 +1,11 @@
-import { Button, Tag } from 'antd';
+import { ArrowLeftOutlined } from '@ant-design/icons';
+import { Button, Tag, Tooltip } from 'antd';
 import type { GraphValidationIssue } from '../../../api/apps';
 import { CANVAS_TOKENS } from '../canvas/tokens';
 
 export type SaveStatus = 'idle' | 'saving' | 'saved' | 'error';
 
-// V6：画布左上角保存状态小字 + 校验/历史入口
+// V6：画布左上角返回按钮 + 保存状态小字 + 校验/历史入口
 export function SaveStatusBar({
   saveStatus,
   lastSavedAt,
@@ -13,6 +14,7 @@ export function SaveStatusBar({
   onRetry,
   onOpenValidation,
   onOpenHistory,
+  onBack,
 }: {
   saveStatus: SaveStatus;
   lastSavedAt: Date | null;
@@ -21,6 +23,7 @@ export function SaveStatusBar({
   onRetry: () => void;
   onOpenValidation: () => void;
   onOpenHistory: () => void;
+  onBack: () => void;
 }) {
   return (
     <div style={{
@@ -29,6 +32,16 @@ export function SaveStatusBar({
       color: saveStatus === 'error' ? CANVAS_TOKENS.dangerDeep : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,
       display: 'flex', alignItems: 'center', gap: 6,
     }}>
+      <Tooltip title="返回应用列表">
+        <Button
+          type="text"
+          size="small"
+          icon={<ArrowLeftOutlined />}
+          onClick={onBack}
+          aria-label="返回应用列表"
+          style={{ marginRight: 4, color: '#374151' }}
+        />
+      </Tooltip>
       <span style={{
         width: 6, height: 6, borderRadius: '50%',
         background: saveStatus === 'error' ? CANVAS_TOKENS.dangerDot : saveStatus === 'saving' ? CANVAS_TOKENS.info : CANVAS_TOKENS.run,

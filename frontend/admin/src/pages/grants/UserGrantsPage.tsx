@@ -1,5 +1,5 @@
 import { SafetyCertificateOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Divider, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
+import { Alert, App, Button, Form, Input, Modal, Select, Space, Table, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -9,6 +9,7 @@ import type { MgmtUnit } from '../../api/mgmtUnit'
 import type { Role, User, UserOption } from '../../api/types'
 import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
+import { FormSection } from '../../components/common/FormSection'
 
 interface GrantFormValues {
   role_ids: string[]
@@ -380,55 +381,53 @@ export default function UserGrantsPage() {
           message="保存后将整体覆盖每个目标用户的角色与管理单元；角色变更会立即撤销其全部会话。"
         />
         <Form<BatchFormValues> form={batchForm} layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            目标用户
-          </Divider>
-          <Form.Item
-            name="user_ids"
-            label={`目标用户（最多 ${MAX_BATCH_USERS} 个）`}
-            rules={[{ required: true, message: '请至少选择一个用户' }]}
-          >
-            <Select
-              mode="multiple"
-              showSearch
-              filterOption={false}
-              onSearch={(value) => void searchUsers(value)}
-              loading={userSearching}
-              placeholder="输入用户名或显示名搜索"
-              options={userOptions.map((user) => ({
-                label: user.display_name ? `${user.display_name}（${user.username}）` : user.username,
-                value: user.id,
-              }))}
-            />
-          </Form.Item>
+          <FormSection title="目标用户">
+            <Form.Item
+              name="user_ids"
+              label={`目标用户（最多 ${MAX_BATCH_USERS} 个）`}
+              rules={[{ required: true, message: '请至少选择一个用户' }]}
+            >
+              <Select
+                mode="multiple"
+                showSearch
+                filterOption={false}
+                onSearch={(value) => void searchUsers(value)}
+                loading={userSearching}
+                placeholder="输入用户名或显示名搜索"
+                options={userOptions.map((user) => ({
+                  label: user.display_name ? `${user.display_name}（${user.username}）` : user.username,
+                  value: user.id,
+                }))}
+              />
+            </Form.Item>
+          </FormSection>
 
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            授权配置
-          </Divider>
-          <Form.Item
-            name="role_ids"
-            label="角色（功能权限）"
-            rules={[{ required: true, message: '请至少选择一个角色' }]}
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="选择角色"
-              options={roleOptions}
-            />
-          </Form.Item>
-          <Form.Item
-            name="mgmt_unit_ids"
-            label="管理单元（数据权限）"
-            extra="留空表示清空目标用户的管理单元授权；用户将仅可见本人创建的智能体。"
-          >
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="选择管理单元（可留空）"
-              options={unitOptions}
-            />
-          </Form.Item>
+          <FormSection title="授权配置">
+            <Form.Item
+              name="role_ids"
+              label="角色（功能权限）"
+              rules={[{ required: true, message: '请至少选择一个角色' }]}
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="选择角色"
+                options={roleOptions}
+              />
+            </Form.Item>
+            <Form.Item
+              name="mgmt_unit_ids"
+              label="管理单元（数据权限）"
+              extra="留空表示清空目标用户的管理单元授权；用户将仅可见本人创建的智能体。"
+            >
+              <Select
+                mode="multiple"
+                allowClear
+                placeholder="选择管理单元（可留空）"
+                options={unitOptions}
+              />
+            </Form.Item>
+          </FormSection>
         </Form>
       </Modal>
     </div>

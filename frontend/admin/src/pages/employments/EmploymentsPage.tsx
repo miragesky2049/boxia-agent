@@ -4,7 +4,6 @@ import {
   Button,
   Col,
   DatePicker,
-  Divider,
   Form,
   Input,
   InputNumber,
@@ -23,6 +22,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { departmentsApi } from '../../api/department'
 import { employmentsApi } from '../../api/employment'
 import { hrDictionariesApi, type HrDictionaryCategory } from '../../api/hrDictionary'
+import { FormSection } from '../../components/common/FormSection'
 import type {
   Department,
   Employment,
@@ -134,121 +134,117 @@ function HrFieldsGroup({
     list.map((item) => ({ label: item.name, value: item.id }))
   return (
     <>
-      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-        岗位信息
-      </Divider>
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form.Item name="employment_type_id" label="雇佣类型">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              options={dictOptions(dictionaries.employment_type)}
-              placeholder="选择雇佣类型"
-            />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item name="job_level_id" label="岗位职级">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              options={dictOptions(dictionaries.job_level)}
-              placeholder="选择岗位职级"
-            />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form.Item name="job_family_id" label="岗位序列">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              options={dictOptions(dictionaries.job_family)}
-              placeholder="选择岗位序列"
-            />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item name="manager_id" label="汇报上级">
-            <Select
-              allowClear
-              showSearch
-              optionFilterProp="label"
-              options={userOptions}
-              placeholder="选择汇报上级"
-            />
-          </Form.Item>
-        </Col>
-      </Row>
+      <FormSection title="岗位信息">
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="employment_type_id" label="雇佣类型">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={dictOptions(dictionaries.employment_type)}
+                placeholder="选择雇佣类型"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="job_level_id" label="岗位职级">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={dictOptions(dictionaries.job_level)}
+                placeholder="选择岗位职级"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="job_family_id" label="岗位序列">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={dictOptions(dictionaries.job_family)}
+                placeholder="选择岗位序列"
+              />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="manager_id" label="汇报上级">
+              <Select
+                allowClear
+                showSearch
+                optionFilterProp="label"
+                options={userOptions}
+                placeholder="选择汇报上级"
+              />
+            </Form.Item>
+          </Col>
+        </Row>
+      </FormSection>
 
-      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-        工作信息
-      </Divider>
-      <Row gutter={12}>
-        <Col span={8}>
-          <Form.Item name="work_location" label="工作地点">
-            <Input maxLength={100} placeholder="例如：北京" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="cost_center" label="成本中心">
-            <Input maxLength={64} placeholder="例如：CC-001" />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="contract_no" label="合同编号">
-            <Input maxLength={64} />
-          </Form.Item>
-        </Col>
-      </Row>
-      <Row gutter={12}>
-        <Col span={12}>
-          <Form.Item name="employment_nature" label="用工性质">
-            <Select allowClear options={EMPLOYMENT_NATURE_OPTIONS} placeholder="选择用工性质" />
-          </Form.Item>
-        </Col>
-        <Col span={12}>
-          <Form.Item name="weekly_hours" label="标准工时（小时/周）">
-            <InputNumber min={0} max={168} step={1} style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-      </Row>
+      <FormSection title="工作信息">
+        <Row gutter={12}>
+          <Col span={8}>
+            <Form.Item name="work_location" label="工作地点">
+              <Input maxLength={100} placeholder="例如：北京" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="cost_center" label="成本中心">
+              <Input maxLength={64} placeholder="例如：CC-001" />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="contract_no" label="合同编号">
+              <Input maxLength={64} />
+            </Form.Item>
+          </Col>
+        </Row>
+        <Row gutter={12}>
+          <Col span={12}>
+            <Form.Item name="employment_nature" label="用工性质">
+              <Select allowClear options={EMPLOYMENT_NATURE_OPTIONS} placeholder="选择用工性质" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="weekly_hours" label="标准工时（小时/周）">
+              <InputNumber min={0} max={168} step={1} style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+      </FormSection>
 
-      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-        试用期
-      </Divider>
-      <Row gutter={12}>
-        <Col span={8}>
-          <Form.Item name="probation_started_at" label="试用期开始">
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="probation_ended_at" label="试用期结束">
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-        <Col span={8}>
-          <Form.Item name="regularized_at" label="转正日期">
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-        </Col>
-      </Row>
+      <FormSection title="试用期">
+        <Row gutter={12}>
+          <Col span={8}>
+            <Form.Item name="probation_started_at" label="试用期开始">
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="probation_ended_at" label="试用期结束">
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+          <Col span={8}>
+            <Form.Item name="regularized_at" label="转正日期">
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+          </Col>
+        </Row>
+      </FormSection>
 
-      <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-        其他
-      </Divider>
-      <Form.Item name="change_reason" label="变动原因">
-        <Input maxLength={255} />
-      </Form.Item>
-      <Form.Item name="remark" label="备注">
-        <Input.TextArea rows={2} maxLength={2000} />
-      </Form.Item>
+      <FormSection title="其他">
+        <Form.Item name="change_reason" label="变动原因">
+          <Input maxLength={255} />
+        </Form.Item>
+        <Form.Item name="remark" label="备注">
+          <Input.TextArea rows={2} maxLength={2000} />
+        </Form.Item>
+      </FormSection>
     </>
   )
 }
@@ -716,50 +712,49 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<CreateFormValues> form={createForm} layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            任职基本信息
-          </Divider>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item
-                name="user_id"
-                label="用户"
-                rules={[{ required: true, message: '请选择用户' }]}
-              >
-                <Select
-                  showSearch
-                  optionFilterProp="label"
-                  options={userOptions}
-                  placeholder="选择用户"
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="department_id"
-                label="所属部门"
-                rules={[{ required: true, message: '请选择部门' }]}
-              >
-                <TreeSelect
-                  treeData={departmentTreeData}
-                  placeholder="选择部门"
-                  treeDefaultExpandAll
-                />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="position" label="岗位">
-                <Input maxLength={100} placeholder="例如：客服专员" />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="started_at" label="生效日期" extra="不选默认为今天。">
-                <DatePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <FormSection title="任职基本信息">
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item
+                  name="user_id"
+                  label="用户"
+                  rules={[{ required: true, message: '请选择用户' }]}
+                >
+                  <Select
+                    showSearch
+                    optionFilterProp="label"
+                    options={userOptions}
+                    placeholder="选择用户"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="department_id"
+                  label="所属部门"
+                  rules={[{ required: true, message: '请选择部门' }]}
+                >
+                  <TreeSelect
+                    treeData={departmentTreeData}
+                    placeholder="选择部门"
+                    treeDefaultExpandAll
+                  />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="position" label="岗位">
+                  <Input maxLength={100} placeholder="例如：客服专员" />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="started_at" label="生效日期" extra="不选默认为今天。">
+                  <DatePicker style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
           <HrFieldsGroup userOptions={userOptions} dictionaries={dictionaries} />
         </Form>
       </Modal>
@@ -777,21 +772,20 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<EditFormValues> form={editForm} layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            任职基本信息
-          </Divider>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="position" label="岗位">
-                <Input maxLength={100} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="started_at" label="生效日期">
-                <DatePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <FormSection title="任职基本信息">
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="position" label="岗位">
+                  <Input maxLength={100} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="started_at" label="生效日期">
+                  <DatePicker style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
           <HrFieldsGroup userOptions={userOptions} dictionaries={dictionaries} />
         </Form>
       </Modal>
@@ -813,45 +807,44 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<TransferFormValues> form={transferForm} layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            调岗信息
-          </Divider>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item
-                name="department_id"
-                label="调入部门"
-                rules={[{ required: true, message: '请选择调入部门' }]}
-              >
-                <TreeSelect
-                  treeData={departmentTreeData}
-                  treeDefaultExpandAll
-                  placeholder="选择新部门"
-                />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item name="change_type" label="变动类型">
-                <Select options={CHANGE_TYPE_OPTIONS} />
-              </Form.Item>
-            </Col>
-          </Row>
-          <Row gutter={12}>
-            <Col span={12}>
-              <Form.Item name="position" label="新岗位" extra="留空沿用原岗位。">
-                <Input maxLength={100} />
-              </Form.Item>
-            </Col>
-            <Col span={12}>
-              <Form.Item
-                name="started_at"
-                label="生效日期"
-                extra="不选默认为今天；原任职结束日期为生效日期前一天。"
-              >
-                <DatePicker style={{ width: '100%' }} />
-              </Form.Item>
-            </Col>
-          </Row>
+          <FormSection title="调岗信息">
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item
+                  name="department_id"
+                  label="调入部门"
+                  rules={[{ required: true, message: '请选择调入部门' }]}
+                >
+                  <TreeSelect
+                    treeData={departmentTreeData}
+                    treeDefaultExpandAll
+                    placeholder="选择新部门"
+                  />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item name="change_type" label="变动类型">
+                  <Select options={CHANGE_TYPE_OPTIONS} />
+                </Form.Item>
+              </Col>
+            </Row>
+            <Row gutter={12}>
+              <Col span={12}>
+                <Form.Item name="position" label="新岗位" extra="留空沿用原岗位。">
+                  <Input maxLength={100} />
+                </Form.Item>
+              </Col>
+              <Col span={12}>
+                <Form.Item
+                  name="started_at"
+                  label="生效日期"
+                  extra="不选默认为今天；原任职结束日期为生效日期前一天。"
+                >
+                  <DatePicker style={{ width: '100%' }} />
+                </Form.Item>
+              </Col>
+            </Row>
+          </FormSection>
           <HrFieldsGroup userOptions={userOptions} dictionaries={dictionaries} />
         </Form>
       </Modal>
@@ -870,18 +863,17 @@ export default function EmploymentsPage() {
         destroyOnHidden
       >
         <Form<ArchiveFormValues> form={archiveForm} layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            结束信息
-          </Divider>
-          <Form.Item name="ended_at" label="结束日期">
-            <DatePicker style={{ width: '100%' }} />
-          </Form.Item>
-          <Form.Item name="termination_type" label="离职类型">
-            <Select allowClear options={TERMINATION_TYPE_OPTIONS} placeholder="选择离职类型" />
-          </Form.Item>
-          <Form.Item name="change_reason" label="离职原因">
-            <Input.TextArea rows={2} maxLength={255} />
-          </Form.Item>
+          <FormSection title="结束信息">
+            <Form.Item name="ended_at" label="结束日期">
+              <DatePicker style={{ width: '100%' }} />
+            </Form.Item>
+            <Form.Item name="termination_type" label="离职类型">
+              <Select allowClear options={TERMINATION_TYPE_OPTIONS} placeholder="选择离职类型" />
+            </Form.Item>
+            <Form.Item name="change_reason" label="离职原因">
+              <Input.TextArea rows={2} maxLength={255} />
+            </Form.Item>
+          </FormSection>
         </Form>
       </Modal>
 

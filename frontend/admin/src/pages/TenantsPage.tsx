@@ -2,7 +2,6 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
-  Divider,
   Form,
   Input,
   Modal,
@@ -20,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import { batchDeleteTenants, createTenant, deleteTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant, TenantBatchDeleteItem } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { FormSection } from '../components/common/FormSection'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
@@ -386,58 +386,56 @@ export default function TenantsPage() {
         width={560}
       >
         <Form<CreateFormValues> form={createForm} name="tenant-create" layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            租户信息
-          </Divider>
-          <Form.Item
-            name="code"
-            label="租户编码"
-            extra="作为子域名前缀，创建后不可修改；仅支持小写字母、数字和短横线。"
-            rules={[
-              { required: true, message: '请输入租户编码' },
-              {
-                pattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-                message: '需为 1-63 位小写字母、数字或短横线',
-              },
-            ]}
-          >
-            <Input placeholder="例如：acme" autoComplete="off" />
-          </Form.Item>
-          <Form.Item
-            name="name"
-            label="租户名称"
-            rules={[{ required: true, message: '请输入租户名称' }]}
-          >
-            <Input placeholder="例如：Acme 公司" />
-          </Form.Item>
+          <FormSection title="租户信息">
+            <Form.Item
+              name="code"
+              label="租户编码"
+              extra="作为子域名前缀，创建后不可修改；仅支持小写字母、数字和短横线。"
+              rules={[
+                { required: true, message: '请输入租户编码' },
+                {
+                  pattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+                  message: '需为 1-63 位小写字母、数字或短横线',
+                },
+              ]}
+            >
+              <Input placeholder="例如：acme" autoComplete="off" />
+            </Form.Item>
+            <Form.Item
+              name="name"
+              label="租户名称"
+              rules={[{ required: true, message: '请输入租户名称' }]}
+            >
+              <Input placeholder="例如：Acme 公司" />
+            </Form.Item>
+          </FormSection>
 
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            管理员账号
-          </Divider>
-          <Form.Item
-            name="admin_username"
-            label="租户管理员账号"
-            rules={[
-              { required: true, message: '请输入管理员账号' },
-              { min: 3, max: 64, message: '账号长度为 3-64 个字符' },
-            ]}
-          >
-            <Input placeholder="该租户的超级管理员登录账号" autoComplete="off" />
-          </Form.Item>
-          <Form.Item name="admin_display_name" label="管理员显示名">
-            <Input placeholder="默认与账号相同" />
-          </Form.Item>
-          <Form.Item
-            name="admin_password"
-            label="管理员初始密码"
-            rules={[
-              { required: true, message: '请输入初始密码' },
-              passwordRule(context?.password_policy),
-            ]}
-            extra="租户管理员首次登录后必须修改密码。"
-          >
-            <Input.Password autoComplete="new-password" />
-          </Form.Item>
+          <FormSection title="管理员账号" description="该租户的超级管理员，首次登录需修改密码">
+            <Form.Item
+              name="admin_username"
+              label="租户管理员账号"
+              rules={[
+                { required: true, message: '请输入管理员账号' },
+                { min: 3, max: 64, message: '账号长度为 3-64 个字符' },
+              ]}
+            >
+              <Input placeholder="该租户的超级管理员登录账号" autoComplete="off" />
+            </Form.Item>
+            <Form.Item name="admin_display_name" label="管理员显示名">
+              <Input placeholder="默认与账号相同" />
+            </Form.Item>
+            <Form.Item
+              name="admin_password"
+              label="管理员初始密码"
+              rules={[
+                { required: true, message: '请输入初始密码' },
+                passwordRule(context?.password_policy),
+              ]}
+              extra="租户管理员首次登录后必须修改密码。"
+            >
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+          </FormSection>
         </Form>
       </Modal>
 
