@@ -19,14 +19,14 @@ os.environ["ACCESS_TOKEN_MINUTES"] = "60"
 os.environ["BCRYPT_ROUNDS"] = "4"
 os.environ["LOG_LEVEL"] = "WARNING"
 os.environ["ROOT_DOMAIN"] = "example.com"
-os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "adminsystem"
+os.environ["PLATFORM_ADMIN_SUBDOMAIN"] = "platform"
 # 本机 Windows + Docker 环境下 TRUNCATE 全库偶发超过默认 5s，测试环境放宽等待上限
 os.environ["STATEMENT_TIMEOUT_MS"] = "60000"
 os.environ["LOCK_TIMEOUT_MS"] = "30000"
 # 部署环境只按域名识别租户；集成用例统一使用 tenant_client 的子域名访问
 os.environ["ALLOW_TENANT_HEADER"] = "false"
 
-PLATFORM_HOST = "adminsystem.example.com"
+PLATFORM_HOST = "platform.example.com"
 TENANT_HEADER = "X-Tenant-Code"
 
 import psycopg  # noqa: E402
@@ -218,7 +218,7 @@ def _reset_data():
 
 @pytest.fixture(scope="session")
 def client():
-    """管理站点客户端：默认以产品级平台域名访问，与生产 adminsystem 子域名一致。"""
+    """管理站点客户端：默认以产品级平台域名访问，与生产 platform 子域名一致。"""
     with TestClient(ADMIN_APP, base_url=f"http://{PLATFORM_HOST}") as test_client:
         yield test_client
 

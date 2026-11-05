@@ -37,7 +37,7 @@ from tests.workflow_canvas import (
     build_start_llm_end_canvas,
 )
 
-PLATFORM_HOST = "adminsystem.localhost"
+PLATFORM_HOST = "platform.localhost"
 TENANT_CODE = "wfco"
 
 _APPS = (

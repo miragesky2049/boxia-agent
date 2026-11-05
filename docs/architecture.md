@@ -22,7 +22,7 @@ web/deps/tenant.py 读取 Host（去端口、转小写、去尾点）
   ├─ local + 回环/本机主机（localhost、127.0.0.1、任意 IP、testserver）
   │    ├─ ALLOW_TENANT_HEADER=true 且带 X-Tenant-Code → 按请求头（platform 表示产品级）
   │    └─ 未指定 → DEFAULT_TENANT_CODE 或产品级平台（resolution=default）
-  ├─ adminsystem.<ROOT_DOMAIN> → 产品级平台（resolution=host）
+  ├─ platform.<ROOT_DOMAIN> → 产品级平台（resolution=host）
   ├─ <code>.<ROOT_DOMAIN>      → 按 code 查询租户（域名优先于请求头，resolution=host）
   │    ├─ 不存在 → 404；已停用 → 403
   │    └─ 存在 → 租户作用域（tenant_id = 该租户）

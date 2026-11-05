@@ -89,7 +89,7 @@ class Settings(BaseSettings):
     # 多租户根域名：每个环境使用独立泛域名，如 dev.example.com / test.example.com / example.com。
     # local 环境留空时回退 localhost，便于用 acme.localhost 直接验证子域名解析。
     root_domain: str = ""
-    platform_admin_subdomain: str = "adminsystem"
+    platform_admin_subdomain: str = "platform"
     default_tenant_code: str = ""
     # 仅 local 环境允许用 X-Tenant-Code 请求头覆盖作用域；开发/测试/线上启动时禁止开启。
     allow_tenant_header: bool = False

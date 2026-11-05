@@ -102,7 +102,7 @@ export function TenantProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      // 平台子域名保留字（如 adminsystem）不是租户编码，归一化为产品级
+      // 平台子域名保留字（如 platform）不是租户编码，归一化为产品级
       const target =
         urlTenant && urlTenant !== result.platform_admin_subdomain
           ? urlTenant

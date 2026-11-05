@@ -216,7 +216,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 | `PASSWORD_MAX_BYTES`          | `72`                | 否       | 密码最大字节数（UTF-8，32-72）；bcrypt 只处理前 72 字节                                                                                               |
 | `PASSWORD_MIN_CATEGORIES`     | `3`                 | 否       | 至少包含的字符类别数（1-4）                                                                                                                           |
 | `ROOT_DOMAIN`                 | 空                  | 部署必填 | 每个环境独立的租户根域名，如 `dev.example.com` / `example.com`；`local` 设为 `localhost`（或留空自动回退）                                              |
-| `PLATFORM_ADMIN_SUBDOMAIN`    | `adminsystem`       | 否       | 产品级平台子域名前缀，最终为 `adminsystem.<ROOT_DOMAIN>`                                                                                              |
+| `PLATFORM_ADMIN_SUBDOMAIN`    | `platform`       | 否       | 产品级平台子域名前缀，最终为 `platform.<ROOT_DOMAIN>`                                                                                              |
 | `PLATFORM_NAME`               | `AI智能体运营管理平台` | 否    | 管理端展示的平台名称                                                                                                                                  |
 | `DEFAULT_TENANT_CODE`         | 空                  | 否       | 访问根域名时默认进入的租户；留空则拒绝根域名访问                                                                                                      |
 | `ALLOW_TENANT_HEADER`         | `false`             | 否       | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**                                                                                          |
@@ -298,7 +298,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 | 访问地址                  | 作用域      | 能力                                                                 |
 |---------------------------|-------------|----------------------------------------------------------------------|
-| `adminsystem.example.com` | 产品级平台  | 跨租户管理、创建/停用租户、维护产品级应用、资源、模型与授权           |
+| `platform.example.com` | 产品级平台  | 跨租户管理、创建/停用租户、维护产品级应用、资源、模型与授权           |
 | `acme.example.com`        | 租户 `acme` | 维护本租户账号、角色、组织架构；浏览市场并开通应用；只读使用平台资源  |
 | `example.com`             | 根域名      | 配置了 `DEFAULT_TENANT_CODE` 则进入该租户，否则返回 404              |
 
@@ -310,17 +310,17 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 |-------------------------------------------|--------------------------|--------------------------------|
 | `http://localhost:5173`                   | 产品级平台（无请求头时） | 默认兜底 `resolution=default`  |
 | `http://localhost:5173/login?tenant=acme` | 租户 `acme`              | 请求头模式 `resolution=header` |
-| `http://adminsystem.localhost:5173`       | 产品级平台               | 域名 `resolution=host`         |
+| `http://platform.localhost:5173`       | 产品级平台               | 域名 `resolution=host`         |
 | `http://acme.localhost:5173`              | 租户 `acme`              | 域名 `resolution=host`         |
 
 **多环境策略**
 
 | 环境         | `APP_ENV`     | 根域名                      | 平台地址                       | 租户地址                | 租户切换方式                                  |
 |--------------|---------------|-----------------------------|--------------------------------|-------------------------|-----------------------------------------------|
-| 本地调试     | `local`       | 可留空（回退 `localhost`）  | `adminsystem.localhost:5173`   | `acme.localhost:5173`   | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
-| 开发环境部署 | `dev`         | 必填，如 `dev.example.com`  | `adminsystem.dev.example.com`  | `acme.dev.example.com`  | 仅二级域名                                    |
-| 测试环境部署 | `test`        | 必填，如 `test.example.com` | `adminsystem.test.example.com` | `acme.test.example.com` | 仅二级域名                                    |
-| 线上环境     | `prod`        | 必填，如 `example.com`      | `adminsystem.example.com`      | `acme.example.com`      | 仅二级域名                                    |
+| 本地调试     | `local`       | 可留空（回退 `localhost`）  | `platform.localhost:5173`   | `acme.localhost:5173`   | 回环主机走请求头/`?tenant=`；子域名按域名跳转 |
+| 开发环境部署 | `dev`         | 必填，如 `dev.example.com`  | `platform.dev.example.com`  | `acme.dev.example.com`  | 仅二级域名                                    |
+| 测试环境部署 | `test`        | 必填，如 `test.example.com` | `platform.test.example.com` | `acme.test.example.com` | 仅二级域名                                    |
+| 线上环境     | `prod`        | 必填，如 `example.com`      | `platform.example.com`      | `acme.example.com`      | 仅二级域名                                    |
 
 `/public/context` 与 `/admin/context` 会返回 `app_env`、`tenant_resolution`、`tenant_switch_mode` 与 `platform_admin_host`，登录页和管理端侧边栏会展示环境与解析来源，便于排查“为什么进了错误租户”。
 
@@ -335,7 +335,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 **创建并使用租户**
 
-1. 用产品级账号登录 `adminsystem.example.com`，进入「租户管理」新建租户。
+1. 用产品级账号登录 `platform.example.com`，进入「租户管理」新建租户。
 2. 租户编码即子域名前缀（如 `acme` → `acme.example.com`），创建后不可修改。
 3. 新建时填写的租户管理员账号首次登录会强制改密；该账号只能登录本租户子域名。
 4. 停用租户后，该子域名下的登录与已登录会话都会立即被拒绝。

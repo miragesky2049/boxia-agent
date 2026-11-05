@@ -54,7 +54,7 @@ def _resource_service(uow: SqlAlchemyUnitOfWork) -> AppResourceService:
 def _entitlement_service(
     uow: SqlAlchemyUnitOfWork, *, with_catalog: bool = True
 ) -> EntitlementService:
-    context = RequestContext(scope="platform", tenant=None, host="adminsystem")
+    context = RequestContext(scope="platform", tenant=None, host="platform")
     return EntitlementService(
         uow,
         EntitlementRepository(uow.session),
