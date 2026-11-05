@@ -3,7 +3,7 @@
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import case, func, literal, or_, select, update
+from sqlalchemy import case, delete, func, insert, literal, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.sql.elements import ColumnElement
 
@@ -152,13 +152,13 @@ class PostgresMgmtUnitRepository:
     ) -> None:
         """整体替换管理单元的部门关联。"""
         self._session.execute(
-            MgmtUnitDepartmentModel.__table__.delete().where(
+            delete(MgmtUnitDepartmentModel).where(
                 MgmtUnitDepartmentModel.unit_id == unit_id
             )
         )
         if bindings:
             self._session.execute(
-                MgmtUnitDepartmentModel.__table__.insert(),
+                insert(MgmtUnitDepartmentModel),
                 [
                     {"unit_id": unit_id, "department_id": dept_id, "include_subtree": flag}
                     for dept_id, flag in bindings
@@ -169,11 +169,11 @@ class PostgresMgmtUnitRepository:
     def replace_users(self, unit_id: UUID, user_ids: list[UUID]) -> None:
         """整体替换管理单元的人员关联。"""
         self._session.execute(
-            MgmtUnitUserModel.__table__.delete().where(MgmtUnitUserModel.unit_id == unit_id)
+            delete(MgmtUnitUserModel).where(MgmtUnitUserModel.unit_id == unit_id)
         )
         if user_ids:
             self._session.execute(
-                MgmtUnitUserModel.__table__.insert(),
+                insert(MgmtUnitUserModel),
                 [{"unit_id": unit_id, "user_id": user_id} for user_id in user_ids],
             )
         self._session.flush()
