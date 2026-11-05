@@ -20,6 +20,7 @@ from internal.domain.graph.runtime import GraphRuntime
 from web.admin.schemas.apps import (
     AppBatchDeleteOut,
     AppBatchDeleteRequest,
+    AppCopyOut,
     AppCreatePayload,
     AppDeleteOut,
     AppUpdatePayload,
@@ -170,6 +171,27 @@ def update_app(
         flow_type=payload.flow_type,
     )
     return {"ok": True}
+
+
+@router.post("/{application_id}/copy", response_model=AppCopyOut, status_code=status.HTTP_201_CREATED)
+def copy_app(
+    application_id: UUID,
+    service: ApplicationService = AppServiceDep,
+    principal: PlatformAdminDep = None,
+) -> AppCopyOut:
+    """复制产品级应用：复制主行、当前 graph、最新版本、可见范围。
+
+    副本默认未启用、未上架、未发布；名称自动加「的副本」/「的副本N」后缀。
+    不复制租户开通关系、会话、运行、用量等运行态数据。
+    """
+    actor_id = getattr(principal, "user_id", None) if principal else None
+    actor_username = getattr(principal, "username", "") if principal else ""
+    result = service.copy_application(
+        application_id,
+        actor_id=actor_id,
+        actor_username=actor_username,
+    )
+    return AppCopyOut.model_validate(result)
 
 
 @router.post(

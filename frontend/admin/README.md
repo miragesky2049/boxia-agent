@@ -1,6 +1,6 @@
 # Boxia Agent 管理端
 
-React 19 + TypeScript + Vite + Ant Design 5 实现的管理后台，默认开发端口 `5173`。
+React 18 + TypeScript + Vite + Ant Design 5 + Semi UI + @flowgram.ai/free-layout-editor 实现的管理后台，默认开发端口 `5173`。
 
 项目整体说明、后端启动、认证模型与生产部署见仓库根目录 [README](../../README.md)。
 

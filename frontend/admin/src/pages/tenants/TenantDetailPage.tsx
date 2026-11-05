@@ -3,8 +3,13 @@ import { App, Button, Descriptions, Space, Spin, Tag, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
+import { rolesApi } from '../../api/access'
 import { getTenant } from '../../api/tenant'
-import type { Tenant } from '../../api/types'
+import { tenantAdminsApi } from '../../api/tenantAdmins'
+import type { AdminUser, Role, Tenant } from '../../api/types'
+import { useAuth } from '../../auth/AuthContext'
+import { AdminUsersBlock } from '../../components/admin-users/AdminUsersBlock'
+import { FormSection } from '../../components/common/FormSection'
 import { useTenant } from '../../tenant/TenantContext'
 
 export default function TenantDetailPage() {
@@ -13,8 +18,21 @@ export default function TenantDetailPage() {
   const navigate = useNavigate()
   const { message } = App.useApp()
   const { context } = useTenant()
+  const { user: currentUser, hasPermission } = useAuth()
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
+  const [roles, setRoles] = useState<Role[]>([])
+  const [admins, setAdmins] = useState<AdminUser[]>([])
+  const [adminsTotal, setAdminsTotal] = useState(0)
+  const [adminsPage, setAdminsPage] = useState(1)
+  const [adminsPageSize, setAdminsPageSize] = useState(10)
+  const [adminsKeyword, setAdminsKeyword] = useState('')
+  const [adminsLoading, setAdminsLoading] = useState(false)
+
+  const canCreate = hasPermission('button:admin-user:create')
+  const canUpdate = hasPermission('button:admin-user:update')
+  const canDelete = hasPermission('button:admin-user:delete')
+  const canResetPassword = hasPermission('button:admin-user:reset-password')
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -35,6 +53,36 @@ export default function TenantDetailPage() {
     }
     void load()
   }, [tenantId, load, navigate])
+
+  useEffect(() => {
+    if (!tenantId || !tenant || tenant.is_platform) return
+    rolesApi
+      .list({ tenant_id: tenantId })
+      .then((items) => setRoles(items.filter((role) => role.is_active)))
+      .catch(() => setRoles([]))
+  }, [tenantId, tenant])
+
+  const loadAdmins = useCallback(async () => {
+    setAdminsLoading(true)
+    try {
+      const result = await tenantAdminsApi.list(tenantId, {
+        page: adminsPage,
+        page_size: adminsPageSize,
+        keyword: adminsKeyword || undefined,
+      })
+      setAdmins(result.items)
+      setAdminsTotal(result.total)
+    } catch (error) {
+      message.error(error instanceof Error ? error.message : '加载管理员失败')
+    } finally {
+      setAdminsLoading(false)
+    }
+  }, [tenantId, adminsPage, adminsPageSize, adminsKeyword, message])
+
+  useEffect(() => {
+    if (!tenantId || !tenant || tenant.is_platform) return
+    void loadAdmins()
+  }, [tenantId, loadAdmins, tenant])
 
   return (
     <div className="page-card">
@@ -82,6 +130,60 @@ export default function TenantDetailPage() {
           </Descriptions>
         )}
       </Spin>
+
+      {tenant && !tenant.is_platform && (
+        <div style={{ marginTop: 16 }}>
+          <FormSection
+            title="管理员账号"
+            description="维护本租户的管理端访问账号；新建账号首次登录需修改密码"
+          >
+            <AdminUsersBlock
+              roles={roles}
+              passwordPolicy={context?.password_policy}
+              currentUserId={currentUser?.id ?? null}
+              canCreate={canCreate}
+              canUpdate={canUpdate}
+              canDelete={canDelete}
+              canResetPassword={canResetPassword}
+              dataSource={admins}
+              loading={adminsLoading}
+              pagination={{
+                page: adminsPage,
+                pageSize: adminsPageSize,
+                total: adminsTotal,
+                onChange: (nextPage, nextSize) => {
+                  setAdminsPage(nextSize !== adminsPageSize ? 1 : nextPage)
+                  setAdminsPageSize(nextSize)
+                },
+              }}
+              onSearch={(value) => {
+                setAdminsKeyword(value)
+                setAdminsPage(1)
+              }}
+              onCreate={async (payload) => {
+                await tenantAdminsApi.create(tenantId, payload)
+                await loadAdmins()
+              }}
+              onUpdate={async (id, payload) => {
+                await tenantAdminsApi.update(tenantId, id, payload)
+                await loadAdmins()
+              }}
+              onRemove={async (id) => {
+                await tenantAdminsApi.remove(tenantId, id)
+                await loadAdmins()
+              }}
+              onResetPassword={async (id, password) => {
+                await tenantAdminsApi.resetPassword(tenantId, id, password)
+              }}
+              onToggleActive={async (id, enabled) => {
+                await tenantAdminsApi.update(tenantId, id, { is_active: enabled })
+                await loadAdmins()
+              }}
+              roleLabel="租户角色"
+            />
+          </FormSection>
+        </div>
+      )}
     </div>
   )
 }

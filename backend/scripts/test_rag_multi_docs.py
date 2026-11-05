@@ -155,7 +155,7 @@ async def main() -> None:
     ctx = RequestContext(
         scope="platform",
         tenant=None,
-        host="adminsystem.localhost",
+        host="platform.localhost",
         resolution="default",
     )
 

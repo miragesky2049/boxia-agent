@@ -20,9 +20,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 # 删前快照计数：键为审计 detail 中的逻辑名，值为计数 SQL（谓词已含 :tid）
@@ -112,22 +114,28 @@ class PostgresTenantPurgeRepository:
         """
         counts: dict[str, int] = {}
         for table, sql in _PURGE_STEPS:
-            result = self._session.execute(text(sql), {"tid": tenant_id})
+            result = cast(CursorResult[Any], self._session.execute(text(sql), {"tid": tenant_id}))
             counts[table] = int(result.rowcount)
         return counts
 
     def delete_audit_logs(self, tenant_id: UUID) -> int:
         """物理清除租户自身审计日志（平台侧删除审计须先写并 flush）。"""
-        result = self._session.execute(
-            text("DELETE FROM audit_logs WHERE tenant_id = :tid"),
-            {"tid": tenant_id},
+        result = cast(
+            CursorResult[Any],
+            self._session.execute(
+                text("DELETE FROM audit_logs WHERE tenant_id = :tid"),
+                {"tid": tenant_id},
+            ),
         )
         return int(result.rowcount)
 
     def delete_tenant_row(self, tenant_id: UUID) -> int:
         """删除 tenants 行并触发全部 CASCADE；返回删除行数（0 表示租户不存在）。"""
-        result = self._session.execute(
-            text("DELETE FROM tenants WHERE id = :tid"),
-            {"tid": tenant_id},
+        result = cast(
+            CursorResult[Any],
+            self._session.execute(
+                text("DELETE FROM tenants WHERE id = :tid"),
+                {"tid": tenant_id},
+            ),
         )
         return int(result.rowcount)

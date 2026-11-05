@@ -24,6 +24,7 @@ class TenantOut(BaseModel):
     is_active: bool
     created_at: datetime
     updated_at: datetime
+    is_platform: bool = False
 
 
 class TenantCreateRequest(BaseModel):

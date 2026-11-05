@@ -1,0 +1,71 @@
+/* 表单分区卡片：统一替代 antd <Divider orientation="left" dashed>。
+   视觉目标：在白底 Modal / page-card 上自然"凹"进去，标题左贴边、有品牌色锚点。 */
+
+.form-section {
+  padding: 16px 18px 14px;
+  border: 1px solid #eef0f4;
+  border-radius: 12px;
+  background: #fafbfd;
+}
+
+.form-section + .form-section {
+  margin-top: 12px;
+}
+
+.form-section__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e5e6eb;
+}
+
+.form-section__heading {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.form-section__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  color: #1d2129;
+  font-size: 14px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
+/* 左侧品牌色竖条：用伪元素画，避免额外 DOM */
+.form-section__title::before {
+  content: '';
+  flex: 0 0 auto;
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: #2f6bff;
+}
+
+.form-section__desc {
+  margin: 2px 0 0;
+  padding-left: 11px; /* 对齐标题文字（竖条 3 + 间距 8） */
+  color: #86909c;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.form-section__extra {
+  flex: 0 0 auto;
+}
+
+.form-section__body {
+  padding-top: 12px;
+}
+
+/* body 内最后一个表单项去掉默认下边距，避免卡片底部留白过大 */
+.form-section__body .ant-form-item:last-child {
+  margin-bottom: 0;
+}

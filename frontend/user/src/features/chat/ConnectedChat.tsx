@@ -1,6 +1,6 @@
 import { Spin } from 'antd'
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, Navigate, useParams } from 'react-router-dom'
 import { getAgent } from '../../api/agents'
 import type { UserAgentDetail } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
@@ -83,6 +83,10 @@ export function ConnectedChat() {
         </div>
       </div>
     )
+  }
+
+  if (agent.flow_type === 'workflow') {
+    return <Navigate to={`/agents/${agent.id}/workflow`} replace />
   }
 
   const chatAgent: ChatAgent = {

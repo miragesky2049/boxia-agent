@@ -2,7 +2,6 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import {
   App,
   Button,
-  Divider,
   Form,
   Input,
   Modal,
@@ -20,6 +19,7 @@ import { useNavigate } from 'react-router-dom'
 import { batchDeleteTenants, createTenant, deleteTenant, listTenants, updateTenant } from '../api/tenant'
 import type { Tenant, TenantBatchDeleteItem } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
+import { FormSection } from '../components/common/FormSection'
 import { useTenant } from '../tenant/TenantContext'
 import { passwordRule } from '../utils/password'
 
@@ -169,7 +169,8 @@ export default function TenantsPage() {
 
   const handleBatchDelete = () => {
     const targets = items.filter(
-      (item) => selectedKeys.includes(item.id) && item.code !== PLATFORM_TENANT_CODE
+      (item) =>
+        selectedKeys.includes(item.id) && !(item.is_platform ?? item.code === PLATFORM_TENANT_CODE)
     )
     if (targets.length === 0) return
     modal.confirm({
@@ -206,7 +207,14 @@ export default function TenantsPage() {
       width: 260,
       render: (_: unknown, record: Tenant) => (
         <div>
-          <div className="resource-name">{record.name}</div>
+          <div className="resource-name">
+            {record.name}
+            {record.is_platform && (
+              <Tag color="gold" style={{ marginLeft: 8 }} bordered={false}>
+                产品级
+              </Tag>
+            )}
+          </div>
           <div className="resource-desc">
             {context?.root_domain ? `${record.code}.${context.root_domain}` : record.code}
           </div>
@@ -231,7 +239,7 @@ export default function TenantsPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
-          disabled={!canUpdate}
+          disabled={!canUpdate || record.is_platform}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -248,13 +256,13 @@ export default function TenantsPage() {
       key: 'actions',
       width: 220,
       render: (_: unknown, record: Tenant) => {
-        const isPlatformTenant = record.code === PLATFORM_TENANT_CODE
+        const isPlatformTenant = record.is_platform ?? record.code === PLATFORM_TENANT_CODE
         return (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
               详情
             </Button>
-            {canUpdate && (
+            {canUpdate && !isPlatformTenant && (
               <Button
                 type="link"
                 size="small"
@@ -354,7 +362,7 @@ export default function TenantsPage() {
                 selectedRowKeys: selectedKeys,
                 onChange: (keys) => setSelectedKeys(keys as string[]),
                 getCheckboxProps: (record) => ({
-                  disabled: record.code === PLATFORM_TENANT_CODE,
+                  disabled: record.is_platform ?? record.code === PLATFORM_TENANT_CODE,
                 }),
               }
             : undefined
@@ -386,58 +394,56 @@ export default function TenantsPage() {
         width={560}
       >
         <Form<CreateFormValues> form={createForm} name="tenant-create" layout="vertical" requiredMark={false}>
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            租户信息
-          </Divider>
-          <Form.Item
-            name="code"
-            label="租户编码"
-            extra="作为子域名前缀，创建后不可修改；仅支持小写字母、数字和短横线。"
-            rules={[
-              { required: true, message: '请输入租户编码' },
-              {
-                pattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
-                message: '需为 1-63 位小写字母、数字或短横线',
-              },
-            ]}
-          >
-            <Input placeholder="例如：acme" autoComplete="off" />
-          </Form.Item>
-          <Form.Item
-            name="name"
-            label="租户名称"
-            rules={[{ required: true, message: '请输入租户名称' }]}
-          >
-            <Input placeholder="例如：Acme 公司" />
-          </Form.Item>
+          <FormSection title="租户信息">
+            <Form.Item
+              name="code"
+              label="租户编码"
+              extra="作为子域名前缀，创建后不可修改；仅支持小写字母、数字和短横线。"
+              rules={[
+                { required: true, message: '请输入租户编码' },
+                {
+                  pattern: /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/,
+                  message: '需为 1-63 位小写字母、数字或短横线',
+                },
+              ]}
+            >
+              <Input placeholder="例如：acme" autoComplete="off" />
+            </Form.Item>
+            <Form.Item
+              name="name"
+              label="租户名称"
+              rules={[{ required: true, message: '请输入租户名称' }]}
+            >
+              <Input placeholder="例如：Acme 公司" />
+            </Form.Item>
+          </FormSection>
 
-          <Divider orientation="left" dashed style={{ margin: '4px 0 16px' }}>
-            管理员账号
-          </Divider>
-          <Form.Item
-            name="admin_username"
-            label="租户管理员账号"
-            rules={[
-              { required: true, message: '请输入管理员账号' },
-              { min: 3, max: 64, message: '账号长度为 3-64 个字符' },
-            ]}
-          >
-            <Input placeholder="该租户的超级管理员登录账号" autoComplete="off" />
-          </Form.Item>
-          <Form.Item name="admin_display_name" label="管理员显示名">
-            <Input placeholder="默认与账号相同" />
-          </Form.Item>
-          <Form.Item
-            name="admin_password"
-            label="管理员初始密码"
-            rules={[
-              { required: true, message: '请输入初始密码' },
-              passwordRule(context?.password_policy),
-            ]}
-            extra="租户管理员首次登录后必须修改密码。"
-          >
-            <Input.Password autoComplete="new-password" />
-          </Form.Item>
+          <FormSection title="管理员账号" description="该租户的超级管理员，首次登录需修改密码">
+            <Form.Item
+              name="admin_username"
+              label="租户管理员账号"
+              rules={[
+                { required: true, message: '请输入管理员账号' },
+                { min: 3, max: 64, message: '账号长度为 3-64 个字符' },
+              ]}
+            >
+              <Input placeholder="该租户的超级管理员登录账号" autoComplete="off" />
+            </Form.Item>
+            <Form.Item name="admin_display_name" label="管理员显示名">
+              <Input placeholder="默认与账号相同" />
+            </Form.Item>
+            <Form.Item
+              name="admin_password"
+              label="管理员初始密码"
+              rules={[
+                { required: true, message: '请输入初始密码' },
+                passwordRule(context?.password_policy),
+              ]}
+              extra="租户管理员首次登录后必须修改密码。"
+            >
+              <Input.Password autoComplete="new-password" />
+            </Form.Item>
+          </FormSection>
         </Form>
       </Modal>
 

@@ -108,8 +108,8 @@ function mockContext(scope: 'platform' | 'tenant', permissions: string[], captur
     tenant_resolution: 'host',
     tenant_switch_mode: 'none',
     root_domain: 'example.com',
-    platform_admin_subdomain: 'adminsystem',
-    platform_admin_host: 'adminsystem.example.com',
+    platform_admin_subdomain: 'platform',
+    platform_admin_host: 'platform.example.com',
     platform_name: 'Boxia',
     password_policy: passwordPolicy,
   }

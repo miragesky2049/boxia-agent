@@ -42,7 +42,7 @@ def tenant(uow):
 
 
 def _service(uow: SqlAlchemyUnitOfWork, *, revoke_strict: bool = False) -> EntitlementService:
-    context = RequestContext(scope="platform", tenant=None, host="adminsystem")
+    context = RequestContext(scope="platform", tenant=None, host="platform")
     return EntitlementService(
         uow, EntitlementRepository(uow.session), context, revoke_strict=revoke_strict
     )

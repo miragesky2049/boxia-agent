@@ -7,6 +7,12 @@ from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 
 from internal.application.apps.tenant_settings_service import TenantSettingsService
+from web.admin.schemas.auth import (
+    AdminUserCreateRequest,
+    AdminUserOut,
+    AdminUserResetPasswordRequest,
+    AdminUserUpdateRequest,
+)
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import (
     TenantBatchDeleteOut,
@@ -19,7 +25,7 @@ from web.admin.schemas.tenant import (
 from web.deps.apps_services import make_tenant_settings_service
 from web.deps.auth import AdminAuthDep, require_permission, require_platform_admin
 from web.deps.db import UowDep
-from web.deps.services import TenantServiceDep
+from web.deps.services import AdminUserServiceDep, TenantServiceDep
 
 router = APIRouter(
     prefix="/tenants",
@@ -207,4 +213,135 @@ def update_tenant_settings(
         default_model_catalog_id=payload.default_model_catalog_id,
         allowed_catalog_ids=payload.allowed_catalog_ids,
         plugin_whitelist=payload.plugin_whitelist,
+    )
+
+
+# ========== 租户管理员账号（平台管理员跨租户管理）==========
+@router.get(
+    "/{tenant_id}/admins",
+    response_model=PageOut[AdminUserOut],
+    dependencies=[Depends(require_permission("page:admin-users"))],
+)
+def list_tenant_admins(
+    tenant_id: UUID,
+    service: AdminUserServiceDep,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    keyword: str | None = Query(None, max_length=100),
+) -> PageOut[AdminUserOut]:
+    """平台管理员分页查询指定租户的管理员账号。"""
+    result = service.list_for_tenant(tenant_id, page, page_size, keyword)
+    return PageOut[AdminUserOut](
+        items=[AdminUserOut.model_validate(item) for item in result.items],
+        total=result.total,
+        page=result.page,
+        page_size=result.page_size,
+    )
+
+
+@router.post(
+    "/{tenant_id}/admins",
+    response_model=AdminUserOut,
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_permission("button:admin-user:create"))],
+)
+def create_tenant_admin(
+    tenant_id: UUID,
+    payload: AdminUserCreateRequest,
+    request: Request,
+    service: AdminUserServiceDep,
+    principal: AdminAuthDep,
+) -> AdminUserOut:
+    """平台管理员为指定租户新建管理员账号。"""
+    ip, user_agent = _client_meta(request)
+    user = service.create_for_tenant(
+        tenant_id,
+        username=payload.username,
+        password=payload.password,
+        display_name=payload.display_name,
+        role_id=payload.role_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return AdminUserOut.model_validate(user)
+
+
+@router.patch(
+    "/{tenant_id}/admins/{user_id}",
+    response_model=AdminUserOut,
+    dependencies=[Depends(require_permission("button:admin-user:update"))],
+)
+def update_tenant_admin(
+    tenant_id: UUID,
+    user_id: UUID,
+    payload: AdminUserUpdateRequest,
+    request: Request,
+    service: AdminUserServiceDep,
+    principal: AdminAuthDep,
+) -> AdminUserOut:
+    """平台管理员调整指定租户的管理员账号。"""
+    ip, user_agent = _client_meta(request)
+    user = service.update_for_tenant(
+        tenant_id,
+        user_id,
+        display_name=payload.display_name,
+        role_id=payload.role_id,
+        is_active=payload.is_active,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+    return AdminUserOut.model_validate(user)
+
+
+@router.delete(
+    "/{tenant_id}/admins/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:admin-user:delete"))],
+)
+def delete_tenant_admin(
+    tenant_id: UUID,
+    user_id: UUID,
+    request: Request,
+    service: AdminUserServiceDep,
+    principal: AdminAuthDep,
+) -> None:
+    """平台管理员删除指定租户的管理员账号。"""
+    ip, user_agent = _client_meta(request)
+    service.delete_for_tenant(
+        tenant_id,
+        user_id,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
+    )
+
+
+@router.post(
+    "/{tenant_id}/admins/{user_id}/password",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_permission("button:admin-user:reset-password"))],
+)
+def reset_tenant_admin_password(
+    tenant_id: UUID,
+    user_id: UUID,
+    payload: AdminUserResetPasswordRequest,
+    request: Request,
+    service: AdminUserServiceDep,
+    principal: AdminAuthDep,
+) -> None:
+    """平台管理员重置指定租户管理员密码。"""
+    ip, user_agent = _client_meta(request)
+    service.reset_password_for_tenant(
+        tenant_id,
+        user_id,
+        new_password=payload.new_password,
+        actor_id=principal.user_id,
+        actor_username=principal.username,
+        ip=ip,
+        user_agent=user_agent,
     )

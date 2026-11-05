@@ -5,6 +5,7 @@ import AgentDetailPage from './pages/AgentDetailPage'
 import AgentListPage from './pages/AgentListPage'
 import ChatPage from './pages/ChatPage'
 import LoginPage from './pages/LoginPage'
+import WorkflowPage from './pages/WorkflowPage'
 
 export default function App() {
   return (
@@ -33,6 +34,14 @@ export default function App() {
             element={
               <RequireAuth>
                 <ChatPage />
+              </RequireAuth>
+            }
+          />
+          <Route
+            path="/agents/:agentId/workflow"
+            element={
+              <RequireAuth>
+                <WorkflowPage />
               </RequireAuth>
             }
           />

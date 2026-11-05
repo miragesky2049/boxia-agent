@@ -1,8 +1,10 @@
 """用户被授权管理单元的 PostgreSQL 仓储实现。"""
 
+from typing import Any, cast
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import delete, insert, select
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
@@ -89,7 +91,7 @@ class PostgresUserMgmtUnitGrantRepository:
                     }
                 )
         if payload:
-            self._session.execute(UserMgmtUnitGrantModel.__table__.insert(), payload)
+            self._session.execute(insert(UserMgmtUnitGrantModel), payload)
             self._session.flush()
         return len(payload)
 
@@ -104,7 +106,7 @@ class PostgresUserMgmtUnitGrantRepository:
         if not user_ids:
             return
         self._session.execute(
-            UserMgmtUnitGrantModel.__table__.delete().where(
+            delete(UserMgmtUnitGrantModel).where(
                 UserMgmtUnitGrantModel.tenant_id == tenant_id,
                 UserMgmtUnitGrantModel.user_id.in_(user_ids),
             )
@@ -121,20 +123,20 @@ class PostgresUserMgmtUnitGrantRepository:
                 for user_id in user_ids
                 for unit_id in unit_ids
             ]
-            self._session.execute(UserMgmtUnitGrantModel.__table__.insert(), payload)
+            self._session.execute(insert(UserMgmtUnitGrantModel), payload)
         self._session.flush()
 
     def remove_grant(self, tenant_id: UUID, user_id: UUID, unit_id: UUID) -> bool:
         """移除某用户对某单元的授权。"""
         result = self._session.execute(
-            UserMgmtUnitGrantModel.__table__.delete().where(
+            delete(UserMgmtUnitGrantModel).where(
                 UserMgmtUnitGrantModel.tenant_id == tenant_id,
                 UserMgmtUnitGrantModel.user_id == user_id,
                 UserMgmtUnitGrantModel.unit_id == unit_id,
             )
         )
         self._session.flush()
-        return int(result.rowcount or 0) > 0
+        return int(cast(CursorResult[Any], result).rowcount or 0) > 0
 
     def list_unit_names(self, tenant_id: UUID, unit_ids: list[UUID]) -> dict[UUID, str]:
         """批量读取单元 id -> 名称映射（前端展示用）。"""
