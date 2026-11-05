@@ -46,9 +46,34 @@ class TenantService:
         self._context = context
 
     def list_tenants(self, keyword: str | None = None) -> list[Tenant]:
-        """产品级平台查询全部租户。"""
+        """产品级平台查询全部租户，列表头部注入虚拟产品级平台租户。"""
         self._require_platform()
-        return self._uow.tenants.search(keyword)
+        tenants = self._uow.tenants.search(keyword)
+        platform_tenant = self._build_platform_tenant()
+        if self._platform_tenant_matches(keyword, platform_tenant):
+            return [platform_tenant, *tenants]
+        return tenants
+
+    @staticmethod
+    def _build_platform_tenant() -> Tenant:
+        """构造虚拟产品级平台租户（不入库，仅用于列表展示与作用域标识）。"""
+        settings = get_settings()
+        return Tenant(
+            id=PLATFORM_TENANT_ID,
+            code=settings.platform_admin_subdomain.strip().lower(),
+            name=settings.platform_name,
+            is_active=True,
+            created_at=datetime.min,
+            updated_at=datetime.min,
+        )
+
+    @staticmethod
+    def _platform_tenant_matches(keyword: str | None, tenant: Tenant) -> bool:
+        """关键字搜索时产品级租户是否命中（无关键字时始终返回）。"""
+        if not keyword or not keyword.strip():
+            return True
+        kw = keyword.strip().lower()
+        return kw in tenant.code.lower() or kw in tenant.name.lower()
 
     def list_active(self) -> list[Tenant]:
         """查询启用中的租户（本地调试切换作用域使用）。"""
@@ -57,6 +82,8 @@ class TenantService:
     def get(self, tenant_id: UUID) -> Tenant:
         """查询租户详情。"""
         self._require_platform()
+        if tenant_id == PLATFORM_TENANT_ID:
+            return self._build_platform_tenant()
         tenant = self._uow.tenants.get_by_id(tenant_id)
         if tenant is None:
             raise NotFoundError("租户不存在")
@@ -169,6 +196,8 @@ class TenantService:
     ) -> Tenant:
         """更新租户名称与启用状态。"""
         self._require_platform()
+        if tenant_id == PLATFORM_TENANT_ID:
+            raise ForbiddenError("产品级平台为系统内置租户，仅可查看不可修改")
         tenant = self._uow.tenants.get_by_id(tenant_id)
         if tenant is None:
             raise NotFoundError("租户不存在")

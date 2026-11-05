@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
 
+from internal.domain.constants import PLATFORM_TENANT_ID
+
 
 @dataclass(frozen=True)
 class Tenant:
@@ -15,3 +17,8 @@ class Tenant:
     is_active: bool
     created_at: datetime
     updated_at: datetime
+
+    @property
+    def is_platform(self) -> bool:
+        """是否为产品级平台内置租户（全零 UUID）。"""
+        return self.id == PLATFORM_TENANT_ID

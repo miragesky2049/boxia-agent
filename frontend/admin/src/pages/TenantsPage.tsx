@@ -169,7 +169,8 @@ export default function TenantsPage() {
 
   const handleBatchDelete = () => {
     const targets = items.filter(
-      (item) => selectedKeys.includes(item.id) && item.code !== PLATFORM_TENANT_CODE
+      (item) =>
+        selectedKeys.includes(item.id) && !(item.is_platform ?? item.code === PLATFORM_TENANT_CODE)
     )
     if (targets.length === 0) return
     modal.confirm({
@@ -206,7 +207,14 @@ export default function TenantsPage() {
       width: 260,
       render: (_: unknown, record: Tenant) => (
         <div>
-          <div className="resource-name">{record.name}</div>
+          <div className="resource-name">
+            {record.name}
+            {record.is_platform && (
+              <Tag color="gold" style={{ marginLeft: 8 }} bordered={false}>
+                产品级
+              </Tag>
+            )}
+          </div>
           <div className="resource-desc">
             {context?.root_domain ? `${record.code}.${context.root_domain}` : record.code}
           </div>
@@ -231,7 +239,7 @@ export default function TenantsPage() {
           checked={enabled}
           checkedChildren="启用"
           unCheckedChildren="停用"
-          disabled={!canUpdate}
+          disabled={!canUpdate || record.is_platform}
           onChange={(checked) => handleToggle(record, checked)}
         />
       ),
@@ -248,13 +256,13 @@ export default function TenantsPage() {
       key: 'actions',
       width: 220,
       render: (_: unknown, record: Tenant) => {
-        const isPlatformTenant = record.code === PLATFORM_TENANT_CODE
+        const isPlatformTenant = record.is_platform ?? record.code === PLATFORM_TENANT_CODE
         return (
           <Space size={4}>
             <Button type="link" size="small" onClick={() => navigate(`/tenants/${record.id}`)}>
               详情
             </Button>
-            {canUpdate && (
+            {canUpdate && !isPlatformTenant && (
               <Button
                 type="link"
                 size="small"
@@ -354,7 +362,7 @@ export default function TenantsPage() {
                 selectedRowKeys: selectedKeys,
                 onChange: (keys) => setSelectedKeys(keys as string[]),
                 getCheckboxProps: (record) => ({
-                  disabled: record.code === PLATFORM_TENANT_CODE,
+                  disabled: record.is_platform ?? record.code === PLATFORM_TENANT_CODE,
                 }),
               }
             : undefined

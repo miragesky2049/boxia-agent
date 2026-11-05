@@ -20,6 +20,7 @@ export interface Tenant {
   is_active: boolean
   created_at: string
   updated_at: string
+  is_platform?: boolean
 }
 
 export interface TenantDeleteResult {
