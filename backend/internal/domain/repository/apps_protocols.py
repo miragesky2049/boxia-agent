@@ -13,7 +13,6 @@ from datetime import datetime
 from typing import Any, Protocol
 from uuid import UUID
 
-from internal.domain.entity.access import AppGrantRow
 from internal.domain.entity.entitlement import EntitlementItem, EntitlementView
 from internal.domain.entity.entitlement_plan import EntitlementPlan
 
@@ -29,6 +28,9 @@ class ApplicationRepositoryProtocol(Protocol):
         description: str = "",
         created_by: UUID | None = None,
         flow_type: str = "workflow",
+        visibility_template: str = "all",
+        visibility_lock: bool = False,
+        admin_scope_mode: str = "creator_only",
     ) -> UUID: ...
 
     def update_application(
@@ -39,21 +41,37 @@ class ApplicationRepositoryProtocol(Protocol):
         description: str | None = None,
         avatar_url: str | None = None,
         flow_type: str | None = None,
+        visibility_template: str | None = None,
+        visibility_lock: bool | None = None,
+        admin_scope_mode: str | None = None,
     ) -> None: ...
 
     def set_listed_in_market(self, application_id: UUID, listed: bool) -> None: ...
 
     def set_enabled(self, application_id: UUID, enabled: bool) -> None: ...
 
-    def get_application_visibility(self, application_id: UUID) -> dict: ...
+    # ========== v2 可见范围（0068：按 (application, tenant) 隔离） ==========
+    def get_tenant_scope(self, application_id: UUID, tenant_id: UUID) -> dict | None:
+        """读取某应用在某租户的可见范围配置；无记录返回 None。"""
+        ...
 
-    def replace_application_visibility(
+    def upsert_tenant_scope(
         self,
         application_id: UUID,
-        mode: str,
-        departments: list[dict],
-        users: list[UUID],
-    ) -> None: ...
+        tenant_id: UUID,
+        visibility: str,
+        whitelist: list[dict],
+    ) -> dict:
+        """整体覆盖写入可见范围：upsert scope 行 + 清空并重写 whitelist，返回 {id, visibility, whitelist}。"""
+        ...
+
+    def ensure_scope_on_subscribe(self, application_id: UUID, tenant_id: UUID) -> None:
+        """按平台 visibility_template 初始化 scope（已存在则跳过）；一期不显式调用，预留给未来钩子。"""
+        ...
+
+    def list_subscribed_apps_for_admin(self, tenant_id: UUID) -> list[dict]:
+        """租户已订阅（生效中）的产品级应用列表，含 visibility_lock/visibility_template。"""
+        ...
 
     def get_application(self, application_id: UUID) -> dict | None: ...
 
@@ -151,7 +169,7 @@ class ApplicationRepositoryProtocol(Protocol):
         user_id: UUID,
         keyword: str | None = None,
     ) -> list[dict[str, Any]]:
-        """user 端可见应用卡片列表：租户自建 + 已开通实例，叠加 visibility 白名单/部门过滤。"""
+        """user 端可见应用卡片列表：租户自建 + 已开通实例，叠加 v2 可见范围（scope/白名单/模板兜底）过滤。"""
         ...
 
     def count_copies(self, source_name: str) -> int:
@@ -190,18 +208,36 @@ class ApplicationRepositoryProtocol(Protocol):
         """向 application_graph_version 写入一行（复制路径专用，与 insert_graph_version 等价但显式命名）。"""
         ...
 
-    def get_visibility_detail(self, application_id: UUID) -> dict:
-        """读取可见范围完整行集 {mode, departments: [{department_id, include_subtree}], users: [UUID]}（复制用）。"""
+
+class AdminScopeRepositoryProtocol(Protocol):
+    """app_admin_scope（应用 ↔ 管理单元）仓储端口（0069 二期）。"""
+
+    def list_scopes(self, application_id: UUID, tenant_id: UUID) -> list[dict]:
+        """列出应用关联的管理单元（JOIN mgmt_units 隐式过滤孤儿，带名称）。"""
         ...
 
-    def insert_visibility_rows(
-        self,
-        application_id: UUID,
-        mode: str,
-        departments: list[dict],
-        users: list[UUID],
+    def list_unit_ids(self, application_id: UUID, tenant_id: UUID) -> list[UUID]:
+        """列出应用关联的管理单元 ID 集合。"""
+        ...
+
+    def unit_exists(self, tenant_id: UUID, mgmt_unit_id: UUID) -> bool:
+        """校验管理单元存在且属于本租户。"""
+        ...
+
+    def add_scope(
+        self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID
     ) -> None:
-        """整体写入可见范围行（复制路径专用，调用方已保证目标应用无残留行）。"""
+        """新增关联（ON CONFLICT DO NOTHING，幂等）。"""
+        ...
+
+    def remove_scope(
+        self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID
+    ) -> None:
+        """解除关联（不存在时静默）。"""
+        ...
+
+    def list_unit_ids_by_app(self, tenant_id: UUID) -> dict[UUID, set[UUID]]:
+        """租户维度一次性取 {application_id: {mgmt_unit_id}}，供"我管理的应用"过滤。"""
         ...
 
 
@@ -590,41 +626,6 @@ class TenantSettingsRepositoryProtocol(Protocol):
     ) -> dict: ...
 
     def list_all(self) -> list[dict]: ...
-
-
-class AppGrantRepositoryProtocol(Protocol):
-    """应用授权仓储端口：application 表适配为资源授权统一查询接口。"""
-
-    def list_page(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        is_enabled: bool | None,
-        manageable_only: bool = False,
-        grant_state: str | None = None,
-        grant_tenant_id: UUID | None = None,
-    ) -> tuple[list[AppGrantRow], int]: ...
-
-    def get(self, resource_id: UUID) -> AppGrantRow | None: ...
-
-    def ids_exist(self, ids: list[UUID]) -> set[UUID]: ...
-
-    def ids_owned(self, ids: list[UUID]) -> set[UUID]: ...
-
-    def list_grantable(
-        self,
-        page: int,
-        page_size: int,
-        keyword: str | None,
-        ids: list[UUID] | None = None,
-    ) -> tuple[list[AppGrantRow], int]: ...
-
-    def ids_grantable(self, ids: list[UUID]) -> set[UUID]: ...
-
-    def grant_block_reasons(self, ids: list[UUID]) -> dict[UUID, str]:
-        """候选集外资源拦截原因码；应用档 P1-8 无权益/审核口径恒返回空（P1-10 联动）。"""
-        ...
 
 
 class EntitlementRepositoryProtocol(Protocol):

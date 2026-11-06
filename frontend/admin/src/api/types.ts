@@ -124,7 +124,8 @@ export interface AdminUserCreatePayload {
   username: string
   password: string
   display_name: string
-  role_id: string
+  /** 产品级租户管理新建时不传，服务端固定绑定该租户超级管理员。 */
+  role_id?: string
 }
 
 export interface AdminUserUpdatePayload {
@@ -396,7 +397,7 @@ export interface ResourceGrant {
   created_at: string
 }
 
-export type ResourceType = 'tool' | 'skill' | 'prompt' | 'knowledge' | 'app'
+export type ResourceType = 'tool' | 'skill' | 'prompt' | 'knowledge'
 
 export type GrantBatchMode = 'merge' | 'replace' | 'clear'
 

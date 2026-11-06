@@ -29,12 +29,12 @@ interface CreateFormValues {
   username: string
   display_name: string
   password: string
-  role_id: string
+  role_id?: string
 }
 
 interface EditFormValues {
   display_name: string
-  role_id: string
+  role_id?: string
 }
 
 interface ResetFormValues {
@@ -50,7 +50,7 @@ export interface AdminUsersPagination {
 }
 
 export interface AdminUsersBlockProps {
-  roles: Role[]
+  roles?: Role[]
   passwordPolicy?: PasswordPolicy | null
   currentUserId: string | null
   canCreate: boolean
@@ -67,11 +67,13 @@ export interface AdminUsersBlockProps {
   onResetPassword: (id: string, newPassword: string) => Promise<void>
   onToggleActive: (id: string, enabled: boolean) => Promise<void>
   roleLabel?: string
+  /** 隐藏新建/编辑弹窗中的角色选择（产品级租户管理固定绑定超级管理员）。 */
+  hideRoleSelect?: boolean
   extraHeader?: React.ReactNode
 }
 
 export function AdminUsersBlock({
-  roles,
+  roles = [],
   passwordPolicy,
   currentUserId,
   canCreate,
@@ -88,6 +90,7 @@ export function AdminUsersBlock({
   onResetPassword,
   onToggleActive,
   roleLabel = '角色',
+  hideRoleSelect = false,
   extraHeader,
 }: AdminUsersBlockProps) {
   const { message } = App.useApp()
@@ -109,7 +112,8 @@ export function AdminUsersBlock({
         username: values.username.trim(),
         display_name: values.display_name.trim(),
         password: values.password,
-        role_id: values.role_id,
+        // 产品级入口不选角色，服务端固定绑定超级管理员
+        ...(hideRoleSelect ? {} : { role_id: values.role_id }),
       })
       message.success('账号已创建，首次登录需修改密码')
       setCreateOpen(false)
@@ -128,7 +132,7 @@ export function AdminUsersBlock({
     try {
       await onUpdate(editing.id, {
         display_name: values.display_name.trim(),
-        role_id: values.role_id,
+        ...(hideRoleSelect ? {} : { role_id: values.role_id }),
       })
       message.success('已保存')
       setEditing(null)
@@ -371,15 +375,17 @@ export function AdminUsersBlock({
             </Form.Item>
           </FormSection>
 
-          <FormSection title="角色配置">
-            <Form.Item
-              name="role_id"
-              label={roleLabel}
-              rules={[{ required: true, message: `请选择${roleLabel}` }]}
-            >
-              <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
-            </Form.Item>
-          </FormSection>
+          {!hideRoleSelect && (
+            <FormSection title="角色配置">
+              <Form.Item
+                name="role_id"
+                label={roleLabel}
+                rules={[{ required: true, message: `请选择${roleLabel}` }]}
+              >
+                <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
+              </Form.Item>
+            </FormSection>
+          )}
         </Form>
       </Modal>
 
@@ -401,14 +407,16 @@ export function AdminUsersBlock({
           >
             <Input />
           </Form.Item>
-          <Form.Item
-            name="role_id"
-            label={roleLabel}
-            rules={[{ required: true, message: `请选择${roleLabel}` }]}
-            extra="修改角色会立即刷新该账号的权限与会话。"
-          >
-            <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
-          </Form.Item>
+          {!hideRoleSelect && (
+            <Form.Item
+              name="role_id"
+              label={roleLabel}
+              rules={[{ required: true, message: `请选择${roleLabel}` }]}
+              extra="修改角色会立即刷新该账号的权限与会话。"
+            >
+              <Select options={roles.map((role) => ({ label: role.name, value: role.id }))} />
+            </Form.Item>
+          )}
         </Form>
       </Modal>
 

@@ -29,8 +29,16 @@ import './AdminLayout.css'
 
 const { Header, Sider, Content } = Layout
 
-const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
+interface MenuMeta {
+  icon: ReactNode
+  label: string
+  /** 菜单指向的路由；缺省为 /{key}。tenant-apps 复用 /apps（0070 菜单合并） */
+  path?: string
+}
+
+const MENU_META: Record<string, MenuMeta> = {
   apps: { icon: <AppstoreOutlined />, label: '应用管理' },
+  'tenant-apps': { icon: <AppstoreOutlined />, label: '应用管理', path: '/apps' },
   marketplace: { icon: <ShopOutlined />, label: '应用市场' },
   resources: { icon: <DatabaseOutlined />, label: '资源管理' },
   grants: { icon: <SafetyOutlined />, label: '用户授权' },
@@ -43,7 +51,6 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
   audit: { icon: <FileSearchOutlined />, label: '审计日志' },
   entitlements: { icon: <GiftOutlined />, label: '开通授权' },
-  'role-access': { icon: <KeyOutlined />, label: '角色授权' },
 }
 
 interface MenuGroup {
@@ -103,7 +110,7 @@ export default function AdminLayout() {
     if (!groupedKeys.has(key)) {
       const meta = MENU_META[key]
       if (meta) {
-        menuItems.push({ key: `/${key}`, icon: meta.icon, label: meta.label })
+        menuItems.push({ key: meta.path ?? `/${key}`, icon: meta.icon, label: meta.label })
       }
       return
     }
@@ -116,7 +123,7 @@ export default function AdminLayout() {
       .filter((child) => menus.includes(child))
       .flatMap((child) => {
         const meta = MENU_META[child]
-        return meta ? [{ key: `/${child}`, icon: meta.icon, label: meta.label }] : []
+        return meta ? [{ key: meta.path ?? `/${child}`, icon: meta.icon, label: meta.label }] : []
       })
     if (children.length > 0) {
       menuItems.push({
@@ -130,7 +137,7 @@ export default function AdminLayout() {
 
   const selectedKey =
     menus
-      .map((key) => `/${key}`)
+      .map((key) => MENU_META[key]?.path ?? `/${key}`)
       .sort((left, right) => right.length - left.length)
       .find((candidate) => location.pathname.startsWith(candidate)) ?? '/apps'
 

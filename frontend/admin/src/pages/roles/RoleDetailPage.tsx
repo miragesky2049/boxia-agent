@@ -7,32 +7,17 @@ import {
   Checkbox,
   Descriptions,
   Empty,
-  Input,
   Space,
   Spin,
-  Switch,
-  Table,
   Tabs,
   Tag,
 } from 'antd'
-import type { ColumnsType } from 'antd/es/table'
-import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { rolesApi } from '../../api/access'
-import type {
-  PermissionCategory,
-  PermissionResource,
-  Role,
-  RoleGrantResource,
-  ResourceType,
-} from '../../api/types'
+import type { PermissionCategory, PermissionResource, Role } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
-
-const RESOURCE_TABS: { key: ResourceType; label: string }[] = [
-  { key: 'tool', label: '工具' },
-  { key: 'app', label: '应用' },
-]
+import RoleGrantMatrix from './RoleGrantMatrix'
 
 const CATEGORY_ORDER: PermissionCategory[] = [
   'system',
@@ -66,16 +51,6 @@ export default function RoleDetailPage() {
   const { hasPermission } = useAuth()
   const [role, setRole] = useState<Role | null>(null)
   const [roleLoading, setRoleLoading] = useState(false)
-  const [counts, setCounts] = useState<Record<string, number>>({})
-  const [resourceType, setResourceType] = useState<ResourceType>('tool')
-  const [items, setItems] = useState<RoleGrantResource[]>([])
-  const [total, setTotal] = useState(0)
-  const [page, setPage] = useState(1)
-  const [pageSize, setPageSize] = useState(10)
-  const [keyword, setKeyword] = useState('')
-  const [grantedOnly, setGrantedOnly] = useState(false)
-  const [loading, setLoading] = useState(false)
-  const [pendingIds, setPendingIds] = useState<string[]>([])
   const [catalog, setCatalog] = useState<PermissionResource[]>([])
   const [selectedCodes, setSelectedCodes] = useState<string[]>([])
   const [savedCodes, setSavedCodes] = useState<string[]>([])
@@ -97,12 +72,7 @@ export default function RoleDetailPage() {
     }
     setRoleLoading(true)
     try {
-      const [detail, summary] = await Promise.all([
-        rolesApi.get(roleId),
-        rolesApi.grantSummary(roleId),
-      ])
-      setRole(detail)
-      setCounts(summary.counts)
+      setRole(await rolesApi.get(roleId))
     } catch (error) {
       message.error(error instanceof Error ? error.message : '加载角色失败')
     } finally {
@@ -128,44 +98,10 @@ export default function RoleDetailPage() {
     }
   }, [roleId, message])
 
-  const loadGrants = useCallback(async () => {
-    if (!roleId) return
-    setLoading(true)
-    try {
-      const result = await rolesApi.listGrants(roleId, {
-        resource_type: resourceType,
-        page,
-        page_size: pageSize,
-        keyword: keyword || undefined,
-        granted_only: grantedOnly,
-      })
-      setItems(result.items)
-      setTotal(result.total)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载授权失败')
-    } finally {
-      setLoading(false)
-    }
-  }, [roleId, resourceType, page, pageSize, keyword, grantedOnly, message])
-
-  const refreshSummary = useCallback(async () => {
-    if (!roleId) return
-    try {
-      const summary = await rolesApi.grantSummary(roleId)
-      setCounts(summary.counts)
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '加载授权汇总失败')
-    }
-  }, [roleId, message])
-
   useEffect(() => {
     void loadRole()
     void loadPermissions()
   }, [loadRole, loadPermissions])
-
-  useEffect(() => {
-    void loadGrants()
-  }, [loadGrants])
 
   const permissionGroups = useMemo<PermissionGroup[]>(() => {
     return CATEGORY_ORDER.map((category) => ({
@@ -221,23 +157,6 @@ export default function RoleDetailPage() {
     })
   }
 
-  const handleToggle = async (record: RoleGrantResource, checked: boolean) => {
-    setPendingIds((prev) => [...prev, record.resource_id])
-    try {
-      if (checked) {
-        await rolesApi.addGrants(roleId, resourceType, [record.resource_id])
-      } else {
-        await rolesApi.removeGrant(roleId, resourceType, record.resource_id)
-      }
-      message.success(checked ? '已授权' : '已取消授权')
-      await Promise.all([loadGrants(), refreshSummary()])
-    } catch (error) {
-      message.error(error instanceof Error ? error.message : '授权失败')
-    } finally {
-      setPendingIds((prev) => prev.filter((item) => item !== record.resource_id))
-    }
-  }
-
   const handleSavePermissions = async () => {
     setSavingPermissions(true)
     try {
@@ -251,55 +170,6 @@ export default function RoleDetailPage() {
       setSavingPermissions(false)
     }
   }
-
-  const columns: ColumnsType<RoleGrantResource> = [
-    {
-      title: '名称',
-      key: 'name',
-      render: (_: unknown, record: RoleGrantResource) => (
-        <div>
-          <div className="resource-name">
-            {record.name}
-            {record.is_platform && (
-              <Tag color="geekblue" bordered={false} style={{ marginLeft: 8 }}>
-                平台级
-              </Tag>
-            )}
-          </div>
-          {record.description && <div className="resource-desc">{record.description}</div>}
-        </div>
-      ),
-    },
-    {
-      title: '状态',
-      dataIndex: 'is_enabled',
-      key: 'is_enabled',
-      width: 90,
-      render: (enabled: boolean) => (enabled ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>),
-    },
-    {
-      title: '更新时间',
-      dataIndex: 'updated_at',
-      key: 'updated_at',
-      width: 170,
-      render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm'),
-    },
-    {
-      title: '授权',
-      key: 'granted',
-      width: 90,
-      align: 'center',
-      render: (_: unknown, record: RoleGrantResource) => (
-        <Checkbox
-          checked={record.is_granted}
-          disabled={readonly || pendingIds.includes(record.resource_id)}
-          onChange={(event) => void handleToggle(record, event.target.checked)}
-        >
-          {record.is_granted ? '已授权' : '未授权'}
-        </Checkbox>
-      ),
-    },
-  ]
 
   return (
     <div className="page-card">
@@ -466,72 +336,10 @@ export default function RoleDetailPage() {
                       }
                     />
                   )}
-                  <Tabs
-                    size="small"
-                    activeKey={resourceType}
-                    items={RESOURCE_TABS.map((tab) => ({
-                      key: tab.key,
-                      label: (
-                        <span>
-                          {tab.label}
-                          <Tag bordered={false} style={{ marginLeft: 6 }}>
-                            {counts[tab.key] ?? 0}
-                          </Tag>
-                        </span>
-                      ),
-                    }))}
-                    onChange={(key) => {
-                      setResourceType(key as ResourceType)
-                      setPage(1)
-                      setKeyword('')
-                      setGrantedOnly(false)
-                    }}
-                  />
-
-                  <div className="page-toolbar">
-                    <Input.Search
-                      key={resourceType}
-                      allowClear
-                      placeholder="搜索名称或描述"
-                      style={{ width: 260 }}
-                      onSearch={(value) => {
-                        setKeyword(value.trim())
-                        setPage(1)
-                      }}
-                    />
-                    <Space size={8}>
-                      <Switch
-                        size="small"
-                        checked={grantedOnly}
-                        onChange={(checked) => {
-                          setGrantedOnly(checked)
-                          setPage(1)
-                        }}
-                      />
-                      <span>仅看已授权</span>
-                    </Space>
-                    <Tag color="blue" bordered={false}>
-                      共 {total} 个
-                    </Tag>
-                  </div>
-
-                  <Table<RoleGrantResource>
-                    rowKey="resource_id"
-                    columns={columns}
-                    dataSource={items}
-                    loading={loading}
-                    pagination={{
-                      current: page,
-                      pageSize,
-                      total,
-                      showSizeChanger: true,
-                      pageSizeOptions: ['10', '20', '50'],
-                      showTotal: (count) => `共 ${count} 条`,
-                      onChange: (nextPage, nextSize) => {
-                        setPage(nextSize !== pageSize ? 1 : nextPage)
-                        setPageSize(nextSize)
-                      },
-                    }}
+                  <RoleGrantMatrix
+                    roleId={roleId}
+                    canManage={!readonly}
+                    isPlatformRole={isPlatformRole}
                   />
                 </>
               ),

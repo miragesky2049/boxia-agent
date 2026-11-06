@@ -40,6 +40,8 @@ _SNAPSHOT_SQL = """
         (SELECT count(*) FROM message WHERE tenant_id = :tid) AS messages,
         (SELECT count(*) FROM run WHERE tenant_id = :tid) AS runs,
         (SELECT count(*) FROM application_apply WHERE tenant_id = :tid) AS application_apply,
+        (SELECT count(*) FROM app_visibility_scope WHERE tenant_id = :tid) AS visibility_scopes,
+        (SELECT count(*) FROM app_admin_scope WHERE tenant_id = :tid) AS admin_scopes,
         (SELECT count(*) FROM tenant_application_instance WHERE tenant_id = :tid) AS app_instances,
         (SELECT count(*) FROM tenant_resource_entitlement WHERE tenant_id = :tid) AS resource_entitlements,
         (SELECT count(*) FROM audit_logs WHERE tenant_id = :tid) AS audit_logs,
@@ -71,6 +73,10 @@ _PURGE_STEPS: tuple[tuple[str, str], ...] = (
     ("event_webhook", "DELETE FROM event_webhook WHERE tenant_id = :tid"),
     ("entitlement_request_log", "DELETE FROM entitlement_request_log WHERE tenant_id = :tid"),
     ("application_apply", "DELETE FROM application_apply WHERE tenant_id = :tid"),
+    # 0068：app_visibility_scope.tenant_id 对 tenants RESTRICT（白名单随其 CASCADE），须先于 tenants 删除
+    ("app_visibility_scope", "DELETE FROM app_visibility_scope WHERE tenant_id = :tid"),
+    # 0069：app_admin_scope.tenant_id 对 tenants RESTRICT（管理单元关联），须先于 tenants 删除
+    ("app_admin_scope", "DELETE FROM app_admin_scope WHERE tenant_id = :tid"),
     ("document_chunks", "DELETE FROM document_chunks WHERE tenant_id = :tid"),
     ("documents", "DELETE FROM documents WHERE tenant_id = :tid"),
     (

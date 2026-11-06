@@ -242,7 +242,7 @@ test.describe('权益流 E2E（§5.3）', () => {
     }
   })
 
-  test('场景3：租户角色授权页只含已开通资源，批量授权成功', async ({ page, request }) => {
+  test('场景3：租户角色详情数据授权只含已开通资源，批量授权成功', async ({ page, request }) => {
     const token = await adminToken(request)
     const tenantId = await ensureTenant(request, token)
     const suffix = Date.now()
@@ -256,9 +256,15 @@ test.describe('权益流 E2E（§5.3）', () => {
 
     try {
       await loginTenant(page, request, token)
-      await page.goto('/role-access')
+      // 0073：角色授权页并入角色详情，入口为角色列表「授权」→ 数据授权页签
+      await page.goto('/roles')
+      await page
+        .getByRole('row', { name: /\badmin\b/ })
+        .getByRole('button', { name: '授权' })
+        .click()
+      await page.getByRole('tab', { name: '数据授权' }).click()
       await page.getByRole('menuitem', { name: /^技能（/ }).click()
-      const search = page.getByPlaceholder('搜索名称')
+      const search = page.getByPlaceholder('搜索名称或描述')
       await search.fill('E2E')
       await search.press('Enter')
 
@@ -359,7 +365,7 @@ test.describe('权益流 E2E（§5.3）', () => {
     }
   })
 
-  test('场景5：跨作用域互斥，租户访问开通页与平台访问角色授权页均 404', async ({
+  test('场景5：跨作用域互斥，租户访问开通页 404，旧角色授权路由下线后各作用域均 404', async ({
     page,
     request,
   }) => {
@@ -375,6 +381,10 @@ test.describe('权益流 E2E（§5.3）', () => {
 
     await loginTenant(page, request, token)
     await page.goto('/entitlements')
+    await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
+
+    // 0073：旧角色授权路由已从任何作用域下线
+    await page.goto('/role-access')
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
 
     // 404 页不套后台布局（无用户菜单），先回 /apps 再退出；

@@ -8,10 +8,10 @@ from pydantic import BaseModel, Field
 
 from internal.application.apps.tenant_settings_service import TenantSettingsService
 from web.admin.schemas.auth import (
-    AdminUserCreateRequest,
     AdminUserOut,
     AdminUserResetPasswordRequest,
     AdminUserUpdateRequest,
+    TenantAdminCreateRequest,
 )
 from web.admin.schemas.common import PageOut
 from web.admin.schemas.tenant import (
@@ -247,19 +247,18 @@ def list_tenant_admins(
 )
 def create_tenant_admin(
     tenant_id: UUID,
-    payload: AdminUserCreateRequest,
+    payload: TenantAdminCreateRequest,
     request: Request,
     service: AdminUserServiceDep,
     principal: AdminAuthDep,
 ) -> AdminUserOut:
-    """平台管理员为指定租户新建管理员账号。"""
+    """平台管理员为指定租户新建管理员账号；服务端固定绑定该租户超级管理员角色。"""
     ip, user_agent = _client_meta(request)
     user = service.create_for_tenant(
         tenant_id,
         username=payload.username,
         password=payload.password,
         display_name=payload.display_name,
-        role_id=payload.role_id,
         actor_id=principal.user_id,
         actor_username=principal.username,
         ip=ip,

@@ -37,7 +37,6 @@ from web.admin.schemas.apps import (
     UserVariablesPayload,
     ValidateGraphPayload,
     VariablesPayload,
-    VisibilityPayload,
 )
 from web.deps.apps_services import make_application_service, make_conversation_admin_service
 from web.deps.auth import AdminAuthDep, PlatformAdminDep, require_permission, require_platform_admin
@@ -100,6 +99,8 @@ def create_app(
         name=payload.name,
         description=payload.description,
         flow_type=payload.flow_type,
+        visibility_template=payload.visibility_template,
+        visibility_lock=payload.visibility_lock,
     )
     return {"application_id": app_id}
 
@@ -169,6 +170,9 @@ def update_app(
         description=payload.description,
         avatar_url=payload.avatar_url,
         flow_type=payload.flow_type,
+        visibility_template=payload.visibility_template,
+        visibility_lock=payload.visibility_lock,
+        admin_scope_mode=payload.admin_scope_mode,
     )
     return {"ok": True}
 
@@ -429,28 +433,8 @@ def set_enabled(
     return {"ok": True}
 
 
-@router.get("/{application_id}/visibility")
-def get_app_visibility(
-    application_id: UUID,
-    service: ApplicationService = AppServiceDep,
-) -> dict:
-    """读取应用可见范围设置。"""
-    return service.get_visibility(application_id)
-
-
-@router.put("/{application_id}/visibility")
-def replace_app_visibility(
-    application_id: UUID,
-    payload: VisibilityPayload,
-    service: ApplicationService = AppServiceDep,
-) -> dict:
-    """整体覆盖应用可见范围：mode=all 全员可见；mode=custom 按部门/用户白名单收敛。"""
-    return service.replace_visibility(
-        application_id,
-        mode=payload.mode,
-        departments=[d.model_dump() for d in payload.departments],
-        users=list(payload.users),
-    )
+# 0068：老 GET/PUT /{application_id}/visibility 已下线（全局 visibility_mode 模型推翻），
+# 租户侧可见范围接口见 web/admin/routers/tenant_apps.py（/admin/tenant/apps/{id}/visibility）
 
 
 async def _sse_frames(

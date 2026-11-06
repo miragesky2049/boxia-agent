@@ -68,6 +68,16 @@ class AdminUserCreateRequest(BaseModel):
     role_id: UUID = Field()
 
 
+class TenantAdminCreateRequest(BaseModel):
+    """产品级为指定租户创建管理员请求；不传角色，服务端固定绑定该租户超级管理员。"""
+
+    model_config = ConfigDict(extra="forbid")
+
+    username: str = Field(min_length=3, max_length=64)
+    password: str = Field(min_length=1, max_length=128)
+    display_name: str = Field(min_length=1, max_length=64)
+
+
 class AdminUserUpdateRequest(BaseModel):
     """调整管理员请求。"""
 

@@ -48,13 +48,18 @@ class ApplicationRepository:
         description: str = "",
         created_by: UUID | None = None,
         flow_type: str = "workflow",
+        visibility_template: str = "all",
+        visibility_lock: bool = False,
+        admin_scope_mode: str = "creator_only",
     ) -> UUID:
         app_id = new_uuid()
         self._session.execute(
             text(
                 "INSERT INTO application "
-                "(id, owner_type, owner_id, name, description, created_by, flow_type) "
-                "VALUES (:id, :owner_type, :owner_id, :name, :description, :created_by, :flow_type)"
+                "(id, owner_type, owner_id, name, description, created_by, flow_type, "
+                "visibility_template, visibility_lock, admin_scope_mode) "
+                "VALUES (:id, :owner_type, :owner_id, :name, :description, :created_by, :flow_type, "
+                ":visibility_template, :visibility_lock, :admin_scope_mode)"
             ),
             {
                 "id": app_id,
@@ -64,6 +69,9 @@ class ApplicationRepository:
                 "description": description,
                 "created_by": created_by,
                 "flow_type": flow_type,
+                "visibility_template": visibility_template,
+                "visibility_lock": visibility_lock,
+                "admin_scope_mode": admin_scope_mode,
             },
         )
         return app_id
@@ -76,6 +84,9 @@ class ApplicationRepository:
         description: str | None = None,
         avatar_url: str | None = None,
         flow_type: str | None = None,
+        visibility_template: str | None = None,
+        visibility_lock: bool | None = None,
+        admin_scope_mode: str | None = None,
     ) -> None:
         sets: list[str] = ["updated_at = NOW()"]
         params: dict[str, Any] = {"id": application_id}
@@ -91,6 +102,15 @@ class ApplicationRepository:
         if flow_type is not None:
             sets.append("flow_type = :flow_type")
             params["flow_type"] = flow_type
+        if visibility_template is not None:
+            sets.append("visibility_template = :visibility_template")
+            params["visibility_template"] = visibility_template
+        if visibility_lock is not None:
+            sets.append("visibility_lock = :visibility_lock")
+            params["visibility_lock"] = visibility_lock
+        if admin_scope_mode is not None:
+            sets.append("admin_scope_mode = :admin_scope_mode")
+            params["admin_scope_mode"] = admin_scope_mode
         self._session.execute(
             text(f"UPDATE application SET {', '.join(sets)} WHERE id = :id"),
             params,
@@ -114,94 +134,207 @@ class ApplicationRepository:
             {"enabled": enabled, "id": application_id},
         )
 
-    # ========== visibility（数据可见范围） ==========
-    def get_application_visibility(self, application_id: UUID) -> dict:
-        """读取应用可见范围：mode + 部门白名单（含子树开关）+ 用户白名单。"""
-        mode_row = self._session.execute(
-            text("SELECT visibility_mode FROM application WHERE id = :aid"),
-            {"aid": application_id},
-        ).first()
-        mode = mode_row._mapping["visibility_mode"] if mode_row else "all"
-
-        dept_rows = self._session.execute(
-            text(
-                "SELECT department_id, include_subtree FROM application_visibility_departments "
-                "WHERE application_id = :aid ORDER BY created_at"
-            ),
-            {"aid": application_id},
-        ).all()
-        user_rows = self._session.execute(
-            text(
-                "SELECT user_id FROM application_visibility_users "
-                "WHERE application_id = :aid ORDER BY created_at"
-            ),
-            {"aid": application_id},
-        ).all()
-        return {
-            "mode": mode,
-            "departments": [
-                {"department_id": str(r._mapping["department_id"]), "include_subtree": r._mapping["include_subtree"]}
-                for r in dept_rows
-            ],
-            "users": [str(r._mapping["user_id"]) for r in user_rows],
-        }
-
-    def replace_application_visibility(
-        self,
-        application_id: UUID,
-        mode: str,
-        departments: list[dict],
-        users: list[UUID],
-    ) -> None:
-        """整体覆盖可见范围：先清空两张关联表，再按入参写入；同时更新 visibility_mode。"""
-        self._session.execute(
-            text(
-                "UPDATE application SET visibility_mode = :mode, updated_at = NOW() WHERE id = :aid"
-            ),
-            {"mode": mode, "aid": application_id},
-        )
-        self._session.execute(
-            text("DELETE FROM application_visibility_departments WHERE application_id = :aid"),
-            {"aid": application_id},
-        )
-        self._session.execute(
-            text("DELETE FROM application_visibility_users WHERE application_id = :aid"),
-            {"aid": application_id},
-        )
-        if mode == "custom":
-            for dept in departments:
-                self._session.execute(
-                    text(
-                        "INSERT INTO application_visibility_departments "
-                        "(application_id, department_id, include_subtree) "
-                        "VALUES (:aid, :did, :sub)"
-                    ),
-                    {
-                        "aid": application_id,
-                        "did": dept["department_id"],
-                        "sub": dept.get("include_subtree", True),
-                    },
-                )
-            for uid in users:
-                self._session.execute(
-                    text(
-                        "INSERT INTO application_visibility_users (application_id, user_id) "
-                        "VALUES (:aid, :uid)"
-                    ),
-                    {"aid": application_id, "uid": uid},
-                )
-
     def get_application(self, application_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
                 "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-                "is_listed_in_market, sale_mode, visibility_mode, published_graph_version, "
+                "is_listed_in_market, sale_mode, visibility_lock, visibility_template, "
+                "admin_scope_mode, published_graph_version, "
                 "flow_type, created_by, created_at, updated_at "
                 "FROM application WHERE id = :aid"
             ),
             {"aid": application_id},
         ).first()
         return dict(row._mapping) if row else None
+
+    # ========== v2 可见范围：app_visibility_scope + app_visibility_whitelist ==========
+    def get_tenant_scope(self, application_id: UUID, tenant_id: UUID) -> dict | None:
+        """读取某应用在某租户的可见范围配置（含白名单明细）。无记录返回 None。"""
+        row = self._session.execute(
+            text(
+                """
+                SELECT id, visibility, created_at, updated_at
+                FROM app_visibility_scope
+                WHERE application_id = :aid AND tenant_id = :tid
+                """
+            ),
+            {"aid": str(application_id), "tid": str(tenant_id)},
+        ).first()
+        if row is None:
+            return None
+        scope_id = row._mapping["id"]
+        wl_rows = self._session.execute(
+            text(
+                """
+                SELECT subject_type, subject_id, include_subtree
+                FROM app_visibility_whitelist
+                WHERE scope_id = :sid
+                ORDER BY created_at
+                """
+            ),
+            {"sid": str(scope_id)},
+        ).all()
+        return {
+            "id": str(scope_id),
+            "visibility": row._mapping["visibility"],
+            "whitelist": [
+                {
+                    "subject_type": r._mapping["subject_type"],
+                    "subject_id": str(r._mapping["subject_id"]),
+                    "include_subtree": r._mapping["include_subtree"],
+                }
+                for r in wl_rows
+            ],
+        }
+
+    def upsert_tenant_scope(
+        self,
+        application_id: UUID,
+        tenant_id: UUID,
+        visibility: str,
+        whitelist: list[dict],
+    ) -> dict:
+        """整体覆盖写入可见范围：upsert scope 行 + 清空并重写 whitelist。
+
+        使用 ON CONFLICT 兜底并发：两个请求同时首次写入时，唯一约束
+        (application_id, tenant_id) 让后到的请求走 DO UPDATE 分支，不会报 23505。
+        """
+        scope_pk = self._session.execute(
+            text(
+                """
+                INSERT INTO app_visibility_scope (id, application_id, tenant_id, visibility)
+                VALUES (:sid, :aid, :tid, :vis)
+                ON CONFLICT (application_id, tenant_id)
+                DO UPDATE SET visibility = EXCLUDED.visibility, updated_at = now()
+                RETURNING id
+                """
+            ),
+            {
+                "sid": str(new_uuid()),
+                "aid": str(application_id),
+                "tid": str(tenant_id),
+                "vis": visibility,
+            },
+        ).scalar_one()
+        scope_id = str(scope_pk)
+
+        self._session.execute(
+            text("DELETE FROM app_visibility_whitelist WHERE scope_id = :sid"),
+            {"sid": scope_id},
+        )
+
+        if visibility == "whitelist":
+            for item in whitelist:
+                self._session.execute(
+                    text(
+                        """
+                        INSERT INTO app_visibility_whitelist
+                            (id, scope_id, subject_type, subject_id, include_subtree)
+                        VALUES
+                            (:id, :sid, :stype, :sub_id, :sub)
+                        """
+                    ),
+                    {
+                        "id": str(new_uuid()),
+                        "sid": scope_id,
+                        "stype": item["subject_type"],
+                        "sub_id": str(item["subject_id"]),
+                        "sub": item.get("include_subtree", False),
+                    },
+                )
+
+        # 回读走 get_tenant_scope，保证与 GET 接口返回结构一致（id/visibility/whitelist）
+        return {
+            "id": scope_id,
+            "visibility": visibility,
+            "whitelist": [
+                {
+                    "subject_type": item["subject_type"],
+                    "subject_id": str(item["subject_id"]),
+                    "include_subtree": bool(item.get("include_subtree", False)),
+                }
+                for item in (whitelist if visibility == "whitelist" else [])
+            ],
+        }
+
+    def ensure_scope_on_subscribe(self, application_id: UUID, tenant_id: UUID) -> None:
+        """租户订阅产品级应用时调用：无 scope 则按平台 visibility_template 初始化。
+
+        一期策略：不依赖显式钩子，list_visible_for_user 对缺失 scope 已按模板惰性兜底；
+        本方法保留供未来显式 hook（3 处订阅创建点 / 租户级应用创建）使用。
+        """
+        row = self._session.execute(
+            text("SELECT visibility_template FROM application WHERE id = :aid"),
+            {"aid": str(application_id)},
+        ).first()
+        template = row._mapping["visibility_template"] if row else "all"
+        self._session.execute(
+            text(
+                """
+                INSERT INTO app_visibility_scope (id, application_id, tenant_id, visibility)
+                VALUES (:id, :aid, :tid, :vis)
+                ON CONFLICT (application_id, tenant_id) DO NOTHING
+                """
+            ),
+            {
+                "id": str(new_uuid()),
+                "aid": str(application_id),
+                "tid": str(tenant_id),
+                "vis": template,
+            },
+        )
+
+    def list_subscribed_apps_for_admin(self, tenant_id: UUID) -> list[dict]:
+        """列出当前租户已订阅（生效中）的产品级应用，供租户管理端配置可见范围。
+
+        LEFT JOIN 本租户 scope：未配置时 configured=false，
+        visibility 回退平台模板值，便于列表直接渲染当前生效范围标签。
+        """
+        rows = self._session.execute(
+            text(
+                """
+                SELECT a.id, a.name, a.avatar_url, a.description,
+                       a.visibility_lock, a.visibility_template,
+                       a.admin_scope_mode, a.created_by,
+                       s.id IS NOT NULL AS configured,
+                       COALESCE(s.visibility, a.visibility_template) AS visibility,
+                       COALESCE((
+                           SELECT count(*) FROM app_visibility_whitelist w
+                           WHERE w.scope_id = s.id
+                       ), 0) AS whitelist_count
+                FROM application a
+                JOIN tenant_application_instance t ON t.application_id = a.id
+                LEFT JOIN app_visibility_scope s
+                    ON s.application_id = a.id AND s.tenant_id = :tid
+                WHERE t.tenant_id = :tid
+                  AND t.status = 'active'
+                  AND (t.start_time IS NULL OR t.start_time <= now())
+                  AND (t.expire_time IS NULL OR t.expire_time > now())
+                  AND a.owner_type = 'platform'
+                  AND a.is_enabled = true
+                ORDER BY a.updated_at DESC
+                """
+            ),
+            {"tid": str(tenant_id)},
+        ).all()
+        return [
+            {
+                "id": str(r._mapping["id"]),
+                "name": r._mapping["name"],
+                "avatar_url": r._mapping["avatar_url"] or "",
+                "description": r._mapping["description"] or "",
+                "visibility_lock": r._mapping["visibility_lock"],
+                "visibility_template": r._mapping["visibility_template"],
+                "admin_scope_mode": r._mapping["admin_scope_mode"],
+                "created_by": (
+                    str(r._mapping["created_by"]) if r._mapping["created_by"] else None
+                ),
+                "configured": r._mapping["configured"],
+                "visibility": r._mapping["visibility"],
+                "whitelist_count": int(r._mapping["whitelist_count"]),
+            }
+            for r in rows
+        ]
 
     # ========== 变量体系 ==========
     def get_application_variables(self, application_id: UUID) -> list[dict[str, Any]]:
@@ -295,7 +428,8 @@ class ApplicationRepository:
     ) -> list[dict]:
         sql = (
             "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
-            "is_listed_in_market, flow_type, created_at, updated_at FROM application"
+            "is_listed_in_market, flow_type, visibility_lock, visibility_template, "
+            "admin_scope_mode, created_at, updated_at FROM application"
         )
         conditions: list[str] = []
         params: dict[str, Any] = {}
@@ -573,14 +707,22 @@ class ApplicationRepository:
         rows = self._session.execute(text(sql), params).all()
         return [dict(r._mapping) for r in rows]
 
-    # ========== user 端可见应用（DDD 四期从 ApplicationService 下沉） ==========
+    # ========== user 端可见应用（v2：按 (应用, 租户) 隔离的可见范围） ==========
     def list_visible_for_user(
         self,
         tenant_id: UUID,
         user_id: UUID,
         keyword: str | None = None,
     ) -> list[dict[str, Any]]:
-        """当前用户可见应用 = 本租户自建 + 已开通的产品级实例，叠加 visibility 白名单/部门过滤。"""
+        """当前用户可见应用 = 本租户自建 + 已开通的产品级实例，叠加 v2 可见范围过滤。
+
+        可见范围解析（0068）：
+        - scope 有记录：visibility='all' 全员可见；'whitelist' 需命中部门/角色/用户白名单。
+        - scope 无记录（订阅后未配置）：产品级应用按平台模板 visibility_template 兜底；
+          租户级应用一期不做创建、兜底为不可见（未来创建时会显式写 scope）。
+        孤儿数据兜底：subject_id 无外键，三条 JOIN 链路（departments /
+        user_employments+users / user_roles）在主体被删后自然过滤，无需级联清理。
+        """
         params: dict[str, Any] = {"tid": str(tenant_id), "uid": str(user_id)}
         kw_clause = ""
         if keyword:
@@ -594,40 +736,81 @@ class ApplicationRepository:
                 FROM application a
                 WHERE a.is_enabled = true
                   AND (
-                    a.owner_type = 'tenant' AND a.owner_id = :tid
-                    OR a.id IN (
-                        SELECT application_id FROM tenant_application_instance
-                        WHERE tenant_id = :tid AND status = 'active'
+                    (a.owner_type = 'tenant' AND a.owner_id = :tid)
+                    OR (
+                      a.owner_type = 'platform'
+                      AND EXISTS (
+                        SELECT 1 FROM tenant_application_instance t
+                        WHERE t.application_id = a.id
+                          AND t.tenant_id = :tid
+                          AND t.status = 'active'
+                          AND (t.start_time IS NULL OR t.start_time <= now())
+                          AND (t.expire_time IS NULL OR t.expire_time > now())
+                      )
                     )
                   )
                   AND (
-                    a.visibility_mode = 'all'
-                    OR a.id IN (
-                        SELECT application_id FROM application_visibility_users
-                        WHERE user_id = :uid
+                    -- 分支 1：scope 已配置为 all
+                    EXISTS (
+                      SELECT 1 FROM app_visibility_scope s
+                      WHERE s.application_id = a.id
+                        AND s.tenant_id = :tid
+                        AND s.visibility = 'all'
                     )
-                    OR a.id IN (
-                        SELECT avd.application_id
-                        FROM application_visibility_departments avd
-                        JOIN user_employments ue ON ue.tenant_id = :tid
-                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                        WHERE ue.user_id = :uid
-                          AND ue.is_current = true
-                          AND avd.department_id = ue.department_id
-                        UNION
-                        SELECT avd.application_id
-                        FROM application_visibility_departments avd
-                        JOIN departments target_d ON target_d.id = avd.department_id
-                        JOIN user_employments ue ON ue.tenant_id = :tid
-                        JOIN departments d ON d.id = ue.department_id AND d.tenant_id = :tid
-                        WHERE ue.user_id = :uid
-                          AND ue.is_current = true
-                          AND avd.include_subtree = true
-                          AND d.path LIKE '/' || target_d.id::text || '/%'
+                    -- 分支 2：scope 已配置为 whitelist，命中部门/角色/用户白名单
+                    OR EXISTS (
+                      SELECT 1 FROM app_visibility_scope s
+                      JOIN app_visibility_whitelist w ON w.scope_id = s.id
+                      WHERE s.application_id = a.id
+                        AND s.tenant_id = :tid
+                        AND s.visibility = 'whitelist'
+                        AND (
+                          (w.subject_type = 'USER'
+                            AND w.subject_id = :uid
+                            AND EXISTS (
+                              SELECT 1 FROM users us
+                              WHERE us.id = :uid AND us.tenant_id = :tid AND us.is_active = true
+                            ))
+                          OR (
+                            w.subject_type = 'ROLE'
+                            AND w.subject_id IN (
+                              SELECT role_id FROM user_roles
+                              WHERE user_id = :uid AND tenant_id = :tid
+                            )
+                          )
+                          OR (
+                            w.subject_type = 'DEPARTMENT'
+                            AND EXISTS (
+                              SELECT 1
+                              FROM user_employments ue
+                              JOIN departments ud ON ud.id = ue.department_id AND ud.tenant_id = :tid
+                              JOIN departments wd ON wd.id = w.subject_id
+                              WHERE ue.user_id = :uid
+                                AND ue.tenant_id = :tid
+                                AND ue.is_current = true
+                                AND (
+                                  wd.id = ud.id
+                                  OR (w.include_subtree = true AND ud.path LIKE wd.path || '%')
+                                )
+                            )
+                          )
+                        )
+                    )
+                    -- 分支 3：scope 不存在，按 owner_type 兜底
+                    OR (
+                      NOT EXISTS (
+                        SELECT 1 FROM app_visibility_scope s
+                        WHERE s.application_id = a.id AND s.tenant_id = :tid
+                      )
+                      AND (
+                        -- 产品级应用：按平台模板兜底（模板为 whitelist 时等待租户配置，暂不可见）
+                        (a.owner_type = 'platform' AND a.visibility_template = 'all')
+                        -- 租户级应用：一期不做创建，兜底不可见；未来创建时显式写 scope
+                        OR (a.owner_type = 'tenant' AND false)
+                      )
                     )
                   )
                   {kw_clause}
-                GROUP BY a.id, a.name, a.avatar_url, a.description, a.is_enabled, a.flow_type, a.updated_at
                 ORDER BY a.updated_at DESC
                 """
             ),
@@ -668,7 +851,8 @@ class ApplicationRepository:
             text(
                 "SELECT id, owner_type, owner_id, name, avatar_url, description, "
                 "is_enabled, is_listed_in_market, sale_mode, support_trial, doc_url, "
-                "ext_json, visibility_mode, published_graph_version, flow_type, "
+                "ext_json, visibility_lock, visibility_template, admin_scope_mode, "
+                "published_graph_version, flow_type, "
                 "variables, created_by, created_at, updated_at "
                 "FROM application WHERE id = :aid"
             ),
@@ -701,12 +885,14 @@ class ApplicationRepository:
                 "INSERT INTO application ("
                 "id, owner_type, owner_id, name, avatar_url, description, "
                 "is_enabled, is_listed_in_market, sale_mode, support_trial, doc_url, "
-                "ext_json, visibility_mode, published_graph_version, flow_type, "
+                "ext_json, visibility_lock, visibility_template, admin_scope_mode, "
+                "published_graph_version, flow_type, "
                 "variables, created_by"
                 ") VALUES ("
                 ":id, :owner_type, :owner_id, :name, :avatar_url, :description, "
                 ":is_enabled, :is_listed_in_market, :sale_mode, :support_trial, :doc_url, "
-                "CAST(:ext_json AS JSONB), :visibility_mode, :published_graph_version, :flow_type, "
+                "CAST(:ext_json AS JSONB), :visibility_lock, :visibility_template, :admin_scope_mode, "
+                ":published_graph_version, :flow_type, "
                 "CAST(:variables AS JSONB), :created_by"
                 ")"
             ),
@@ -723,7 +909,9 @@ class ApplicationRepository:
                 "support_trial": bool(data.get("support_trial", False)),
                 "doc_url": data.get("doc_url", ""),
                 "ext_json": ext_json_str,
-                "visibility_mode": data.get("visibility_mode", "all"),
+                "visibility_lock": bool(data.get("visibility_lock", False)),
+                "visibility_template": data.get("visibility_template", "all"),
+                "admin_scope_mode": data.get("admin_scope_mode", "all_admin"),
                 "published_graph_version": data.get("published_graph_version"),
                 "flow_type": data.get("flow_type", "workflow"),
                 "variables": variables_str,
@@ -799,66 +987,3 @@ class ApplicationRepository:
         )
         return vid
 
-    def get_visibility_detail(self, application_id: UUID) -> dict:
-        """读取可见范围完整行集（复制用）。"""
-        mode_row = self._session.execute(
-            text("SELECT visibility_mode FROM application WHERE id = :aid"),
-            {"aid": application_id},
-        ).first()
-        mode = mode_row._mapping["visibility_mode"] if mode_row else "all"
-        dept_rows = self._session.execute(
-            text(
-                "SELECT department_id, include_subtree FROM application_visibility_departments "
-                "WHERE application_id = :aid ORDER BY created_at"
-            ),
-            {"aid": application_id},
-        ).all()
-        user_rows = self._session.execute(
-            text(
-                "SELECT user_id FROM application_visibility_users "
-                "WHERE application_id = :aid ORDER BY created_at"
-            ),
-            {"aid": application_id},
-        ).all()
-        return {
-            "mode": mode,
-            "departments": [
-                {
-                    "department_id": r._mapping["department_id"],
-                    "include_subtree": r._mapping["include_subtree"],
-                }
-                for r in dept_rows
-            ],
-            "users": [r._mapping["user_id"] for r in user_rows],
-        }
-
-    def insert_visibility_rows(
-        self,
-        application_id: UUID,
-        mode: str,
-        departments: list[dict],
-        users: list[UUID],
-    ) -> None:
-        """整体写入可见范围行（复制路径专用，目标应用为新建、无残留行）。"""
-        if mode == "custom":
-            for dept in departments:
-                self._session.execute(
-                    text(
-                        "INSERT INTO application_visibility_departments "
-                        "(application_id, department_id, include_subtree) "
-                        "VALUES (:aid, :did, :sub)"
-                    ),
-                    {
-                        "aid": application_id,
-                        "did": dept["department_id"],
-                        "sub": dept.get("include_subtree", True),
-                    },
-                )
-            for uid in users:
-                self._session.execute(
-                    text(
-                        "INSERT INTO application_visibility_users (application_id, user_id) "
-                        "VALUES (:aid, :uid)"
-                    ),
-                    {"aid": application_id, "uid": uid},
-                )

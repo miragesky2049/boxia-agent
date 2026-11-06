@@ -71,8 +71,8 @@ def _application(uow) -> object:
     uow.session.execute(
         text(
             "INSERT INTO application (id, owner_type, name, description, is_enabled, "
-            "is_listed_in_market, visibility_mode, sale_mode, support_trial, doc_url, ext_json) "
-            "VALUES (:id, 'platform', '配额应用', '', TRUE, FALSE, 'all', 1, FALSE, '', '{}'::jsonb)"
+            "is_listed_in_market, sale_mode, support_trial, doc_url, ext_json) "
+            "VALUES (:id, 'platform', '配额应用', '', TRUE, FALSE, 1, FALSE, '', '{}'::jsonb)"
         ),
         {"id": aid},
     )

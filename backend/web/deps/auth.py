@@ -113,12 +113,40 @@ def require_permission(code: str) -> Callable[..., AdminPrincipal]:
     return dependency
 
 
+def require_permission_any(*codes: str) -> Callable[..., AdminPrincipal]:
+    """生成"任一命中即可"的功能权限校验依赖：所列编码全部缺失时返回 403。
+
+    用于应用可见范围白名单编辑器等场景：角色/用户列表读取接口既要服务各自的
+    管理页面，也要服务只持有 app:visibility:write 的租户应用管理员。
+    """
+
+    def dependency(
+        principal: Annotated[AdminPrincipal, Depends(require_admin)],
+    ) -> AdminPrincipal:
+        if not any(code in principal.permissions for code in codes):
+            raise ForbiddenError("当前角色无权执行该操作")
+        return principal
+
+    return dependency
+
+
 def require_platform_admin(
     principal: Annotated[AdminPrincipal, Depends(require_admin)],
 ) -> AdminPrincipal:
     """产品级平台作用域校验：仅 platform 子域名可用。"""
     if not principal.is_platform:
         raise ForbiddenError("该操作仅产品级运营管理平台可用")
+    return principal
+
+
+def require_tenant_admin(
+    principal: Annotated[AdminPrincipal, Depends(require_admin)],
+) -> AdminPrincipal:
+    """租户作用域校验：仅租户子域名可用，且拥有 app:admin 权限（0068 预置码）。"""
+    if principal.is_platform:
+        raise ForbiddenError("该操作仅租户管理端可用")
+    if not principal.can("app:admin"):
+        raise ForbiddenError("缺少应用管理权限")
     return principal
 
 
@@ -159,4 +187,5 @@ def require_user(
 
 AdminAuthDep = Annotated[AdminPrincipal, Depends(require_admin)]
 PlatformAdminDep = Annotated[AdminPrincipal, Depends(require_platform_admin)]
+TenantAdminDep = Annotated[AdminPrincipal, Depends(require_tenant_admin)]
 UserAuthDep = Annotated[UserPrincipal, Depends(require_user)]

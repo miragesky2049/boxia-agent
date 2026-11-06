@@ -33,7 +33,10 @@ export interface Application {
   description: string
   is_enabled: boolean
   is_listed_in_market: boolean
-  visibility_mode: 'all' | 'custom'
+  // 可见范围 v2（0068）：平台侧默认模板与锁定标记；列表/详情均返回
+  visibility_lock?: boolean
+  visibility_template?: 'all' | 'whitelist'
+  admin_scope_mode?: 'creator_only' | 'mgmt_unit' | 'all_admin'
   flow_type: FlowType
   created_by: string | null
   created_at: string
@@ -448,6 +451,8 @@ export async function createApp(payload: {
   name: string
   description?: string
   flow_type?: FlowType
+  visibility_template?: 'all' | 'whitelist'
+  visibility_lock?: boolean
 }): Promise<{ application_id: string }> {
   return request<{ application_id: string }>('/admin/apps', {
     method: 'POST',
@@ -466,6 +471,9 @@ export async function updateApp(
     description?: string
     avatar_url?: string | null
     flow_type?: FlowType
+    visibility_template?: 'all' | 'whitelist'
+    visibility_lock?: boolean
+    admin_scope_mode?: 'creator_only' | 'mgmt_unit' | 'all_admin'
   },
 ): Promise<void> {
   await request<void>(`/admin/apps/${applicationId}`, {
@@ -669,32 +677,6 @@ export async function setAppEnabled(applicationId: string, enabled: boolean): Pr
   await request<void>(`/admin/apps/${applicationId}/enabled`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
-  })
-}
-
-// ========== 数据可见范围 ==========
-export interface AppVisibilityDepartment {
-  department_id: string
-  include_subtree: boolean
-}
-
-export interface AppVisibility {
-  mode: 'all' | 'custom'
-  departments: AppVisibilityDepartment[]
-  users: string[]
-}
-
-export async function getAppVisibility(applicationId: string): Promise<AppVisibility> {
-  return request<AppVisibility>(`/admin/apps/${applicationId}/visibility`)
-}
-
-export async function replaceAppVisibility(
-  applicationId: string,
-  payload: AppVisibility,
-): Promise<AppVisibility> {
-  return request<AppVisibility>(`/admin/apps/${applicationId}/visibility`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
   })
 }
 

@@ -14,7 +14,7 @@ from internal.application.errors import (
     ValidationError,
 )
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.entity.access import Role, User
+from internal.domain.entity.access import SUPERADMIN_ROLE_CODE, Role, User
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.common import MAX_PAGE_SIZE, Page
@@ -130,24 +130,26 @@ class AdminUserService:
         username: str,
         password: str,
         display_name: str,
-        role_id: UUID,
         actor_id: UUID,
         actor_username: str,
         ip: str | None = None,
         user_agent: str | None = None,
     ) -> AdminUser:
-        """产品级管理员为指定租户创建管理员账号。"""
+        """产品级管理员为指定租户创建管理员账号，固定绑定该租户超级管理员角色。"""
         self._require_platform()
         self._get_tenant_or_404(tenant_id)
         normalized = username.strip()
         if not _USERNAME_PATTERN.match(normalized):
             raise ValidationError("用户名需为 3-64 位字母、数字、下划线、点或短横线")
+        superadmin_role = self._uow.roles.get_by_code(tenant_id, SUPERADMIN_ROLE_CODE)
+        if superadmin_role is None or not superadmin_role.is_active:
+            raise ValidationError("该租户的超级管理员角色不存在或已停用，无法新建管理员")
         return self._create_tenant_admin(
             tenant_id,
             normalized,
             password,
             display_name,
-            role_id,
+            superadmin_role.id,
             actor_id,
             actor_username,
             ip,

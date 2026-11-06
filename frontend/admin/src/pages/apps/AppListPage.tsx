@@ -5,14 +5,17 @@ import {
   Card,
   Col,
   Descriptions,
+  Divider,
   Drawer,
   Empty,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Radio,
   Row,
   Segmented,
+  Select,
   Space,
   Spin,
   Switch,
@@ -90,8 +93,15 @@ export default function AppListPage() {
   const [newDesc, setNewDesc] = useState('')
   const [newFlowType, setNewFlowType] = useState<FlowType>('workflow')
 
-  // 编辑应用基本信息（名称/描述）
-  const [editForm] = Form.useForm<{ name: string; description: string }>()
+  // 编辑应用基本信息（名称/描述）与平台侧可见范围默认值（0068 v2）
+  const [editForm] =
+    Form.useForm<{
+      name: string
+      description: string
+      visibility_template: 'all' | 'whitelist'
+      visibility_lock: boolean
+      admin_scope_mode: 'creator_only' | 'mgmt_unit' | 'all_admin'
+    }>()
   const [editTarget, setEditTarget] = useState<Application | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [copyingId, setCopyingId] = useState<string | null>(null)
@@ -191,7 +201,13 @@ export default function AppListPage() {
     setEditTarget(record)
     // Modal 还未打开时 Form 未挂载，用 requestAnimationFrame 等渲染后再 setFieldsValue
     requestAnimationFrame(() => {
-      editForm.setFieldsValue({ name: record.name, description: record.description ?? '' })
+      editForm.setFieldsValue({
+        name: record.name,
+        description: record.description ?? '',
+        visibility_template: record.visibility_template ?? 'all',
+        visibility_lock: record.visibility_lock ?? false,
+        admin_scope_mode: record.admin_scope_mode ?? 'all_admin',
+      })
     })
   }
 
@@ -203,6 +219,9 @@ export default function AppListPage() {
       await updateApp(editTarget.id, {
         name: values.name.trim(),
         description: values.description?.trim() ?? '',
+        visibility_template: values.visibility_template,
+        visibility_lock: values.visibility_lock,
+        admin_scope_mode: values.admin_scope_mode,
       })
       message.success('应用信息已更新')
       setEditTarget(null)
@@ -652,6 +671,42 @@ export default function AppListPage() {
               rows={3}
               maxLength={200}
               showCount
+            />
+          </Form.Item>
+          <Divider orientation="left" plain>
+            高级设置
+          </Divider>
+          <Form.Item
+            label="默认可见范围模板"
+            name="visibility_template"
+            tooltip="租户未配置可见范围时的兜底值：全员可见，或等待租户自行配置白名单"
+          >
+            <Radio.Group
+              options={[
+                { value: 'all', label: '全员可见' },
+                { value: 'whitelist', label: '等待租户配置' },
+              ]}
+            />
+          </Form.Item>
+          <Form.Item
+            label="锁定可见范围"
+            name="visibility_lock"
+            valuePropName="checked"
+            tooltip="锁定后租户管理端不可修改本租户的可见范围"
+          >
+            <Switch />
+          </Form.Item>
+          <Form.Item
+            label="管理范围模式"
+            name="admin_scope_mode"
+            tooltip="决定租户侧哪些管理员可配置该应用（二期按管理单元收敛）"
+          >
+            <Select
+              options={[
+                { value: 'creator_only', label: '仅创建者' },
+                { value: 'mgmt_unit', label: '按管理单元' },
+                { value: 'all_admin', label: '全部租户管理员' },
+              ]}
             />
           </Form.Item>
         </Form>

@@ -14,6 +14,48 @@ from tests.helpers import (
 _TOOL_CONFIG = {"url": "https://example.com/api", "method": "GET"}
 
 
+def _create_restricted_account(
+    client: TestClient,
+    admin_headers: dict[str, str],
+    username: str,
+    codes: list[str],
+) -> dict[str, str]:
+    """创建仅授予指定权限码的自定义角色管理员并登录。
+
+    0071 后 viewer 出厂无「管理端访问」，不能再绑定为管理员；
+    测试低权重主体时改用自定义角色（须含 system:console:access 才能登录）。
+    """
+    role = client.post(
+        "/api/v1/admin/roles",
+        json={"code": username, "name": f"受限-{username}"},
+        headers=admin_headers,
+    )
+    assert role.status_code == 201, role.text
+    granted = client.put(
+        f"/api/v1/admin/roles/{role.json()['id']}/permissions",
+        json={"codes": codes},
+        headers=admin_headers,
+    )
+    assert granted.status_code == 200, granted.text
+    created = client.post(
+        "/api/v1/admin/admin-users",
+        json={
+            "username": username,
+            "password": USER_PASSWORD,
+            "display_name": username,
+            "role_id": role.json()["id"],
+        },
+        headers=admin_headers,
+    )
+    assert created.status_code == 201, created.text
+    login = client.post(
+        "/api/v1/admin/auth/login",
+        json={"username": username, "password": USER_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    return {"Authorization": f"Bearer {login.json()['access_token']}"}
+
+
 def _create_platform_admin(
     client: TestClient, auth_headers: dict[str, str], username: str, role_code: str
 ) -> dict[str, str]:
@@ -105,7 +147,7 @@ def test_tenant_created_tool_pending_then_review_flow(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
     """租户自建默认 pending 且不可授权；approve 后放行；reject 后再次拦截。"""
-    tenant = create_tenant(client, auth_headers, code="rreview", name="审核公司")
+    create_tenant(client, auth_headers, code="rreview", name="审核公司")
     site, headers, _ = tenant_admin_client(tenant_client, "rreview")
     viewer_id = list_roles(site, headers)["viewer"]["id"]
 
@@ -164,51 +206,28 @@ def test_tenant_rejected_tool_resubmit_sets_pending(
 def test_resubmit_requires_create_permission(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
-    """租户 viewer 无 button:resource:create → 重新提交 403。"""
+    """租户受限角色（仅管理端访问）无 button:resource:create → 重新提交 403。"""
     create_tenant(client, auth_headers, code="rrespb", name="无权重提")
     site, headers, _ = tenant_admin_client(tenant_client, "rrespb")
     tool_id = _create_my_tool(site, headers, "权重提交拦截")
     _review(client, auth_headers, tool_id, "reject", "需整改")
 
-    viewer = _create_tenant_viewer(site, headers, "rrb-viewer")
+    operator = _create_restricted_account(
+        site, headers, "rrb-operator", ["system:console:access"]
+    )
     response = site.post(
-        f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=viewer
+        f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=operator
     )
     assert response.status_code == 403, response.text
 
 
-def _create_tenant_viewer(
-    site: TestClient, admin_headers: dict[str, str], username: str
-) -> dict[str, str]:
-    """在租户站点创建 viewer 管理员并登录，返回鉴权头（viewer 无 button:resource:create）。"""
-    roles = {
-        item["code"]: item
-        for item in site.get("/api/v1/admin/roles", headers=admin_headers).json()
-    }
-    created = site.post(
-        "/api/v1/admin/admin-users",
-        json={
-            "username": username,
-            "password": USER_PASSWORD,
-            "display_name": username,
-            "role_id": roles["viewer"]["id"],
-        },
-        headers=admin_headers,
-    )
-    assert created.status_code == 201, created.text
-    login = site.post(
-        "/api/v1/admin/auth/login",
-        json={"username": username, "password": USER_PASSWORD},
-    )
-    assert login.status_code == 200, login.text
-    return {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-
 def test_review_requires_permission(client: TestClient, auth_headers) -> None:
-    """平台 viewer 无 button:resource:review → 403。"""
-    viewer_headers = _create_platform_admin(client, auth_headers, "rr-viewer", "viewer")
+    """平台受限角色（仅管理端访问）无 button:resource:review → 403。"""
+    operator_headers = _create_restricted_account(
+        client, auth_headers, "rr-no-review", ["system:console:access"]
+    )
     tool_id = _create_platform_tool(client, auth_headers, "审核权限门槛")
-    response = _review(client, viewer_headers, tool_id, "approve")
+    response = _review(client, operator_headers, tool_id, "approve")
     assert response.status_code == 403, response.text
 
 
