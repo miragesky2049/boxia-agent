@@ -43,7 +43,6 @@ const MENU_META: Record<string, { icon: ReactNode; label: string }> = {
   tenants: { icon: <ApartmentOutlined />, label: '租户管理' },
   audit: { icon: <FileSearchOutlined />, label: '审计日志' },
   entitlements: { icon: <GiftOutlined />, label: '开通授权' },
-  'role-access': { icon: <KeyOutlined />, label: '角色授权' },
 }
 
 interface MenuGroup {

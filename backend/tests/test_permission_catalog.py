@@ -26,11 +26,13 @@ _PLATFORM_CODES = (
     "button:entitlement:manage",
     "button:resource:review",
 )
-_TENANT_CODES = (
+_TENANT_CODES = ("button:resource:create",)
+
+# 0073 下线：角色授权页并入角色详情，三码不再出现在目录与库内
+_RETIRED_ROLE_ACCESS_CODES = (
     "menu:role-access",
     "page:role-access",
     "button:role-access:manage",
-    "button:resource:create",
 )
 
 
@@ -52,10 +54,22 @@ def test_new_codes_in_catalog():
     assert set(_PLATFORM_CODES + _TENANT_CODES) <= set(PERMISSION_CODES)
 
 
+def test_retired_role_access_codes_removed():
+    """0073 下线三码：目录与内置角色集合均不再包含。"""
+    for code in _RETIRED_ROLE_ACCESS_CODES:
+        assert code not in PERMISSION_CODES
+        assert code not in TENANT_ADMIN_CODES
+        assert code not in TENANT_SUPERADMIN_CODES
+
+
 def test_migration_permissions_match_catalog():
-    """迁移 _PERMISSIONS 与 domain 目录逐字段一致，防止两侧漂移。"""
+    """迁移 _PERMISSIONS 与 domain 目录逐字段一致，防止两侧漂移。
+
+    0058 为已发布迁移不改写历史，其中 role-access 三码已被 0073 下线，比对时跳过。
+    """
     module = _load_migration_module()
-    rows = module._PERMISSIONS
+    retired = set(_RETIRED_ROLE_ACCESS_CODES)
+    rows = [row for row in module._PERMISSIONS if row[0] not in retired]
     assert {row[0] for row in rows} == set(_PLATFORM_CODES + _TENANT_CODES)
     for code, name, category, action, sort_order, _desc in rows:
         item = PERMISSION_BY_CODE[code]
@@ -95,7 +109,7 @@ def test_tenant_role_sets():
 
 
 def test_db_seeded_permissions_and_grants():
-    """conftest 重播后：8 码在目录表内，且平台 admin 角色持有 menu:entitlements。"""
+    """conftest 重播后：5 码在目录表内、下线三码不在，且平台 admin 角色持有 menu:entitlements。"""
     uow = SqlAlchemyUnitOfWork()
     try:
         session = uow.session
@@ -105,6 +119,21 @@ def test_db_seeded_permissions_and_grants():
                 {"code": code},
             ).first()
             assert row is not None, f"权限码未入库：{code}"
+        for code in _RETIRED_ROLE_ACCESS_CODES:
+            row = session.execute(
+                text("SELECT id FROM permission_resources WHERE code = :code"),
+                {"code": code},
+            ).first()
+            assert row is None, f"下线权限码仍在库内：{code}"
+            granted = session.execute(
+                text(
+                    "SELECT 1 FROM role_permissions rp "
+                    "JOIN permission_resources p ON p.id = rp.permission_id "
+                    "WHERE p.code = :code"
+                ),
+                {"code": code},
+            ).first()
+            assert granted is None, f"下线权限码仍被角色持有：{code}"
         granted = session.execute(
             text(
                 "SELECT 1 FROM role_permissions rp "

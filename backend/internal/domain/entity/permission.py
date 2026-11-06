@@ -117,9 +117,6 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("page:entitlements", "租户开通页面", "page", "view", 115),
     _perm("button:entitlement:manage", "租户开通-维护", "button", "manage", 405),
     _perm("button:resource:review", "资源-审核", "button", "manage", 406),
-    _perm("menu:role-access", "角色授权", "menu", "view", 21),
-    _perm("page:role-access", "角色授权页面", "page", "view", 121),
-    _perm("button:role-access:manage", "角色授权-维护", "button", "manage", 301),
     _perm("button:resource:create", "资源-新建", "button", "create", 302),
 )
 
@@ -143,7 +140,7 @@ PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
         "button:app:delete",
     }
 )
-# 平台作用域不展示租户用户、用户授权、组织架构与角色授权菜单：平台授权入口在资源/角色详情内
+# 平台作用域不展示租户用户、用户授权与组织架构菜单：平台授权入口在资源/角色详情内
 TENANT_ONLY_CODES: frozenset[str] = frozenset(
     {
         "menu:grants",
@@ -168,9 +165,6 @@ TENANT_ONLY_CODES: frozenset[str] = frozenset(
         "button:mgmt-unit:update",
         "button:mgmt-unit:delete",
         "button:mgmt-unit:grant",
-        "menu:role-access",
-        "page:role-access",
-        "button:role-access:manage",
         "button:resource:create",
     }
 )
@@ -224,12 +218,10 @@ _ENTITLEMENT_CODES = frozenset(
         "button:resource:review",
     }
 )
-# 租户内置角色新增：角色授权 + 资源新建（viewer 不授予）
-_TENANT_ACCESS_CODES = frozenset(
+# 租户内置角色新增：资源新建（viewer 不授予）；
+# 0073 起角色授权页并入角色详情，role-access 三码下线
+_TENANT_RESOURCE_CODES = frozenset(
     {
-        "menu:role-access",
-        "page:role-access",
-        "button:role-access:manage",
         "button:resource:create",
     }
 )
@@ -245,7 +237,7 @@ TENANT_ADMIN_CODES: frozenset[str] = (
     (PLATFORM_ADMIN_CODES & TENANT_SCOPED_CODES)
     | _ORG_READ_CODES
     | _ORG_WRITE_CODES
-    | _TENANT_ACCESS_CODES
+    | _TENANT_RESOURCE_CODES
 )
 TENANT_VIEWER_CODES: frozenset[str] = (
     PLATFORM_VIEWER_CODES & TENANT_SCOPED_CODES
