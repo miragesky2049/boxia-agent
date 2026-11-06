@@ -14,7 +14,7 @@ from web.admin.schemas.user import (
     UserResetPasswordRequest,
     UserUpdateRequest,
 )
-from web.deps.auth import AdminAuthDep, require_permission
+from web.deps.auth import AdminAuthDep, require_permission, require_permission_any
 from web.deps.http import client_meta
 from web.deps.services import UserAdminServiceDep
 
@@ -40,7 +40,8 @@ def list_users(
 @router.get(
     "/options",
     response_model=list[UserOptionOut],
-    dependencies=[Depends(require_permission("page:users"))],
+    # 白名单编辑器场景：持可见范围编辑权的管理员需搜索用户下拉
+    dependencies=[Depends(require_permission_any("page:users", "app:visibility:write"))],
 )
 def list_user_options(
     service: UserAdminServiceDep,

@@ -15,6 +15,8 @@ export interface TenantVisibility {
   visibility: 'all' | 'whitelist'
   whitelist: WhitelistItem[]
   visibility_lock: boolean
+  // 当前用户是否在管理范围内（false 时详情页只读）
+  manageable?: boolean
 }
 
 export interface SubscribedApp {
@@ -25,6 +27,8 @@ export interface SubscribedApp {
   visibility_lock: boolean
   visibility_template: 'all' | 'whitelist'
   admin_scope_mode?: 'creator_only' | 'mgmt_unit' | 'all_admin'
+  // 当前用户按管理范围能否管理该应用
+  manageable?: boolean
   configured: boolean
   visibility: 'all' | 'whitelist'
   whitelist_count: number

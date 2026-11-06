@@ -1,5 +1,5 @@
 import { SettingOutlined } from '@ant-design/icons'
-import { App, Button, Empty, Spin, Table, Tabs, Tag, Typography } from 'antd'
+import { App, Button, Empty, Spin, Table, Tabs, Tag, Tooltip, Typography } from 'antd'
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { listSubscribedApps, type SubscribedApp } from '../../api/tenantApps'
@@ -114,15 +114,29 @@ export default function TenantAppAdminListPage() {
           title: '操作',
           key: 'actions',
           width: 160,
-          render: (_, record) => (
-            <Button
-              size="small"
-              icon={<SettingOutlined />}
-              onClick={() => navigate(`/tenant-apps/${record.id}`)}
-            >
-              配置可见范围
-            </Button>
-          ),
+          render: (_, record) => {
+            // 管理范围收口：不在范围内的应用置灰入口（后端写接口同口径 403 兜底）
+            if (record.manageable === false) {
+              return (
+                <Tooltip title="此应用不在你的管理范围内，仅超管或关联管理单元的管理员可配置">
+                  <span style={{ display: 'inline-block' }}>
+                    <Button size="small" icon={<SettingOutlined />} disabled>
+                      应用配置
+                    </Button>
+                  </span>
+                </Tooltip>
+              )
+            }
+            return (
+              <Button
+                size="small"
+                icon={<SettingOutlined />}
+                onClick={() => navigate(`/tenant-apps/${record.id}`)}
+              >
+                应用配置
+              </Button>
+            )
+          },
         },
       ]}
     />

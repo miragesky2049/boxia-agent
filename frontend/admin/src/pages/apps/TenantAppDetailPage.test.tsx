@@ -33,6 +33,8 @@ interface MockState {
   visibility: 'all' | 'whitelist'
   whitelist: Array<{ subject_type: string; subject_id: string; include_subtree: boolean }>
   visibilityLock: boolean
+  manageable?: boolean
+  auxForbidden?: boolean
   putStatus?: number
 }
 
@@ -87,10 +89,16 @@ function mockApi(captured: Captured, state: MockState) {
     if (pathname.endsWith('/public/context')) return jsonResponse(publicContext)
     if (pathname.endsWith('/public/tenants')) return jsonResponse([])
     if (pathname.endsWith('/admin/context')) return jsonResponse(adminContext)
+    if (pathname.endsWith('/admin/users/options')) {
+      if (state.auxForbidden) return jsonResponse({ detail: 'forbidden' }, 403)
+      return jsonResponse([{ id: 'u1', username: 'li4lei', display_name: '李雷' }])
+    }
     if (pathname.endsWith('/admin/departments')) {
+      if (state.auxForbidden) return jsonResponse({ detail: 'forbidden' }, 403)
       return jsonResponse([{ id: 'd1', name: '技术部', parent_id: null, children: [] }])
     }
     if (pathname.endsWith('/admin/roles')) {
+      if (state.auxForbidden) return jsonResponse({ detail: 'forbidden' }, 403)
       return jsonResponse([
         {
           id: 'r1',
@@ -105,9 +113,6 @@ function mockApi(captured: Captured, state: MockState) {
         },
       ])
     }
-    if (pathname.endsWith('/admin/users/options')) {
-      return jsonResponse([{ id: 'u1', username: 'li4lei', display_name: '李雷' }])
-    }
     if (pathname.endsWith('/admin/tenant/apps/101/visibility')) {
       if (method === 'GET') {
         return jsonResponse({
@@ -115,6 +120,7 @@ function mockApi(captured: Captured, state: MockState) {
           visibility: state.visibility,
           whitelist: state.whitelist,
           visibility_lock: state.visibilityLock,
+          manageable: state.manageable ?? true,
         })
       }
       if (method === 'PUT') {
@@ -205,6 +211,45 @@ describe('TenantAppDetailPage 可见范围配置', () => {
     expect(screen.queryByRole('button', { name: /保\s*存/ })).not.toBeInTheDocument()
     const radio = screen.getByLabelText('全员可见') as HTMLInputElement
     expect(radio.disabled).toBe(true)
+  })
+
+  it('manageable=false（不在管理范围）时整页只读并提示', async () => {
+    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
+      configured: true,
+      visibility: 'all',
+      whitelist: [],
+      visibilityLock: false,
+      manageable: false,
+    }))
+    renderPage()
+    await waitForPageLoaded()
+
+    expect(
+      await screen.findByText('你不在该应用的管理范围内，当前仅可查看配置'),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /保\s*存/ })).not.toBeInTheDocument()
+    const radio = screen.getByLabelText('白名单可见') as HTMLInputElement
+    expect(radio.disabled).toBe(true)
+  })
+
+  it('辅助下拉接口 403 不影响编辑态：manageable=true 时仍可保存', async () => {
+    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
+      configured: true,
+      visibility: 'all',
+      whitelist: [],
+      visibilityLock: false,
+      manageable: true,
+      auxForbidden: true,
+    }))
+    renderPage()
+    await waitForPageLoaded()
+
+    expect(
+      screen.queryByText('你不在该应用的管理范围内，当前仅可查看配置'),
+    ).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /保\s*存/ })).toBeInTheDocument()
+    const radio = screen.getByLabelText('白名单可见') as HTMLInputElement
+    expect(radio.disabled).toBe(false)
   })
 
   it('白名单保存时 PUT 请求体格式正确', async () => {

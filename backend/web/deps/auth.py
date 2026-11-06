@@ -113,6 +113,23 @@ def require_permission(code: str) -> Callable[..., AdminPrincipal]:
     return dependency
 
 
+def require_permission_any(*codes: str) -> Callable[..., AdminPrincipal]:
+    """生成"任一命中即可"的功能权限校验依赖：所列编码全部缺失时返回 403。
+
+    用于应用可见范围白名单编辑器等场景：角色/用户列表读取接口既要服务各自的
+    管理页面，也要服务只持有 app:visibility:write 的租户应用管理员。
+    """
+
+    def dependency(
+        principal: Annotated[AdminPrincipal, Depends(require_admin)],
+    ) -> AdminPrincipal:
+        if not any(code in principal.permissions for code in codes):
+            raise ForbiddenError("当前角色无权执行该操作")
+        return principal
+
+    return dependency
+
+
 def require_platform_admin(
     principal: Annotated[AdminPrincipal, Depends(require_admin)],
 ) -> AdminPrincipal:

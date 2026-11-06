@@ -3,10 +3,9 @@ import { App, Button, Descriptions, Space, Spin, Tag, Typography } from 'antd'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { rolesApi } from '../../api/access'
 import { getTenant } from '../../api/tenant'
 import { tenantAdminsApi } from '../../api/tenantAdmins'
-import type { AdminUser, Role, Tenant } from '../../api/types'
+import type { AdminUser, Tenant } from '../../api/types'
 import { useAuth } from '../../auth/AuthContext'
 import { AdminUsersBlock } from '../../components/admin-users/AdminUsersBlock'
 import { FormSection } from '../../components/common/FormSection'
@@ -21,7 +20,6 @@ export default function TenantDetailPage() {
   const { user: currentUser, hasPermission } = useAuth()
   const [tenant, setTenant] = useState<Tenant | null>(null)
   const [loading, setLoading] = useState(true)
-  const [roles, setRoles] = useState<Role[]>([])
   const [admins, setAdmins] = useState<AdminUser[]>([])
   const [adminsTotal, setAdminsTotal] = useState(0)
   const [adminsPage, setAdminsPage] = useState(1)
@@ -53,14 +51,6 @@ export default function TenantDetailPage() {
     }
     void load()
   }, [tenantId, load, navigate])
-
-  useEffect(() => {
-    if (!tenantId || !tenant || tenant.is_platform) return
-    rolesApi
-      .list({ tenant_id: tenantId })
-      .then((items) => setRoles(items.filter((role) => role.is_active)))
-      .catch(() => setRoles([]))
-  }, [tenantId, tenant])
 
   const loadAdmins = useCallback(async () => {
     setAdminsLoading(true)
@@ -138,7 +128,7 @@ export default function TenantDetailPage() {
             description="维护本租户的管理端访问账号；新建账号首次登录需修改密码"
           >
             <AdminUsersBlock
-              roles={roles}
+              hideRoleSelect
               passwordPolicy={context?.password_policy}
               currentUserId={currentUser?.id ?? null}
               canCreate={canCreate}

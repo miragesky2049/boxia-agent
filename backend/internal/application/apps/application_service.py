@@ -697,14 +697,6 @@ class ApplicationService:
         self._uow.commit()
         return result
 
-    def list_subscribed_apps_for_admin(self, tenant_id: UUID) -> list[dict]:
-        """列出当前租户已订阅的产品级应用（租户管理端列表数据源）。
-
-        返回每个应用的基础信息 + visibility_lock 状态，
-        前端据此决定「配置可见范围」入口是否禁用。
-        """
-        return self._repo.list_subscribed_apps_for_admin(tenant_id)
-
     # ========== graph 整图版本（新 hot path） ==========
     def save_graph(
         self,
