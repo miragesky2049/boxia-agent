@@ -61,9 +61,9 @@ flowchart LR
 
 | 数据 | 表/位置 | 写入时机 |
 |---|---|---|
-| 画布版本快照 | Postgres `application_graph_version`（JSONB，>1MB 转对象存储留 ref） | 每次保存追加一行（version+1） |
-| 当前草稿 | Postgres `application_graph`（UPSERT 覆盖） | 每次保存 |
-| live 指针 | `application.published_graph_version` | 发布 |
+| 画布版本快照 | Postgres `application_graph_version`（JSONB，>1MB 转对象存储留 ref）——**"最新/生效版本"的唯一存放表**：version 最大行=最新，指针指向行=生效 | 每次保存追加一行（version+1） |
+| 当前草稿 | Postgres `application_graph`（UPSERT 覆盖；**不承载生效版本**，仅兼容旧读路径） | 每次保存 |
+| live 指针 | `application.published_graph_version`（只存版本号，不存 JSON） | 发布 |
 | 租户锁版本 | `tenant_application_instance.pinned_graph_version` | 市场开通/pin |
 | 会话 / 消息 | Postgres `conversation` / `message` | 首条消息建会话；用户消息先于执行落库，最终回复流结束提交 |
 | 执行账本 | `run`（含画布快照）/ `run_node_execution` / `tenant_usage_ledger` | run 先建，每节点即时写 |
@@ -232,6 +232,11 @@ sequenceDiagram
 | `application_graph_version` | **版本历史**，每次保存追加一行 | `id`(PK) · `application_id`(FK) · `version`(int) · `schema_json`(JSONB 整图快照) · `runtime_mode` · `changelog`(text) · `created_by`(uuid) · `created_at`；唯一约束 `(application_id, version)`，索引 `(application_id, version DESC)` |
 | `application.published_graph_version` | **live 指针**（int，指向版本表的 version） | 发布=改它；NULL=从未发布 |
 | `tenant_application_instance.pinned_graph_version` | **租户锁**（int，NULL=跟随） | 开通时钉版本 |
+
+> **"最新生效版本"在哪张表**：统一落在 **`application_graph_version`**，靠"version 最大值 + 指针"两个维度定位——
+> - **最新版本**：`application_graph_version` 中 `version` 最大的那一行（`get_latest_graph_version` repo:592，`ORDER BY version DESC LIMIT 1`），每次保存追加、永不覆盖。
+> - **生效中版本**：内容同在 `application_graph_version`，具体哪一行由指针决定（优先级 `tenant_application_instance.pinned_graph_version` > `application.published_graph_version`，两列存的都是版本表的 version 号，本身不存 JSON）。
+> - ⚠️ `application_graph` **不是**生效版本表：只是草稿 1:1 副本，每次保存 UPSERT 覆盖，仅为兼容旧读路径保留。
 
 >1MB 的外壳替换：`schema_json` 不存整图，改存 `{"__graph_ref__": "<对象存储URI>"}`，读取时 `_parse_graph`(application_service.py:240) 解引用回灌；写对象存储失败自动降级回内联。
 
