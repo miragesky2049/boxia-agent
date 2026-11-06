@@ -268,12 +268,39 @@ def test_change_password_rejects_weak_password(client: TestClient) -> None:
     assert response.status_code == 422
 
 
-def test_viewer_cannot_write(client: TestClient) -> None:
+def test_viewer_cannot_access_console(client: TestClient) -> None:
+    """0071 出厂设置：只读成员不再预置管理端访问，管理端登录被拒绝。"""
     _insert_user("viewer", "viewer")
     response = client.post(
         "/api/v1/admin/auth/login", json={"username": "viewer", "password": ADMIN_PASSWORD}
     )
-    headers = _bearer(response.json()["access_token"])
+    assert response.status_code == 403
+    assert "管理端访问" in response.json()["detail"]
+
+
+def test_readonly_console_role_cannot_write(client: TestClient) -> None:
+    """自定义只读角色（管理端访问+资源查看）可读资源，但写操作与其他页面被拒。"""
+    admin_headers = _bearer(_login(client)["access_token"])
+    role = client.post(
+        "/api/v1/admin/roles",
+        json={"code": "limited", "name": "受限只读"},
+        headers=admin_headers,
+    )
+    assert role.status_code == 201, role.text
+    granted = client.put(
+        f"/api/v1/admin/roles/{role.json()['id']}/permissions",
+        json={"codes": ["system:console:access", "page:resources"]},
+        headers=admin_headers,
+    )
+    assert granted.status_code == 200, granted.text
+
+    _insert_user("limited-user", "limited")
+    login = client.post(
+        "/api/v1/admin/auth/login",
+        json={"username": "limited-user", "password": ADMIN_PASSWORD},
+    )
+    assert login.status_code == 200, login.text
+    headers = _bearer(login.json()["access_token"])
 
     assert client.get("/api/v1/admin/resources", headers=headers).status_code == 200
     assert (

@@ -175,22 +175,38 @@ def test_platform_account_binds_platform_role(
     created = client.post(
         USERS_URL,
         json={
-            "username": "platform-viewer",
+            "username": "platform-operator",
             "password": OPERATOR_PASSWORD,
-            "display_name": "平台只读",
-            "role_id": roles["viewer"]["id"],
+            "display_name": "平台运营",
+            "role_id": roles["admin"]["id"],
         },
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
-    assert created.json()["role_code"] == "viewer"
-    assert created.json()["role_id"] == roles["viewer"]["id"]
+    assert created.json()["role_code"] == "admin"
+    assert created.json()["role_id"] == roles["admin"]["id"]
 
-    # 平台只读账号仍可登录，资源范围由角色授权决定（此时为空）
-    operator_headers = _login(client, "platform-viewer", OPERATOR_PASSWORD)
+    operator_headers = _login(client, "platform-operator", OPERATOR_PASSWORD)
     listed = client.get("/api/v1/admin/apps", headers=operator_headers)
     assert listed.status_code == 200, listed.text
-    assert len(listed.json()) == 0
+
+
+def test_platform_account_rejects_non_console_role(
+    client: TestClient, auth_headers: dict[str, str]
+) -> None:
+    """0071 出厂设置：viewer 不再预置管理端访问，不能作为管理员角色。"""
+    response = client.post(
+        USERS_URL,
+        json={
+            "username": "platform-viewer",
+            "password": OPERATOR_PASSWORD,
+            "display_name": "平台只读",
+            "role_id": _role_id(client, auth_headers, "viewer"),
+        },
+        headers=auth_headers,
+    )
+    assert response.status_code == 422, response.text
+    assert "管理端访问" in response.json()["detail"]
 
 
 def test_platform_account_rejects_tenant_role(

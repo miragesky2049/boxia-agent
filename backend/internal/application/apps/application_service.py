@@ -375,10 +375,19 @@ class ApplicationService:
         description: str = "",
         created_by: UUID | None = None,
         flow_type: str = "workflow",
+        visibility_template: str = "all",
+        visibility_lock: bool = False,
     ) -> UUID:
+        """创建产品级应用。
+
+        0068 默认口径：admin_scope_mode 固定 all_admin（产品级应用默认所有
+        租户管理员可配租户侧可见范围）；creator_only 预留给未来租户级应用。
+        """
         if not name.strip():
             raise ValidationError("应用名称不能为空")
         _assert_flow_type(flow_type)
+        if visibility_template not in ("all", "whitelist"):
+            raise ValidationError("visibility_template 只能是 all 或 whitelist")
         app_id = self._repo.create_application(
             name=name.strip(),
             owner_type="platform",
@@ -386,6 +395,9 @@ class ApplicationService:
             description=description,
             created_by=created_by,
             flow_type=flow_type,
+            visibility_template=visibility_template,
+            visibility_lock=visibility_lock,
+            admin_scope_mode="all_admin",
         )
         # 新应用直接落一版可运行的最小画布，避免进编排页面对空白画布
         self.save_graph(
@@ -405,6 +417,9 @@ class ApplicationService:
         description: str | None = None,
         avatar_url: str | None = None,
         flow_type: str | None = None,
+        visibility_template: str | None = None,
+        visibility_lock: bool | None = None,
+        admin_scope_mode: str | None = None,
     ) -> None:
         app = self._repo.get_application(application_id)
         if app is None:
@@ -413,12 +428,30 @@ class ApplicationService:
             _assert_flow_type(flow_type)
             if flow_type != app.get("flow_type"):
                 self._assert_flow_switch_allowed(application_id, flow_type)
+        # 0068：可见范围模板/锁定/管理范围属平台侧配置，仅产品级应用可设置
+        if (
+            visibility_template is not None
+            or visibility_lock is not None
+            or admin_scope_mode is not None
+        ) and app.get("owner_type") != "platform":
+            raise ValidationError("仅产品级应用可设置可见范围模板/锁定/管理范围")
+        if visibility_template is not None and visibility_template not in ("all", "whitelist"):
+            raise ValidationError("visibility_template 只能是 all 或 whitelist")
+        if admin_scope_mode is not None and admin_scope_mode not in (
+            "creator_only",
+            "mgmt_unit",
+            "all_admin",
+        ):
+            raise ValidationError("admin_scope_mode 只能是 creator_only / mgmt_unit / all_admin")
         self._repo.update_application(
             application_id,
             name=name,
             description=description,
             avatar_url=avatar_url,
             flow_type=flow_type,
+            visibility_template=visibility_template,
+            visibility_lock=visibility_lock,
+            admin_scope_mode=admin_scope_mode,
         )
         self._uow.commit()
 
@@ -593,46 +626,84 @@ class ApplicationService:
         self._repo.set_enabled(application_id, enabled)
         self._uow.commit()
 
-    # ========== 数据可见范围（保持原逻辑） ==========
-    def get_visibility(self, application_id: UUID) -> dict:
-        if self._repo.get_application(application_id) is None:
-            raise NotFoundError("应用不存在")
-        return self._repo.get_application_visibility(application_id)
+    # ========== 数据可见范围 v2（0068：按 (应用, 租户) 隔离） ==========
+    def get_tenant_visibility(self, application_id: UUID, tenant_id: UUID) -> dict:
+        """读取本租户内某应用的可见范围。
 
-    def replace_visibility(
+        scope 不存在时按平台 visibility_template 兜底返回（不写库）；
+        返回值带 configured 字段，前端据此区分「未配置」和「已配置」。
+        """
+        app = self._repo.get_application(application_id)
+        if app is None:
+            raise NotFoundError("应用不存在")
+        scope = self._repo.get_tenant_scope(application_id, tenant_id)
+        if scope is None:
+            return {
+                "configured": False,
+                "visibility": app["visibility_template"],
+                "whitelist": [],
+                "visibility_lock": app["visibility_lock"],
+            }
+        scope["configured"] = True
+        scope["visibility_lock"] = app["visibility_lock"]
+        return scope
+
+    def replace_tenant_visibility(
         self,
         application_id: UUID,
-        *,
-        mode: str,
-        departments: list[dict] | None = None,
-        users: list[UUID] | None = None,
+        tenant_id: UUID,
+        visibility: str,
+        whitelist: list[dict],
     ) -> dict:
-        if self._repo.get_application(application_id) is None:
+        """覆盖写入本租户可见范围。
+
+        业务规则（0068）：
+        1. visibility_lock=True 时平台锁定可见范围，租户不可修改（403）；
+        2. visibility='all' 强制清空白名单；
+        3. visibility='whitelist' 整体覆盖白名单（先 DELETE 再 INSERT）；
+        4. scope.updated_at 由 upsert 的 DO UPDATE 分支维护。
+        """
+        if visibility not in ("all", "whitelist"):
+            raise ValidationError("visibility 只能是 all 或 whitelist")
+
+        app = self._repo.get_application(application_id)
+        if app is None:
             raise NotFoundError("应用不存在")
-        if mode not in ("all", "custom"):
-            raise ValidationError("visibility_mode 只能是 all 或 custom")
+        if app["visibility_lock"]:
+            raise ForbiddenError("该应用的可见范围已被平台锁定，租户不可修改")
 
-        depts = departments or []
-        uids = users or []
-        if mode == "custom" and not depts and not uids:
-            raise ValidationError("自定义可见范围至少需要指定一个部门或用户")
+        if visibility == "all":
+            whitelist = []
 
-        norm_depts: list[dict] = []
-        for d in depts:
-            did = d.get("department_id")
-            if isinstance(did, str):
-                did = UUID(did)
-            norm_depts.append(
-                {"department_id": did, "include_subtree": bool(d.get("include_subtree", True))}
+        normalized: list[dict] = []
+        for item in whitelist:
+            subject_type = item.get("subject_type")
+            if subject_type not in ("DEPARTMENT", "ROLE", "USER"):
+                raise ValidationError(f"非法 subject_type: {subject_type}")
+            subject_id = item.get("subject_id")
+            if isinstance(subject_id, str):
+                subject_id = UUID(subject_id)
+            normalized.append(
+                {
+                    "subject_type": subject_type,
+                    "subject_id": subject_id,
+                    "include_subtree": bool(item.get("include_subtree", False)),
+                }
             )
 
-        norm_uids: list[UUID] = []
-        for u in uids:
-            norm_uids.append(UUID(u) if isinstance(u, str) else u)
-
-        self._repo.replace_application_visibility(application_id, mode, norm_depts, norm_uids)
+        result = self._repo.upsert_tenant_scope(
+            application_id, tenant_id, visibility, normalized
+        )
         self._uow.commit()
-        return self._repo.get_application_visibility(application_id)
+        return result
+
+    def list_subscribed_apps_for_admin(self, tenant_id: UUID) -> list[dict]:
+        """列出当前租户已订阅的产品级应用（租户管理端列表数据源）。
+
+        返回每个应用的基础信息 + visibility_lock 状态，
+        前端据此决定「配置可见范围」入口是否禁用。
+        """
+        return self._repo.list_subscribed_apps_for_admin(tenant_id)
 
     # ========== graph 整图版本（新 hot path） ==========
     def save_graph(
@@ -1179,12 +1250,14 @@ class ApplicationService:
 
         复制范围（应用「定义」层）：
         - application 主行（owner_type/owner_id/avatar_url/description/flow_type/
-          variables/visibility_mode/sale_mode/support_trial/doc_url/ext_json）
+          variables/visibility_lock/visibility_template/admin_scope_mode/
+          sale_mode/support_trial/doc_url/ext_json）
         - application_graph 当前整图
         - application_graph_version 最新一版（作为副本的 v1）
-        - application_visibility_departments / users 可见范围白名单
 
         不复制（运行态/租户关系数据）：
+        - app_visibility_scope / whitelist（v2 可见范围按 (应用, 租户) 隔离，
+          属租户侧配置；副本新租户按继承的 visibility_template 走兜底）
         - tenant_application_instance、tenant_application_config、application_user_variable
         - conversation、message、run、run_node_execution、tenant_usage_ledger
         - event_webhook、resource_grants、entitlement_plan_item、application_apply
@@ -1224,7 +1297,9 @@ class ApplicationService:
                 "support_trial": source.get("support_trial", False),
                 "doc_url": source.get("doc_url", ""),
                 "ext_json": source.get("ext_json") or {},
-                "visibility_mode": source.get("visibility_mode", "all"),
+                "visibility_lock": source.get("visibility_lock", False),
+                "visibility_template": source.get("visibility_template", "all"),
+                "admin_scope_mode": source.get("admin_scope_mode", "all_admin"),
                 "published_graph_version": None,
                 "flow_type": source.get("flow_type", "workflow"),
                 "variables": source.get("variables") or [],
@@ -1253,14 +1328,7 @@ class ApplicationService:
                     created_by=actor_id,
                 )
 
-            # 复制可见范围
-            visibility = self._repo.get_visibility_detail(application_id)
-            self._repo.insert_visibility_rows(
-                new_app_id,
-                mode=visibility.get("mode", "all"),
-                departments=visibility.get("departments") or [],
-                users=visibility.get("users") or [],
-            )
+            # v2 可见范围（app_visibility_scope）属租户侧配置，随副本新租户订阅按模板兜底，不复制
 
             # 写审计日志
             self._uow.audit_logs.record({

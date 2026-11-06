@@ -1,11 +1,10 @@
 """申请单鉴权与认领归属：运营端点仅平台作用域可用，认领 CAS 落库 sales_user_id。"""
 
-from uuid import UUID
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import text
 
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.infrastructure.id.uuid7 import new_uuid
 from internal.infrastructure.model.database import get_engine
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
@@ -117,7 +116,7 @@ def test_claim_apply_cas_returns_false_when_status_raced() -> None:
         )
         apply_id = AuthRepository(uow.session).create_apply(
             {
-                "tenant_id": UUID("00000000-0000-0000-0000-000000000000"),
+                "tenant_id": PLATFORM_TENANT_ID,
                 "application_id": app_id,
                 "apply_type": "TRIAL",
                 "status": "SUBMITTED",

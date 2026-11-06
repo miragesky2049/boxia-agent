@@ -18,7 +18,6 @@ from internal.application.errors import (
 )
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.access import (
-    APP_RESOURCE_TYPE,
     GRANT_BLOCK_DEPRECATED,
     GRANT_BLOCK_NOT_APPROVED,
     GRANT_BLOCK_NOT_ENTITLED,
@@ -329,8 +328,6 @@ class RoleGrantService:
 
     def _resource_repository(self, resource_type: str) -> Any:
         self._ensure_resource_type(resource_type)
-        if resource_type == APP_RESOURCE_TYPE:
-            return self._uow.app_grants
         return self._uow.resource_repo(resource_type)
 
     def _validate_ids(self, repository: Any, resource_ids: Sequence[UUID]) -> ResourceIdList:

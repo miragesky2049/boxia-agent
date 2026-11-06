@@ -234,15 +234,24 @@ def test_permission_changes_take_effect_immediately(
 def test_readonly_platform_role_is_denied_management_endpoints(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    roles = {
-        item["code"]: item
-        for item in client.get(ROLES_URL, headers=auth_headers).json()
-    }
-    viewer_headers = _create_platform_account(
-        client, auth_headers, "platform-readonly", roles["viewer"]["id"]
-    )
+    """自定义只读角色（管理端访问+资源查看）可读资源，管理/账号/租户端点均被拒。
 
-    assert client.get("/api/v1/admin/resources", headers=viewer_headers).status_code == 200
-    assert client.get(ROLES_URL, headers=viewer_headers).status_code == 403
-    assert client.get(ADMIN_USERS_URL, headers=viewer_headers).status_code == 403
-    assert client.get("/api/v1/admin/tenants", headers=viewer_headers).status_code == 403
+    0071 后 viewer 出厂无「管理端访问」，不能再绑定为管理员，改用自定义角色验证。
+    """
+    role = client.post(
+        ROLES_URL, json={"code": "readonly-check", "name": "只读校验"}, headers=auth_headers
+    )
+    assert role.status_code == 201, role.text
+    role_id = role.json()["id"]
+    assert (
+        _replace_permissions(
+            client, auth_headers, role_id, ["system:console:access", "page:resources"]
+        ).status_code
+        == 200
+    )
+    readonly_headers = _create_platform_account(client, auth_headers, "platform-readonly", role_id)
+
+    assert client.get("/api/v1/admin/resources", headers=readonly_headers).status_code == 200
+    assert client.get(ROLES_URL, headers=readonly_headers).status_code == 403
+    assert client.get(ADMIN_USERS_URL, headers=readonly_headers).status_code == 403
+    assert client.get("/api/v1/admin/tenants", headers=readonly_headers).status_code == 403

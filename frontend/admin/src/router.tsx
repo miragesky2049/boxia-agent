@@ -1,9 +1,11 @@
 import { lazy, Suspense } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
+import { useAuth } from './auth/AuthContext'
 import RequireAuth from './auth/RequireAuth'
 import RequirePermission from './auth/RequirePermission'
 import PageLoading from './components/PageLoading'
 import AdminLayout from './layouts/AdminLayout'
+import { useTenant } from './tenant/TenantContext'
 
 const LoginPage = lazy(() => import('./pages/LoginPage'))
 const ChangePasswordPage = lazy(() => import('./pages/ChangePasswordPage'))
@@ -22,6 +24,7 @@ const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
 const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
 const AppsIndexPage = lazy(() => import('./pages/apps/AppsIndexPage'))
 const AppEditPage = lazy(() => import('./pages/apps/AppEditPage'))
+const TenantAppDetailPage = lazy(() => import('./pages/apps/TenantAppDetailPage'))
 const MarketplacePage = lazy(() => import('./pages/apps/MarketplacePage'))
 const RunPage = lazy(() => import('./pages/apps/RunPage'))
 const RunsPage = lazy(() => import('./pages/apps/RunsPage'))
@@ -51,9 +54,18 @@ export default function AppRouter() {
               </RequireAuth>
             }
           >
-            <Route path="/" element={<Navigate to="/apps" replace />} />
+            <Route path="/" element={<LandingRedirect />} />
             <Route path="/apps" element={<AppsIndexPage />} />
             <Route path="/apps/:id/edit" element={<AppEditPage />} />
+            <Route path="/tenant-apps" element={<Navigate to="/apps" replace />} />
+            <Route
+              path="/tenant-apps/:appId"
+              element={
+                <RequirePermission permission="page:tenant-apps" tenantOnly>
+                  <TenantAppDetailPage />
+                </RequirePermission>
+              }
+            />
             <Route path="/marketplace" element={<MarketplacePage />} />
             <Route path="/marketplace/apps/:appId/run" element={<RunPage />} />
             <Route path="/marketplace/apps/:appId/runs" element={<RunsPage />} />
@@ -184,4 +196,13 @@ export default function AppRouter() {
       </Suspense>
     </BrowserRouter>
   )
+}
+
+function LandingRedirect() {
+  const { loading, user, hasPermission } = useAuth()
+  const { isPlatform } = useTenant()
+  if (loading || !user) return <PageLoading />
+  // 租户 viewer 无应用管理入口权限（0070 收回 menu:apps），落地到应用市场
+  if (isPlatform || hasPermission('page:tenant-apps')) return <Navigate to="/apps" replace />
+  return <Navigate to="/marketplace" replace />
 }

@@ -28,7 +28,6 @@ from internal.domain.entity.refresh_token import RefreshToken
 from internal.domain.entity.resource import Tool
 from internal.domain.entity.tenant import Tenant
 from internal.domain.entity.user_mgmt_unit_grant import UserMgmtUnitGrant
-from internal.domain.repository.apps_protocols import AppGrantRepositoryProtocol
 
 TResource = TypeVar("TResource")
 
@@ -858,7 +857,6 @@ class UnitOfWork(Protocol):
     mgmt_units: MgmtUnitRepository
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     tools: ResourceRepository[Tool]
-    app_grants: AppGrantRepositoryProtocol
 
     def resource_repo(self, resource_type: str) -> ResourceRepository[Tool]:
         """按资源类型返回当前作用域仓储；tools 等价于 resource_repo('tool')。"""

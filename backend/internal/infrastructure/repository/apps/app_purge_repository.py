@@ -4,8 +4,9 @@
 
 1. 数据库外键 CASCADE 自动覆盖：application_graph、application_graph_version、
    tenant_application_instance、tenant_application_config、
-   application_visibility_departments/users、conversation/message——
-   最后 DELETE application 行时统一触发。
+   app_visibility_scope（0068，其下 app_visibility_whitelist 二级 CASCADE）、
+   app_admin_scope（0069，随 application 行 CASCADE）、
+   conversation/message——最后 DELETE application 行时统一触发。
 2. RESTRICT 阻塞点，必须先显式删除：run（workflow_id→application RESTRICT；
    删 run 级联清 run_node_execution，并使 message.run_id SET NULL）、
    application_apply（application_id RESTRICT）。

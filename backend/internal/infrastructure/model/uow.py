@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.entity.resource import Tool
-from internal.domain.repository.apps_protocols import AppGrantRepositoryProtocol
 from internal.domain.repository.protocols import (
     AdminUserRepository,
     AuditLogRepository,
@@ -26,7 +25,6 @@ from internal.domain.repository.protocols import (
     UserRepository,
 )
 from internal.infrastructure.model.database import get_session_factory
-from internal.infrastructure.repository.apps.app_grant_repository import AppGrantRepository
 from internal.infrastructure.repository.postgres_admin_user_repository import (
     PostgresAdminUserRepository,
 )
@@ -116,7 +114,6 @@ class SqlAlchemyUnitOfWork:
         self._scope_role_ids: tuple[UUID, ...] = ()
         self._scope_apply_role_filter: bool = True
         self.tools: ResourceRepository[Tool] = self.resource_repo("tool")
-        self.app_grants: AppGrantRepositoryProtocol = AppGrantRepository(self.session)
         # RAG 知识库：文档元数据 + 分块向量仓储
         self.documents = PostgresDocumentRepository(self.session, tenant_id)
         self.document_chunks = PostgresDocumentChunkRepository(self.session, tenant_id)

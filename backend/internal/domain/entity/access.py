@@ -13,29 +13,17 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
-# 应用权益存于 application / tenant_application_instance，不在 resource 表
-APP_RESOURCE_TYPE = "app"
 # 统一资源表（resource）承载的类型
 RESOURCE_TABLE_TYPES = ("tool", "skill", "prompt", "knowledge")
-# RBAC 资源授权可选的全部类型
-RESOURCE_TYPES = (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
+# RBAC 资源授权可选的全部类型。
+# 0072：应用不再走资源授权（resource_grants），使用授权由「应用管理 → 可见范围」
+# （app_visibility_scope，0068）单点生效；存量 app grants 已由迁移折算并清理。
+RESOURCE_TYPES = RESOURCE_TABLE_TYPES
 
 # 角色授权写侧拦截原因码（P1-8）：候选仓储 diagnose 返回码，服务层映射为领域错误
 GRANT_BLOCK_NOT_ENTITLED = "not_entitled"
 GRANT_BLOCK_NOT_APPROVED = "not_approved"
 GRANT_BLOCK_DEPRECATED = "deprecated"
-
-
-@dataclass(frozen=True)
-class AppGrantRow:
-    """应用授权行：application 表映射为与 resource 仓储输出对齐的候选/汇总结构。"""
-
-    id: UUID
-    name: str
-    description: str
-    tenant_id: UUID
-    is_enabled: bool
-    updated_at: datetime
 
 
 @dataclass(frozen=True)

@@ -122,6 +122,17 @@ def require_platform_admin(
     return principal
 
 
+def require_tenant_admin(
+    principal: Annotated[AdminPrincipal, Depends(require_admin)],
+) -> AdminPrincipal:
+    """租户作用域校验：仅租户子域名可用，且拥有 app:admin 权限（0068 预置码）。"""
+    if principal.is_platform:
+        raise ForbiddenError("该操作仅租户管理端可用")
+    if not principal.can("app:admin"):
+        raise ForbiddenError("缺少应用管理权限")
+    return principal
+
+
 def require_user(
     request: Request,
     uow: UowDep,
@@ -159,4 +170,5 @@ def require_user(
 
 AdminAuthDep = Annotated[AdminPrincipal, Depends(require_admin)]
 PlatformAdminDep = Annotated[AdminPrincipal, Depends(require_platform_admin)]
+TenantAdminDep = Annotated[AdminPrincipal, Depends(require_tenant_admin)]
 UserAuthDep = Annotated[UserPrincipal, Depends(require_user)]

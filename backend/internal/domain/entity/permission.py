@@ -118,6 +118,14 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:entitlement:manage", "租户开通-维护", "button", "manage", 405),
     _perm("button:resource:review", "资源-审核", "button", "manage", 406),
     _perm("button:resource:create", "资源-新建", "button", "create", 302),
+    # 应用可见范围 v2（0068）：租户侧应用管理三码 + 菜单/页面码
+    _perm("menu:tenant-apps", "应用管理", "menu", "view", 17, "租户侧应用管理入口（已订阅应用与可见/管理范围配置）"),
+    _perm("page:tenant-apps", "应用管理页面", "page", "view", 117, "租户应用管理页面（已订阅应用与我管理的应用）"),
+    _perm("app:admin", "应用管理", "button", "manage", 407, "可管理本租户内产品级应用的租户侧配置"),
+    _perm("app:admin:all", "应用管理全部", "button", "manage", 408, "租户内所有应用的管理范围不受限"),
+    _perm("app:visibility:write", "可见范围编辑", "button", "update", 409, "可修改应用可见范围"),
+    # 应用管理范围（0069 二期）：管理单元关联编辑
+    _perm("app:admin_scope:write", "管理范围编辑", "button", "update", 410, "可修改应用关联的管理单元"),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)
@@ -128,6 +136,10 @@ PERMISSION_BY_CODE: dict[str, PermissionDefinition] = {
 # 租户作用域不包含平台级租户管理权限
 PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
     {
+        # 0070：租户侧「应用管理」由 menu:tenant-apps 承接（订阅列表+管理范围），
+        # 面向普通用户的应用运行在用户端，租户 console 不再下发 menu:apps/page:apps
+        "menu:apps",
+        "page:apps",
         "menu:tenants",
         "page:tenants",
         "button:tenant:create",
@@ -166,6 +178,13 @@ TENANT_ONLY_CODES: frozenset[str] = frozenset(
         "button:mgmt-unit:delete",
         "button:mgmt-unit:grant",
         "button:resource:create",
+        # 应用可见范围 v2：租户侧专属，平台子域名不使用（require_tenant_admin 拒绝平台作用域）
+        "menu:tenant-apps",
+        "page:tenant-apps",
+        "app:admin",
+        "app:admin:all",
+        "app:visibility:write",
+        "app:admin_scope:write",
     }
 )
 
@@ -225,11 +244,23 @@ _TENANT_RESOURCE_CODES = frozenset(
         "button:resource:create",
     }
 )
+# 应用可见范围 v2 + 管理范围：租户 admin 授入口 + app:admin + 可见/管理范围编辑；app:admin:all 仅超管（见 0068/0069）
+_APP_ADMIN_CODES = frozenset(
+    {
+        "menu:tenant-apps",
+        "page:tenant-apps",
+        "app:admin",
+        "app:visibility:write",
+        "app:admin_scope:write",
+    }
+)
 
 # 平台内置角色：与迁移中的种子数据保持一致
 PLATFORM_SUPERADMIN_CODES: frozenset[str] = PLATFORM_SCOPED_CODES
 PLATFORM_ADMIN_CODES: frozenset[str] = _CONSOLE_CODES | _ENTITLEMENT_CODES
-PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES
+# 0071：只读成员出厂设置不勾选「管理端访问」——viewer 走用户端查看业务对象，
+# 管理后台入口仅管理员及以上角色可用；租户域 viewer 经下方交集推导同步生效
+PLATFORM_VIEWER_CODES: frozenset[str] = _CONSOLE_CODES - {CONSOLE_ACCESS}
 
 # 租户内置角色：仅包含租户作用域权限，并并入组织架构相关权限
 TENANT_SUPERADMIN_CODES: frozenset[str] = TENANT_SCOPED_CODES
@@ -238,6 +269,7 @@ TENANT_ADMIN_CODES: frozenset[str] = (
     | _ORG_READ_CODES
     | _ORG_WRITE_CODES
     | _TENANT_RESOURCE_CODES
+    | _APP_ADMIN_CODES
 )
 TENANT_VIEWER_CODES: frozenset[str] = (
     PLATFORM_VIEWER_CODES & TENANT_SCOPED_CODES
