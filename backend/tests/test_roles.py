@@ -288,6 +288,7 @@ def test_roles_are_tenant_isolated(
 def test_viewer_admin_cannot_access_role_management(
     client: TestClient, auth_headers, tenant_client
 ) -> None:
+    """0071 出厂设置：租户 viewer 无「管理端访问」，管理端登录即被拒，更无从进入角色管理。"""
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     viewer = list_roles(site, headers)["viewer"]
@@ -308,14 +309,5 @@ def test_viewer_admin_cannot_access_role_management(
         "/api/v1/admin/auth/login",
         json={"username": "acme-viewer-admin", "password": TENANT_ADMIN_PASSWORD},
     )
-    assert login.status_code == 200, login.text
-    viewer_headers = {"Authorization": f"Bearer {login.json()['access_token']}"}
-
-    # 只读角色仅拥有资源查看权限，不含角色管理页面权限
-    assert site.get("/api/v1/admin/roles", headers=viewer_headers).status_code == 403
-    denied = site.post(
-        "/api/v1/admin/roles",
-        json={"code": "sales", "name": "销售"},
-        headers=viewer_headers,
-    )
-    assert denied.status_code == 403
+    assert login.status_code == 403, login.text
+    assert "管理端访问" in login.json()["detail"]

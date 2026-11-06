@@ -112,14 +112,16 @@ describe('AdminLayout 双入口菜单', () => {
     expect(screen.queryByText('角色授权')).not.toBeInTheDocument()
   })
 
-  it('租户作用域展示角色授权、不展示开通授权', async () => {
+  it('角色授权菜单已下线：租户作用域即使旧上下文带 role-access 也不渲染', async () => {
     vi.stubGlobal(
       'fetch',
-      mockContext('tenant', ['role-access'], ['page:role-access', 'button:role:grant']),
+      mockContext('tenant', ['roles', 'grants', 'role-access'], ['page:roles', 'page:grants']),
     )
     renderLayout()
 
-    expect(await screen.findByText('角色授权', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(await screen.findByText('角色管理', {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(screen.getByText('用户授权')).toBeInTheDocument()
+    expect(screen.queryByText('角色授权')).not.toBeInTheDocument()
     expect(screen.queryByText('开通授权')).not.toBeInTheDocument()
   })
 })

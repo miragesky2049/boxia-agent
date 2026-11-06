@@ -1,6 +1,6 @@
 """平台应用管理（apps-admin）请求模型。"""
 
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID
 
 from pydantic import BaseModel, Field
@@ -11,6 +11,9 @@ class AppCreatePayload(BaseModel):
     description: str = Field("", max_length=2000)
     # workflow（工作流） / chatflow（对话流）
     flow_type: str = Field("workflow", pattern="^(workflow|chatflow)$")
+    # 0068 可见范围 v2：产品级应用的平台侧默认值
+    visibility_template: Literal["all", "whitelist"] = "all"
+    visibility_lock: bool = False
 
 
 class AppUpdatePayload(BaseModel):
@@ -18,6 +21,10 @@ class AppUpdatePayload(BaseModel):
     description: str | None = Field(None, max_length=2000)
     avatar_url: str | None = Field(None, max_length=500)
     flow_type: str | None = Field(None, pattern="^(workflow|chatflow)$")
+    # 0068 可见范围 v2：仅产品级应用可设置（owner_type 校验在 service 层）
+    visibility_template: Literal["all", "whitelist"] | None = None
+    visibility_lock: bool | None = None
+    admin_scope_mode: Literal["creator_only", "mgmt_unit", "all_admin"] | None = None
 
 
 class GraphPayload(BaseModel):
@@ -31,17 +38,6 @@ class ListingPayload(BaseModel):
 
 class EnabledPayload(BaseModel):
     enabled: bool
-
-
-class VisibilityDepartmentItem(BaseModel):
-    department_id: UUID
-    include_subtree: bool = True
-
-
-class VisibilityPayload(BaseModel):
-    mode: str = Field(..., pattern="^(all|custom)$")
-    departments: list[VisibilityDepartmentItem] = Field(default_factory=list)
-    users: list[UUID] = Field(default_factory=list)
 
 
 class ValidateGraphPayload(BaseModel):

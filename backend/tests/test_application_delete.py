@@ -78,10 +78,6 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
             {"tid": tenant_id},
         ).scalar_one()
         ids["user"] = str(user_id)
-        role_id = uow.session.execute(
-            text("SELECT id FROM roles WHERE tenant_id = :tid AND code = 'superadmin'"),
-            {"tid": tenant_id},
-        ).scalar_one()
 
         # 租户开通实例 + 租户级配置覆盖
         uow.session.execute(
@@ -101,31 +97,34 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
             {"id": uuid4(), "tid": tenant_id, "aid": app_id},
         )
 
-        # 可见范围（部门 + 指定用户）
+        # 可见范围 v2：(应用, 租户) scope + 白名单（部门 + 指定用户）
+        scope_id = uuid4()
         uow.session.execute(
             text(
-                "INSERT INTO application_visibility_departments "
-                "(application_id, department_id, include_subtree) "
-                "VALUES (:aid, :did, TRUE)"
+                "INSERT INTO app_visibility_scope "
+                "(id, application_id, tenant_id, visibility) "
+                "VALUES (:id, :aid, :tid, 'whitelist')"
             ),
-            {"aid": app_id, "did": department_id},
+            {"id": scope_id, "aid": app_id, "tid": tenant_id},
         )
         uow.session.execute(
             text(
-                "INSERT INTO application_visibility_users (application_id, user_id) "
-                "VALUES (:aid, :uid)"
+                "INSERT INTO app_visibility_whitelist "
+                "(id, scope_id, subject_type, subject_id, include_subtree) "
+                "VALUES (:id, :sid, 'DEPARTMENT', :did, TRUE), "
+                "       (:id2, :sid, 'USER', :uid, FALSE)"
             ),
-            {"aid": app_id, "uid": user_id},
+            {
+                "id": uuid4(),
+                "id2": uuid4(),
+                "sid": scope_id,
+                "did": department_id,
+                "uid": user_id,
+            },
         )
 
-        # RBAC 角色授权（多态 resource_type='app'）
-        uow.session.execute(
-            text(
-                "INSERT INTO resource_grants (id, resource_type, resource_id, tenant_id, role_id, "
-                "subject_type) VALUES (:id, 'app', :aid, :tid, :role_id, 'role')"
-            ),
-            {"id": uuid4(), "aid": app_id, "tid": tenant_id, "role_id": role_id},
-        )
+        # 0072 起 resource_grants 的 CHECK 收紧，无法再播种 app 档授权；
+        # 清理器仍保留 app 档 DELETE 作为存量兜底（删除行数恒为 0）。
 
         # 权益套餐项（多态 object_type='app'）
         plan_id = uuid4()
@@ -240,13 +239,14 @@ def _app_related_counts(app_id: str) -> dict[str, int]:
             "SELECT count(*) FROM tenant_application_config WHERE application_id = :aid",
             aid=app_id,
         ),
-        "visibility_departments": _scalar(
-            "SELECT count(*) FROM application_visibility_departments "
-            "WHERE application_id = :aid",
+        "visibility_scope": _scalar(
+            "SELECT count(*) FROM app_visibility_scope WHERE application_id = :aid",
             aid=app_id,
         ),
-        "visibility_users": _scalar(
-            "SELECT count(*) FROM application_visibility_users WHERE application_id = :aid",
+        "visibility_whitelist": _scalar(
+            "SELECT count(*) FROM app_visibility_whitelist w "
+            "JOIN app_visibility_scope s ON s.id = w.scope_id "
+            "WHERE s.application_id = :aid",
             aid=app_id,
         ),
         "conversations": _scalar(
@@ -306,11 +306,11 @@ def test_delete_requires_permission_code(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     app_id = _create_app(client, auth_headers, "权限应用")
-    for role_code in ("admin", "viewer"):
-        headers = _create_operator(client, auth_headers, role_code, f"op-{role_code}-delete")
-        response = client.delete(f"{APPS_URL}/{app_id}?confirm=true", headers=headers)
-        assert response.status_code == 403, response.text
-        assert client.get(f"{APPS_URL}/{app_id}", headers=auth_headers).status_code == 200
+    # 0071：viewer 出厂已无「管理端访问」，无法再绑定为管理员，仅以 admin 验证权限码门槛
+    headers = _create_operator(client, auth_headers, "admin", "op-admin-delete")
+    response = client.delete(f"{APPS_URL}/{app_id}?confirm=true", headers=headers)
+    assert response.status_code == 403, response.text
+    assert client.get(f"{APPS_URL}/{app_id}", headers=auth_headers).status_code == 200
 
 
 def test_delete_requires_login(client: TestClient, auth_headers: dict[str, str]) -> None:
@@ -347,8 +347,8 @@ def test_delete_tenant_owned_app_rejected(
         uow.session.execute(
             text(
                 "INSERT INTO application (id, owner_type, owner_id, name, description, is_enabled, "
-                "is_listed_in_market, visibility_mode) "
-                "VALUES (:id, 'tenant', :tid, '租户自有应用', '', TRUE, FALSE, 'all')"
+                "is_listed_in_market) "
+                "VALUES (:id, 'tenant', :tid, '租户自有应用', '', TRUE, FALSE)"
             ),
             {"id": owned_app, "tid": tenant["id"]},
         )
@@ -378,7 +378,8 @@ def test_delete_cascades_all_related_data(
     body = response.json()
     assert body["name"] == "待删应用"
     assert body["deleted"]["run"] >= 1
-    assert body["deleted"]["resource_grants"] >= 1
+    # 0072：app 档授权已不可播种，兜底 DELETE 恒为 0 行
+    assert body["deleted"]["resource_grants"] == 0
     assert body["deleted"]["entitlement_plan_item"] >= 1
 
     counts = _app_related_counts(app_id)

@@ -1,4 +1,7 @@
-"""GrantService 仓储路由：五类资源各走对应仓储，overview/replace/replace_batch 不再一律按 tool。"""
+"""GrantService 仓储路由：四类可授权资源各走对应仓储，overview/replace/replace_batch 不再一律按 tool。
+
+0072：应用不再走资源授权（改由「应用管理 → 可见范围」单点生效），app 类型应被拒绝。
+"""
 
 from uuid import UUID, uuid4
 
@@ -7,9 +10,8 @@ import pytest
 from internal.application.grant_service import GrantService
 from internal.domain.entity.request_context import PLATFORM_SCOPE, RequestContext
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
-from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 
-_RESOURCE_TYPES = ("app", "tool", "skill", "prompt", "knowledge")
+_RESOURCE_TYPES = ("tool", "skill", "prompt", "knowledge")
 _TOOL_CONFIG = {"url": "https://example.com/api", "method": "GET"}
 
 
@@ -26,15 +28,6 @@ def _platform_service(uow: SqlAlchemyUnitOfWork) -> GrantService:
 
 
 def _create_resource(uow: SqlAlchemyUnitOfWork, resource_type: str) -> UUID:
-    if resource_type == "app":
-        app_id = ApplicationRepository(uow.session).create_application(
-            name=f"授权应用-{resource_type}",
-            owner_type="platform",
-            owner_id=None,
-            description="类型路由用例",
-        )
-        uow.commit()
-        return app_id
     created = uow.resource_repo(resource_type).create(
         {"name": f"授权资源-{resource_type}", "config": _TOOL_CONFIG}
     )
@@ -115,12 +108,14 @@ def test_overview_does_not_leak_across_types():
         uow.close()
 
 
-def test_invalid_resource_type_rejected():
+@pytest.mark.parametrize("bad_type", ["component", "app"])
+def test_invalid_resource_type_rejected(bad_type: str):
+    """0072：app 已移出可授权类型，GrantService 入口必须拒绝。"""
     uow = _platform_uow()
     try:
         from internal.application.errors import ValidationError
 
         with pytest.raises(ValidationError):
-            _platform_service(uow).overview("component", 1, 10, None, None)
+            _platform_service(uow).overview(bad_type, 1, 10, None, None)
     finally:
         uow.close()

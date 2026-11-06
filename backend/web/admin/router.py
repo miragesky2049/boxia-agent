@@ -15,14 +15,15 @@ from web.admin.routers.entitlements import router as entitlements_router
 from web.admin.routers.grants import router as grants_router
 from web.admin.routers.hr_dictionaries import router as hr_dictionaries_router
 from web.admin.routers.marketplace import router as marketplace_router
-from web.admin.routers.models import router as models_router
 from web.admin.routers.mgmt_units import router as mgmt_units_router
+from web.admin.routers.models import router as models_router
 from web.admin.routers.node_meta import router as node_meta_router
 from web.admin.routers.permissions import router as permissions_router
 from web.admin.routers.prompt_optimize import router as prompt_optimize_router
 from web.admin.routers.resources import admin_router as resource_admin_router
 from web.admin.routers.resources import tenant_router as resource_tenant_router
 from web.admin.routers.roles import router as roles_router
+from web.admin.routers.tenant_apps import router as tenant_apps_router
 from web.admin.routers.tenants import router as tenants_router
 from web.admin.routers.users import router as users_router
 from web.deps.auth import require_admin
@@ -51,3 +52,4 @@ router.include_router(node_meta_router)
 router.include_router(prompt_optimize_router)
 router.include_router(resource_admin_router)
 router.include_router(resource_tenant_router)
+router.include_router(tenant_apps_router)

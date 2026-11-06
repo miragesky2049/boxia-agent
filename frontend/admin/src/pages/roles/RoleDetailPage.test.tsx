@@ -83,6 +83,44 @@ const deletePermission = {
 
 const catalog = [pagePermission, createPermission, deletePermission]
 
+// 数据授权矩阵行（0073 起由原角色授权页用例迁入）
+const rowWide = {
+  resource_id: 'w1',
+  name: '全员工具',
+  description: '',
+  is_platform: false,
+  is_enabled: true,
+  updated_at: '2026-01-01T00:00:00Z',
+  is_granted: true,
+  is_tenant_wide: true,
+}
+
+const rowRole = {
+  resource_id: 'g1',
+  name: '角色工具',
+  description: '',
+  is_platform: true,
+  is_enabled: true,
+  updated_at: '2026-01-01T00:00:00Z',
+  is_granted: true,
+  is_tenant_wide: false,
+}
+
+const rowCandidate = {
+  resource_id: 'c1',
+  name: '停用工具',
+  description: '',
+  is_platform: false,
+  is_enabled: false,
+  updated_at: '2026-01-01T00:00:00Z',
+  is_granted: false,
+  is_tenant_wide: false,
+}
+
+interface Captured {
+  requests: { method: string; pathname: string; body: unknown }[]
+}
+
 function jsonResponse(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -90,14 +128,26 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-function emptyPage() {
-  return { items: [], total: 0, page: 1, page_size: 10 }
+function noContent() {
+  return new Response(null, { status: 204 })
 }
 
-function mockApi(onSave?: (codes: string[]) => void) {
+function emptyPage() {
+  return { items: [], total: 0, page: 1, page_size: 20 }
+}
+
+function mockApi(captured: Captured, onSave?: (codes: string[]) => void) {
   return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input)
     const method = (init?.method ?? 'GET').toUpperCase()
+    const u = new URL(url, 'http://localhost')
+    const pathname = u.pathname
+    const record = () =>
+      captured.requests.push({
+        method,
+        pathname,
+        body: init?.body ? JSON.parse(String(init.body)) : undefined,
+      })
     if (url.endsWith('/admin/auth/refresh')) {
       return jsonResponse({
         access_token: 'access',
@@ -110,7 +160,9 @@ function mockApi(onSave?: (codes: string[]) => void) {
     }
     if (url.endsWith('/admin/context')) return jsonResponse(adminContext)
     if (url.endsWith('/admin/roles/5') && method === 'GET') return jsonResponse(role)
-    if (url.endsWith('/admin/roles/5/grants/summary')) return jsonResponse({ counts: {} })
+    if (url.endsWith('/admin/roles/5/grants/summary')) {
+      return jsonResponse({ counts: { tool: 2, skill: 0, prompt: 0, knowledge: 0 } })
+    }
     if (url.endsWith('/admin/permissions')) return jsonResponse(catalog)
     if (url.endsWith('/admin/roles/5/permissions') && method === 'GET') {
       return jsonResponse({ items: [], codes: [] })
@@ -120,7 +172,24 @@ function mockApi(onSave?: (codes: string[]) => void) {
       onSave?.(codes)
       return jsonResponse({ items: catalog.filter((item) => codes.includes(item.code)), codes })
     }
-    if (url.includes('/admin/roles/5/grants?')) return jsonResponse(emptyPage())
+    if (pathname.endsWith('/admin/roles/5/grants') && method === 'GET') {
+      if (u.searchParams.get('resource_type') === 'tool') {
+        return jsonResponse({ items: [rowWide, rowRole, rowCandidate], total: 3, page: 1, page_size: 20 })
+      }
+      return jsonResponse(emptyPage())
+    }
+    if (pathname.endsWith('/admin/roles/5/grants/tool') && method === 'POST') {
+      record()
+      return jsonResponse({ updated: 1 })
+    }
+    if (pathname.endsWith('/admin/roles/5/grants/tool/w1') && method === 'DELETE') {
+      record()
+      return noContent()
+    }
+    if (pathname.endsWith('/admin/roles/5/grants/tool/g1/tenant-wide') && method === 'PUT') {
+      record()
+      return noContent()
+    }
     return jsonResponse({ detail: 'not found' }, 404)
   })
 }
@@ -139,6 +208,12 @@ function renderPage() {
   )
 }
 
+async function openDataTab() {
+  renderPage()
+  fireEvent.click(await screen.findByRole('tab', { name: '数据授权' }))
+  expect(await screen.findByText('全员工具', {}, { timeout: 3000 })).toBeInTheDocument()
+}
+
 beforeEach(() => {
   localStorage.clear()
   setRefreshToken('bxt_test')
@@ -153,7 +228,7 @@ describe('RoleDetailPage 功能权限', () => {
     let savedCodes: string[] | null = null
     vi.stubGlobal(
       'fetch',
-      mockApi((codes) => (savedCodes = codes)),
+      mockApi({ requests: [] }, (codes) => (savedCodes = codes)),
     )
 
     renderPage()
@@ -170,7 +245,7 @@ describe('RoleDetailPage 功能权限', () => {
   })
 
   it('按分类切换页签并支持整类全选与取消', async () => {
-    vi.stubGlobal('fetch', mockApi())
+    vi.stubGlobal('fetch', mockApi({ requests: [] }))
     renderPage()
 
     expect(await screen.findByRole('tab', { name: /页面/ })).toBeInTheDocument()
@@ -195,7 +270,7 @@ describe('RoleDetailPage 功能权限', () => {
   })
 
   it('数据授权是独立页签', async () => {
-    vi.stubGlobal('fetch', mockApi())
+    vi.stubGlobal('fetch', mockApi({ requests: [] }))
     renderPage()
 
     expect(await screen.findByRole('checkbox', { name: /查看智能体/ })).toBeInTheDocument()
@@ -205,5 +280,70 @@ describe('RoleDetailPage 功能权限', () => {
     expect(await screen.findByPlaceholderText('搜索名称或描述')).toBeInTheDocument()
     expect(screen.getByText('仅看已授权')).toBeInTheDocument()
     expect(screen.queryByRole('checkbox', { name: /查看智能体/ })).not.toBeInTheDocument()
+  })
+})
+
+describe('RoleDetailPage 数据授权矩阵', () => {
+  it('候选表格展示全员可见与已停用标记及开通说明', async () => {
+    vi.stubGlobal('fetch', mockApi({ requests: [] }))
+    await openDataTab()
+
+    expect(screen.getByText('全员可见')).toBeInTheDocument()
+    expect(screen.getByText('已停用')).toBeInTheDocument()
+    expect(screen.getByText(/候选仅包含已开通/)).toBeInTheDocument()
+    // 全员可见行不参与批量勾选
+    const wideRow = screen.getByText('全员工具').closest('tr')
+    expect(wideRow?.querySelector<HTMLInputElement>('input[type="checkbox"]')?.disabled).toBe(true)
+  })
+
+  it('批量授权提交未授权候选', async () => {
+    const captured: Captured = { requests: [] }
+    vi.stubGlobal('fetch', mockApi(captured))
+    await openDataTab()
+
+    const row = screen.getByText('停用工具').closest('tr')
+    const checkbox = row?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    if (!checkbox) throw new Error('未找到候选行选择框')
+    fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: /批量授权/ }))
+
+    await waitFor(() => expect(captured.requests).toHaveLength(1))
+    expect(captured.requests[0]).toMatchObject({
+      method: 'POST',
+      pathname: '/api/v1/admin/roles/5/grants/tool',
+      body: { resource_ids: ['c1'] },
+    })
+    expect(await screen.findByText('已授权 1 项', {}, { timeout: 3000 })).toBeInTheDocument()
+  })
+
+  it('取消全员可见先展示降级提示再提交单资源移除', async () => {
+    const captured: Captured = { requests: [] }
+    vi.stubGlobal('fetch', mockApi(captured))
+    await openDataTab()
+
+    fireEvent.click(screen.getByRole('button', { name: '取消全员可见' }))
+    expect(await screen.findByText('将降级为按角色授权，仅保留其余角色')).toBeInTheDocument()
+    // antd 会在两字中文按钮中自动插入空格（确 认），用正则匹配
+    fireEvent.click(screen.getByRole('button', { name: /^确\s*认$/ }))
+
+    await waitFor(() =>
+      expect(
+        captured.requests.some((r) => r.method === 'DELETE' && r.pathname.endsWith('/w1')),
+      ).toBe(true),
+    )
+  })
+
+  it('已授权角色档资源可设为全员可见', async () => {
+    const captured: Captured = { requests: [] }
+    vi.stubGlobal('fetch', mockApi(captured))
+    await openDataTab()
+
+    fireEvent.click(screen.getByRole('button', { name: '设为全员可见' }))
+
+    await waitFor(() =>
+      expect(
+        captured.requests.some((r) => r.method === 'PUT' && r.pathname.endsWith('/tenant-wide')),
+      ).toBe(true),
+    )
   })
 })

@@ -74,8 +74,8 @@ def _seed_related_data(tenant_id: str) -> dict[str, str]:
         uow.session.execute(
             text(
                 "INSERT INTO application (id, owner_type, name, description, is_enabled, "
-                "is_listed_in_market, visibility_mode, sale_mode, support_trial, doc_url, ext_json) "
-                "VALUES (:id, 'platform', '平台公共应用', '', TRUE, FALSE, 'all', 1, FALSE, '', '{}'::jsonb)"
+                "is_listed_in_market, sale_mode, support_trial, doc_url, ext_json) "
+                "VALUES (:id, 'platform', '平台公共应用', '', TRUE, FALSE, 1, FALSE, '', '{}'::jsonb)"
             ),
             {"id": platform_app},
         )
@@ -85,8 +85,8 @@ def _seed_related_data(tenant_id: str) -> dict[str, str]:
         uow.session.execute(
             text(
                 "INSERT INTO application (id, owner_type, owner_id, name, description, is_enabled, "
-                "is_listed_in_market, visibility_mode, sale_mode, support_trial, doc_url, ext_json) "
-                "VALUES (:id, 'tenant', :tid, '租户自有应用', '', TRUE, FALSE, 'all', 1, FALSE, '', '{}'::jsonb)"
+                "is_listed_in_market, sale_mode, support_trial, doc_url, ext_json) "
+                "VALUES (:id, 'tenant', :tid, '租户自有应用', '', TRUE, FALSE, 1, FALSE, '', '{}'::jsonb)"
             ),
             {"id": owned_app, "tid": tenant_id},
         )
@@ -327,15 +327,11 @@ def test_delete_requires_permission_code(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
     tenant = create_tenant(client, auth_headers, code="del-perm", name="权限租户")
-    for role_code in ("admin", "viewer"):
-        headers = _create_operator(
-            client, auth_headers, role_code, f"op-{role_code}-delete"
-        )
-        response = client.delete(
-            f"{TENANTS_URL}/{tenant['id']}?confirm=true", headers=headers
-        )
-        assert response.status_code == 403, response.text
-        assert client.get(f"{TENANTS_URL}/{tenant['id']}", headers=auth_headers).status_code == 200
+    # 0071：viewer 出厂已无「管理端访问」，无法再绑定为管理员，仅以 admin 验证权限码门槛
+    headers = _create_operator(client, auth_headers, "admin", "op-admin-delete")
+    response = client.delete(f"{TENANTS_URL}/{tenant['id']}?confirm=true", headers=headers)
+    assert response.status_code == 403, response.text
+    assert client.get(f"{TENANTS_URL}/{tenant['id']}", headers=auth_headers).status_code == 200
 
 
 def test_delete_requires_login(client: TestClient, auth_headers: dict[str, str]) -> None:

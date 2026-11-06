@@ -3,7 +3,6 @@
 import re
 
 from internal.domain.entity.access import (
-    APP_RESOURCE_TYPE,
     RESOURCE_TABLE_TYPES,
     RESOURCE_TYPES,
 )
@@ -22,10 +21,9 @@ def _orm_check_types() -> set[str]:
 
 
 def test_domain_types_cover_expected_set():
-    """domain 为唯一来源：五类资源，应用类型不落在 resource 表。"""
-    assert set(RESOURCE_TYPES) == {"tool", "skill", "prompt", "knowledge", "app"}
-    assert RESOURCE_TYPES == (*RESOURCE_TABLE_TYPES, APP_RESOURCE_TYPE)
-    assert APP_RESOURCE_TYPE not in RESOURCE_TABLE_TYPES
+    """domain 为唯一来源：四类可授权资源；0072 起应用改走可见范围，不再出现在授权类型中。"""
+    assert set(RESOURCE_TYPES) == {"tool", "skill", "prompt", "knowledge"}
+    assert RESOURCE_TYPES == RESOURCE_TABLE_TYPES
 
 
 def test_orm_check_matches_domain():

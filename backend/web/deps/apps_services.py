@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from sqlalchemy.orm import Session
 
+from internal.application.apps.admin_scope_service import AdminScopeService
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.conversation_admin_service import ConversationAdminService
 from internal.application.apps.model_service import ModelService
@@ -23,6 +24,7 @@ from internal.domain.auth.service import AuthService
 from internal.infrastructure.cache.factory import get_kv_cache
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
+from internal.infrastructure.repository.apps.admin_scope_repository import AdminScopeRepository
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
 from internal.infrastructure.repository.apps.conversation_repository import (
@@ -50,6 +52,15 @@ def make_application_service(uow: SqlAlchemyUnitOfWork) -> ApplicationService:
         cache=get_kv_cache(),
         object_storage=get_object_storage(),
         default_llm_model_id=get_settings().llm_model_id,
+    )
+
+
+def make_admin_scope_service(uow: SqlAlchemyUnitOfWork) -> AdminScopeService:
+    """构造 AdminScopeService（0069 二期）：管理范围仓储 + 应用仓储 + 请求级 UoW。"""
+    return AdminScopeService(
+        uow,
+        ApplicationRepository(uow.session),
+        AdminScopeRepository(uow.session),
     )
 
 

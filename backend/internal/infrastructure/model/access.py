@@ -180,12 +180,13 @@ class ResourceGrantModel(Base):
     tenant_id 非空；产品级授权 = PLATFORM_TENANT_ID（全零 UUID），租户授权 = 真实租户 ID。
     subject_type='tenant' 表示授予整个租户（role_id 必须为空，全员可见+新增角色自动继承）；
     subject_type='role' 表示仅授予指定角色（role_id 非空）。0057 起以 subject_type 显式表达。
+    0072 起应用不再可授权（使用授权 = app_visibility_scope 可见范围），类型清单不含 app。
     """
 
     __tablename__ = "resource_grants"
     __table_args__ = (
         CheckConstraint(
-            "resource_type IN ('app', 'tool', 'skill', 'prompt', 'knowledge')",
+            "resource_type IN ('tool', 'skill', 'prompt', 'knowledge')",
             name="ck_resource_grants_type",
         ),
         CheckConstraint(
