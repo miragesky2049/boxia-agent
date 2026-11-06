@@ -63,6 +63,26 @@ def convert_canvas(raw: dict[str, Any]) -> CanvasGraph:
     return CanvasGraph(nodes=nodes, edges=edges, versions=dict(versions), variables=variables)
 
 
+def find_agent_loop_config(raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | None:
+    """在 coze 画布原始 JSON 中定位 agent_loop 节点，返回 (节点 ID, 运行时口径配置)。
+
+    20261106 冒烟发现：画布持久化形态是数字 type（"100"）+ data.inputs
+    （ValueExpressionDTO 或 llmParam 数组），调用方（chat 通道判定、应用详情卡片）
+    直接按 {"type":"agent_loop","config":{...}} 读取永远读不到。
+    本函数复用 convert_canvas，使读取方与 AgentLoopNodeHandler 拿到完全一致的
+    config 字典（含 _flatten_named_param_lists 压平）；整图转换失败
+    （含不支持节点等）返回 None，调用方按"无 agent_loop 配置"走各自兜底。
+    """
+    try:
+        canvas = convert_canvas(raw)
+    except CanvasConvertError:
+        return None
+    for node in canvas.nodes:
+        if node.type == NodeType.AGENT_LOOP:
+            return node.id, node.config
+    return None
+
+
 def _convert_variable(raw: dict[str, Any]) -> VariableDef:
     """把 coze 变量声明转成 VariableDef。
 

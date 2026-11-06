@@ -176,3 +176,42 @@ def test_llm_node_tool_executor_unavailable_returns_error_text() -> None:
     second_messages = mock_llm.calls[1]["messages"]
     tool_msg = next(m for m in second_messages if m["role"] == "tool")
     assert "工具未注册" in tool_msg["content"]
+
+
+def test_llm_node_rejects_undeclared_tool_without_touching_executor() -> None:
+    """白名单：模型调用未在 config.tools 声明的工具时拒绝执行，执行器不被触碰。"""
+    touched: list[str] = []
+
+    def _tool_executor(name: str, arguments: dict) -> str:
+        touched.append(name)
+        return "should-not-run"
+
+    class _HallucinationLLM(_MockLLM):
+        async def chat(self, **kwargs) -> _Resp:  # type: ignore[override]
+            self.calls.append(kwargs)
+            if len(self.calls) == 1:
+                return _Resp(
+                    content="",
+                    tool_calls=[_ToolCall("call_1", "internal_hr_tool", "{}")],
+                    usage=_Usage(1, 1),
+                )
+            return _Resp(content="回答结束。", tool_calls=None, usage=_Usage(1, 1))
+
+    mock_llm = _HallucinationLLM()
+    services = ServiceRegistry({
+        "llm": mock_llm,
+        "tool_executor": _tool_executor,
+    })
+
+    ctx = _make_ctx(services, {
+        "modleName": "test-model",
+        "prompt": "{{input}}",
+        "tools": [{"name": "get_weather", "description": "", "parameters": {}}],
+    })
+
+    result = asyncio.run(LLMNodeHandler().run(ctx))
+    assert result.outputs["output"] == "回答结束。"
+    assert touched == []
+    log = result.outputs["tool_calls"][0]
+    assert "未在应用中声明" in log["observation"]
+    assert log["name"] == "internal_hr_tool"

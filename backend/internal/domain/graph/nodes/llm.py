@@ -18,16 +18,21 @@ config 约定（来自 coze llmParam 压平后的结构）：
 
 工具执行：通过 ctx.services.get("tool_executor") 拿执行器；
     tool_executor(name: str, arguments: dict) -> str，返回值文本回灌给 LLM。
-    未注册时 LLM 仍可声明 tool_calls，但回灌文本为 "[error] 工具未注册"。
+    执行白名单 = config.tools 声明的工具名：模型调用未声明工具直接拒绝回灌，
+    不触达执行器（防越权使用租户全量工具目录）；未注册执行器时回灌 "[error] 工具未注册"。
 """
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import Any
 from uuid import UUID
 
+from internal.domain.agent.react import (
+    accumulate_usage,
+    build_tool_specs,
+    run_react_loop,
+)
 from internal.domain.canvas.expression import Expr, Literal, TemplatedString
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult
@@ -91,7 +96,9 @@ class LLMNodeHandler(NodeHandler):
             })
 
         llm_service = ctx.services.get("llm")
-        tool_specs = _build_tool_specs(tools_raw)
+        # 20260731 双轨合并：工具 schema 归一化收敛到 react.build_tool_specs，
+        # 声明名集合即内核执行白名单
+        tool_specs = build_tool_specs(tools_raw)
         tool_executor = ctx.services.get("tool_executor") if ctx.services.has("tool_executor") else None
 
         messages: list[dict[str, Any]] = []
@@ -132,16 +139,6 @@ class LLMNodeHandler(NodeHandler):
         final_reasoning = ""
         tool_call_log: list[dict[str, Any]] = []
 
-        chat_kwargs: dict[str, Any] = {
-            "messages": messages,
-            "model": model_id,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-            "response_format": response_format,
-        }
-        if tool_specs:
-            chat_kwargs["tools"] = tool_specs
-
         try:
             # 走流式路径：开启流式 + 无 tools + 有 SSE emit_event 通道时，逐 token 推 llm_token 事件
             if stream_enabled and not tool_specs and ctx.emit_event is not None:
@@ -156,50 +153,23 @@ class LLMNodeHandler(NodeHandler):
                     aggregated_usage=aggregated_usage,
                 )
             else:
-                for round_idx in range(max_rounds):
-                    resp = await llm_service.chat(**chat_kwargs)
-                    _accumulate_usage(aggregated_usage, resp)
-
-                    tool_calls = list(getattr(resp, "tool_calls", None) or [])
-                    if not tool_calls:
-                        final_content = getattr(resp, "content", "") or ""
-                        final_reasoning = getattr(resp, "reasoning_content", "") or ""
-                        break
-
-                    # 把 assistant 的 tool_calls 追加进 messages
-                    messages.append({
-                        "role": "assistant",
-                        "content": getattr(resp, "content", "") or "",
-                        "tool_calls": [
-                            {
-                                "id": tc.id,
-                                "type": "function",
-                                "function": {
-                                    "name": tc.function.name,
-                                    "arguments": tc.function.arguments,
-                                },
-                            }
-                            for tc in tool_calls
-                        ],
-                    })
-
-                    # 逐个执行工具并回灌 role=tool 消息
-                    for tc in tool_calls:
-                        observation = await _execute_one_tool(
-                            tool_executor, tc.function.name, tc.function.arguments,
-                        )
-                        tool_call_log.append({
-                            "name": tc.function.name,
-                            "arguments": tc.function.arguments,
-                            "observation": observation,
-                        })
-                        messages.append({
-                            "role": "tool",
-                            "tool_call_id": tc.id,
-                            "content": observation,
-                        })
-                else:
-                    final_content = "（达到最大工具调用轮次，已停止）"
+                # 20260731 双轨合并：非流式分支收敛到 react.run_react_loop 内核，
+                # 白名单/参数解析/异常转文本均由内核统一承担
+                final_content, final_reasoning = await _run_react_collect(
+                    llm_service=llm_service,
+                    messages=messages,
+                    tool_specs=tool_specs,
+                    tool_executor=tool_executor,
+                    max_rounds=max_rounds,
+                    chat_kwargs={
+                        "model": model_id,
+                        "temperature": temperature,
+                        "max_tokens": max_tokens,
+                        "response_format": response_format,
+                    },
+                    aggregated_usage=aggregated_usage,
+                    tool_call_log=tool_call_log,
+                )
         except Exception as exc:
             logger.exception("LLM 调用失败: node=%s", ctx.node_id)
             raise RuntimeError(f"LLM 调用失败: {exc}") from exc
@@ -216,78 +186,52 @@ class LLMNodeHandler(NodeHandler):
         return NodeResult(outputs=outputs, usage=aggregated_usage)
 
 
-def _build_tool_specs(tools_raw: Any) -> list[LLMToolSpec]:
-    """把 config.tools 归一化成 LLMToolSpec 列表。
-
-    接受两种输入：
-    - list[LLMToolSpec]（已构造好）
-    - list[dict]：{name, description, parameters}
-    其他形状忽略。
-    """
-    if not tools_raw or not isinstance(tools_raw, list):
-        return []
-
-    specs: list[LLMToolSpec] = []
-    for item in tools_raw:
-        if isinstance(item, LLMToolSpec):
-            specs.append(item)
-            continue
-        if not isinstance(item, dict):
-            continue
-        name = item.get("name") or item.get("function", {}).get("name")
-        if not name:
-            continue
-        description = item.get("description") or item.get("function", {}).get("description", "")
-        parameters = item.get("parameters") or item.get("function", {}).get("parameters") or {
-            "type": "object",
-            "properties": {},
-        }
-        specs.append(LLMToolSpec(
-            name=str(name),
-            description=str(description),
-            parameters=parameters,
-        ))
-    return specs
-
-
-async def _execute_one_tool(
+async def _run_react_collect(
+    *,
+    llm_service: Any,
+    messages: list[dict[str, Any]],
+    tool_specs: list[LLMToolSpec],
     tool_executor: Any,
-    name: str,
-    raw_arguments: str,
-) -> str:
-    """执行单个 tool_call；未注册执行器或执行失败时返回错误文本回灌 LLM。"""
-    if tool_executor is None:
-        return f"[error] 工具未注册: {name}"
+    max_rounds: int,
+    chat_kwargs: dict[str, Any],
+    aggregated_usage: dict[str, int],
+    tool_call_log: list[dict[str, Any]],
+) -> tuple[str, str]:
+    """消费共享 ReAct 内核事件流，收集 LLM 节点输出所需的 (content, reasoning)。
 
-    args = _parse_arguments(raw_arguments)
-    try:
-        result = tool_executor(name, args)
-        # 支持 async 函数 / 同步函数 / 协程
-        if hasattr(result, "__await__"):
-            result = await result
-        return str(result)
-    except Exception as exc:  # noqa: BLE001 - 工具失败不应中断主循环
-        logger.warning("工具执行失败: %s err=%s", name, exc)
-        return f"[error] {name}: {exc}"
-
-
-def _parse_arguments(raw: Any) -> dict[str, Any]:
-    if isinstance(raw, dict):
-        return raw
-    try:
-        parsed = json.loads(str(raw or "{}"))
-        return parsed if isinstance(parsed, dict) else {"input": parsed}
-    except (json.JSONDecodeError, ValueError):
-        return {"input": str(raw or "")}
+    - usage 在 llm_end 逐轮累计：即使后续轮 LLM 异常，已消耗 token 不丢；
+    - tool_call_log 保持迁移前形态：{name, arguments(原始字符串), observation}；
+    - 轮次耗尽沿用原节点文案，避免画布输出回归。
+    """
+    final_content = ""
+    final_reasoning = ""
+    async for event in run_react_loop(
+        llm=llm_service,
+        messages=messages,
+        tool_specs=tool_specs,
+        tool_executor=tool_executor,
+        max_rounds=max_rounds,
+        chat_kwargs=chat_kwargs,
+        max_rounds_message="（达到最大工具调用轮次，已停止）",
+    ):
+        payload = event.payload
+        if event.kind == "llm_end":
+            accumulate_usage(aggregated_usage, payload["usage"])
+        elif event.kind == "tool_end":
+            tool_call_log.append({
+                "name": payload["name"],
+                "arguments": payload["arguments_raw"],
+                "observation": payload["observation"],
+            })
+        elif event.kind == "result":
+            final_content = payload["content"]
+            final_reasoning = payload["reasoning_content"]
+    return final_content, final_reasoning
 
 
 def _accumulate_usage(aggregated: dict[str, int], resp: Any) -> None:
-    usage = getattr(resp, "usage", None)
-    if usage is None:
-        return
-    aggregated["prompt_tokens"] += int(getattr(usage, "prompt_tokens", 0) or 0)
-    aggregated["completion_tokens"] += int(getattr(usage, "completion_tokens", 0) or 0)
-    aggregated["total_tokens"] += int(getattr(usage, "total_tokens", 0) or 0)
+    """累计一次响应/chunk 的 usage；实现收敛到 react.accumulate_usage。"""
+    accumulate_usage(aggregated, getattr(resp, "usage", None))
 
 
 async def _run_streaming(

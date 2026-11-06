@@ -49,6 +49,33 @@ from web.deps.apps_services import make_application_service, make_model_service
 logger = logging.getLogger(__name__)
 
 
+def make_tool_executor_factory(
+    session: Any,
+    tenant_id: UUID,
+    user_id: UUID | None,
+) -> Callable[[UUID, UUID | str], ToolExecutorService]:
+    """用户端 chat 的工具执行器工厂：按 run 构造一个 ToolExecutorService。
+
+    与画布 build_runner 注入的是同一条链路（ResourceToolRepository 租户可见 +
+    HttpTool/McpTool/EchoTool + ToolGateway），20260731 双轨合并 P2'。
+    """
+
+    def _factory(application_id: UUID, run_id: UUID | str) -> ToolExecutorService:
+        return ToolExecutorService(
+            ResourceToolRepository(
+                session,
+                tenant_id=tenant_id,
+                apply_role_filter=False,
+            ),
+            tenant_id=tenant_id,
+            user_id=user_id,
+            application_id=application_id,
+            run_id=str(run_id),
+        )
+
+    return _factory
+
+
 def register_llm_and_http(services: ServiceRegistry, uow: Any, tenant_id: Any) -> None:
     """注册 llm / http 基础服务（build_runner 与 admin debug 画布试运行共用装配）。
 

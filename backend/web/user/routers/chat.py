@@ -29,7 +29,7 @@ from web.deps.apps_services import (
 )
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
-from web.deps.graph import build_runner
+from web.deps.graph import build_runner, make_tool_executor_factory
 from web.deps.sse import SSE_HEADERS, sse_event
 from web.deps.tenant import RequestContextDep
 
@@ -83,6 +83,9 @@ def get_chat_service(
         msg_repo=make_message_repository(uow.session),
         run_repo=make_run_repository(uow.session),
         default_llm_model_id=get_settings().llm_model_id,
+        tool_executor_factory=make_tool_executor_factory(
+            uow.session, principal.tenant_id, principal.user_id
+        ),
     )
 
 
