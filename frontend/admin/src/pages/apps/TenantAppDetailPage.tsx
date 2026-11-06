@@ -64,6 +64,8 @@ export default function TenantAppDetailPage() {
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [locked, setLocked] = useState(false)
+  // 默认可读不可写：manageable 由详情接口确认后才放开编辑，避免竞态下出现可保存窗口
+  const [manageable, setManageable] = useState(false)
   const [configured, setConfigured] = useState(false)
   const [visibility, setVisibility] = useState<'all' | 'whitelist'>('all')
   const [rows, setRows] = useState<WhitelistRow[]>([])
@@ -72,15 +74,15 @@ export default function TenantAppDetailPage() {
   const [userOptions, setUserOptions] = useState<UserOption[]>([])
 
   useEffect(() => {
+    let cancelled = false
+    // 主数据：可见范围 + manageable，决定页面可编辑性，单独加载
     ;(async () => {
       setLoading(true)
       try {
-        const [detail, depts, roleList] = await Promise.all([
-          getTenantVisibility(appId),
-          departmentsApi.tree(),
-          rolesApi.list(),
-        ])
+        const detail = await getTenantVisibility(appId)
+        if (cancelled) return
         setLocked(detail.visibility_lock)
+        setManageable(detail.manageable !== false)
         setConfigured(detail.configured)
         setVisibility(detail.visibility)
         setRows(
@@ -91,15 +93,36 @@ export default function TenantAppDetailPage() {
             include_subtree: item.include_subtree,
           })),
         )
-        setDeptTree(toTreeData(depts))
-        setRoles(roleList.filter((role) => role.is_active))
-        setUserOptions(await usersApi.options())
       } catch (error) {
-        message.error(error instanceof Error ? error.message : '加载可见范围配置失败')
+        if (!cancelled) {
+          message.error(error instanceof Error ? error.message : '加载可见范围配置失败')
+        }
       } finally {
-        setLoading(false)
+        if (!cancelled) setLoading(false)
       }
     })()
+    // 辅助下拉数据独立容错：子管理员可能缺少某些页面读权限，403 不应锁死整页编辑态
+    departmentsApi
+      .tree()
+      .then((depts) => {
+        if (!cancelled) setDeptTree(toTreeData(depts))
+      })
+      .catch(() => {})
+    rolesApi
+      .list()
+      .then((roleList) => {
+        if (!cancelled) setRoles(roleList.filter((role) => role.is_active))
+      })
+      .catch(() => {})
+    usersApi
+      .options()
+      .then((items) => {
+        if (!cancelled) setUserOptions(items)
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
   }, [appId, message])
 
   const handleVisibilityChange = (next: 'all' | 'whitelist') => {
@@ -183,6 +206,9 @@ export default function TenantAppDetailPage() {
     )
   }
 
+  // 可编辑 = 在管理范围内 且 平台未锁定；否则整页只读
+  const editable = manageable && !locked
+
   return (
     <div className="page-card">
       <Space style={{ marginBottom: 16 }}>
@@ -206,6 +232,15 @@ export default function TenantAppDetailPage() {
         />
       )}
 
+      {!manageable && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ marginBottom: 16 }}
+          message="你不在该应用的管理范围内，当前仅可查看配置"
+        />
+      )}
+
       <Card>
         <Tabs
           items={[
@@ -216,7 +251,7 @@ export default function TenantAppDetailPage() {
                 <>
         <Radio.Group
           value={visibility}
-          disabled={locked}
+          disabled={!editable}
           onChange={(event) => handleVisibilityChange(event.target.value)}
           options={[
             { value: 'all', label: '全员可见' },
@@ -231,7 +266,7 @@ export default function TenantAppDetailPage() {
                 <Select
                   value={row.subject_type}
                   style={{ width: 100 }}
-                  disabled={locked}
+                  disabled={!editable}
                   options={SUBJECT_TYPE_OPTIONS}
                   onChange={(type) => updateRow(row.key, { subject_type: type, subject_id: '' })}
                 />
@@ -239,7 +274,7 @@ export default function TenantAppDetailPage() {
                   <TreeSelect
                     value={row.subject_id || undefined}
                     style={{ width: 320 }}
-                    disabled={locked}
+                    disabled={!editable}
                     showSearch
                     treeNodeFilterProp="title"
                     placeholder="选择部门"
@@ -251,7 +286,7 @@ export default function TenantAppDetailPage() {
                   <Select
                     value={row.subject_id || undefined}
                     style={{ width: 320 }}
-                    disabled={locked}
+                    disabled={!editable}
                     showSearch
                     optionFilterProp="label"
                     placeholder="选择角色"
@@ -263,7 +298,7 @@ export default function TenantAppDetailPage() {
                   <Select
                     value={row.subject_id || undefined}
                     style={{ width: 320 }}
-                    disabled={locked}
+                    disabled={!editable}
                     showSearch
                     filterOption={false}
                     placeholder="搜索并选择用户"
@@ -282,7 +317,7 @@ export default function TenantAppDetailPage() {
                   <Space size={4}>
                     <Switch
                       size="small"
-                      disabled={locked}
+                      disabled={!editable}
                       checked={row.include_subtree}
                       onChange={(checked) => updateRow(row.key, { include_subtree: checked })}
                     />
@@ -291,7 +326,7 @@ export default function TenantAppDetailPage() {
                     </Typography.Text>
                   </Space>
                 )}
-                {!locked && (
+                {editable && (
                   <Button
                     size="small"
                     type="text"
@@ -302,7 +337,7 @@ export default function TenantAppDetailPage() {
                 )}
               </Space>
             ))}
-            {!locked && (
+            {editable && (
               <Button
                 icon={<PlusOutlined />}
                 onClick={() =>
@@ -318,7 +353,7 @@ export default function TenantAppDetailPage() {
           </div>
         )}
 
-        {!locked && (
+        {editable && (
           <Space style={{ marginTop: 24 }}>
             <Button type="primary" loading={saving} onClick={handleSave}>
               保存
@@ -334,7 +369,7 @@ export default function TenantAppDetailPage() {
               children: (
                 <AdminScopePanel
                   appId={appId}
-                  canWrite={hasPermission('app:admin_scope:write')}
+                  canWrite={manageable && hasPermission('app:admin_scope:write')}
                 />
               ),
             },

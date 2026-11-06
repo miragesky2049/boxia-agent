@@ -24,7 +24,7 @@ from web.admin.schemas.role_permission import (
     RolePermissionListOut,
     RolePermissionReplaceRequest,
 )
-from web.deps.auth import AdminAuthDep, require_permission
+from web.deps.auth import AdminAuthDep, require_permission, require_permission_any
 from web.deps.http import client_meta
 from web.deps.services import (
     RoleGrantServiceDep,
@@ -36,9 +36,11 @@ router = APIRouter(prefix="/roles", tags=["admin-roles"])
 
 _VIEW_ROLES = Depends(require_permission("page:roles"))
 _GRANT_ROLES = Depends(require_permission("button:role:grant"))
+# 白名单编辑器场景：无角色管理页面权限、但持可见范围编辑权的租户应用管理员也需读取角色列表
+_LIST_ROLES_PICKER = Depends(require_permission_any("page:roles", "app:visibility:write"))
 
 
-@router.get("", response_model=list[RoleOut], dependencies=[_VIEW_ROLES])
+@router.get("", response_model=list[RoleOut], dependencies=[_LIST_ROLES_PICKER])
 def list_roles(
     service: RoleServiceDep,
     tenant_id: UUID | None = Query(None),

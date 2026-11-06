@@ -53,9 +53,16 @@ def get_visibility(
     application_id: UUID,
     principal: TenantAdminDep,
     service: ApplicationService = AppServiceDep,
+    scope_service: AdminScopeService = AdminScopeServiceDep,
 ) -> dict:
-    """读取本租户内某应用的可见范围（未配置时按平台模板兜底，带 configured 标记）。"""
-    return service.get_tenant_visibility(application_id, _tenant_of(principal))
+    """读取本租户内某应用的可见范围（未配置时按平台模板兜底，带 configured 标记）。
+
+    附 manageable 标记：当前用户是否可管理该应用，前端据此渲染只读详情。
+    """
+    tenant_id = _tenant_of(principal)
+    result = service.get_tenant_visibility(application_id, tenant_id)
+    result["manageable"] = scope_service.is_manageable(application_id, tenant_id, principal.user_id)
+    return result
 
 
 @router.put("/{application_id}/visibility")
@@ -64,12 +71,21 @@ def replace_visibility(
     payload: VisibilityPayload,
     principal: TenantAdminDep,
     service: ApplicationService = AppServiceDep,
+    scope_service: AdminScopeService = AdminScopeServiceDep,
 ) -> dict:
-    """覆盖写入本租户可见范围；平台锁定（visibility_lock）时 403。"""
+    """覆盖写入本租户可见范围。
+
+    门槛：app:visibility:write + 管理范围鉴权（assert_manageable）；
+    平台锁定（visibility_lock）时 403。
+    """
+    if not principal.can("app:visibility:write"):
+        raise ForbiddenError("缺少可见范围编辑权限")
+    tenant_id = _tenant_of(principal)
+    scope_service.assert_manageable(application_id, tenant_id, principal.user_id)
     whitelist = [item.model_dump() for item in payload.whitelist]
     return service.replace_tenant_visibility(
         application_id,
-        _tenant_of(principal),
+        tenant_id,
         payload.visibility,
         whitelist,
     )
@@ -78,19 +94,20 @@ def replace_visibility(
 @router.get("")
 def list_subscribed_apps(
     principal: TenantAdminDep,
-    service: ApplicationService = AppServiceDep,
     scope_service: AdminScopeService = AdminScopeServiceDep,
     scope: Annotated[Literal["all", "managed"], Query(description="all=全部订阅；managed=我管理的")] = "all",
 ) -> list[dict]:
     """列出当前租户已订阅的产品级应用（管理列表数据源）。
 
-    返回每个应用的基础信息 + visibility_lock 状态，
-    前端据此决定「配置可见范围」按钮是否 disabled。
-    scope=managed 时仅返回当前用户按 admin_scope_mode 可管理的应用（0069 二期）。
+    返回每个应用的基础信息 + visibility_lock 状态 + manageable 标记
+    （当前用户按管理范围能否管理该应用），
+    前端据此决定「应用配置」进入后是否只读。
+    scope=managed 时仅返回当前用户可管理的应用（0069 二期）。
     """
+    apps = scope_service.list_subscribed_apps(principal.user_id, _tenant_of(principal))
     if scope == "managed":
-        return scope_service.list_managed_apps(principal.user_id, _tenant_of(principal))
-    return service.list_subscribed_apps_for_admin(_tenant_of(principal))
+        return [app for app in apps if app["manageable"]]
+    return apps
 
 
 class AdminScopePayload(BaseModel):

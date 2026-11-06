@@ -278,3 +278,97 @@ def test_write_endpoints_require_admin_scope_write(
     )
     assert denied.status_code == 403, denied.text
     assert "缺少管理范围编辑权限" in denied.json()["detail"]
+
+    # 可见范围写接口同理：缺 app:visibility:write → 403
+    vis_denied = member_site.put(
+        f"{TENANT_APPS_URL}/{app_id}/visibility",
+        json={"visibility": "all", "whitelist": []},
+        headers=member_headers,
+    )
+    assert vis_denied.status_code == 403, vis_denied.text
+    assert "缺少可见范围编辑权限" in vis_denied.json()["detail"]
+
+
+# ========== 用例 5：租户侧关联推导生效模式（回归：平台列仍 all_admin 时按管理单元收敛） ==========
+def test_scope_rows_derive_mgmt_unit_without_platform_mode(
+    client, auth_headers, tenant_client
+) -> None:
+    site, headers, roles, tenant_id = _setup_tenant(client, auth_headers, tenant_client, "adm-deriv")
+    app_id = _create_enabled_platform_app(client, auth_headers, "推导应用")
+    _subscribe(tenant_id, app_id)
+    nanjing = _create_unit(site, headers, "南京mou", "adm-deriv-nj")
+    beijing = _create_unit(site, headers, "北京mou", "adm-deriv-bj")
+
+    # 超管仅通过管理范围面板关联南京mou，不改平台侧 admin_scope_mode（保持 all_admin）
+    assert (
+        site.post(
+            f"{TENANT_APPS_URL}/{app_id}/admin-scope",
+            json={"mgmt_unit_id": nanjing},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+
+    # 超管视角：可见，且展示口径应推导为 mgmt_unit 而非库里默认 all_admin
+    super_list = site.get(f"{TENANT_APPS_URL}?scope=managed", headers=headers)
+    assert super_list.status_code == 200, super_list.text
+    item = next(row for row in super_list.json() if row["id"] == app_id)
+    assert item["admin_scope_mode"] == "mgmt_unit"
+
+    # 已订阅 tab：全员可见，但 manageable 按管理范围标记（超管 True）
+    super_all = site.get(TENANT_APPS_URL, headers=headers)
+    assert next(row for row in super_all.json() if row["id"] == app_id)["manageable"] is True
+
+    # admin 角色、仅授予北京mou：不应在"我管理的应用"中看到该应用
+    member = create_user(site, headers, username="derivops", role_id=roles["admin"]["id"])
+    _grant_user_unit(site, headers, member["id"], roles["admin"]["id"], [beijing])
+    member_site, member_headers = _admin_login(tenant_client, "adm-deriv", "derivops", USER_PASSWORD)
+    member_list = member_site.get(f"{TENANT_APPS_URL}?scope=managed", headers=member_headers)
+    assert member_list.status_code == 200, member_list.text
+    assert app_id not in {row["id"] for row in member_list.json()}
+
+    # 白名单编辑器下拉：admin 角色无 page:roles/page:users，但持 app:visibility:write → 读取放行
+    assert member_site.get("/api/v1/admin/roles", headers=member_headers).status_code == 200
+    assert (
+        member_site.get("/api/v1/admin/users/options", headers=member_headers).status_code == 200
+    )
+
+    # 已订阅 tab 仍可见，但 manageable=False（前端据此只读）
+    member_all = member_site.get(TENANT_APPS_URL, headers=member_headers)
+    assert next(row for row in member_all.json() if row["id"] == app_id)["manageable"] is False
+
+    # 详情可见范围：manageable 标记同口径
+    member_vis = member_site.get(f"{TENANT_APPS_URL}/{app_id}/visibility", headers=member_headers)
+    assert member_vis.status_code == 200, member_vis.text
+    assert member_vis.json()["manageable"] is False
+
+    # 同口径鉴权：北京mou 管理员对该应用写管理范围应 403
+    denied = member_site.post(
+        f"{TENANT_APPS_URL}/{app_id}/admin-scope",
+        json={"mgmt_unit_id": beijing},
+        headers=member_headers,
+    )
+    assert denied.status_code == 403, denied.text
+
+    # 可见范围写接口同样被管理范围拦截：北京mou 管理员 PUT → 403
+    vis_denied = member_site.put(
+        f"{TENANT_APPS_URL}/{app_id}/visibility",
+        json={"visibility": "all", "whitelist": []},
+        headers=member_headers,
+    )
+    assert vis_denied.status_code == 403, vis_denied.text
+    assert "无权管理此应用" in vis_denied.json()["detail"]
+
+    # 授予南京mou 后可见
+    _grant_user_unit(site, headers, member["id"], roles["admin"]["id"], [beijing, nanjing])
+    member_site, member_headers = _admin_login(tenant_client, "adm-deriv", "derivops", USER_PASSWORD)
+    member_list2 = member_site.get(f"{TENANT_APPS_URL}?scope=managed", headers=member_headers)
+    assert app_id in {row["id"] for row in member_list2.json()}
+
+    # 授予南京mou 后可见范围写入放行
+    vis_ok = member_site.put(
+        f"{TENANT_APPS_URL}/{app_id}/visibility",
+        json={"visibility": "all", "whitelist": []},
+        headers=member_headers,
+    )
+    assert vis_ok.status_code == 200, vis_ok.text

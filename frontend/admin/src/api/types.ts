@@ -124,7 +124,8 @@ export interface AdminUserCreatePayload {
   username: string
   password: string
   display_name: string
-  role_id: string
+  /** 产品级租户管理新建时不传，服务端固定绑定该租户超级管理员。 */
+  role_id?: string
 }
 
 export interface AdminUserUpdatePayload {

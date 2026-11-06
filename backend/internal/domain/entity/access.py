@@ -13,6 +13,9 @@ SYSTEM_ROLE_SEEDS = (
     ("viewer", "只读成员", "只读访问被授权的业务对象"),
 )
 
+# 租户超级管理员角色编码：产品级租户管理新建管理员时固定绑定该角色
+SUPERADMIN_ROLE_CODE = "superadmin"
+
 # 统一资源表（resource）承载的类型
 RESOURCE_TABLE_TYPES = ("tool", "skill", "prompt", "knowledge")
 # RBAC 资源授权可选的全部类型。
