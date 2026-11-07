@@ -131,14 +131,16 @@ def validate_raw_graph(
     *,
     variable_names: set[str] | None = None,
     system_names: set[str] | None = None,
+    known_models: set[str] | None = None,
 ) -> list[ValidationIssue]:
     """对原始 dict graph 做校验：先 convert 成 IR，再 validate + lint。
 
     convert 失败时返回 error 级问题。用于 save_graph 前的快速校验。
     variable_names / system_names 传入时，额外检查未声明的命名空间变量引用（warning）。
+    known_models 传入时（发布闸门），检查节点模型引用在启用目录内（error）；草稿保存不传。
     """
     from internal.domain.canvas.convert import CanvasConvertError, convert_canvas
-    from internal.domain.canvas.lint import lint_graph, lint_variable_refs
+    from internal.domain.canvas.lint import lint_graph, lint_model_refs, lint_variable_refs
 
     try:
         graph = convert_canvas(raw)
@@ -155,4 +157,5 @@ def validate_raw_graph(
             variable_names=variable_names,
             system_names=system_names,
         )
+        + lint_model_refs(graph, known_models)
     )

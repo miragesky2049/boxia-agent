@@ -22,7 +22,10 @@ from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.canvas.variable_types import coerce as coerce_variable
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.repository.apps_protocols import ApplicationRepositoryProtocol
+from internal.domain.repository.apps_protocols import (
+    ApplicationRepositoryProtocol,
+    ModelRepositoryProtocol,
+)
 from internal.domain.repository.protocols import UnitOfWork
 from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.repository.apps.app_purge_repository import (
@@ -328,14 +331,20 @@ class ApplicationService:
         object_storage: ObjectStorage | None = None,
         *,
         default_llm_model_id: str,
+        model_repo: ModelRepositoryProtocol | None = None,
     ):
-        """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。"""
+        """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。
+
+        model_repo（可选）：发布闸门读取启用中的模型目录，用于拦截画布引用不存在
+        模型的发布；轻量 fake/测试未注入时跳过该项检查。
+        """
         self._uow = uow
         self._repo: ApplicationRepositoryProtocol = app_repo
         self._cache = cache
         # A12：对象存储（可选）；未配置时为 None，大画布降级内联存 DB
         self._storage = object_storage
         self._default_llm_model_id = default_llm_model_id
+        self._model_repo = model_repo
 
     # ========== 缓存 key ==========
     @staticmethod
@@ -955,6 +964,18 @@ class ApplicationService:
         return graph
 
     # ========== 发布动作（draft → live 快照） ==========
+    def _known_model_ids(self) -> set[str] | None:
+        """发布闸门的可用模型集合：目录中已启用模型 + settings 默认模型兜底。
+
+        组合根未注入 model_repo（fake/测试装配）时返回 None，调用方跳过模型检查，
+        避免测试环境因目录为空而误拦截所有发布。
+        """
+        if self._model_repo is None:
+            return None
+        models = {str(row["model_id"]) for row in self._model_repo.list_catalog()}
+        models.add(self._default_llm_model_id)
+        return models
+
     def publish_graph(
         self,
         application_id: UUID,
@@ -981,6 +1002,7 @@ class ApplicationService:
             latest_graph if isinstance(latest_graph, dict) else {},
             variable_names=variable_names,
             system_names=system_names,
+            known_models=self._known_model_ids(),
         )
         errors = [i for i in issues if i.severity == "error"]
         if errors:

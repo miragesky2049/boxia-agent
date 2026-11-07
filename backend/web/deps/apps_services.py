@@ -52,6 +52,7 @@ def make_application_service(uow: SqlAlchemyUnitOfWork) -> ApplicationService:
         cache=get_kv_cache(),
         object_storage=get_object_storage(),
         default_llm_model_id=get_settings().llm_model_id,
+        model_repo=ModelRepository(uow.session),
     )
 
 
