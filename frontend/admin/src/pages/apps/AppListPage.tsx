@@ -56,6 +56,14 @@ const FLOW_TYPE_OPTIONS: Array<{
   color: string
 }> = [
   {
+    value: 'agent',
+    label: '智能体',
+    desc: '模型自主规划与工具/知识库调用，配置面为表单、画布为事实源',
+    nodes: '开始 → Agent 循环 → 结束',
+    trial: '聊天试运行',
+    color: '#fa541c',
+  },
+  {
     value: 'workflow',
     label: '工作流',
     desc: '一次输入、一次输出，适合批处理与固定流程自动化',
@@ -70,14 +78,6 @@ const FLOW_TYPE_OPTIONS: Array<{
     nodes: '开始 → 大模型 → 输出 → 结束',
     trial: '聊天试运行',
     color: '#722ed1',
-  },
-  {
-    value: 'agent',
-    label: '智能体',
-    desc: '模型自主规划与工具/知识库调用，配置面为表单、画布为事实源',
-    nodes: '开始 → Agent 循环 → 结束',
-    trial: '聊天试运行',
-    color: '#fa541c',
   },
 ]
 
@@ -105,7 +105,7 @@ export default function AppListPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Application[]>([])
   const [keyword, setKeyword] = useState('')
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('agent')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detailApp, setDetailApp] = useState<Application | null>(null)
@@ -115,7 +115,7 @@ export default function AppListPage() {
 
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
-  const [newFlowType, setNewFlowType] = useState<FlowType>('workflow')
+  const [newFlowType, setNewFlowType] = useState<FlowType>('agent')
 
   // 编辑应用基本信息（名称/描述）与平台侧可见范围默认值（0068 v2）
   const [editForm] =
@@ -157,7 +157,7 @@ export default function AppListPage() {
   const resetCreateForm = () => {
     setNewName('')
     setNewDesc('')
-    setNewFlowType('workflow')
+    setNewFlowType('agent')
   }
 
   const handleCreate = async (enterCanvas: boolean) => {
@@ -362,10 +362,10 @@ export default function AppListPage() {
               setSelectedKeys([])
             }}
             options={[
-              { label: '全部', value: 'all' },
+              { label: '智能体', value: 'agent' },
               { label: '工作流', value: 'workflow' },
               { label: '对话流', value: 'chatflow' },
-              { label: '智能体', value: 'agent' },
+              { label: '全部', value: 'all' },
             ]}
           />
         </Col>
