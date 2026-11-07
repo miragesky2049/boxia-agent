@@ -40,12 +40,15 @@ class RunRepository:
         input_data: dict[str, Any],
         thread_id: str,
         user_id: UUID | None = None,
+        parent_run_id: UUID | None = None,
     ) -> None:
+        # parent_run_id：0074 PRD F7.2 工作流即工具的子 run 归因（顶层 run 为 NULL）
         self._session.execute(
             text(
                 "INSERT INTO run (id, tenant_id, workflow_id, graph_snapshot, input, "
-                "thread_id, execute_status, user_id) VALUES "
-                "(:id, :tid, :wid, CAST(:snapshot AS JSONB), CAST(:input AS JSONB), :thread, 'running', :uid)"
+                "thread_id, execute_status, user_id, parent_run_id) VALUES "
+                "(:id, :tid, :wid, CAST(:snapshot AS JSONB), CAST(:input AS JSONB), :thread, "
+                "'running', :uid, :parent)"
             ),
             {
                 "id": run_id,
@@ -55,6 +58,7 @@ class RunRepository:
                 "input": json.dumps(input_data),
                 "thread": thread_id,
                 "uid": user_id,
+                "parent": parent_run_id,
             },
         )
 
@@ -94,7 +98,7 @@ class RunRepository:
         row = self._session.execute(
             text(
                 "SELECT id, tenant_id, workflow_id, user_id, input, output, execute_status, error_message, "
-                "thread_id, interrupt_payload, started_at, finished_at FROM run WHERE id = :id"
+                "thread_id, interrupt_payload, parent_run_id, started_at, finished_at FROM run WHERE id = :id"
             ),
             {"id": run_id},
         ).first()
@@ -129,7 +133,7 @@ class RunRepository:
     ) -> list[dict]:
         sql = (
             "SELECT id, workflow_id, user_id, thread_id, execute_status, input, output, error_message, "
-            "interrupt_payload, started_at, finished_at "
+            "interrupt_payload, parent_run_id, started_at, finished_at "
             "FROM run WHERE tenant_id = :tid"
         )
         params: dict[str, Any] = {"tid": tenant_id}
@@ -142,6 +146,18 @@ class RunRepository:
         sql += " ORDER BY started_at DESC LIMIT :limit"
         params["limit"] = limit
         rows = self._session.execute(text(sql), params).all()
+        return [dict(r._mapping) for r in rows]
+
+    def list_child_runs(self, tenant_id: UUID, parent_run_id: UUID) -> list[dict]:
+        """工作流即工具的子 run 明细（0074 PRD F7.2/F13，运行日志页展开用）。"""
+        rows = self._session.execute(
+            text(
+                "SELECT id, workflow_id, user_id, thread_id, execute_status, error_message, "
+                "started_at, finished_at "
+                "FROM run WHERE tenant_id = :tid AND parent_run_id = :parent ORDER BY started_at"
+            ),
+            {"tid": tenant_id, "parent": parent_run_id},
+        ).all()
         return [dict(r._mapping) for r in rows]
 
     def list_interrupted(

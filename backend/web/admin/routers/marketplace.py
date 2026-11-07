@@ -219,6 +219,13 @@ async def resume_application(
 
     pending = make_run_service(uow).get_running_for_thread(tenant_id, application_id, thread_id)
 
+    # 0074 PRD F10（M3）：agent 工具审批是"应用层快照挂起"，不是 langgraph 人审节点，
+    # 只能由发起用户在对话端裁决；管理端 resume 通道显式拒绝，防止越权代答
+    # （正常路径下 get_interrupt_state 也取不到挂起态会 403，这里给出更明确的 422）。
+    pending_payload = pending.get("interrupt_payload")
+    if isinstance(pending_payload, dict) and pending_payload.get("type") == "tool_approval":
+        raise ValidationError("工具审批需由用户在对话端裁决，管理端不支持恢复此类中断")
+
     runner = await _build_runner(
         service, uow, context, tenant_id, application_id,
         thread_id=thread_id, run_id=pending["id"],

@@ -387,6 +387,7 @@ class RunRepositoryProtocol(Protocol):
         input_data: dict[str, Any],
         thread_id: str,
         user_id: UUID | None = None,
+        parent_run_id: UUID | None = None,
     ) -> None: ...
 
     def update_run_status(
@@ -401,6 +402,8 @@ class RunRepositoryProtocol(Protocol):
     def update_run_interrupt(self, run_id: UUID, payload: dict[str, Any]) -> None: ...
 
     def get_run(self, run_id: UUID) -> dict | None: ...
+
+    def list_child_runs(self, tenant_id: UUID, parent_run_id: UUID) -> list[dict]: ...
 
     def get_running_by_thread(
         self,

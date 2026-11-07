@@ -472,12 +472,12 @@ class WorkflowService:
 
     # ========== 内部 ==========
     def _assert_workflow_application(self, application_id: UUID) -> dict[str, Any]:
-        """可见性闸门 + 形态校验：用户端 workflow 接口拒绝 chatflow。"""
+        """可见性闸门 + 形态校验：用户端 workflow 接口拒绝 chatflow / agent（0074）。"""
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )
-        if app_card.get("flow_type") == "chatflow":
-            raise ValidationError("对话流应用请使用对话流运行接口")
+        if app_card.get("flow_type") in ("chatflow", "agent"):
+            raise ValidationError("对话流/智能体应用请使用对应的对话运行接口")
         return app_card
 
     @staticmethod

@@ -37,6 +37,20 @@ export function ConnectedChat() {
 
   const session = useChatSession({ agentId, flowType: agent?.flow_type })
 
+  // 0074 F3.4：智能体配置面的开场白与推荐问题（详情卡片 config 新键）
+  const agentConfig = (agent?.config ?? {}) as {
+    opening_remarks?: string
+    suggested_questions?: string[]
+    vision_enabled?: boolean
+  }
+  const suggestions: Suggestion[] = agentConfig.suggested_questions?.length
+    ? agentConfig.suggested_questions.map((question) => ({
+        icon: 'bolt',
+        title: question,
+        description: '点击直接发送',
+      }))
+    : SUGGESTIONS
+
   useEffect(() => {
     if (!agentId) {
       setAgentError('智能体地址不正确')
@@ -102,12 +116,14 @@ export function ConnectedChat() {
       conversationsLoading={session.conversationsLoading}
       activeConversationId={session.conversationId}
       messages={session.messages}
-      suggestions={SUGGESTIONS}
+      suggestions={suggestions}
+      openingRemarks={agentConfig.opening_remarks || undefined}
       streaming={session.streaming}
       userName={user?.display_name || user?.username || '当前用户'}
       tenantCode={getTenantCode()}
-      onSend={(text) => {
-        void session.send(text)
+      imagesEnabled={agent.flow_type === 'agent' && Boolean(agentConfig.vision_enabled)}
+      onSend={(text, images) => {
+        void session.send(text, images)
       }}
       onStop={session.stop}
       onNewChat={session.newConversation}
@@ -128,6 +144,9 @@ export function ConnectedChat() {
             }
           : undefined
       }
+      onApprovalDecision={(approved, comment, approval) => {
+        void session.resolveApproval(approved, comment, approval)
+      }}
     />
   )
 }

@@ -12,12 +12,14 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
 
+from internal.application.apps.agent_config_service import AgentConfigService
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.canvas_debug_service import CanvasDebugService
 from internal.application.errors import ValidationError
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphRuntime
 from web.admin.schemas.apps import (
+    AgentConfigPayload,
     AppBatchDeleteOut,
     AppBatchDeleteRequest,
     AppCopyOut,
@@ -68,6 +70,13 @@ def get_app_service(uow: UowDep) -> ApplicationService:
 
 
 AppServiceDep = Depends(get_app_service)
+
+
+def get_agent_config_service(service: ApplicationService = AppServiceDep) -> AgentConfigService:
+    return AgentConfigService(service)
+
+
+AgentConfigServiceDep = Depends(get_agent_config_service)
 
 
 def _client_meta(request: Request) -> tuple[str | None, str | None]:
@@ -324,6 +333,33 @@ def save_app_graph(
         application_id,
         payload.graph,
         changelog=payload.changelog,
+        actor_id=actor_id,
+        actor_username=actor_username,
+    )
+
+
+@router.get("/{application_id}/agent-config")
+def get_agent_config(
+    application_id: UUID,
+    service: AgentConfigService = AgentConfigServiceDep,
+) -> dict:
+    """读取智能体配置表单（0074 PRD F2：表单是画布 agent_loop 节点的视图）。"""
+    return service.get_config(application_id)
+
+
+@router.put("/{application_id}/agent-config")
+def save_agent_config(
+    application_id: UUID,
+    payload: AgentConfigPayload,
+    service: AgentConfigService = AgentConfigServiceDep,
+    principal: PlatformAdminDep = None,
+) -> dict:
+    """保存智能体配置：校验表单后写回画布产生新版本，返回归一化回读结果。"""
+    actor_id = getattr(principal, "user_id", None) if principal else None
+    actor_username = getattr(principal, "username", "") if principal else ""
+    return service.save_config(
+        application_id,
+        payload.model_dump(),
         actor_id=actor_id,
         actor_username=actor_username,
     )

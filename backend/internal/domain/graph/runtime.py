@@ -71,10 +71,13 @@ class GraphRuntime:
         variables: dict[str, Any] | None = None,
         user_variable_keys: set[str] | None = None,
         on_user_variables_changed: Any = None,
+        parent_run_id: UUID | None = None,
     ):
         self.canvas_json = canvas_json
         self.services = services or ServiceRegistry()
         self.run_repo = run_repo
+        # 0074 PRD F7.2：工作流即工具时子 run 关联父 run（顶层 run 为 None）
+        self.parent_run_id = parent_run_id
         self.usage_repo = usage_repo
         self.audit_repo = audit_repo
         self.webhook_repo = webhook_repo
@@ -210,17 +213,47 @@ class GraphRuntime:
             get_run = getattr(self.run_repo, "get_run", None)
             if get_run is not None and get_run(self.run_id) is not None:
                 return
-            self.run_repo.insert_run(
-                run_id=self.run_id,
-                tenant_id=self.tenant_id,
-                workflow_id=self.application_id,
-                graph_snapshot=self.canvas_json,
-                input_data=input_data,
-                thread_id=self.thread_id,
-                user_id=self.user_id,
-            )
+            kwargs: dict[str, Any] = {
+                "run_id": self.run_id,
+                "tenant_id": self.tenant_id,
+                "workflow_id": self.application_id,
+                "graph_snapshot": self.canvas_json,
+                "input_data": input_data,
+                "thread_id": self.thread_id,
+                "user_id": self.user_id,
+            }
+            if self.parent_run_id is not None:
+                # 仅在子 run 时传：存量 insert_run 桩签名不带该键（0074 PRD F7.2）
+                kwargs["parent_run_id"] = self.parent_run_id
+            self.run_repo.insert_run(**kwargs)
         except Exception:  # noqa: BLE001
             logger.exception("写 run 记录失败")
+
+    async def purge_thread_checkpoints(self) -> None:
+        """删除本 thread 的 checkpoints（0074 PRD R6：画布任务取消后的幽灵状态清理）。
+
+        客户端断连时 langgraph 的逐超步自提交 checkpointer 会留下中断时刻的
+        部分 state；同一 thread_id 下一轮继续在其上追加。仅当业务确认"下一轮
+        不依赖 checkpoint 续跑"（agent 对话通道：多轮上下文由 history 入参
+        显式携带、画布 agent 图无 human_task 中断点）时才允许调用本方法。
+        清理失败只告警——残留 checkpoint 不影响下一轮正确性，只影响存储。
+        """
+        if self._checkpointer_override is None:
+            return
+        try:
+            checkpointer = (
+                await get_checkpointer()
+                if self._checkpointer_override is _UNSET
+                else self._checkpointer_override
+            )
+            delete_thread = getattr(checkpointer, "adelete_thread", None)
+            if delete_thread is None:
+                return
+            await delete_thread(make_checkpoint_thread_id(self.tenant_id, self.thread_id))
+        except Exception:  # noqa: BLE001 - 兜底清理失败不掩盖断连主流程
+            logger.warning(
+                "checkpoint 清理失败 thread=%s run=%s", self.thread_id, self.run_id
+            )
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行工作流，返回最终 output。人审中断本次不触发。"""

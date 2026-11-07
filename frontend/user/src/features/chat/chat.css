@@ -880,6 +880,95 @@
   color: var(--danger-text);
 }
 
+/* ---------- 知识库引用来源（0074 PRD F5.3） ---------- */
+
+.lc-sources {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 8px;
+}
+
+.lc-sources__name {
+  margin-right: 8px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.lc-sources__score {
+  color: var(--brand-500);
+  font-size: 11px;
+}
+
+.lc-sources__excerpt {
+  margin-top: 2px;
+  color: var(--text-tertiary);
+  font-size: 12px;
+  line-height: 1.55;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- 深度模式计划卡（0074 PRD F4） ---------- */
+
+.lc-plan {
+  margin: 10px 0;
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  overflow: hidden;
+}
+
+.lc-plan.is-done {
+  border-color: var(--brand-200);
+}
+
+.lc-plan__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 10px 12px;
+  border: 0;
+  background: transparent;
+  color: var(--text-secondary);
+  font-family: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.lc-plan__header:hover {
+  background: var(--bg-hover);
+}
+
+.lc-plan__body {
+  padding: 10px 12px;
+  border-top: 1px solid var(--border-subtle);
+}
+
+.lc-plan__tasks {
+  margin: 0;
+  padding-left: 18px;
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.lc-plan__acceptance {
+  color: var(--text-tertiary);
+}
+
+.lc-plan__reflect {
+  color: var(--text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
 /* ---------- 问答卡 ---------- */
 
 .lc-question {
@@ -1424,4 +1513,186 @@
   .lc-send {
     transition: none;
   }
+}
+
+/* ===== 0074 PRD F10：敏感工具审批卡 ===== */
+.lc-approval {
+  margin: 10px 0;
+  padding: 16px;
+  border: 1px solid #fed7aa;
+  border-radius: var(--radius-lg);
+  background: linear-gradient(180deg, #fff7ed 0%, #ffffff 100%);
+  box-shadow: var(--shadow-xs);
+}
+
+.lc-approval__title {
+  color: #b54708;
+  font-size: 12.5px;
+  font-weight: 650;
+  letter-spacing: 0.02em;
+}
+
+.lc-approval__desc {
+  margin: 6px 0 10px;
+  color: var(--text-secondary);
+  font-size: 13.5px;
+  line-height: 1.5;
+}
+
+.lc-approval__calls {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.lc-approval__call {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+}
+
+.lc-approval__name {
+  color: var(--text-primary);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+
+.lc-approval__args {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.lc-approval__input {
+  width: 100%;
+  height: 40px;
+  margin-top: 12px;
+  padding: 0 12px;
+  border: 1px solid var(--border-default);
+  border-radius: 10px;
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 14px;
+  outline: none;
+  transition: border-color var(--dur-fast) var(--ease-out), box-shadow var(--dur-fast) var(--ease-out);
+}
+
+.lc-approval__input::placeholder {
+  color: var(--text-tertiary);
+}
+
+.lc-approval__input:focus {
+  border-color: var(--brand-500);
+  box-shadow: var(--shadow-focus);
+}
+
+.lc-approval__footer {
+  display: flex;
+  gap: 8px;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.lc-approval.is-decided {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 11px 14px;
+  border-color: #abefc6;
+  background: var(--success-bg);
+  color: #027a48;
+  font-size: 13px;
+}
+
+.lc-approval__icon {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #fff;
+  font-size: 10px;
+}
+
+.lc-approval__icon.is-ok {
+  background: var(--success-500);
+}
+
+.lc-approval__icon.is-no {
+  background: var(--text-tertiary);
+}
+
+/* ===== 0074 PRD F9：图片链接入口 ===== */
+.lc-composer__images {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.lc-img-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 260px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-pill);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  font-size: 12.5px;
+}
+
+.lc-img-chip__text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.lc-img-chip button {
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--text-tertiary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.lc-img-chip button:hover {
+  color: var(--danger-500);
+}
+
+.lc-img-input {
+  flex: 1;
+  min-width: 180px;
+  height: 32px;
+  padding: 0 12px;
+  border: 1px dashed var(--border-default);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12.5px;
+  outline: none;
+}
+
+.lc-img-input:focus {
+  border-color: var(--brand-500);
+  border-style: solid;
 }

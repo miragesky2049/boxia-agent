@@ -36,10 +36,10 @@ function AgentCard({ agent }: { agent: UserAgentSummary }) {
               {agent.name}
             </Typography.Title>
             <Tag
-              color={agent.flow_type === 'chatflow' ? 'purple' : 'blue'}
+              color={agent.flow_type === 'agent' ? 'orange' : agent.flow_type === 'chatflow' ? 'purple' : 'blue'}
               style={{ marginInlineStart: 'auto', marginInlineEnd: 0 }}
             >
-              {agent.flow_type === 'chatflow' ? '对话流' : '工作流'}
+              {agent.flow_type === 'agent' ? '智能体' : agent.flow_type === 'chatflow' ? '对话流' : '工作流'}
             </Tag>
           </div>
           <Typography.Paragraph

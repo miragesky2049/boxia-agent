@@ -1,4 +1,4 @@
-import type { ChatMessage, PendingQuestion, ToolTrace } from '../types'
+import type { ApprovalSpec, ChatMessage, PendingQuestion, PlanTask, ReflectNote, ToolTrace } from '../types'
 
 export interface ChatState {
   messages: ChatMessage[]
@@ -6,6 +6,8 @@ export interface ChatState {
   conversationId: string | null
   threadId: string | null
   pendingQuestion: PendingQuestion | null
+  /** 0074 PRD F10：最近一次挂起的工具审批（composer 提示与默认续跑目标） */
+  pendingApproval: ApprovalSpec | null
 }
 
 export type ChatAction =
@@ -21,13 +23,23 @@ export type ChatAction =
   | { type: 'llm_end'; id: string; content: string; streamed: boolean }
   | { type: 'tool_start'; id: string; trace: ToolTrace }
   | { type: 'tool_end'; id: string; trace: ToolTrace }
-  | { type: 'agent_result'; id: string; content: string; tools: ToolTrace[] }
+  | {
+      type: 'agent_result'
+      id: string
+      content: string
+      tools: ToolTrace[]
+      notice?: string
+      noticeTone?: 'waiting' | 'muted'
+    }
+  | { type: 'plan'; id: string; tasks: PlanTask[] }
+  | { type: 'reflect'; id: string; note: ReflectNote }
   | { type: 'message_error'; id: string; message: string; detail?: string }
   | {
       type: 'question'
       message: ChatMessage
       pending: PendingQuestion
     }
+  | { type: 'approval_interrupt'; message: ChatMessage }
   | { type: 'set_streaming'; streaming: boolean }
   | { type: 'stop'; id?: string }
   | { type: 'set_conversation'; conversationId: string | null }
@@ -41,6 +53,7 @@ export const initialChatState: ChatState = {
   conversationId: null,
   threadId: null,
   pendingQuestion: null,
+  pendingApproval: null,
 }
 
 function patchMessage(
@@ -78,6 +91,8 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         messages,
         streaming: true,
         pendingQuestion: null,
+        // 新一轮开始即不再是"等待裁决"态；历史审批卡仍可按卡内 threadId 续跑
+        pendingApproval: null,
       }
     }
 
@@ -95,6 +110,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ],
         streaming: true,
         pendingQuestion: null,
+        pendingApproval: null,
       }
 
     case 'append_assistant':
@@ -139,7 +155,20 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         content: action.content,
         tools: action.tools,
         streaming: false,
+        // 0074 PRD F11：预算触顶等场景由上层传入提示，未传时保留原有 notice
+        ...(action.notice !== undefined
+          ? { notice: action.notice, noticeTone: action.noticeTone ?? message.noticeTone }
+          : {}),
       }))
+
+    case 'plan':
+      return patchMessage(state, action.id, (message) => ({ ...message, plan: action.tasks }))
+
+    case 'reflect':
+      return patchMessage(state, action.id, (message) => {
+        const rest = (message.reflects ?? []).filter((item) => item.round !== action.note.round)
+        return { ...message, reflects: [...rest, action.note].sort((a, b) => a.round - b.round) }
+      })
 
     case 'message_error':
       return patchMessage(state, action.id, (message) => ({
@@ -158,6 +187,15 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         ...state,
         messages: [...messages, action.message],
         pendingQuestion: action.pending,
+      }
+    }
+
+    case 'approval_interrupt': {
+      const approval = action.message.approval ?? null
+      return {
+        ...state,
+        messages: [...state.messages, action.message],
+        pendingApproval: approval,
       }
     }
 
@@ -190,7 +228,9 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
                 !message.tools?.length &&
                 !message.error &&
                 !message.question &&
-                !message.notice
+                !message.notice &&
+                !message.plan?.length &&
+                !message.reflects?.length
               ),
           ),
       }
@@ -209,6 +249,7 @@ export function chatReducer(state: ChatState, action: ChatAction): ChatState {
         conversationId: action.conversationId,
         threadId: null,
         pendingQuestion: null,
+        pendingApproval: null,
         streaming: false,
       }
 

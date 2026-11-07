@@ -38,6 +38,7 @@ from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult
 from internal.domain.graph.nodes import register_node_handler
 from internal.domain.llm.client import LLMToolSpec
+from internal.domain.llm.multimodal import build_multimodal_content, normalize_image_urls
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +119,7 @@ class LLMNodeHandler(NodeHandler):
         images = _extract_images(ctx, config)
         user_content: Any = str(prompt_text)
         if images:
-            user_content = _build_multimodal_content(str(prompt_text), images)
+            user_content = build_multimodal_content(str(prompt_text), images)
         messages.append({"role": "user", "content": user_content})
 
         temperature = _to_float(temperature_raw, 0.7)
@@ -381,33 +382,9 @@ def _extract_images(ctx: NodeContext, config: dict) -> list[str]:
     - ctx.inputs["images"]：上游节点（如 START 上传附件）传入的图片列表
     - config["images"]：节点静态配置的图片 URL 列表（调试用）
 
-    输入形态：
-    - list[str]：直接使用
-    - str：逗号分隔的 URL（前端上传组件传逗号拼接），拆分为列表
-    非字符串元素直接忽略。
+    归一化逻辑（0074 PRD F9 起）收敛到 llm.multimodal.normalize_image_urls。
     """
     raw = ctx.inputs.get("images")
     if raw is None:
         raw = config.get("images")
-    if raw is None:
-        return []
-    if isinstance(raw, str):
-        # 前端把多图拼成 "url1,url2,data:..." 形式；逗号分隔
-        parts = [p.strip() for p in raw.split(",") if p.strip()]
-        return parts
-    if not isinstance(raw, list):
-        return []
-    return [str(x) for x in raw if isinstance(x, (str,)) and str(x).strip()]
-
-
-def _build_multimodal_content(text: str, images: list[str]) -> list[dict[str, Any]]:
-    """把纯文本 + 图片 URL 列表组装成 OpenAI multi-modal content part 数组。"""
-    parts: list[dict[str, Any]] = []
-    if text:
-        parts.append({"type": "text", "text": text})
-    for url in images:
-        parts.append({
-            "type": "image_url",
-            "image_url": {"url": url},
-        })
-    return parts
+    return normalize_image_urls(raw)

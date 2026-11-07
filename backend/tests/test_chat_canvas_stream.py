@@ -11,6 +11,7 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 from typing import Any
 from uuid import uuid4
@@ -35,11 +36,12 @@ class _Principal:
 
 
 class _AppService:
-    def __init__(self, graph: dict) -> None:
+    def __init__(self, graph: dict, flow_type: str = "agent") -> None:
         self._graph = graph
+        self._flow_type = flow_type
 
     def assert_user_can_view(self, application_id, tenant_id, user_id) -> dict:
-        return {"name": "天气助手", "description": "", "flow_type": "agent"}
+        return {"name": "天气助手", "description": "", "flow_type": self._flow_type}
 
     async def get_runtime_graph(self, application_id, tenant_id) -> dict:
         return self._graph
@@ -60,10 +62,18 @@ class _ConvRepo:
 class _MsgRepo:
     def __init__(self) -> None:
         self.appended: list[dict[str, Any]] = []
+        # 0074 F8 服务端记忆：list_messages_by_conversation 的固定返回（时间正序）
+        self.history_rows: list[dict[str, Any]] = []
+        self.list_calls: list[int] = []
 
     def append_message(self, **kwargs) -> int:
         self.appended.append(kwargs)
         return len(self.appended)
+
+    def list_messages_by_conversation(self, conversation_id, *, limit: int = 50):
+        self.list_calls.append(limit)
+        # 与真实仓储一致：取最近 limit 条后按时间正序返回
+        return self.history_rows[-limit:]
 
 
 class _ModelService:
@@ -204,15 +214,24 @@ def _canvas_trace_events() -> list[tuple[str, dict]]:
 
 
 class _FakeRunner:
-    def __init__(self, run_id, on_node_event, events, error: Exception | None = None) -> None:
+    def __init__(
+        self,
+        run_id,
+        on_node_event,
+        events,
+        error: Exception | None = None,
+        hang: bool = False,
+    ) -> None:
         self.run_id = run_id
         self.thread_id = "t"
         self.application_id = uuid4()
         self._events = events
         self._error = error
+        self._hang = hang
         self._emit = on_node_event
         self.ensure_inputs: dict[str, Any] | None = None
         self.invoke_inputs: dict[str, Any] | None = None
+        self.purged = 0
 
     def ensure_run(self, input_data: dict[str, Any]) -> None:
         self.ensure_inputs = input_data
@@ -221,9 +240,23 @@ class _FakeRunner:
         self.invoke_inputs = input_data
         for event_type, payload in self._events:
             await self._emit(event_type, payload)
+        if self._hang:
+            # R6 断连用例：模拟长耗时图执行挂起，等待消费侧拆除后取消
+            await asyncio.Event().wait()
         if self._error is not None:
             raise self._error
         return {"output": "北京 20 度。"}
+
+    async def purge_thread_checkpoints(self) -> None:
+        self.purged += 1
+
+
+class _FakeRunRepo:
+    def __init__(self) -> None:
+        self.status_updates: list[dict[str, Any]] = []
+
+    def update_run_status(self, run_id, **kwargs) -> None:
+        self.status_updates.append({"run_id": run_id, **kwargs})
 
 
 def _make_service(
@@ -233,13 +266,16 @@ def _make_service(
     runner_error: Exception | None = None,
     client: _FakeChatClient | None = None,
     tool_executor=None,
+    flow_type: str = "agent",
+    runner_hang: bool = False,
+    run_repo: Any | None = None,
 ) -> tuple[ChatService, dict[str, Any]]:
     tenant_id, user_id = uuid4(), uuid4()
     cid = uuid4()
     app_id = uuid4()
     principal = _Principal(tenant_id, user_id)
     uow = _Uow()
-    app_service = _AppService(graph)
+    app_service = _AppService(graph, flow_type)
     conv_repo = _ConvRepo(cid, principal, app_id)
     msg_repo = _MsgRepo()
     model_service = _ModelService(client or _FakeChatClient())
@@ -252,6 +288,7 @@ def _make_service(
             on_node_event=kwargs.get("on_node_event"),
             events=runner_events if runner_events is not None else _canvas_trace_events(),
             error=runner_error,
+            hang=runner_hang,
         )
         captured["runner"] = runner
         return runner
@@ -269,7 +306,7 @@ def _make_service(
         resource_service=object(),
         conv_repo=conv_repo,
         msg_repo=msg_repo,
-        run_repo=object(),
+        run_repo=run_repo or object(),
         default_llm_model_id="default-m",
         tool_executor_factory=tool_executor_factory,
     )
@@ -430,3 +467,423 @@ def test_chat_canvas_guard_when_agent_loop_not_executed() -> None:
     assert "agent_loop" in frames[1][1]["message"]
     assert [m["role"] for m in cap["msg_repo"].appended] == ["user"]
     assert cap["uow"].commits == 0
+
+
+# ---------- 20261107 0074 PRD F5/F8：datasets 通道条件 + 服务端记忆 ----------
+def _datasets_canvas_graph(*, memory: dict | None = None) -> dict:
+    """纯知识库 agent 画布：无 tools，仅 datasets（F5 校准后也应走画布通道）。"""
+
+    def literal(value: object) -> dict:
+        return {"value": {"type": "literal", "content": value}}
+
+    inputs = {
+        "modleName": literal("m1"),
+        "systemPrompt": literal("你是产品顾问"),
+        "datasets": literal([{"datasetId": "d1", "name": "产品库", "mode": "onDemand"}]),
+    }
+    if memory is not None:
+        inputs["memory"] = literal(memory)
+    return {"nodes": [{"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}], "edges": []}
+
+
+def test_chat_datasets_only_agent_goes_canvas_channel() -> None:
+    """无 tools 仅 datasets：use_canvas 命中，runner 被触达，不再误落打字机通道。"""
+    service, cap = _make_service(_datasets_canvas_graph())
+    frames = asyncio.run(_collect(service, cap["application_id"], "退款政策", cap["cid"]))
+
+    assert cap["runner"] is not None
+    assert frames[0][0] == "run_start"
+    assert frames[0][1]["tools"] == []
+    # 打字机通道会调 chat_stream；画布通道不应触达模型客户端
+    assert cap["model_service"].calls == []
+
+
+def test_chat_agent_server_memory_fetched_when_history_omitted() -> None:
+    """F8：前端未传 history 且 flow_type=agent → 按节点 memory 配置拉取并截断注入画布。"""
+    graph = _datasets_canvas_graph(memory={"shortTerm": {"windowTurns": 1, "tokenBudget": 100000}})
+    service, cap = _make_service(graph)
+    cap["msg_repo"].history_rows = [
+        {"role": "user", "content": "q1"},
+        {"role": "assistant", "content": "a1"},
+        {"role": "user", "content": "q2"},
+        {"role": "assistant", "content": "a2"},
+    ]
+
+    asyncio.run(_collect(service, cap["application_id"], "q3", cap["cid"]))
+
+    # 拉取 limit = windowTurns * 2
+    assert cap["msg_repo"].list_calls == [2]
+    injected = cap["runner"].invoke_inputs["history"]
+    assert injected == [{"role": "user", "content": "q2"}, {"role": "assistant", "content": "a2"}]
+
+
+def test_chat_agent_explicit_empty_history_skips_server_memory() -> None:
+    """显式 history=[] 表示"本轮不带历史"，不得再走服务端拉取。"""
+    service, cap = _make_service(_datasets_canvas_graph())
+    cap["msg_repo"].history_rows = [{"role": "user", "content": "不应出现"}]
+
+    asyncio.run(_collect(service, cap["application_id"], "q", cap["cid"], history=[]))
+
+    assert cap["msg_repo"].list_calls == []
+    assert cap["runner"].invoke_inputs["history"] == []
+
+
+def test_chat_agent_disabled_memory_returns_empty() -> None:
+    """memory.enabled=false：不拉库，注入空历史。"""
+    graph = _datasets_canvas_graph(memory={"shortTerm": {"enabled": False}})
+    service, cap = _make_service(graph)
+    cap["msg_repo"].history_rows = [{"role": "user", "content": "q1"}]
+
+    asyncio.run(_collect(service, cap["application_id"], "q2", cap["cid"]))
+
+    assert cap["msg_repo"].list_calls == []
+    assert cap["runner"].invoke_inputs["history"] == []
+
+
+def test_chatflow_never_uses_server_side_memory() -> None:
+    """服务端记忆仅对 agent 型生效：chatflow 未传 history 不拉库（行为不变）。"""
+    graph = _datasets_canvas_graph()
+    service, cap = _make_service(graph, flow_type="chatflow")
+    cap["msg_repo"].history_rows = [{"role": "user", "content": "q1"}]
+
+    asyncio.run(_collect(service, cap["application_id"], "q2", cap["cid"]))
+
+    assert cap["msg_repo"].list_calls == []
+
+
+# ---------- 20261107 0074 PRD M2：F4 深度模式 / F5.3 溯源 / F6+F7 通道判据 / R6 断连 ----------
+def _agent_graph_with(**literal_inputs: object) -> dict:
+    def literal(value: object) -> dict:
+        return {"value": {"type": "literal", "content": value}}
+
+    inputs = {k: (v["value"]["content"] if isinstance(v, dict) else v) for k, v in literal_inputs.items()}
+    return {
+        "nodes": [{
+            "id": "loop_x", "type": "100",
+            "data": {
+                "inputs": {key: literal(value) for key, value in inputs.items()},
+                "outputs": [],
+            },
+        }],
+        "edges": [],
+    }
+
+
+def test_chat_mcp_or_workflows_only_agent_goes_canvas_channel() -> None:
+    """F6/F7：仅挂 MCP 快照或工作流的 agent（无 tools/datasets）也必须走画布通道。"""
+    graphs = [
+        _agent_graph_with(
+            modleName="m1", systemPrompt="S",
+            mcpServers=[{"serverUrl": "http://10.0.0.8/mcp", "enabledTools": [{"name": "geocode"}]}],
+        ),
+        _agent_graph_with(
+            modleName="m1", systemPrompt="S",
+            workflows=[{"applicationId": str(uuid4())}],
+        ),
+    ]
+    for graph in graphs:
+        service, cap = _make_service(graph, runner_events=[
+            ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+            ("prompt_text", {"phase": "execute", "iteration": 1, "role": "assistant",
+                             "content": "done", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                             "finish_reason": "stop", "tool_calls": []}),
+            ("node_end", {"node_id": "loop_x", "status": "success", "outputs": {"output": "done"}}),
+        ])
+        frames = asyncio.run(_collect(service, cap["application_id"], "q", cap["cid"]))
+        assert cap["runner"] is not None
+        assert frames[0][0] == "run_start"
+        assert cap["model_service"].calls == []
+
+
+def test_chat_deep_mode_reacts_only_false_and_emits_plan_reflect_frames() -> None:
+    """F4：agent+画布+planExecuteReflect → react_only=False；plan/reflect 透出 additive 帧，
+    node_end 的 finish_reason 覆盖 result 帧（F11.1 预算触顶走同一通道）。"""
+    graph = _canvas_graph()
+    graph["nodes"][0]["data"]["inputs"]["reasoningMode"] = {
+        "value": {"type": "literal", "content": "planExecuteReflect"}
+    }
+    events = [
+        ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+        ("prompt_text", {"phase": "plan", "role": "assistant",
+                         "content": '{"tasks": [{"id": "t1", "goal": "查天气"}]}'}),
+        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0, "role": "assistant",
+                         "content": "北京 20 度。",
+                         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                         "finish_reason": "stop", "tool_calls": []}),
+        ("prompt_text", {"phase": "reflect", "reflect_round": 0, "role": "assistant",
+                         "content": '{"done": false, "critique": "缺湿度", "suggestion": "补充"}'}),
+        ("node_end", {"node_id": "loop_x", "status": "success", "outputs": {
+            "output": "北京 20 度。", "plan": [{"id": "t1"}],
+            "finish_reason": "budget_exceeded",
+        }}),
+    ]
+    service, cap = _make_service(graph, runner_events=events)
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    assert cap["runner"].invoke_inputs["react_only"] is False
+    names = [name for name, _ in frames]
+    assert names == ["run_start", "plan", "llm_end", "reflect", "result", "final"]
+    plan = frames[1][1]
+    assert plan["tasks"] == [{"id": "t1", "goal": "查天气"}]
+    reflect = frames[3][1]
+    assert reflect["reflect_round"] == 0 and reflect["done"] is False and reflect["suggestion"] == "补充"
+    # node_end 透出 budget_exceeded 覆盖 execute llm_end 的 stop
+    assert frames[4][1]["finish_reason"] == "budget_exceeded"
+
+
+def test_chat_tool_end_maps_chunks_meta_to_chunks_frame() -> None:
+    """F5.3：节点 trace 的 chunks_meta 映射为 SSE tool_end 帧的 additive chunks 键。"""
+    events = _canvas_trace_events()
+    for index, (event_type, payload) in enumerate(events):
+        if event_type == "tool_call_end":
+            events[index] = (event_type, {**payload, "chunks_meta": [
+                {"dataset_id": "d1", "dataset_name": "售后手册", "chunk_id": "c-1",
+                 "document_id": "doc-1", "score": 0.91, "excerpt": "退款需在7天内"},
+            ]})
+    service, cap = _make_service(_canvas_graph(), runner_events=events)
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    tool_end = next(payload for name, payload in frames if name == "tool_end")
+    assert tool_end["chunks"][0]["dataset_name"] == "售后手册"
+    assert tool_end["chunks"][0]["score"] == 0.91
+    # 原始 4 个基础键不变（additive 只增不改）
+    assert set(tool_end) == {"tool_call_id", "name", "observation", "is_error", "chunks"}
+
+
+def test_chat_canvas_disconnect_marks_cancelled_and_purges_checkpoints() -> None:
+    """R6：消费侧断连拆流时 run 标 cancelled（含提交）并清理 thread checkpoints。"""
+    run_repo = _FakeRunRepo()
+    events = [
+        ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0,
+                         "tool_round": 0, "tools": [], "messages": []}),
+        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0, "role": "assistant",
+                         "content": "", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                         "finish_reason": "tool_calls",
+                         "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": "{}"}]}),
+        ("tool_call_start", {"name": "get_weather", "arguments": "{}", "tool_call_id": "c1",
+                             "arguments_parsed": {}, "reflect_round": 0, "tool_round": 0}),
+    ]
+
+    async def _go():
+        app_id, cid = cap["application_id"], cap["cid"]
+        agen = service.run_agent_stream(app_id, "北京天气", cid, None)
+        seen: list[str] = []
+        got_tool_start = asyncio.Event()
+
+        async def consume() -> None:
+            async for name, _payload in agen:
+                seen.append(name)
+                if name == "tool_start":
+                    # 下一轮 __anext__ 将阻塞在 queue.get（runner 已挂起）——
+                    # 此刻取消任务，等价 uvicorn/starlette 对断连请求的拆流方式
+                    got_tool_start.set()
+
+        task = asyncio.create_task(consume())
+        await asyncio.wait_for(got_tool_start.wait(), timeout=5)
+        await asyncio.sleep(0.05)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+        return seen
+
+    service, cap = _make_service(
+        _canvas_graph(), runner_events=events, runner_hang=True, run_repo=run_repo,
+    )
+    seen = asyncio.run(_go())
+
+    assert seen == ["run_start", "llm_start", "llm_end", "tool_start", "final"]
+    runner = cap["runner"]
+    assert run_repo.status_updates == [{
+        "run_id": runner.run_id,
+        "execute_status": "cancelled",
+        "error_message": "客户端断连，执行已取消",
+    }]
+    # 断连收口提交一次（run 行 + user 消息不随连接回滚）
+    assert cap["uow"].commits == 1
+    assert runner.purged == 1
+
+
+# ---------- 20261107 0074 PRD F10（M3）：工具审批挂起/续跑（chat 通道编排） ----------
+class _ApprovalRunRepo:
+    """带挂起审批检索面的 run_repo fake：get_running_by_thread + update_run_interrupt。"""
+
+    def __init__(self, pending_run_id, pending_payload: dict | None) -> None:
+        self._pending = {
+            "id": pending_run_id,
+            "execute_status": "interrupted",
+            "interrupt_payload": pending_payload,
+        } if pending_payload is not None else None
+        self.interrupt_updates: list[dict[str, Any]] = []
+        self.status_updates: list[dict[str, Any]] = []
+        self.queried_threads: list[str] = []
+
+    def get_running_by_thread(self, tenant_id, application_id, thread_id):
+        self.queried_threads.append(thread_id)
+        return self._pending
+
+    def update_run_interrupt(self, run_id, payload) -> None:
+        self.interrupt_updates.append({"run_id": run_id, "payload": payload})
+
+    def update_run_status(self, run_id, **kwargs) -> None:
+        self.status_updates.append({"run_id": run_id, **kwargs})
+
+
+def _awaiting_trace_events() -> list[tuple[str, dict]]:
+    """节点整轮挂起形态的画布 trace：assistant 轮后 node_end 带 awaiting_approval。"""
+    return [
+        ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+        ("prompt_text", {
+            "phase": "execute", "reflect_round": 0, "tool_round": 0,
+            "iteration": 1, "role": "assistant", "content": "",
+            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+            "finish_reason": "awaiting_approval",
+            "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}],
+        }),
+        ("node_end", {
+            "node_id": "loop_x", "status": "success",
+            "outputs": {
+                "output": "", "plan": [], "model": "m1", "awaiting_approval": True,
+                "approval": {
+                    "type": "tool_approval", "node_id": "loop_x",
+                    "iteration": 1, "tool_round": 0,
+                    "pending_tool_calls": [{"id": "c1", "name": "get_weather",
+                                            "arguments": '{"city": "北京"}'}],
+                    "awaiting_calls": [{"id": "c1", "name": "get_weather",
+                                         "arguments": '{"city": "北京"}'}],
+                },
+                "snapshot": {
+                    "messages": [{"role": "user", "content": "北京天气"}],
+                    "plan_tasks": [], "reflect_round": 0, "reflect_history": [],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+                },
+            },
+        }),
+    ]
+
+
+def _approval_pending_payload() -> dict:
+    return {
+        "type": "tool_approval", "node_id": "loop_x", "iteration": 1, "tool_round": 0,
+        "pending_tool_calls": [{"id": "c1", "name": "send_email", "arguments": "{}"}],
+        "awaiting_calls": [{"id": "c1", "name": "send_email", "arguments": "{}"}],
+        "snapshot": {
+            "messages": [{"role": "user", "content": "发邮件"}],
+            "plan_tasks": [], "reflect_round": 0, "reflect_history": [],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+        },
+    }
+
+
+def _collect_full(service, app_id, query, cid, **kwargs):
+    async def _go():
+        return [(n, p) async for n, p in service.run_agent_stream(app_id, query, cid, None, **kwargs)]
+    return asyncio.run(_go())
+
+
+def test_chat_approval_interrupt_frame_and_snapshot_persist() -> None:
+    """挂起轮：interrupted 帧收尾，快照写 run payload，不落 assistant、不发 result。"""
+    pending_id = uuid4()
+    run_repo = _ApprovalRunRepo(pending_id, None)
+    service, cap = _make_service(
+        _canvas_graph(), runner_events=_awaiting_trace_events(), run_repo=run_repo,
+    )
+    frames = _collect_full(service, cap["application_id"], "北京天气", cap["cid"])
+    names = [name for name, _ in frames]
+    assert names == ["run_start", "llm_end", "interrupted", "final"]
+
+    interrupted = frames[2][1]
+    assert interrupted["approval"]["type"] == "tool_approval"
+    # 帧内 approval 是展示裁剪形态，快照不外发
+    assert "snapshot" not in interrupted["approval"]
+    assert interrupted["run_id"] == frames[0][1]["run_id"]
+    assert interrupted["conversation_id"] == str(cap["cid"])
+    assert interrupted["thread_id"] == str(cap["cid"])
+
+    # run payload = 审批展示字段 + snapshot（供后续 resume 还原执行现场）
+    saved = run_repo.interrupt_updates[0]
+    assert saved["payload"]["type"] == "tool_approval"
+    assert saved["payload"]["snapshot"]["messages"] == [{"role": "user", "content": "北京天气"}]
+    # 挂起现场提交一次；只落 user 消息
+    assert cap["uow"].commits == 1
+    assert [m["role"] for m in cap["msg_repo"].appended] == ["user"]
+
+
+def test_chat_approval_resume_reuses_pending_run_and_snapshot() -> None:
+    """续跑：复用挂起 run 行、start_inputs 携带 approval_resume、user 消息为裁决文案。"""
+    pending_id = uuid4()
+    run_repo = _ApprovalRunRepo(pending_id, _approval_pending_payload())
+    service, cap = _make_service(_canvas_graph(), run_repo=run_repo)
+
+    frames = _collect_full(
+        service, cap["application_id"], "", cap["cid"],
+        resume={"approved": True, "comment": "可以发"},
+    )
+    names = [name for name, _ in frames]
+    assert names[-2:] == ["result", "final"]
+    # run_start 帧复用被挂起的 run id
+    assert frames[0][1]["run_id"] == str(pending_id)
+
+    runner = cap["runner"]
+    approval_resume = runner.invoke_inputs["approval_resume"]
+    assert approval_resume["approved"] is True
+    assert approval_resume["comment"] == "可以发"
+    assert approval_resume["snapshot"]["messages"] == [{"role": "user", "content": "发邮件"}]
+    # 快照自带执行现场：不再携带历史；线程沿用挂起 run 的会话线程
+    assert runner.invoke_inputs["history"] == []
+    assert cap["factory_kwargs"][0]["thread_id"] == str(cap["cid"])
+    # 裁决文案作为 user 消息落库
+    assert cap["msg_repo"].appended[0]["content"] == "批准执行工具调用（理由：可以发）"
+
+
+def test_chat_approval_resume_without_pending_raises() -> None:
+    """无可恢复挂起：ValidationError 在流开始前抛出（不落 user 消息、不构造 runner）。"""
+    run_repo = _ApprovalRunRepo(uuid4(), None)
+    service, cap = _make_service(_canvas_graph(), run_repo=run_repo)
+    import pytest
+
+    with pytest.raises(Exception) as exc_info:
+        _collect_full(service, cap["application_id"], "", cap["cid"],
+                      resume={"approved": True, "comment": ""})
+    assert "没有待恢复的工具审批" in str(exc_info.value)
+    assert cap["factory_kwargs"] == []
+    assert cap["msg_repo"].appended == []
+
+
+def test_chat_new_message_rotates_thread_when_approval_pending() -> None:
+    """新消息遇未决审批：轮转子线程，旧挂起 run 的 resume 检索不被干扰。"""
+    pending_id = uuid4()
+    run_repo = _ApprovalRunRepo(pending_id, _approval_pending_payload())
+    service, cap = _make_service(_canvas_graph(), run_repo=run_repo)
+
+    frames = _collect_full(service, cap["application_id"], "换个话题", cap["cid"])
+    assert frames[-2:][0][0] == "result"
+
+    bound = cap["factory_kwargs"][0]["thread_id"]
+    assert bound != str(cap["cid"])
+    assert bound.startswith(f"{cap['cid']}:")
+    # 旧挂起 run 不被本轮触碰
+    assert run_repo.interrupt_updates == []
+    assert run_repo.status_updates == []
+
+
+def test_chat_prepare_run_and_channel_resolution() -> None:
+    """统一入口预检：空消息/缺 cid/缺 approved 均 422；channel 解析回卡片。"""
+    import pytest
+
+    from internal.application.errors import ValidationError as _VE
+
+    service, cap = _make_service(_canvas_graph())
+    app_id = cap["application_id"]
+
+    with pytest.raises(_VE):
+        service.prepare_chat_run(app_id, message="  ", conversation_id=None, resume=None)
+    with pytest.raises(_VE):
+        service.prepare_chat_run(app_id, message="", conversation_id=None,
+                                 resume={"approved": True})
+    with pytest.raises(_VE):
+        service.prepare_chat_run(app_id, message="", conversation_id=cap["cid"],
+                                 resume={"comment": "x"})
+    service.prepare_chat_run(app_id, message="hi", conversation_id=None, resume=None)
+    # resolve_conversation_channel：路由分派依据（flow_type）
+    assert service.resolve_conversation_channel(app_id)["flow_type"] == "agent"

@@ -1,5 +1,5 @@
-import { ArrowUpOutlined } from '@ant-design/icons'
-import { useEffect, useRef } from 'react'
+import { ArrowUpOutlined, CloseOutlined, PictureOutlined } from '@ant-design/icons'
+import { useEffect, useRef, useState } from 'react'
 
 interface ComposerProps {
   value: string
@@ -9,6 +9,12 @@ interface ComposerProps {
   onChange: (value: string) => void
   onSend: () => void
   onStop?: () => void
+  /** 0074 PRD F9：随消息发送的图片 URL（粘贴式，应用 visionEnabled 时展示入口） */
+  images?: string[]
+  imagesEnabled?: boolean
+  maxImages?: number
+  onAddImage?: (url: string) => void
+  onRemoveImage?: (index: number) => void
 }
 
 const MAX_HEIGHT = 200
@@ -21,8 +27,14 @@ export function Composer({
   onChange,
   onSend,
   onStop,
+  images,
+  imagesEnabled,
+  maxImages = 8,
+  onAddImage,
+  onRemoveImage,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const [imageDraft, setImageDraft] = useState('')
 
   useEffect(() => {
     const el = textareaRef.current
@@ -33,8 +45,47 @@ export function Composer({
 
   const canSend = value.trim().length > 0
 
+  const addImage = () => {
+    const url = imageDraft.trim()
+    if (!url) return
+    onAddImage?.(url)
+    setImageDraft('')
+  }
+
   return (
     <div className="lc-composer-area">
+      {imagesEnabled && (
+        <div className="lc-composer__images">
+          {(images ?? []).map((url, index) => (
+            <span key={url} className="lc-img-chip" title={url}>
+              <PictureOutlined />
+              <span className="lc-img-chip__text">{url}</span>
+              <button
+                type="button"
+                aria-label="移除图片"
+                onClick={() => onRemoveImage?.(index)}
+              >
+                <CloseOutlined />
+              </button>
+            </span>
+          ))}
+          {(images ?? []).length < maxImages && (
+            <input
+              className="lc-img-input"
+              value={imageDraft}
+              placeholder="粘贴图片链接，回车添加"
+              onChange={(event) => setImageDraft(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault()
+                  addImage()
+                }
+              }}
+              onBlur={addImage}
+            />
+          )}
+        </div>
+      )}
       <div className="lc-composer">
         <textarea
           ref={textareaRef}

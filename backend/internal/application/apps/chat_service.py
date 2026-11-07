@@ -1,13 +1,18 @@
 """用户端 chat 应用服务：ReAct 循环 + SSE 事件流 + 会话/消息持久化。
 
 chat 支持两条执行通道（20261106 P3 服务端兼容契约）：
-- 画布通道：应用有 agent_loop 节点且关键配置显式（tools/modleName/systemPrompt）时，
+- 画布通道：应用有 agent_loop 节点且关键配置显式（tools 或 datasets/modleName/systemPrompt）时，
   走 GraphRuntime 执行 start→agent_loop(react_only)→end，把画布 trace 事件映射为
   既有 chat SSE 帧契约，前端 agentRun.ts 消费不变；run 表/节点审计/checkpoint
   作为运行时副产品获得。
 - 进程内通道：无 tools 的打字机流式、以及配置不满足上述条件的旧应用，直接消费
   共享 ReAct 内核（`internal.domain.agent.react.run_react_loop`），保持改造前行为。
 两条通道循环语义同源一份内核，工具执行共用 ToolExecutorService → ToolGateway 链路。
+
+0074 PRD F10 人审（M3）：画布通道内 agent_loop 节点按 sensitiveTools 声明整轮挂起时，
+本服务把审批信息与执行快照存进 run.interrupt_payload 并推 interrupted SSE 帧；
+用户裁决后经同一入口带 resume 续跑（复用被挂起的 run 行、全新 invoke 从快照还原）。
+全程不使用 langgraph 挂起中断，R6 断连清理语义不受影响。
 """
 
 from __future__ import annotations
@@ -26,6 +31,11 @@ from internal.application.apps.model_service import ModelService
 from internal.application.apps.ports import RunnerFactory
 from internal.application.apps.resource_service import AppResourceService
 from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
+from internal.domain.agent.memory import (
+    normalize_history_rows,
+    parse_memory_config,
+    trim_history,
+)
 from internal.domain.agent.react import (
     ToolExecutor,
     build_tool_specs,
@@ -86,6 +96,22 @@ def _resume_answer_text(resume: dict[str, Any] | None) -> str:
     return str(value).strip()
 
 
+def _approval_decision_text(approved: bool, comment: str) -> str:
+    """0074 PRD F10：审批裁决转用户消息文案（落会话历史，恢复时上下文可读）。"""
+    base = "批准执行工具调用" if approved else "拒绝执行工具调用"
+    return f"{base}（理由：{comment}）" if comment else base
+
+
+def _parse_phase_json(text: str) -> Any:
+    """plan/reflect 阶段的模型输出是 JSON 文本；解析失败返回 None（原样透出不影响展示）。"""
+    if not text:
+        return None
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, ValueError):
+        return None
+
+
 @dataclass
 class _ChatRunState:
     """chat 单轮执行累加状态：画布/进程内两条通道共用，落库与 result 帧统一消费。"""
@@ -99,6 +125,8 @@ class _ChatRunState:
     run_id: UUID | None = None
     # 画布通道守卫：agent_loop 节点是否真正执行完成（缺连线/图不可达时不能静默空回答）
     agent_finished: bool = False
+    # 0074 PRD F10：画布节点整轮挂起时的审批现场 {approval, snapshot}
+    awaiting: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -118,6 +146,15 @@ class _ChatRunSpec:
     # 画布通道 node_end 完成判定用（20261106 review 修正：按节点 ID 精确匹配，
     # 不再嗅探输出键名）
     loop_node_id: str = ""
+    # 0074 PRD F4：深度模式（reasoningMode=planExecuteReflect）时画布通道
+    # 不再传 react_only，节点内 plan/execute/reflect 三阶段完整执行
+    react_only: bool = True
+    # 0074 PRD F9：多模态图片 URL 列表（节点侧按 visionEnabled 门控后使用）
+    images: list[str] | None = None
+    # 0074 PRD F10：审批续跑载荷 {approved, comment, snapshot}；None = 常规新轮
+    approval_resume: dict[str, Any] | None = None
+    # 画布通道线程 ID：默认会话 ID；新消息遇到未决审批时轮转为子线程
+    thread_id: str = ""
 
 
 @dataclass(frozen=True)
@@ -205,11 +242,18 @@ class ChatService:
         query: str,
         conversation_id: UUID | None,
         history: list[dict[str, str]] | None,
+        *,
+        images: list[str] | None = None,
+        resume: dict[str, Any] | None = None,
+        thread_id: str | None = None,
     ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
         """跑一轮 ReAct 对话，产出 (event_name, payload) 序列。路由层负责转 SSE 帧。
 
         20261106 P3：读完画布配置后决定执行通道——满足画布条件走 GraphRuntime
         （trace 事件映射为同帧契约），否则保持改造前的进程内内核/打字机通道。
+        0074 PRD F10（M3）：resume={approved, comment} 时找到挂起的 tool_approval
+        run 并从其快照续跑（复用被挂起的 run 行）；挂起本轮以 interrupted 帧收尾，
+        不落 assistant 消息、不发 result。F9：images 透传节点按 visionEnabled 门控。
         """
         # 1. 可见性闸门
         app_card = self._app_service.assert_user_can_view(
@@ -219,11 +263,36 @@ class ChatService:
         # 2. 会话归属
         cid = self._resolve_chat_conversation(application_id, conversation_id, query)
 
+        # 3. 定位该线程上挂起的工具审批（快照挂在 run.interrupt_payload，与 checkpoint 无关）
+        bound_thread = self._bind_chatflow_thread_id(cid, thread_id)
+        pending = self._find_pending_tool_approval(application_id, bound_thread)
+
+        approval_resume: dict[str, Any] | None = None
         run_id = uuid4()
+        if resume is not None:
+            if pending is None:
+                raise ValidationError("没有待恢复的工具审批")
+            approval_resume = {
+                "approved": bool(resume.get("approved")),
+                "comment": str(resume.get("comment") or ""),
+                "snapshot": (pending["payload"] or {}).get("snapshot"),
+            }
+            # 续跑复用被挂起的 run 行：审计字段连续 + message.run_id 外键可解析
+            # （与对话流 resume 同形）；invoke 终态会经 update_run_status 清 payload
+            run_id = pending["run_id"]
+            # 裁决文案作为 user 消息落库；快照续跑路径会忽略该入参
+            query = _approval_decision_text(approval_resume["approved"], approval_resume["comment"])
+            # 快照自带完整执行现场，不再拉取服务端记忆/携带历史
+            history = []
+        elif pending is not None:
+            # 新消息遇到未决审批：轮转子线程，保证旧挂起 run 的 resume 检索
+            # （get_running_by_thread 按 thread 取最近未结束行）不被本轮干扰
+            bound_thread = f"{cid}:{uuid4()}"
+
         state = _ChatRunState()
 
         try:
-            # 3. 读画布 agent_loop 配置 -> 执行计划（配置键收口与通道判定见 _build_chat_run_plan）
+            # 4. 读画布 agent_loop 配置 -> 执行计划（配置键收口与通道判定见 _build_chat_run_plan）
             graph = await self._app_service.get_runtime_graph(application_id, self._tenant_id)
             spec = self._build_chat_run_plan(
                 app_card=app_card,
@@ -233,10 +302,15 @@ class ChatService:
                 cid=cid,
                 history=history,
                 run_id=run_id,
+                images=images,
+                approval_resume=approval_resume,
+                thread_id=bound_thread,
             )
+            if approval_resume is not None and not spec.use_canvas:
+                raise ValidationError("当前应用未走画布执行通道，无法恢复审批")
 
             if not spec.use_canvas:
-                # 4. 落库 user 消息（画布通道在 ensure_run 后绑定 run_id 另行落库）
+                # 5. 落库 user 消息（画布通道在 ensure_run 后绑定 run_id 另行落库）
                 self._msg_repo.append_message(
                     conversation_id=cid,
                     tenant_id=self._tenant_id,
@@ -251,42 +325,51 @@ class ChatService:
                 "tools": [t.name for t in spec.tool_specs],
             }
 
-            # 5. 三条通道（SSE 事件契约一致，仅执行载体不同）
-            if not spec.tool_specs:
-                async for frame in self._run_typewriter_stream(spec, state):
-                    yield frame
-            elif spec.use_canvas:
+            # 6. 三条通道（SSE 事件契约一致，仅执行载体不同）。
+            # 0074 PRD F5 校准：use_canvas 优先于 tools 判空——纯知识库 agent 的
+            # tools 为空但 knowledge_search_N 合成工具只存在于画布节点内，
+            # 若先走打字机分支会整体跳过检索。
+            if spec.use_canvas:
                 async for frame in self._run_agent_via_canvas(spec, state):
+                    yield frame
+            elif not spec.tool_specs:
+                async for frame in self._run_typewriter_stream(spec, state):
                     yield frame
             else:
                 async for frame in self._run_kernel_inprocess_stream(spec, state):
                     yield frame
 
-            # 6. 落库 assistant 消息（进程内通道不走 run 表 run_id 置空；画布通道绑定本轮 run）
-            self._msg_repo.append_message(
-                conversation_id=cid,
-                tenant_id=self._tenant_id,
-                user_id=self._user_id,
-                application_id=application_id,
-                role="assistant",
-                content=state.final_content,
-                tool_calls=state.assistant_tool_calls or None,
-                run_id=state.run_id,
-                metadata={"usage": state.usage_total, "iterations": state.iterations},
-            )
+            if state.awaiting is not None:
+                # 7a. F10 挂起收尾：快照入 run payload、置 interrupted、推 interrupted 帧；
+                # 本轮不落 assistant 消息也不发 result（审批对象不能伪装成最终回答）
+                async for frame in self._emit_approval_interrupt(spec, state):
+                    yield frame
+            else:
+                # 7b. 落库 assistant 消息（进程内通道不走 run 表 run_id 置空；画布通道绑定本轮 run）
+                self._msg_repo.append_message(
+                    conversation_id=cid,
+                    tenant_id=self._tenant_id,
+                    user_id=self._user_id,
+                    application_id=application_id,
+                    role="assistant",
+                    content=state.final_content,
+                    tool_calls=state.assistant_tool_calls or None,
+                    run_id=state.run_id,
+                    metadata={"usage": state.usage_total, "iterations": state.iterations},
+                )
 
-            yield "result", {
-                "agent_id": str(application_id),
-                "run_id": str(run_id),
-                "conversation_id": str(cid),
-                "content": state.final_content,
-                "tool_traces": state.tool_traces,
-                "iterations": state.iterations,
-                "usage": state.usage_total,
-                "finish_reason": state.finish_reason,
-            }
-            # 消息落库后统一提交，HTTP 层无需再 commit
-            self._uow.commit()
+                yield "result", {
+                    "agent_id": str(application_id),
+                    "run_id": str(run_id),
+                    "conversation_id": str(cid),
+                    "content": state.final_content,
+                    "tool_traces": state.tool_traces,
+                    "iterations": state.iterations,
+                    "usage": state.usage_total,
+                    "finish_reason": state.finish_reason,
+                }
+                # 消息落库后统一提交，HTTP 层无需再 commit
+                self._uow.commit()
         except Exception as exc:
             logger.exception("chat 运行失败 application=%s", application_id)
             yield "error", {"message": str(exc), "code": "chat_failed"}
@@ -303,6 +386,9 @@ class ChatService:
         cid: UUID,
         history: list[dict[str, str]] | None,
         run_id: UUID,
+        images: list[str] | None = None,
+        approval_resume: dict[str, Any] | None = None,
+        thread_id: str = "",
     ) -> _ChatRunSpec:
         """从画布 agent_loop 配置解析执行计划（20260731 配置键收口 + 20261106 P3 通道判定）。
 
@@ -341,11 +427,32 @@ class ChatService:
             or _to_int(node_cfg.get("max_tool_rounds"))
             or MAX_TOOL_ROUNDS
         )
+        # 0074 PRD v1.2 校准：纯知识库 agent（无普通 tools）也必须走画布通道，
+        # 否则 knowledge_search_N 合成工具只在节点内存在、旧通道执行不到检索；
+        # M2 同因把 MCP 快照（F6）与工作流挂载（F7）计入判据——它们的工具
+        # 同样只在画布节点内合成
+        datasets_cfg = node_cfg.get("datasets")
         use_canvas = bool(
             loop_node_id
-            and canvas_tool_specs
+            and (
+                canvas_tool_specs
+                or datasets_cfg
+                or node_cfg.get("mcpServers")
+                or node_cfg.get("workflows")
+            )
             and (node_cfg.get("modleName") or node_cfg.get("modelName"))
             and node_cfg.get("systemPrompt")
+        )
+        # 0074 PRD F8：agent 型服务端记忆——前端未传 history 时按节点 memory 配置拉取
+        if history is None and app_card.get("flow_type") == "agent" and cid is not None:
+            history = self._load_agent_memory(node_cfg, cid)
+        # 0074 PRD F4.1：深度模式开关。仅 agent 型且显式选择 planExecuteReflect 时
+        # 放开节点内 plan/reflect 三阶段；其余（含存量应用无该键）保持 react_only=True
+        # 的既有成本与语义。
+        react_only = not (
+            app_card.get("flow_type") == "agent"
+            and use_canvas
+            and str(node_cfg.get("reasoningMode") or "") == "planExecuteReflect"
         )
         return _ChatRunSpec(
             application_id=application_id,
@@ -359,6 +466,35 @@ class ChatService:
             run_id=run_id,
             use_canvas=use_canvas,
             loop_node_id=loop_node_id,
+            react_only=react_only,
+            images=list(images or []),
+            approval_resume=approval_resume,
+            thread_id=thread_id or str(cid),
+        )
+
+    def _load_agent_memory(self, node_cfg: dict[str, Any], cid: UUID) -> list[dict[str, str]]:
+        """按画布 memory 配置从 message 表拉取并截断短期记忆（0074 PRD F8）。
+
+        组装点统一在 ChatService（画布/进程内两条通道经 spec.history 同获），
+        截断纯逻辑在 domain/agent/memory；拉取失败降级为无历史继续对话，
+        只记告警——记忆缺失可容忍，直接报错会让用户连基本对话都发不起。
+        """
+        memory = parse_memory_config(node_cfg.get("memory"))
+        if not memory["enabled"]:
+            return []
+        list_fn = getattr(self._msg_repo, "list_messages_by_conversation", None)
+        if list_fn is None:
+            logger.warning("msg_repo 未实现 list_messages_by_conversation，跳过服务端记忆")
+            return []
+        try:
+            rows = list_fn(cid, limit=memory["windowTurns"] * 2)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("服务端记忆拉取失败 conversation=%s: %s", cid, exc)
+            return []
+        return trim_history(
+            normalize_history_rows(rows),
+            window_turns=memory["windowTurns"],
+            token_budget=memory["tokenBudget"],
         )
 
     async def _run_typewriter_stream(
@@ -489,7 +625,9 @@ class ChatService:
             self._context,
             tenant_id=self._tenant_id,
             application_id=spec.application_id,
-            thread_id=str(spec.cid),
+            # 0074 PRD F10：线程由 run_agent_stream 绑定（默认会话 ID，
+            # 新消息遇未决审批轮转子线程，resume 沿用挂起 run 的线程）
+            thread_id=spec.thread_id or str(spec.cid),
             run_id=spec.run_id,
             current_user_id=self._user_id,
             actor_username=getattr(self._principal, "username", None),
@@ -500,14 +638,20 @@ class ChatService:
             "input": spec.query,
             "USER_INPUT": spec.query,
             "history": [dict(h) for h in spec.history or []],
-            "react_only": True,
             "max_tool_rounds": spec.max_rounds,
             # AgentRunContext 经节点透传 LLM 请求头；与画布试运行共用同一条注入通道
             # （ctx.eval_context.input），画布试运行不传即为缺省。
             # 20261106 review 修正：start_inputs 会进 run 表 JSONB（insert_run 裸
             # json.dumps），必须传 to_storage_dict 平铺形态，节点侧还原。
             "context": run_context.to_storage_dict(),
+            # 0074 PRD F4.1：深度模式下为 False，节点走完整 plan/execute/reflect
+            "react_only": spec.react_only,
+            # 0074 PRD F9：图片 URL 透传，节点按 visionEnabled 门控
+            "images": list(spec.images or []),
         }
+        if spec.approval_resume is not None:
+            # 0074 PRD F10：审批裁决 + 执行快照，节点从快照还原续跑（非法快照按新 run 兜底）
+            start_inputs["approval_resume"] = spec.approval_resume
         runner.ensure_run(start_inputs)
         state.run_id = runner.run_id
         self._msg_repo.append_message(
@@ -540,15 +684,91 @@ class ChatService:
                 for frame in self._map_canvas_trace(event_type, data or {}, state, spec.loop_node_id):
                     yield frame
         finally:
-            if not task.done():
+            # task 未结束即退出循环 = 消费侧被拆（SSE 断连 GeneratorExit / 请求
+            # 任务取消）；error 帧路径 run_task 必先完成（无 await 收尾），不误判
+            abandoned = not task.done()
+            if abandoned:
                 task.cancel()
             with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
+            if abandoned:
+                await self._abandon_canvas_run(runner)
 
         # 守卫：图里没有执行到 agent_loop（缺连线/仅停用未删节点等）时显式报错，
         # 不能带着空回答落库（画布通道判定只查节点存在，不保证图连通）
         if not state.agent_finished:
             raise RuntimeError("画布未执行到 agent_loop 节点，请检查 start→agent_loop→end 连线")
+
+    async def _abandon_canvas_run(self, runner: Any) -> None:
+        """断连取消后的画布 run 收口（0074 PRD 风险 R6，M2）。
+
+        两步：
+        1. run 标记 cancelled 并提交——顺带落盘本请求已写的 run 行与 user 消息，
+           否则连接关闭回滚，日志页只能看到"消失的一轮"；
+        2. 清理该 thread 的幽灵 checkpoint——agent 对话通道的多轮上下文由 history
+           入参显式携带、agent 画布图（白名单 start/agent_loop/end）无 human_task
+           中断点，下一轮不依赖 checkpoint 续跑，残留只会带来脏读与存储浪费。
+        0074 PRD F10 补充：工具审批的执行快照存 run.interrupt_payload 而非
+        checkpoint，purge 不影响已挂起审批的恢复。
+        两步失败都只吞不抛：主流程本就是断连拆除，异常无处可报。
+        """
+        with contextlib.suppress(Exception):
+            self._run_repo.update_run_status(
+                runner.run_id,
+                execute_status="cancelled",
+                error_message="客户端断连，执行已取消",
+            )
+            self._uow.commit()
+        with contextlib.suppress(Exception):
+            await runner.purge_thread_checkpoints()
+
+    def _find_pending_tool_approval(self, application_id: UUID, thread_id: str) -> dict[str, Any] | None:
+        """0074 PRD F10：查线程上挂起的工具审批 run；无（或类型不符）返回 None。
+
+        返回 {run_id, payload}：run_id 供续跑复用，payload 含审批展示字段与执行快照。
+        interrupt_payload 兼容 JSONB 反序列化差异（dict / 字符串两种形态）。
+        协议兼容：duck-typing 场景（轻量 fake/旧实现）缺查询方法按无挂起处理。
+        """
+        finder = getattr(self._run_repo, "get_running_by_thread", None)
+        if finder is None:
+            return None
+        running = finder(self._tenant_id, application_id, thread_id)
+        if running is None or running.get("execute_status") != "interrupted":
+            return None
+        payload = running.get("interrupt_payload")
+        if isinstance(payload, str):
+            try:
+                payload = json.loads(payload or "{}")
+            except json.JSONDecodeError:
+                return None
+        if not isinstance(payload, dict) or payload.get("type") != "tool_approval":
+            return None
+        return {"run_id": running["id"], "payload": payload}
+
+    async def _emit_approval_interrupt(
+        self,
+        spec: _ChatRunSpec,
+        state: _ChatRunState,
+    ) -> AsyncIterator[tuple[str, dict[str, Any]]]:
+        """0074 PRD F10：挂起收尾——审批信息与快照写入 run 并推 interrupted 帧。
+
+        帧内 approval 为展示裁剪形态（节点已不含 snapshot 键），快照只进库不外发，
+        避免大负载走 SSE；run 置 interrupted 后由 update_run_interrupt 落 payload，
+        续跑终态经 update_run_status 自动清理。
+        """
+        awaiting = state.awaiting or {}
+        approval = dict(awaiting.get("approval") or {})
+        snapshot = awaiting.get("snapshot") or {}
+        run_id = state.run_id or spec.run_id
+        self._run_repo.update_run_interrupt(run_id, {**approval, "snapshot": snapshot})
+        # 挂起现场（run 行 + user 消息 + payload）先提交：随后即使断连也不丢审批
+        self._uow.commit()
+        yield "interrupted", {
+            "approval": approval,
+            "conversation_id": str(spec.cid),
+            "thread_id": spec.thread_id or str(spec.cid),
+            "run_id": str(run_id),
+        }
 
     @staticmethod
     def _map_canvas_trace(
@@ -563,6 +783,25 @@ class ChatService:
         （前端 agentRun.ts 忽略 llm_start，不影响渲染）；画布无 token 级流
         （与旧 tools 分支一致，旧分支本就没有 llm_token）。
         """
+        # 0074 PRD F4.1：深度模式的 plan/reflect 结果透出为 additive SSE 事件
+        # （前端不识别时安全忽略；仅 assistant 回复帧外发，请求帧不发，避免刷屏）
+        if event_type == "prompt_text" and data.get("phase") in ("plan", "reflect"):
+            if data.get("role") != "assistant":
+                return []
+            raw = str(data.get("content") or "")
+            frame_type = str(data.get("phase"))
+            payload: dict[str, Any] = {"content": raw}
+            if frame_type == "reflect":
+                payload["reflect_round"] = int(data.get("reflect_round") or 0)
+            parsed = _parse_phase_json(raw)
+            if frame_type == "plan":
+                tasks = parsed.get("tasks") if isinstance(parsed, dict) else None
+                payload["tasks"] = [t for t in tasks if isinstance(t, dict)] if isinstance(tasks, list) else []
+            elif isinstance(parsed, dict):
+                payload["done"] = bool(parsed.get("done"))
+                payload["critique"] = str(parsed.get("critique") or "")
+                payload["suggestion"] = str(parsed.get("suggestion") or "")
+            return [(frame_type, payload)]
         if event_type == "prompt_text" and data.get("phase") == "execute":
             iteration = int(data.get("iteration") or 0)
             state.iterations = max(state.iterations, iteration)
@@ -599,11 +838,14 @@ class ChatService:
                 "observation": data.get("observation"),
                 "is_error": bool(data.get("is_error")),
             })
+            chunks_meta = data.get("chunks_meta")
             return [("tool_end", {
                 "tool_call_id": data.get("tool_call_id"),
                 "name": data.get("name"),
                 "observation": data.get("observation"),
                 "is_error": bool(data.get("is_error")),
+                # 0074 PRD F5.3：知识库命中来源（additive，仅检索工具携带）
+                **({"chunks": chunks_meta} if isinstance(chunks_meta, list) and chunks_meta else {}),
             })]
         if event_type == "node_end" and data.get("status") == "success":
             # 20261106 review 修正：以 agent_loop 节点 ID 精确匹配完成事件，
@@ -613,11 +855,24 @@ class ChatService:
                 return []
             outputs = data.get("outputs")
             if isinstance(outputs, dict):
+                if outputs.get("awaiting_approval"):
+                    # 0074 PRD F10：节点整轮挂起等待人工批准。agent_finished 仍置 True
+                    # （节点确实执行到位），审批现场经 state.awaiting 交回收尾
+                    state.agent_finished = True
+                    state.awaiting = {
+                        "approval": outputs.get("approval") or {},
+                        "snapshot": outputs.get("snapshot") or {},
+                    }
+                    return []
                 state.final_content = str(outputs.get("output") or "")
                 state.agent_finished = True
                 usage = outputs.get("usage")
                 if isinstance(usage, dict):
                     state.usage_total = usage
+                # 0074 PRD F11.1：节点透出 finish_reason 时覆盖默认 stop（当前仅预算触顶）
+                finish_reason = outputs.get("finish_reason")
+                if isinstance(finish_reason, str) and finish_reason:
+                    state.finish_reason = finish_reason
         return []
 
     @staticmethod
@@ -718,8 +973,8 @@ class ChatService:
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )
-        if app_card.get("flow_type") == "chatflow":
-            raise ValidationError("对话流应用请使用对话流运行接口")
+        if app_card.get("flow_type") in ("chatflow", "agent"):
+            raise ValidationError("对话流/智能体应用请使用对应的对话运行接口")
 
         canvas_json = await self._app_service.get_runtime_graph(application_id, self._tenant_id)
         if any(str(node.get("type")) == "18" for node in canvas_json.get("nodes") or []):
@@ -756,6 +1011,40 @@ class ChatService:
                 "run_id": runner.run_id,
                 "approval": exc.interrupt_payload,
             }
+
+    # ========== 统一对话入口（0074 PRD M3 端点收敛）==========
+    def resolve_conversation_channel(self, application_id: UUID) -> dict:
+        """统一 SSE 入口的路由分派依据：返回应用卡片（含 flow_type）。
+
+        路由层按 flow_type 选择管线：chatflow → run_chatflow_stream；
+        其余（agent / 旧 workflow 型聊天应用）→ run_agent_stream 三通道。
+        可见性校验在此完成，流内重复校验由两条管线各自兜底。
+        """
+        return self._app_service.assert_user_can_view(
+            application_id, self._tenant_id, self._user_id
+        )
+
+    def prepare_chat_run(
+        self,
+        application_id: UUID,
+        *,
+        message: str,
+        conversation_id: UUID | None,
+        resume: dict[str, Any] | None,
+    ) -> None:
+        """chat 通道请求级预检（与 prepare_chatflow_run 同级的 4xx 语义）。
+
+        F10 续跑参数在此收口：resume 必须带 conversation_id 与 approved 布尔；
+        "是否存在可恢复的挂起审批"依赖线程定位，留在流内校验。
+        """
+        normalized = (message or "").strip()
+        if not normalized and resume is None:
+            raise ValidationError("message 与 resume 至少提供一个")
+        if resume is not None:
+            if conversation_id is None:
+                raise ValidationError("续跑必须提供 conversation_id")
+            if not isinstance(resume, dict) or "approved" not in resume:
+                raise ValidationError("resume 需提供 approved 布尔字段")
 
     # ========== 对话流流式运行 ==========
     def assert_chatflow_application(self, application_id: UUID) -> dict:
@@ -948,10 +1237,8 @@ class ChatService:
         finally:
             if not task.done():
                 task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
 
         if interrupted is not None:
             await self._handle_chatflow_interrupt(cid, interrupted, runner)

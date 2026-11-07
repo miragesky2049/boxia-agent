@@ -103,6 +103,25 @@ async def get_agent(
                 "system_prompt": system_prompt,
                 "model_id": model_id,
                 "max_tool_rounds": max_tool_rounds,
+                # 0074 PRD F3.4：开场白/推荐问题（additive 新键，snake_case 对齐卡片既有键）
+                "opening_remarks": str(node_cfg.get("openingRemarks") or ""),
+                "suggested_questions": [
+                    str(item)
+                    for item in (node_cfg.get("suggestedQuestions") or [])
+                    if str(item or "").strip()
+                ],
+                # 0074 PRD F9：视觉开关（用户端图片入口据此门控，运行侧同键判定）
+                "vision_enabled": bool(node_cfg.get("visionEnabled")),
+                # 0074 PRD F5：知识库元信息（前端展示引用来源；检索由画布通道执行）
+                "datasets": [
+                    {
+                        "dataset_id": str(entry.get("datasetId") or ""),
+                        "name": str(entry.get("name") or ""),
+                        "mode": str(entry.get("mode") or "onDemand"),
+                    }
+                    for entry in (node_cfg.get("datasets") or [])
+                    if isinstance(entry, dict) and entry.get("datasetId")
+                ],
             }
             if system_prompt:
                 prompts.append(

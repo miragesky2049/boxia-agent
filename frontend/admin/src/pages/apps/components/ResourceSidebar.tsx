@@ -70,7 +70,7 @@ export function ResourceSidebar({
       </div>
 
       <div style={{ fontSize: 11, color: '#9ca3af', padding: '4px 4px 2px' }}>
-        {flowType === 'chatflow' ? '对话流' : '工作流'}
+        {flowType === 'agent' ? '智能体' : flowType === 'chatflow' ? '对话流' : '工作流'}
       </div>
       <FlowTypeResourceItem
         appName={appName}
@@ -101,7 +101,8 @@ function FlowTypeResourceItem({
   onSwitchFlowType: (next: FlowType) => void;
 }) {
   const isChatflow = flowType === 'chatflow';
-  const nextFlowType: FlowType = isChatflow ? 'workflow' : 'chatflow';
+  const isAgent = flowType === 'agent';
+  // 0074 PRD U2（M3）：智能体 ↔ 对话流互转放开；切回工作流后端按节点集合校验
   const menuItems: MenuProps['items'] = [
     {
       key: 'hint',
@@ -109,15 +110,27 @@ function FlowTypeResourceItem({
       label: <span style={{ fontSize: 12, color: '#9ca3af' }}>切换会改变画布的执行语义</span>,
     },
     { type: 'divider' },
-    {
-      key: 'switch',
-      icon: <SwapOutlined />,
-      disabled: switching,
-      danger: false,
-      label: nextFlowType === 'chatflow' ? '切换为对话流' : '切换为工作流',
-      onClick: () => onSwitchFlowType(nextFlowType),
-    },
+    // 0074 PRD U2：智能体可切对话流/工作流；其余保持原双向切换
+    ...(flowType === 'workflow'
+      ? [{ key: 'to-chatflow', icon: <SwapOutlined />, disabled: switching,
+          label: '切换为对话流', onClick: () => onSwitchFlowType('chatflow' as FlowType) }]
+      : isChatflow
+        ? [{ key: 'to-workflow', icon: <SwapOutlined />, disabled: switching,
+            label: '切换为工作流', onClick: () => onSwitchFlowType('workflow' as FlowType) }]
+        : [
+            { key: 'to-chatflow', icon: <SwapOutlined />, disabled: switching,
+              label: '切换为对话流', onClick: () => onSwitchFlowType('chatflow' as FlowType) },
+            { key: 'to-workflow', icon: <SwapOutlined />, disabled: switching,
+              label: '切换为工作流', onClick: () => onSwitchFlowType('workflow' as FlowType) },
+          ]),
   ];
+
+  const tooltip = isAgent
+    ? '智能体：模型自主规划与工具调用，配置面统一维护人设/工具/知识库'
+    : isChatflow
+      ? '对话流：多轮会话、中间消息输出、支持问答节点'
+      : '工作流：单次执行返回结果';
+  const emoji = isAgent ? '🤖' : isChatflow ? '💬' : '📄';
 
   return (
     <div
@@ -128,8 +141,8 @@ function FlowTypeResourceItem({
         display: 'flex', alignItems: 'center', gap: 8,
       }}
     >
-      <Tooltip title={isChatflow ? '对话流：多轮会话、中间消息输出、支持问答节点' : '工作流：单次执行返回结果'}>
-        <span style={{ fontSize: 14 }}>{isChatflow ? '💬' : '📄'}</span>
+      <Tooltip title={tooltip}>
+        <span style={{ fontSize: 14 }}>{emoji}</span>
       </Tooltip>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {appName || '当前工作流'}

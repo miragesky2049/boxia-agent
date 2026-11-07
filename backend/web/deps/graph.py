@@ -12,6 +12,7 @@ from typing import Any
 from uuid import UUID, uuid4
 
 from internal.application.apps.application_service import ApplicationService
+from internal.application.apps.workflow_tool_service import WorkflowToolService
 from internal.application.retrieval_service import RetrievalService
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.graph.node_base import ServiceRegistry
@@ -212,7 +213,22 @@ def make_canvas_debug_runtime(
         application_id=application_id,
         run_id=run_id,
     )
-    register_subgraph_loader(services, make_application_service(uow), principal.tenant_id)
+    debug_app_service = make_application_service(uow)
+    register_subgraph_loader(services, debug_app_service, principal.tenant_id)
+    # 画布试运行同样挂载工作流工具端口（0074 PRD F7）：调试点智能体时可见效果
+    services.register(
+        "workflow_tool",
+        WorkflowToolService(
+            debug_app_service,
+            build_runner,
+            uow,
+            None,
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            parent_run_id=run_id,
+            conversation_id=conversation_id,
+        ),
+    )
     debug_variables, debug_user_keys, debug_persist = load_debug_variables(
         uow, variables_application_id, principal,
     )
@@ -245,12 +261,14 @@ async def build_runner(
     actor_username: str | None = None,
     conversation_id: UUID | None = None,
     on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+    parent_run_id: UUID | None = None,
 ) -> GraphRuntime:
     """构造 GraphRuntime：加载 coze 画布 JSON + 注册 llm/http/subgraph_loader 服务。
 
     - canvas_json 走 ApplicationService.get_runtime_graph（Redis 缓存 + 租户 pin/config 覆盖）
     - thread_id 由调用方传入；不传时由 runtime 内部生成
     - run_id 不传时由 runtime 内部生成
+    - parent_run_id：工作流即工具子 run 归因（0074 PRD F7.2），顶层不传
     """
     canvas_json = await service.get_runtime_graph(application_id, tenant_id)
     app_repo = ApplicationRepository(uow.session)
@@ -318,6 +336,22 @@ async def build_runner(
         services.register("message_repo", async_msg_repo)
 
     register_subgraph_loader(services, service, tenant_id)
+    # 工作流即工具（0074 PRD F7）：agent 节点经 ctx.services["workflow_tool"] 调用；
+    # 子 run 的 parent_run_id 指向本轮 effective_run_id，孙代运行时自动逐层归因。
+    services.register(
+        "workflow_tool",
+        WorkflowToolService(
+            service,
+            build_runner,
+            uow,
+            context,
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            parent_run_id=effective_run_id,
+            actor_username=actor_username,
+            conversation_id=conversation_id,
+        ),
+    )
 
     return GraphRuntime(
         canvas_json=canvas_json,
@@ -337,4 +371,5 @@ async def build_runner(
         variables=runtime_variables,
         user_variable_keys=user_variable_keys,
         on_user_variables_changed=_persist_user_variables if current_user_id else None,
+        parent_run_id=parent_run_id,
     )

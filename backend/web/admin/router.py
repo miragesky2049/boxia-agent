@@ -15,6 +15,7 @@ from web.admin.routers.entitlements import router as entitlements_router
 from web.admin.routers.grants import router as grants_router
 from web.admin.routers.hr_dictionaries import router as hr_dictionaries_router
 from web.admin.routers.marketplace import router as marketplace_router
+from web.admin.routers.mcp_admin import router as mcp_admin_router
 from web.admin.routers.mgmt_units import router as mgmt_units_router
 from web.admin.routers.models import router as models_router
 from web.admin.routers.node_meta import router as node_meta_router
@@ -44,6 +45,7 @@ router.include_router(grants_router)
 router.include_router(entitlements_router)
 router.include_router(audit_logs_router)
 router.include_router(marketplace_router)
+router.include_router(mcp_admin_router)
 router.include_router(applies_router)
 router.include_router(apps_admin_router)
 router.include_router(app_conversations_router)

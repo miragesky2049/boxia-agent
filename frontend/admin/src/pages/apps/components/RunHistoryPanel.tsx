@@ -11,11 +11,13 @@ import {
 } from '../../../api/apps';
 import { CANVAS_TOKENS } from '../canvas/tokens';
 
-const STATUS_VIEW: Record<RunItem['status'], { text: string; color: string }> = {
+// 0074 PRD F13：键名与后端 execute_status 对齐，cancelled=断连取消
+const STATUS_VIEW: Record<RunItem['execute_status'], { text: string; color: string }> = {
   running: { text: '运行中', color: CANVAS_TOKENS.info },
   success: { text: '成功', color: CANVAS_TOKENS.run },
   error: { text: '失败', color: CANVAS_TOKENS.danger },
   interrupted: { text: '已中断', color: CANVAS_TOKENS.warning },
+  cancelled: { text: '已取消', color: '#6b7280' },
 };
 
 function formatTime(value: string | null): string {
@@ -51,17 +53,19 @@ function executionItems(executions: NodeExecution[]) {
         {exec.duration_ms != null && (
           <span style={{ color: '#9ca3af', marginLeft: 'auto' }}>{exec.duration_ms}ms</span>
         )}
-        {exec.error && <span style={{ color: CANVAS_TOKENS.danger }}>失败</span>}
+        {exec.error_message && <span style={{ color: CANVAS_TOKENS.danger }}>失败</span>}
       </div>
     ),
     children: (
       <div style={{ fontSize: 11, fontFamily: 'monospace' }}>
         <JsonBlock label="输入：" value={exec.input} />
         <JsonBlock label="输出：" value={exec.output} />
-        {exec.error && (
+        {exec.error_message && (
           <div style={{ color: CANVAS_TOKENS.danger }}>
             <div>错误：</div>
-            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>{exec.error}</pre>
+            <pre style={{ margin: 0, whiteSpace: 'pre-wrap', wordBreak: 'break-all' }}>
+              {exec.error_message}
+            </pre>
           </div>
         )}
       </div>
@@ -138,7 +142,7 @@ export function RunHistoryPanel({ applicationId, active }: RunHistoryPanelProps)
         </Button>
       </div>
       {runs.map((run) => {
-        const status = STATUS_VIEW[run.status] || { text: run.status, color: '#6b7280' };
+        const status = STATUS_VIEW[run.execute_status] || { text: run.execute_status, color: '#6b7280' };
         const expanded = openRunId === run.id;
         return (
           <div key={run.id} style={{ borderBottom: '1px dashed #f3f4f6', padding: '6px 0' }}>
@@ -159,9 +163,9 @@ export function RunHistoryPanel({ applicationId, active }: RunHistoryPanelProps)
                   <>
                     <JsonBlock label="入参：" value={detail.run.input} />
                     <JsonBlock label="出参：" value={detail.run.output} />
-                    {detail.run.error && (
+                    {detail.run.error_message && (
                       <div style={{ color: CANVAS_TOKENS.danger, marginBottom: 6 }}>
-                        错误：{detail.run.error}
+                        错误：{detail.run.error_message}
                       </div>
                     )}
                     {detail.node_executions.length > 0 ? (

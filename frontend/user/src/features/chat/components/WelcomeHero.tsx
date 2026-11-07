@@ -16,6 +16,8 @@ export interface Suggestion {
 interface WelcomeHeroProps {
   agent: ChatAgent
   suggestions: readonly Suggestion[]
+  // 0074 F3.4：智能体配置的开场白，存在时替换默认引导文案
+  openingRemarks?: string
   onPick?: (title: string) => void
 }
 
@@ -26,7 +28,7 @@ const ICONS: Record<Suggestion['icon'], ReactNode> = {
   bolt: <ThunderboltOutlined />,
 }
 
-export function WelcomeHero({ agent, suggestions, onPick }: WelcomeHeroProps) {
+export function WelcomeHero({ agent, suggestions, openingRemarks, onPick }: WelcomeHeroProps) {
   return (
     <div className="lc-welcome">
       <div className="lc-welcome__avatar" aria-hidden>
@@ -34,7 +36,7 @@ export function WelcomeHero({ agent, suggestions, onPick }: WelcomeHeroProps) {
       </div>
       <h1 className="lc-welcome__title">你好，今天想聊点什么？</h1>
       <p className="lc-welcome__subtitle">
-        我是{agent.name}，可以直接向我提问，或从下面的建议开始。
+        {openingRemarks || `我是${agent.name}，可以直接向我提问，或从下面的建议开始。`}
       </p>
 
       <div className="lc-suggestions">

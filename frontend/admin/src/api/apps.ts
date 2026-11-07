@@ -22,7 +22,7 @@ export interface Graph {
   edges: GraphEdge[]
 }
 
-export type FlowType = 'workflow' | 'chatflow'
+export type FlowType = 'workflow' | 'chatflow' | 'agent'
 
 export interface Application {
   id: string
@@ -115,17 +115,30 @@ export async function listMyApps(): Promise<MyApp[]> {
 }
 
 // ========== 运行历史 ==========
+// 键名与后端 run 表序列化口径一致（0045 起 workflow_id/execute_status/thread_id）；
+// 0075 增 parent_run_id 与 cancelled 取值（0074 PRD F7.2/F13）
+export type RunStatus = 'running' | 'success' | 'error' | 'interrupted' | 'cancelled'
+
 export interface RunItem {
   id: string
-  application_id: string
-  langgraph_thread_id: string
-  status: 'running' | 'success' | 'error' | 'interrupted'
+  workflow_id: string
+  user_id: string | null
+  thread_id: string
+  execute_status: RunStatus
+  parent_run_id: string | null
   input: Record<string, unknown> | null
   output: Record<string, unknown> | null
-  error: string | null
+  error_message: string | null
+  interrupt_payload?: Record<string, unknown> | null
   started_at: string
   finished_at: string | null
 }
+
+// 子 run 列表行（list_child_runs 只回精简列，无 input/output）
+export type RunChildItem = Pick<
+  RunItem,
+  'id' | 'workflow_id' | 'user_id' | 'thread_id' | 'execute_status' | 'error_message' | 'started_at' | 'finished_at'
+>
 
 export interface NodeExecution {
   id: string
@@ -133,11 +146,11 @@ export interface NodeExecution {
   node_type: string
   input: Record<string, unknown> | null
   output: Record<string, unknown> | null
-  error: string | null
+  error_message: string | null
   started_at: string
   finished_at: string | null
   duration_ms: number | null
-  token_usage: {
+  usage: {
     prompt_tokens?: number
     completion_tokens?: number
     total_tokens?: number
@@ -149,6 +162,7 @@ export interface RunDetail {
     tenant_id: string
   }
   node_executions: NodeExecution[]
+  children: RunChildItem[]
 }
 
 export async function listApplicationRuns(applicationId: string, limit = 50): Promise<RunItem[]> {

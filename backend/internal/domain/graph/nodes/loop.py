@@ -145,13 +145,17 @@ class LoopNodeHandler(NodeHandler):
                     continue
                 if is_break:
                     break_received = True
+                    # 与串行语义一致：break 只保留该迭代之前的结果。事件循环繁忙时
+                    # 靠后下标的迭代可能先于 break 帧被 as_completed 处理/完成，
+                    # 此处按触发下标截断，避免 break 想停止的输出泄漏进结果。
+                    results = {i: v for i, v in results.items() if i < index}
                     for t in tasks:
                         if not t.done():
                             t.cancel()
                     continue
                 if is_continue:
                     continue
-                if output is not None:
+                if output is not None and not break_received:
                     results[index] = output
         finally:
             for t in tasks:

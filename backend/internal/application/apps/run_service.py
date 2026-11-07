@@ -43,9 +43,13 @@ class RunService:
         return run
 
     def get_run_detail(self, run_id: UUID, tenant_id: UUID) -> dict[str, Any]:
-        """run 元信息 + 节点执行列表。"""
+        """run 元信息 + 节点执行列表 + 子 run（0074 PRD F7.2/F13 工作流即工具归因）。"""
         run = self.get_run_owned(run_id, tenant_id)
-        return {"run": run, "node_executions": self._repo.list_node_executions(run_id)}
+        return {
+            "run": run,
+            "node_executions": self._repo.list_node_executions(run_id),
+            "children": self._repo.list_child_runs(tenant_id, run_id),
+        }
 
     def insert_run(
         self,

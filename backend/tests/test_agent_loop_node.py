@@ -352,3 +352,387 @@ def test_agent_loop_react_only_trace_events_carry_chat_mapping_fields() -> None:
     assert tend["tool_call_id"] == "c1"
     assert tend["is_error"] is False
     assert tend["observation"] == "晴，20 度"
+
+
+# ---------- 20261107 0074 PRD F5：知识库即工具（datasets）----------
+class _FakeChunk:
+    # 与 domain/retrieval/model.Chunk 契约字段对齐（F5.3 溯源需要 chunk_id/dataset_id）
+    def __init__(self, content: str) -> None:
+        self.content = content
+        self.metadata: dict = {}
+        self.chunk_id = "c-1"
+        self.dataset_id = "d-1"
+        self.document_id = "doc-1"
+
+
+class _FakeSearchResult:
+    def __init__(self, content: str, score: float) -> None:
+        self.chunk = _FakeChunk(content)
+        self.score = score
+
+
+class _FakeEmbedding:
+    def __init__(self) -> None:
+        self.texts: list[list[str]] = []
+
+    async def embed(self, texts: list[str]) -> list[list[float]]:
+        self.texts.append(list(texts))
+        return [[0.1, 0.2, 0.3] for _ in texts]
+
+
+class _FakeVectorStore:
+    def __init__(self, results: dict[str, list[_FakeSearchResult]] | None = None, error: bool = False) -> None:
+        self.results = results or {}
+        self.error = error
+        self.searches: list[dict] = []
+
+    async def search(self, *, dataset_id, query_vector, top_k, tenant_id):
+        self.searches.append({
+            "dataset_id": dataset_id, "query_vector": query_vector,
+            "top_k": top_k, "tenant_id": tenant_id,
+        })
+        if self.error:
+            raise RuntimeError("向量库不可用")
+        return self.results.get(dataset_id, [])
+
+
+def _knowledge_services(llm_script: list[_Resp], store: _FakeVectorStore) -> dict:
+    llm = _ScriptedLLM(llm_script)
+    services = ServiceRegistry({"llm": llm, "embedding": _FakeEmbedding(), "vector_store": store})
+    return {"llm": llm, "services": services, "store": store}
+
+
+def test_agent_loop_datasets_on_demand_synthesizes_knowledge_tool() -> None:
+    """onDemand 库合成 knowledge_search_1 工具：模型发起检索 → 走向量库 → 结果回灌。"""
+    store = _FakeVectorStore({"d1": [_FakeSearchResult("退款需在7天内申请", 0.912)]})
+    kit = _knowledge_services([
+        _Resp(content="", tool_calls=[_ToolCall("c1", "knowledge_search_1", '{"query": "退款期限"}')], usage=_Usage(1, 1)),
+        _Resp(content="退款需在7天内申请。", usage=_Usage(2, 2)),
+    ], store)
+    config = {
+        "modleName": "m",
+        "systemPrompt": "S",
+        "datasets": [{"datasetId": "d1", "name": "售后手册", "mode": "onDemand", "topK": 3}],
+    }
+    ctx = _make_runtime_ctx(kit["services"], config, {"react_only": True, "input": "退款期限是多久"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "退款需在7天内申请。"
+    # 合成工具进白名单与 schema（description 带库名，帮助模型路由）
+    tool_names = [spec.name for spec in (kit["llm"].calls[0]["tools"] or [])]
+    assert tool_names == ["knowledge_search_1"]
+    assert "售后手册" in kit["llm"].calls[0]["tools"][0].description
+    # 检索走 dataset_id/top_k/tenant_id，query 用模型给的检索词
+    assert store.searches[0]["dataset_id"] == "d1"
+    assert store.searches[0]["top_k"] == 3
+    assert store.searches[0]["tenant_id"] == str(ctx.env.tenant_id)
+    # 检索结果以 tool 消息回灌（带相关性序号格式）
+    second_messages = kit["llm"].calls[1]["messages"]
+    tool_msg = next(m for m in second_messages if m["role"] == "tool")
+    assert "退款需在7天内申请" in tool_msg["content"]
+    assert "相关性 0.912" in tool_msg["content"]
+
+
+def test_agent_loop_datasets_index_skips_invalid_entries() -> None:
+    """缺 datasetId 的条目被跳过，合法条目按解析后序号命名（保持配置序稳定）。"""
+    store = _FakeVectorStore()
+    kit = _knowledge_services([
+        _Resp(content="", tool_calls=[_ToolCall("c1", "knowledge_search_1", '{"query": "x"}')], usage=_Usage(1, 1)),
+        _Resp(content="完成。", usage=_Usage(1, 1)),
+    ], store)
+    config = {
+        "modleName": "m",
+        "datasets": [{"mode": "onDemand"}, {"datasetId": "d9", "mode": "onDemand"}],
+    }
+    ctx = _make_runtime_ctx(kit["services"], config, {"react_only": True, "input": "问题"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "完成。"
+    assert store.searches[0]["dataset_id"] == "d9"
+
+
+def test_agent_loop_datasets_always_injects_reference_into_system() -> None:
+    """always 库：执行前自动检索并拼进 system 参考资料段，不合成工具。"""
+    store = _FakeVectorStore({"d2": [_FakeSearchResult("产品支持蓝牙5.3", 0.88)]})
+    kit = _knowledge_services([_Resp(content="支持蓝牙5.3。", usage=_Usage(1, 1))], store)
+    config = {
+        "modleName": "m",
+        "systemPrompt": "S",
+        "datasets": [{"datasetId": "d2", "name": "产品库", "mode": "always"}],
+    }
+    ctx = _make_runtime_ctx(kit["services"], config, {"react_only": True, "input": "支持蓝牙吗"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "支持蓝牙5.3。"
+    assert store.searches[0]["dataset_id"] == "d2"
+    # always 用用户原问题直接检索
+    assert store.searches[0]["dataset_id"] == "d2" and kit["llm"].calls[0]["tools"] is None
+    system_content = kit["llm"].calls[0]["messages"][0]["content"]
+    assert system_content.startswith("S")
+    assert "参考资料" in system_content and "【产品库】" in system_content
+    assert "产品支持蓝牙5.3" in system_content
+
+
+def test_agent_loop_datasets_always_failure_does_not_break_chat() -> None:
+    """always 检索失败：跳过注入，对话照常完成。"""
+    store = _FakeVectorStore(error=True)
+    kit = _knowledge_services([_Resp(content="照常回答。", usage=_Usage(1, 1))], store)
+    config = {
+        "modleName": "m",
+        "systemPrompt": "S",
+        "datasets": [{"datasetId": "d3", "mode": "always"}],
+    }
+    ctx = _make_runtime_ctx(kit["services"], config, {"react_only": True, "input": "你好"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "照常回答。"
+    assert "参考资料" not in kit["llm"].calls[0]["messages"][0]["content"]
+
+
+def test_agent_loop_knowledge_executor_delegates_other_tools() -> None:
+    """合成执行器包装后：非检索工具仍委托租户目录执行器。"""
+    executed: list[str] = []
+
+    def _base(name: str, args: dict) -> str:
+        executed.append(name)
+        return "晴，20 度"
+
+    store = _FakeVectorStore({"d1": [_FakeSearchResult("退款7天内", 0.9)]})
+    script = [
+        _Resp(content="", tool_calls=[_ToolCall("c1", "get_weather", '{"city": "北京"}')], usage=_Usage(1, 1)),
+        _Resp(content="", tool_calls=[_ToolCall("c2", "knowledge_search_1", '{"query": "退款"}')], usage=_Usage(1, 1)),
+        _Resp(content="北京晴，退款7天内。", usage=_Usage(1, 1)),
+    ]
+    llm = _ScriptedLLM(script)
+    services = ServiceRegistry({
+        "llm": llm,
+        "tool_executor": _base,
+        "embedding": _FakeEmbedding(),
+        "vector_store": store,
+    })
+    config = {
+        "modleName": "m",
+        "tools": [{"name": "get_weather", "description": "天气", "parameters": {"type": "object", "properties": {}}}],
+        "datasets": [{"datasetId": "d1", "mode": "onDemand"}],
+    }
+    ctx = _make_runtime_ctx(services, config, {"react_only": True, "input": "天气和退款"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "北京晴，退款7天内。"
+    assert executed == ["get_weather"]
+    assert store.searches[0]["dataset_id"] == "d1"
+
+
+def test_agent_loop_knowledge_missing_services_yields_error_observation() -> None:
+    """检索服务未注册：模型调用 knowledge_search 得到 [error] observation，循环不中断。"""
+    llm = _ScriptedLLM([
+        _Resp(content="", tool_calls=[_ToolCall("c1", "knowledge_search_1", '{"query": "x"}')], usage=_Usage(1, 1)),
+        _Resp(content="抱歉，暂时查不到。", usage=_Usage(1, 1)),
+    ])
+    services = ServiceRegistry({"llm": llm})
+    config = {
+        "modleName": "m",
+        "datasets": [{"datasetId": "d1", "mode": "onDemand"}],
+    }
+    ctx = _make_runtime_ctx(services, config, {"react_only": True, "input": "问题"})
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "抱歉，暂时查不到。"
+    tool_msg = next(m for m in llm.calls[1]["messages"] if m["role"] == "tool")
+    assert tool_msg["content"].startswith("[error]")
+
+
+# ---------- 0074 PRD F10/F9（M3）：工具审批快照暂停/续跑 + 多模态 ----------
+def _pending_assistant_messages(name: str = "send_email", call_id: str = "c1") -> list[dict]:
+    """F10 快照形态：末条 assistant 带未回答 tool_calls。"""
+    return [
+        {"role": "system", "content": "S"},
+        {"role": "user", "content": "发邮件"},
+        {
+            "role": "assistant", "content": "",
+            "tool_calls": [{
+                "id": call_id, "type": "function",
+                "function": {"name": name, "arguments": '{"to": "boss"}'},
+            }],
+        },
+    ]
+
+
+def test_agent_loop_awaiting_approval_outputs_snapshot() -> None:
+    """敏感工具轮：节点不执行工具，提前返回 awaiting_approval + 执行快照。"""
+    def executor(name: str, args: dict) -> str:
+        raise AssertionError("挂起轮不得执行工具")
+
+    llm = _ScriptedLLM([
+        _Resp(content="", tool_calls=[_ToolCall("c1", "send_email", '{"to": "boss"}')], usage=_Usage(2, 3)),
+    ])
+    services = ServiceRegistry({"llm": llm, "tool_executor": executor})
+    events: list[tuple[str, dict]] = []
+
+    async def _emit(etype: str, payload: dict) -> None:
+        events.append((etype, payload))
+
+    config = {
+        "modleName": "m",
+        "systemPrompt": "S",
+        "tools": [{"name": "send_email", "description": "发信",
+                   "parameters": {"type": "object", "properties": {}}}],
+        "sensitiveTools": [{"name": "send_email"}],
+    }
+    ctx = _make_runtime_ctx(
+        services, config, {"react_only": True, "input": "发邮件给老板"}, emit=_emit,
+    )
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    outputs = result.outputs
+    assert outputs["awaiting_approval"] is True
+    approval = outputs["approval"]
+    assert approval["type"] == "tool_approval"
+    assert approval["node_id"] == "agent_1"
+    assert [c["id"] for c in approval["awaiting_calls"]] == ["c1"]
+    snapshot = outputs["snapshot"]
+    assert snapshot["messages"][-1]["role"] == "assistant"
+    assert snapshot["messages"][-1]["tool_calls"][0]["id"] == "c1"
+    assert snapshot["reflect_round"] == 0 and snapshot["plan_tasks"] == []
+    assert snapshot["usage"]["total_tokens"] == 5
+    assert result.usage["total_tokens"] == 5
+    # trace 透出挂起事件供运行详情页展示
+    assert any(t == "tool_approval_required" for t, _ in events)
+
+
+def _approval_snapshot() -> dict:
+    return {
+        "messages": _pending_assistant_messages(),
+        "plan_tasks": [],
+        "reflect_round": 0,
+        "reflect_history": [],
+        "usage": {"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
+    }
+
+
+def test_agent_loop_resume_approved_executes_pending_round() -> None:
+    """批准续跑：跳过 PLAN、排空快照轮、usage 跨挂起累计。"""
+    executed: list[tuple[str, dict]] = []
+
+    def executor(name: str, args: dict) -> str:
+        executed.append((name, args))
+        return "邮件已送达"
+
+    llm = _ScriptedLLM([_Resp(content="已发送并汇报。", usage=_Usage(1, 1))])
+    services = ServiceRegistry({"llm": llm, "tool_executor": executor})
+    config = {
+        "modleName": "m", "systemPrompt": "S",
+        "tools": [{"name": "send_email", "description": "发信",
+                   "parameters": {"type": "object", "properties": {}}}],
+        "sensitiveTools": [{"name": "send_email"}],
+    }
+    runtime_input = {
+        "react_only": True,
+        "input": "批准执行工具调用",
+        "approval_resume": {"approved": True, "comment": "", "snapshot": _approval_snapshot()},
+    }
+    ctx = _make_runtime_ctx(services, config, runtime_input)
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs.get("awaiting_approval") is None
+    assert result.outputs["output"] == "已发送并汇报。"
+    assert executed == [("send_email", {"to": "boss"})]
+    # 快照续跑不重做计划：仅排空后的收敛一次 LLM 调用
+    assert len(llm.calls) == 1
+    # usage 基线来自快照（15）+ 续跑 2
+    assert result.usage["total_tokens"] == 17
+
+
+def test_agent_loop_resume_rejected_does_not_execute() -> None:
+    """拒绝续跑：pending 调用回灌拒绝 observation，不触达执行器。"""
+    def executor(name: str, args: dict) -> str:
+        raise AssertionError("拒绝的调用不得执行")
+
+    llm = _ScriptedLLM([_Resp(content="好的，改用现有信息回答。", usage=_Usage(1, 1))])
+    services = ServiceRegistry({"llm": llm, "tool_executor": executor})
+    config = {
+        "modleName": "m", "systemPrompt": "S",
+        "tools": [{"name": "send_email", "description": "发信",
+                   "parameters": {"type": "object", "properties": {}}}],
+        "sensitiveTools": [{"name": "send_email"}],
+    }
+    runtime_input = {
+        "react_only": True,
+        "input": "拒绝执行工具调用（理由：先别发）",
+        "approval_resume": {"approved": False, "comment": "先别发", "snapshot": _approval_snapshot()},
+    }
+    ctx = _make_runtime_ctx(services, config, runtime_input)
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "好的，改用现有信息回答。"
+    tool_msg = next(m for m in llm.calls[0]["messages"] if m["role"] == "tool")
+    assert "用户拒绝了该工具调用" in tool_msg["content"]
+
+
+def test_agent_loop_deep_resume_continues_reflect_round() -> None:
+    """深度模式快照续跑：跳过 PLAN，从快照 reflect_round 继续 execute→reflect。"""
+    def executor(name: str, args: dict) -> str:
+        return "邮件已送达"
+
+    snapshot = _approval_snapshot()
+    snapshot["plan_tasks"] = [{"id": "t1", "goal": "发邮件"}]
+    llm = _ScriptedLLM([
+        # execute 收敛（排空轮后）
+        _Resp(content="已处理。", usage=_Usage(1, 1)),
+        # reflect done
+        _Resp(content=json.dumps({"done": True}), usage=_Usage(1, 1)),
+    ])
+    services = ServiceRegistry({"llm": llm, "tool_executor": executor})
+    config = {
+        "modleName": "m", "systemPrompt": "S",
+        "tools": [{"name": "send_email", "description": "发信",
+                   "parameters": {"type": "object", "properties": {}}}],
+        "sensitiveTools": [{"name": "send_email"}],
+    }
+    runtime_input = {
+        "input": "批准执行工具调用",
+        "approval_resume": {"approved": True, "comment": "", "snapshot": snapshot},
+    }
+    ctx = _make_runtime_ctx(services, config, runtime_input)
+    result = asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert result.outputs["output"] == "已处理。"
+    assert result.outputs["plan"] == [{"id": "t1", "goal": "发邮件"}]
+    assert len(result.outputs["reflect_history"]) == 1
+    # 无 plan 调用：任务规划器提示词不得出现在任何一次 messages 里
+    assert all(
+        "任务规划器" not in str(m.get("content", ""))
+        for call in llm.calls for m in call["messages"]
+    )
+
+
+def test_agent_loop_vision_enabled_builds_multimodal_user_content() -> None:
+    """visionEnabled=true + 入参 images：user 消息为 OpenAI multi-modal parts 数组。"""
+    llm = _ScriptedLLM([_Resp(content="图里有只猫。", usage=_Usage(1, 1))])
+    services = ServiceRegistry({"llm": llm})
+    config = {"modleName": "m", "systemPrompt": "S", "visionEnabled": True}
+    ctx = _make_runtime_ctx(
+        services, config,
+        {"react_only": True, "input": "看图", "images": ["http://img/a.png"]},
+    )
+    asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    user_msg = llm.calls[0]["messages"][-1]
+    assert user_msg["content"] == [
+        {"type": "text", "text": "看图"},
+        {"type": "image_url", "image_url": {"url": "http://img/a.png"}},
+    ]
+
+
+def test_agent_loop_vision_disabled_ignores_images() -> None:
+    """visionEnabled 缺省/false：图片入参被忽略，user content 保持纯文本。"""
+    llm = _ScriptedLLM([_Resp(content="纯文本回答。", usage=_Usage(1, 1))])
+    services = ServiceRegistry({"llm": llm})
+    config = {"modleName": "m", "systemPrompt": "S"}
+    ctx = _make_runtime_ctx(
+        services, config,
+        {"react_only": True, "input": "你好", "images": ["http://img/a.png"]},
+    )
+    asyncio.run(AgentLoopNodeHandler().run(ctx))
+
+    assert llm.calls[0]["messages"][-1]["content"] == "你好"

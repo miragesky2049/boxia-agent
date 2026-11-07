@@ -45,7 +45,12 @@ def _infer_runtime_mode(graph: dict[str, Any]) -> str:
 
 FLOW_TYPE_WORKFLOW = "workflow"
 FLOW_TYPE_CHATFLOW = "chatflow"
-SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW})
+# 0074 智能体应用（PRD F1）：对话形态，运行载体为 start→agent_loop→end 标准画布
+FLOW_TYPE_AGENT = "agent"
+SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW, FLOW_TYPE_AGENT})
+
+# 切换到 agent 时画布允许保留的节点类型：开始(1)/结束(2)/Agent 循环(100)
+_AGENT_ALLOWED_NODE_TYPES = frozenset({"1", "2", "100"})
 
 _BATCH_DELETE_LIMIT = 100
 
@@ -61,6 +66,14 @@ SYSTEM_VARIABLE_DEFS: dict[str, list[dict[str, str]]] = {
         {"name": "RUN_ID", "label": "本次运行 ID"},
     ],
     FLOW_TYPE_CHATFLOW: [
+        {"name": "USER_INPUT", "label": "本轮用户输入"},
+        {"name": "CONVERSATION_NAME", "label": "会话名称"},
+        {"name": "CONVERSATION_ID", "label": "会话 ID"},
+        {"name": "USER_ID", "label": "当前用户 ID"},
+        {"name": "RUN_ID", "label": "本次运行 ID"},
+    ],
+    # 智能体与对话流同为对话形态，系统变量一致（PRD F1.2）
+    FLOW_TYPE_AGENT: [
         {"name": "USER_INPUT", "label": "本轮用户输入"},
         {"name": "CONVERSATION_NAME", "label": "会话名称"},
         {"name": "CONVERSATION_ID", "label": "会话 ID"},
@@ -180,6 +193,40 @@ def _default_graph(flow_type: str, llm_model_id: str) -> dict[str, Any]:
             },
         ])
         node_ids = ["start_1", "llm_1", "output_1", "end_1"]
+    elif flow_type == FLOW_TYPE_AGENT:
+        # 智能体应用（PRD F1.3）：start→agent_loop→end 标准三节点画布。
+        # agent_loop 配置写显式 camelCase 键，与 chat 通道判定（use_canvas）、
+        # AgentLoopNodeHandler、应用详情卡片同一口径；tools 显式空列表时
+        # 纯聊天走打字机通道，配置面填入工具/知识库后自动切画布通道。
+        nodes.extend([
+            {
+                "id": "agent_1",
+                "type": "100",
+                "data": {
+                    "inputs": {
+                        "modleName": _literal(llm_model_id),
+                        "systemPrompt": _literal("你是一个能干的助手。"),
+                        "tools": _literal([]),
+                        "maxToolRounds": _literal(10),
+                    },
+                    "outputs": [],
+                },
+            },
+            {
+                "id": "end_1",
+                "type": "2",
+                "data": {
+                    "inputs": {
+                        "returnType": _literal("text"),
+                        "content": _literal("{{agent_1.output.output}}"),
+                        # 回答由 agent 通道逐轮产出，结束节点不再重复输出
+                        "stream": _literal(False),
+                    },
+                    "outputs": [],
+                },
+            },
+        ])
+        node_ids = ["start_1", "agent_1", "end_1"]
     else:
         nodes.append({
             "id": "end_1",
@@ -590,7 +637,12 @@ class ApplicationService:
 
         两种形态共用同一套节点库，因此对话流 -> 工作流不因存在输出/问答/会话节点而拒绝；
         工作流 -> 对话流仍要求图中已有开始和结束节点。
+        切换到智能体（0074）要求画布不含会被配置面"编辑不到"的编排节点，见
+        _assert_switch_to_agent_allowed。
         """
+        if next_flow_type == FLOW_TYPE_AGENT:
+            self._assert_switch_to_agent_allowed(application_id)
+            return
         if next_flow_type != FLOW_TYPE_CHATFLOW:
             return
         latest = self._repo.get_latest_graph_version(application_id)
@@ -607,6 +659,31 @@ class ApplicationService:
         if missing:
             raise ValidationError(
                 "当前画布缺少节点，无法切换为对话流：" + "、".join(missing)
+            )
+
+    def _assert_switch_to_agent_allowed(self, application_id: UUID) -> None:
+        """切换到智能体仅允许"不丢编排内容"的画布：节点类型 ⊆ {开始, 结束, Agent 循环}。
+
+        对话流画布上的 LLM/输出/问答等节点切到 agent 后不会被配置面表单读写、
+        却仍留在画布里，会造成"编辑对象与运行对象不一致"的错觉；要求先清理或复制应用。
+        """
+        latest = self._repo.get_latest_graph_version(application_id)
+        if latest is None:
+            return
+        graph = _parse_graph(latest["graph"], self._storage)
+        nodes = graph.get("nodes") or []
+        extra = sorted(
+            {
+                str(node.get("type"))
+                for node in nodes
+                if str(node.get("type")) not in _AGENT_ALLOWED_NODE_TYPES
+            }
+        )
+        if extra:
+            raise ValidationError(
+                "画布包含非智能体结构的节点（类型 "
+                + "、".join(extra)
+                + "），切换为智能体前请先清理画布或复制该应用"
             )
 
     def set_listed_in_market(self, application_id: UUID, listed: bool) -> None:

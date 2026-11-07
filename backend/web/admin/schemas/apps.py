@@ -9,8 +9,8 @@ from pydantic import BaseModel, Field
 class AppCreatePayload(BaseModel):
     name: str = Field(..., max_length=200)
     description: str = Field("", max_length=2000)
-    # workflow（工作流） / chatflow（对话流）
-    flow_type: str = Field("workflow", pattern="^(workflow|chatflow)$")
+    # workflow（工作流） / chatflow（对话流） / agent（智能体，0074）
+    flow_type: str = Field("workflow", pattern="^(workflow|chatflow|agent)$")
     # 0068 可见范围 v2：产品级应用的平台侧默认值
     visibility_template: Literal["all", "whitelist"] = "all"
     visibility_lock: bool = False
@@ -20,7 +20,7 @@ class AppUpdatePayload(BaseModel):
     name: str | None = Field(None, max_length=200)
     description: str | None = Field(None, max_length=2000)
     avatar_url: str | None = Field(None, max_length=500)
-    flow_type: str | None = Field(None, pattern="^(workflow|chatflow)$")
+    flow_type: str | None = Field(None, pattern="^(workflow|chatflow|agent)$")
     # 0068 可见范围 v2：仅产品级应用可设置（owner_type 校验在 service 层）
     visibility_template: Literal["all", "whitelist"] | None = None
     visibility_lock: bool | None = None
@@ -30,6 +30,33 @@ class AppUpdatePayload(BaseModel):
 class GraphPayload(BaseModel):
     graph: dict[str, Any]
     changelog: str = ""
+
+
+class AgentConfigPayload(BaseModel):
+    """0074 智能体配置表单请求体。
+
+    键名与画布配置面保持 camelCase（coze 口径）；本模型只做结构承载与
+    OpenAPI 文档，业务校验（必填/上限/保留前缀）在 domain/canvas/agent_config。
+    """
+
+    systemPrompt: str = ""
+    modleName: str = ""
+    maxToolRounds: int | None = None
+    openingRemarks: str = ""
+    suggestedQuestions: list[str] = Field(default_factory=list)
+    tools: list[dict[str, Any]] = Field(default_factory=list)
+    datasets: list[dict[str, Any]] = Field(default_factory=list)
+    mcpServers: list[dict[str, Any]] = Field(default_factory=list)
+    workflows: list[dict[str, Any]] = Field(default_factory=list)
+    memory: dict[str, Any] = Field(default_factory=dict)
+    reasoningMode: str = "react"
+    plannerPrompt: str | None = None
+    reflectorPrompt: str | None = None
+    maxReflectRounds: int | None = None
+    sensitiveTools: list[dict[str, Any]] = Field(default_factory=list)
+    # 0074 PRD F9（M3）：视觉开关（前端按所选模型 capabilities.supports_vision 门控）
+    visionEnabled: bool = False
+    tokenBudget: int | None = None
 
 
 class ListingPayload(BaseModel):
