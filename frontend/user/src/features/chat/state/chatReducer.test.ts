@@ -227,4 +227,81 @@ describe('chatReducer', () => {
     })
     expect(loaded.pendingApproval).toBeNull()
   })
+
+  describe('M4 F14.10 接管发言权路由态', () => {
+    it('handoff 接管帧：追加通告气泡并登记 activeHandoff', () => {
+      const next = chatReducer(initialChatState, {
+        type: 'handoff',
+        message: {
+          id: 'n1', role: 'assistant', content: '',
+          handoffNotice: '会话已移交给专家「天气专家」，后续对话由其应答。',
+        },
+        active: { applicationId: 'app-2', displayName: '天气专家' },
+      })
+      expect(next.activeHandoff).toEqual({ applicationId: 'app-2', displayName: '天气专家' })
+      expect(next.messages).toHaveLength(1)
+      expect(next.messages[0].handoffNotice).toContain('天气专家')
+    })
+
+    it('handoff 归位帧：通告气泡并清空发言权', () => {
+      const takenOver = chatReducer(initialChatState, {
+        type: 'handoff',
+        message: { id: 'n1', role: 'assistant', content: '', handoffNotice: '移交' },
+        active: { applicationId: 'app-2', displayName: '天气专家' },
+      })
+      const next = chatReducer(takenOver, {
+        type: 'handoff',
+        message: {
+          id: 'n2', role: 'assistant', content: '',
+          handoffNotice: '接管已结束，会话已归位主助手「主助手」。',
+        },
+        active: null,
+      })
+      expect(next.activeHandoff).toBeNull()
+      expect(next.messages.map((item) => item.id)).toEqual(['n1', 'n2'])
+    })
+
+    it('start_run 的 answeredBy 挂到助手占位气泡（接管轮由专家应答徽标）', () => {
+      const next = chatReducer(initialChatState, {
+        type: 'start_run', userText: '明天穿什么', userId: 'u1', assistantId: 'a1',
+        answeredBy: '天气专家',
+      })
+      expect(next.messages[1]).toMatchObject({ id: 'a1', answeredBy: '天气专家' })
+      expect(next.messages[0].answeredBy).toBeUndefined()
+    })
+
+    it('set_messages 切会话携带 activeHandoff，缺省清空；reset 清空', () => {
+      const takenOver: ChatState = {
+        ...initialChatState,
+        activeHandoff: { applicationId: 'app-2', displayName: '天气专家' },
+      }
+      const switched = chatReducer(takenOver, {
+        type: 'set_messages', messages: [], conversationId: 'c9',
+        activeHandoff: { applicationId: 'app-3', displayName: '合同专家' },
+      })
+      expect(switched.activeHandoff).toEqual({ applicationId: 'app-3', displayName: '合同专家' })
+      const plain = chatReducer(takenOver, {
+        type: 'set_messages', messages: [], conversationId: 'c8',
+      })
+      expect(plain.activeHandoff).toBeNull()
+      expect(chatReducer(takenOver, { type: 'reset' }).activeHandoff).toBeNull()
+    })
+
+    it('set_active_handoff 仅对齐发言权，不动消息与其他状态', () => {
+      const base = chatReducer(initialChatState, {
+        type: 'start_run',
+        assistantId: 'a1',
+        userId: 'u1',
+        userText: '查天气',
+      })
+      const next = chatReducer(base, {
+        type: 'set_active_handoff',
+        active: { applicationId: 'app-2', displayName: '天气专家' },
+      })
+      expect(next.activeHandoff).toEqual({ applicationId: 'app-2', displayName: '天气专家' })
+      expect(next.messages).toBe(base.messages)
+      const cleared = chatReducer(next, { type: 'set_active_handoff', active: null })
+      expect(cleared.activeHandoff).toBeNull()
+    })
+  })
 })

@@ -15,7 +15,9 @@ def _login_platform(client: TestClient) -> dict[str, str]:
 
 
 def _create_listed_app(client: TestClient, headers: dict[str, str], name: str) -> str:
-    created = client.post("/api/v1/admin/apps", json={"name": name, "description": "测试应用"}, headers=headers)
+    created = client.post(
+        "/api/v1/admin/apps", json={"name": name, "description": "测试应用"}, headers=headers
+    )
     assert created.status_code == 201, created.text
     app_id = created.json()["application_id"]
 

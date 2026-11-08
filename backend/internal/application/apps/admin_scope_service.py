@@ -75,8 +75,12 @@ class AdminScopeService:
         can_all_admin = uow.users.has_permission(user_id, tenant_id, "app:admin")
         user_units = uow.user_mgmt_unit_grants.list_unit_ids_for_user(tenant_id, user_id)
         return self._is_manageable_row(
-            app, app_units, user_id, is_super=False,
-            can_all_admin=can_all_admin, user_units=user_units,
+            app,
+            app_units,
+            user_id,
+            is_super=False,
+            can_all_admin=can_all_admin,
+            user_units=user_units,
         )
 
     def _is_manageable_row(
@@ -134,6 +138,4 @@ class AdminScopeService:
 
     def list_managed_apps(self, user_id: UUID, tenant_id: UUID) -> list[dict]:
         """当前用户可管理的已订阅应用列表（"我管理的应用"数据源）。"""
-        return [
-            app for app in self.list_subscribed_apps(user_id, tenant_id) if app["manageable"]
-        ]
+        return [app for app in self.list_subscribed_apps(user_id, tenant_id) if app["manageable"]]

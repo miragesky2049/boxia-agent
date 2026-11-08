@@ -12,11 +12,14 @@ from uuid import UUID
 from sqlalchemy import (
     Boolean,
     DateTime,
+    ForeignKey,
     Integer,
     String,
     Text,
+    UniqueConstraint,
     Uuid,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -30,7 +33,10 @@ class ResourceModel(Base):
     __tablename__ = "resource"
 
     id: Mapped[UuidPrimaryKey]
-    type: Mapped[str] = mapped_column(String(40), nullable=False)
+    # 迁移 0061 在库侧建了 fk_resource_type_catalog，模型补齐登记避免 alembic check 漂移
+    type: Mapped[str] = mapped_column(
+        String(40), ForeignKey("resource_type_catalog.code"), nullable=False
+    )
     owner_type: Mapped[str] = mapped_column(String(20), nullable=False)
     owner_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     name: Mapped[str] = mapped_column(String(200), nullable=False)
@@ -66,10 +72,28 @@ class ResourceEntitlementModel(Base):
     """
 
     __tablename__ = "tenant_resource_entitlement"
+    __table_args__ = (
+        UniqueConstraint("resource_id", "tenant_id", name="ux_tenant_resource_entitlement_unique"),
+    )
 
     id: Mapped[UuidPrimaryKey]
-    resource_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
-    tenant_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
+    resource_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("resource.id", ondelete="CASCADE"), nullable=False
+    )
+    tenant_id: Mapped[UUID] = mapped_column(
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False
+    )
     status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
     start_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     expire_time: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # 以下六列迁移 0060 已建、写路径裸 SQL 在用；模型补齐登记，避免 check 误报删列
+    granted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    auth_source: Mapped[str] = mapped_column(String(20), nullable=False, server_default="OPS")
+    auth_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="FORMAL")
+    quota_json: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, server_default=text("'{}'::jsonb"), default=dict
+    )
+    remark: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    granted_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))

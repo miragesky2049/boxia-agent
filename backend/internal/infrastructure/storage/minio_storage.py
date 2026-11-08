@@ -37,12 +37,12 @@ class MinioObjectStorage(ObjectStorage):
         self._secure = secure
         self._access_key = access_key
         self._secret_key = secret_key
-        self._client = None  # 懒加载
+        self._client: Any = None  # 懒加载
 
     def _ensure_client(self) -> Any:
         if self._client is not None:
             return self._client
-        from minio import Minio  # type: ignore[import-not-found]
+        from minio import Minio
 
         self._client = Minio(
             self._endpoint,

@@ -112,9 +112,7 @@ function NodeExecutionRow({ node }: { node: NodeExecution }) {
           <Typography.Text strong>{node.node_id}</Typography.Text>
           <Tag color={status === 'error' ? 'error' : 'success'}>{status}</Tag>
           <Typography.Text type="secondary">{duration}</Typography.Text>
-          {tokens != null && (
-            <Tag color="blue">tokens: {tokens}</Tag>
-          )}
+          {tokens != null && <Tag color="blue">tokens: {tokens}</Tag>}
         </Space>
         <Button type="link" size="small" onClick={() => setExpanded((v) => !v)}>
           {expanded ? '收起' : '详情'}
@@ -448,7 +446,9 @@ export default function RunsPage() {
             )}
 
             <div>
-              <Typography.Text strong>节点执行轨迹（{detail.node_executions.length}）</Typography.Text>
+              <Typography.Text strong>
+                节点执行轨迹（{detail.node_executions.length}）
+              </Typography.Text>
               <div style={{ marginTop: 8 }}>
                 {detail.node_executions.length === 0 ? (
                   <Empty description="无节点执行记录" />
@@ -476,7 +476,10 @@ export default function RunsPage() {
                         background: '#fafafa',
                       }}
                     >
-                      <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space
+                        size="middle"
+                        style={{ width: '100%', justifyContent: 'space-between' }}
+                      >
                         <Space>
                           <StatusTag status={child.execute_status} />
                           <Typography.Text code style={{ fontSize: 11 }}>
@@ -503,9 +506,7 @@ export default function RunsPage() {
             )}
 
             <div>
-              <Typography.Text strong>
-                Time-travel 历史（{checkpoints.length}）
-              </Typography.Text>
+              <Typography.Text strong>Time-travel 历史（{checkpoints.length}）</Typography.Text>
               <Typography.Paragraph type="secondary" style={{ marginTop: 4, fontSize: 12 }}>
                 从任一历史状态分叉：复制该状态到新 thread，从该节点继续跑。
               </Typography.Paragraph>
@@ -525,7 +526,10 @@ export default function RunsPage() {
                         background: '#f0f5ff',
                       }}
                     >
-                      <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space
+                        size="middle"
+                        style={{ width: '100%', justifyContent: 'space-between' }}
+                      >
                         <Space>
                           <Tag color="blue">#{idx + 1}</Tag>
                           <Typography.Text code style={{ fontSize: 11 }}>

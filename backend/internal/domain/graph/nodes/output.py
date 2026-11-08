@@ -118,11 +118,14 @@ class OutputNodeHandler(NodeHandler):
         content = render_content(ctx, "content")
 
         if ctx.emit_event is not None:
-            await ctx.emit_event("output_message", {
-                "content": content,
-                "role": "assistant",
-                "stream": bool((ctx.config or {}).get("stream", False)),
-            })
+            await ctx.emit_event(
+                "output_message",
+                {
+                    "content": content,
+                    "role": "assistant",
+                    "stream": bool((ctx.config or {}).get("stream", False)),
+                },
+            )
 
         await persist_assistant_message(ctx, content, source="output_node")
 

@@ -17,6 +17,7 @@ import asyncio
 import logging
 from typing import Any
 
+from internal.domain.canvas.model import CanvasGraph
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult, RuntimeEnv
 from internal.domain.graph.nodes import register_node_handler
@@ -58,22 +59,24 @@ class BatchNodeHandler(NodeHandler):
         output_list: list[Any] = []
         errors: list[str] = []
         for i, r in enumerate(results):
-            if isinstance(r, Exception):
+            if isinstance(r, BaseException):
                 errors.append(f"item[{i}]: {r}")
                 output_list.append(None)
             else:
                 output_list.append(r.get("output", {}))
 
-        return NodeResult(outputs={
-            "output": output_list,
-            "count": len(output_list),
-            "errors": errors,
-        })
+        return NodeResult(
+            outputs={
+                "output": output_list,
+                "count": len(output_list),
+                "errors": errors,
+            }
+        )
 
     async def _run_iteration(
         self,
         ctx: NodeContext,
-        subgraph,
+        subgraph: CanvasGraph,
         item: Any,
         index: int,
         total: int,

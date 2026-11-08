@@ -30,8 +30,10 @@ def build_multimodal_content(text: str, images: list[str]) -> list[dict[str, Any
     if text:
         parts.append({"type": "text", "text": text})
     for url in images:
-        parts.append({
-            "type": "image_url",
-            "image_url": {"url": url},
-        })
+        parts.append(
+            {
+                "type": "image_url",
+                "image_url": {"url": url},
+            }
+        )
     return parts

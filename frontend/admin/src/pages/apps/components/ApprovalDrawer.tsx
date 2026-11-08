@@ -1,5 +1,5 @@
-import { Button, Drawer, Input, Space, Tag, Typography } from 'antd';
-import type { ApprovalInterruptPayload } from '../../../api/apps';
+import { Button, Drawer, Input, Space, Tag, Typography } from 'antd'
+import type { ApprovalInterruptPayload } from '../../../api/apps'
 
 // 人审审批抽屉（B11）：展示中断负载并提交通过/拒绝
 export function ApprovalDrawer({
@@ -12,14 +12,14 @@ export function ApprovalDrawer({
   onClose,
   onSubmit,
 }: {
-  open: boolean;
-  payload: ApprovalInterruptPayload | null;
-  approver: string;
-  comment: string;
-  onApproverChange: (value: string) => void;
-  onCommentChange: (value: string) => void;
-  onClose: () => void;
-  onSubmit: (approved: boolean) => void;
+  open: boolean
+  payload: ApprovalInterruptPayload | null
+  approver: string
+  comment: string
+  onApproverChange: (value: string) => void
+  onCommentChange: (value: string) => void
+  onClose: () => void
+  onSubmit: (approved: boolean) => void
 }) {
   return (
     <Drawer
@@ -33,7 +33,9 @@ export function ApprovalDrawer({
           {payload.assignee_role && (
             <div>
               <Typography.Text type="secondary">审批人角色</Typography.Text>
-              <div><Tag color="orange">{payload.assignee_role}</Tag></div>
+              <div>
+                <Tag color="orange">{payload.assignee_role}</Tag>
+              </div>
             </div>
           )}
           {payload.instructions && (
@@ -47,10 +49,18 @@ export function ApprovalDrawer({
           {payload.snapshot && (
             <div>
               <Typography.Text type="secondary">节点输入快照</Typography.Text>
-              <pre style={{
-                margin: 0, padding: 8, background: '#fafafa', borderRadius: 6,
-                fontSize: 11, maxHeight: 200, overflow: 'auto', whiteSpace: 'pre-wrap',
-              }}>
+              <pre
+                style={{
+                  margin: 0,
+                  padding: 8,
+                  background: '#fafafa',
+                  borderRadius: 6,
+                  fontSize: 11,
+                  maxHeight: 200,
+                  overflow: 'auto',
+                  whiteSpace: 'pre-wrap',
+                }}
+              >
                 {JSON.stringify(payload.snapshot, null, 2)}
               </pre>
             </div>
@@ -83,5 +93,5 @@ export function ApprovalDrawer({
         </Space>
       )}
     </Drawer>
-  );
+  )
 }

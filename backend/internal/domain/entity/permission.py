@@ -119,13 +119,31 @@ PERMISSION_CATALOG: tuple[PermissionDefinition, ...] = (
     _perm("button:resource:review", "资源-审核", "button", "manage", 406),
     _perm("button:resource:create", "资源-新建", "button", "create", 302),
     # 应用可见范围 v2（0068）：租户侧应用管理三码 + 菜单/页面码
-    _perm("menu:tenant-apps", "应用管理", "menu", "view", 17, "租户侧应用管理入口（已订阅应用与可见/管理范围配置）"),
-    _perm("page:tenant-apps", "应用管理页面", "page", "view", 117, "租户应用管理页面（已订阅应用与我管理的应用）"),
+    _perm(
+        "menu:tenant-apps",
+        "应用管理",
+        "menu",
+        "view",
+        17,
+        "租户侧应用管理入口（已订阅应用与可见/管理范围配置）",
+    ),
+    _perm(
+        "page:tenant-apps",
+        "应用管理页面",
+        "page",
+        "view",
+        117,
+        "租户应用管理页面（已订阅应用与我管理的应用）",
+    ),
     _perm("app:admin", "应用管理", "button", "manage", 407, "可管理本租户内产品级应用的租户侧配置"),
-    _perm("app:admin:all", "应用管理全部", "button", "manage", 408, "租户内所有应用的管理范围不受限"),
+    _perm(
+        "app:admin:all", "应用管理全部", "button", "manage", 408, "租户内所有应用的管理范围不受限"
+    ),
     _perm("app:visibility:write", "可见范围编辑", "button", "update", 409, "可修改应用可见范围"),
     # 应用管理范围（0069 二期）：管理单元关联编辑
-    _perm("app:admin_scope:write", "管理范围编辑", "button", "update", 410, "可修改应用关联的管理单元"),
+    _perm(
+        "app:admin_scope:write", "管理范围编辑", "button", "update", 410, "可修改应用关联的管理单元"
+    ),
 )
 
 PERMISSION_CODES: tuple[str, ...] = tuple(item.code for item in PERMISSION_CATALOG)

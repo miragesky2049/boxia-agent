@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from internal.domain.auth import (
     AuthCache,
@@ -14,7 +14,7 @@ from internal.domain.auth import (
     GrantError,
     GrantService,
 )
-from internal.domain.entity.auth_constants import AuthSource, AuthType
+from internal.domain.entity.auth_constants import AuthType
 
 
 class InMemoryAuthCache(AuthCache):
@@ -39,7 +39,7 @@ class FakeAuthRepo:
         self.audit_logs: list[dict[str, Any]] = []
 
     def find_active_grant(self, tenant_id: UUID, application_id: UUID) -> dict | None:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         for row in self.rows:
             if row["tenant_id"] != tenant_id or row["application_id"] != application_id:
                 continue
@@ -56,7 +56,9 @@ class FakeAuthRepo:
 
     def exists_active_grant(self, tenant_id: UUID, application_id: UUID) -> bool:
         return any(
-            r["tenant_id"] == tenant_id and r["application_id"] == application_id and r["status"] == "active"
+            r["tenant_id"] == tenant_id
+            and r["application_id"] == application_id
+            and r["status"] == "active"
             for r in self.rows
         )
 
@@ -107,7 +109,7 @@ def test_create_grant_active_then_auth_passes():
 
     tenant_id = uuid4()
     app_id = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     req = CreateGrantRequest(
         tenant_id=tenant_id,
@@ -118,7 +120,7 @@ def test_create_grant_active_then_auth_passes():
         start_time=now - timedelta(minutes=1),
         expire_time=now + timedelta(days=365),
     )
-    instance_id = asyncio.run(grant_svc.create_grant(req))
+    asyncio.run(grant_svc.create_grant(req))
 
     # 检查记录确实写入了
     assert len(repo.rows) == 1
@@ -143,7 +145,7 @@ def test_create_grant_rejects_duplicate_active():
 
     tenant_id = uuid4()
     app_id = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     req = CreateGrantRequest(
         tenant_id=tenant_id,
@@ -172,7 +174,7 @@ def test_create_grant_with_past_expire_time_rejected():
 
     tenant_id = uuid4()
     app_id = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     req = CreateGrantRequest(
         tenant_id=tenant_id,
@@ -198,7 +200,7 @@ def test_recycle_grant_invalidates_cache():
 
     tenant_id = uuid4()
     app_id = uuid4()
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     req = CreateGrantRequest(
         tenant_id=tenant_id,

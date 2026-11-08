@@ -1,29 +1,29 @@
-import { Button, Typography } from '@douyinfe/semi-ui';
-import { Component } from 'react';
-import type { ErrorInfo, ReactNode } from 'react';
+import { Button, Typography } from '@douyinfe/semi-ui'
+import { Component } from 'react'
+import type { ErrorInfo, ReactNode } from 'react'
 
 interface Props {
-  children: ReactNode;
+  children: ReactNode
 }
 
 interface State {
-  error: Error | null;
+  error: Error | null
 }
 
 export default class AppErrorBoundary extends Component<Props, State> {
-  override state: State = { error: null };
+  override state: State = { error: null }
 
   static getDerivedStateFromError(error: Error): State {
-    return { error };
+    return { error }
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    console.error('界面渲染异常', error, info.componentStack);
+    console.error('界面渲染异常', error, info.componentStack)
   }
 
   override render(): ReactNode {
-    const { error } = this.state;
-    if (!error) return this.props.children;
+    const { error } = this.state
+    if (!error) return this.props.children
 
     return (
       <div style={{ padding: 48, textAlign: 'center' }}>
@@ -39,6 +39,6 @@ export default class AppErrorBoundary extends Component<Props, State> {
           <Button onClick={() => window.location.assign('/apps')}>返回首页</Button>
         </div>
       </div>
-    );
+    )
   }
 }

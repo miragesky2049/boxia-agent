@@ -31,7 +31,9 @@ class McpDiscoveryService:
 
     def __init__(self) -> None:
         self._lock = threading.Lock()
-        self._cache: dict[tuple[str, tuple[tuple[str, str], ...]], tuple[float, list[dict[str, Any]]]] = {}
+        self._cache: dict[
+            tuple[str, tuple[tuple[str, str], ...]], tuple[float, list[dict[str, Any]]]
+        ] = {}
 
     async def discover(
         self,

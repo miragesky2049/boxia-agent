@@ -1,4 +1,5 @@
 """验证 markdown 切分。"""
+
 import sys
 from pathlib import Path
 

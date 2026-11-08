@@ -28,7 +28,9 @@ class FakeLLMService:
     def __init__(self) -> None:
         self.calls: list[dict[str, Any]] = []
 
-    async def chat(self, *, messages, model, temperature=None, max_tokens=None, response_format=None):
+    async def chat(
+        self, *, messages, model, temperature=None, max_tokens=None, response_format=None
+    ):
         self.calls.append({"messages": messages, "model": model})
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30)
         return SimpleNamespace(
@@ -48,7 +50,9 @@ class FakeRunRepo:
         self.inserted_runs.append(kwargs)
 
     def update_run_status(self, run_id, execute_status, output=None, error_message=None):
-        self.status_updates.append({"run_id": run_id, "status": execute_status, "output": output, "error": error_message})
+        self.status_updates.append(
+            {"run_id": run_id, "status": execute_status, "output": output, "error": error_message}
+        )
 
     def update_run_interrupt(self, run_id, payload):
         self.status_updates.append({"run_id": run_id, "status": "interrupted", "payload": payload})

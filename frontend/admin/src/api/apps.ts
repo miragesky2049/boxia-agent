@@ -38,6 +38,8 @@ export interface Application {
   visibility_template?: 'all' | 'whitelist'
   admin_scope_mode?: 'creator_only' | 'mgmt_unit' | 'all_admin'
   flow_type: FlowType
+  // M4-c F14.1：协作区选择器按"已发布"过滤（列表新增输出列，未发布为 null）
+  published_graph_version?: number | null
   created_by: string | null
   created_at: string
   updated_at: string
@@ -137,7 +139,14 @@ export interface RunItem {
 // 子 run 列表行（list_child_runs 只回精简列，无 input/output）
 export type RunChildItem = Pick<
   RunItem,
-  'id' | 'workflow_id' | 'user_id' | 'thread_id' | 'execute_status' | 'error_message' | 'started_at' | 'finished_at'
+  | 'id'
+  | 'workflow_id'
+  | 'user_id'
+  | 'thread_id'
+  | 'execute_status'
+  | 'error_message'
+  | 'started_at'
+  | 'finished_at'
 >
 
 export interface NodeExecution {
@@ -452,11 +461,16 @@ export async function listApps(
   params: {
     owner_type?: string
     marketplace_only?: boolean
+    // M4-c F14.1：协作区选择器过滤（additive，后端同参数支持）
+    flow_type?: string
+    published_only?: boolean
   } = {},
 ): Promise<Application[]> {
   const query = new URLSearchParams()
   if (params.owner_type) query.set('owner_type', params.owner_type)
   if (params.marketplace_only) query.set('marketplace_only', 'true')
+  if (params.flow_type) query.set('flow_type', params.flow_type)
+  if (params.published_only) query.set('published_only', 'true')
   const qs = query.toString()
   return request<Application[]>(`/admin/apps${qs ? `?${qs}` : ''}`)
 }

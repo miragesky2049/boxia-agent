@@ -201,9 +201,7 @@ def _seed_related_data(tenant_id: str) -> dict[str, str]:
 
         document_id = uuid4()
         uow.session.execute(
-            text(
-                "INSERT INTO documents (id, tenant_id, title) VALUES (:id, :tid, '租户文档')"
-            ),
+            text("INSERT INTO documents (id, tenant_id, title) VALUES (:id, :tid, '租户文档')"),
             {"id": document_id, "tid": tenant_id},
         )
         uow.session.execute(
@@ -227,7 +225,13 @@ def _seed_related_data(tenant_id: str) -> dict[str, str]:
                 "INSERT INTO message (id, conversation_id, tenant_id, user_id, application_id, role) "
                 "VALUES (:id, :cid, :tid, :uid, :aid, 'user')"
             ),
-            {"id": uuid4(), "cid": conversation_id, "tid": tenant_id, "uid": admin_id, "aid": owned_app},
+            {
+                "id": uuid4(),
+                "cid": conversation_id,
+                "tid": tenant_id,
+                "uid": admin_id,
+                "aid": owned_app,
+            },
         )
 
         # 一条租户自身历史审计（模拟租户内操作留痕）
@@ -293,9 +297,7 @@ def _tenant_related_counts(tenant_id: str) -> dict[str, int]:
         "conversations": _scalar(
             "SELECT count(*) FROM conversation WHERE tenant_id = :tid", tid=tenant_id
         ),
-        "messages": _scalar(
-            "SELECT count(*) FROM message WHERE tenant_id = :tid", tid=tenant_id
-        ),
+        "messages": _scalar("SELECT count(*) FROM message WHERE tenant_id = :tid", tid=tenant_id),
         "audit_logs": _scalar(
             "SELECT count(*) FROM audit_logs WHERE tenant_id = :tid", tid=tenant_id
         ),
@@ -317,15 +319,11 @@ def test_delete_requires_confirm(client: TestClient, auth_headers: dict[str, str
     missing = client.delete(f"{TENANTS_URL}/{tenant['id']}", headers=auth_headers)
     assert missing.status_code == 422, missing.text
 
-    rejected = client.delete(
-        f"{TENANTS_URL}/{tenant['id']}?confirm=false", headers=auth_headers
-    )
+    rejected = client.delete(f"{TENANTS_URL}/{tenant['id']}?confirm=false", headers=auth_headers)
     assert rejected.status_code == 422, rejected.text
 
 
-def test_delete_requires_permission_code(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_requires_permission_code(client: TestClient, auth_headers: dict[str, str]) -> None:
     tenant = create_tenant(client, auth_headers, code="del-perm", name="权限租户")
     # 0071：viewer 出厂已无「管理端访问」，无法再绑定为管理员，仅以 admin 验证权限码门槛
     headers = _create_operator(client, auth_headers, "admin", "op-admin-delete")
@@ -349,9 +347,7 @@ def test_delete_forbidden_in_tenant_scope(
     assert response.status_code == 403, response.text
 
 
-def test_delete_platform_tenant_rejected(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_platform_tenant_rejected(client: TestClient, auth_headers: dict[str, str]) -> None:
     response = client.delete(
         f"{TENANTS_URL}/{PLATFORM_TENANT_ID}?confirm=true", headers=auth_headers
     )
@@ -362,23 +358,17 @@ def test_delete_platform_tenant_rejected(
 def test_delete_unknown_tenant_returns_404(
     client: TestClient, auth_headers: dict[str, str]
 ) -> None:
-    response = client.delete(
-        f"{TENANTS_URL}/{uuid4()}?confirm=true", headers=auth_headers
-    )
+    response = client.delete(f"{TENANTS_URL}/{uuid4()}?confirm=true", headers=auth_headers)
     assert response.status_code == 404, response.text
 
 
 # ========== 级联与审计 ==========
-def test_delete_cascades_all_related_data(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_cascades_all_related_data(client: TestClient, auth_headers: dict[str, str]) -> None:
     victim = create_tenant(client, auth_headers, code="del-victim", name="待删租户")
     other = create_tenant(client, auth_headers, code="del-other", name="留存租户")
     ids = _seed_related_data(victim["id"])
 
-    response = client.delete(
-        f"{TENANTS_URL}/{victim['id']}?confirm=true", headers=auth_headers
-    )
+    response = client.delete(f"{TENANTS_URL}/{victim['id']}?confirm=true", headers=auth_headers)
     assert response.status_code == 200, response.text
     body = response.json()
     assert body["code"] == "del-victim"
@@ -406,13 +396,9 @@ def test_delete_cascades_all_related_data(
         == 0
     )
     # 平台应用 / 平台资源本体保留
+    assert _scalar("SELECT count(*) FROM application WHERE id = :aid", aid=ids["platform_app"]) == 1
     assert (
-        _scalar("SELECT count(*) FROM application WHERE id = :aid", aid=ids["platform_app"])
-        == 1
-    )
-    assert (
-        _scalar("SELECT count(*) FROM resource WHERE id = :rid", rid=ids["platform_resource"])
-        == 1
+        _scalar("SELECT count(*) FROM resource WHERE id = :rid", rid=ids["platform_resource"]) == 1
     )
     # 其他租户不受影响（初始化的角色/超管/字典仍在）
     assert _scalar("SELECT count(*) FROM tenants WHERE id = :tid", tid=other["id"]) == 1
@@ -433,13 +419,17 @@ def test_delete_writes_platform_side_audit(
     assert response.status_code == 200, response.text
     audit_id = response.json()["audit_id"]
 
-    row = _new_uow().session.execute(
-        text(
-            "SELECT tenant_id, action, resource_type, resource_id, actor_username "
-            "FROM audit_logs WHERE id = :id"
-        ),
-        {"id": audit_id},
-    ).one()
+    row = (
+        _new_uow()
+        .session.execute(
+            text(
+                "SELECT tenant_id, action, resource_type, resource_id, actor_username "
+                "FROM audit_logs WHERE id = :id"
+            ),
+            {"id": audit_id},
+        )
+        .one()
+    )
     assert str(row[0]) == str(PLATFORM_TENANT_ID)
     assert row[1] == "tenant.deleted"
     assert row[2] == "tenant"
@@ -448,9 +438,7 @@ def test_delete_writes_platform_side_audit(
 
 
 # ========== 批量 ==========
-def test_batch_delete_partial_success(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_partial_success(client: TestClient, auth_headers: dict[str, str]) -> None:
     victim = create_tenant(client, auth_headers, code="batch-victim", name="批量待删")
     _seed_related_data(victim["id"])
     missing_id = str(uuid4())
@@ -490,9 +478,7 @@ def test_batch_delete_partial_success(
     )
 
 
-def test_batch_delete_deduplicates_ids(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_deduplicates_ids(client: TestClient, auth_headers: dict[str, str]) -> None:
     tenant = create_tenant(client, auth_headers, code="batch-dup", name="去重租户")
     response = client.post(
         f"{TENANTS_URL}/batch",
@@ -506,9 +492,7 @@ def test_batch_delete_deduplicates_ids(
     assert body["failed"] == 0
 
 
-def test_batch_delete_validation(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_validation(client: TestClient, auth_headers: dict[str, str]) -> None:
     tenant = create_tenant(client, auth_headers, code="batch-val", name="校验租户")
 
     without_confirm = client.post(

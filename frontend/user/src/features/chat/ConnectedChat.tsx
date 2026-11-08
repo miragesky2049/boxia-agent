@@ -122,6 +122,8 @@ export function ConnectedChat() {
       userName={user?.display_name || user?.username || '当前用户'}
       tenantCode={getTenantCode()}
       imagesEnabled={agent.flow_type === 'agent' && Boolean(agentConfig.vision_enabled)}
+      // M4 PRD F16.6：仅智能体应用有长期记忆管理入口（chatflow 无长期记忆）
+      memoriesEnabled={agent.flow_type === 'agent'}
       onSend={(text, images) => {
         void session.send(text, images)
       }}
@@ -146,6 +148,11 @@ export function ConnectedChat() {
       }
       onApprovalDecision={(approved, comment, approval) => {
         void session.resolveApproval(approved, comment, approval)
+      }}
+      // M4 PRD F14.9：接管中（发言权在专家）时 Composer 提供手动归位
+      handbackVisible={Boolean(session.activeHandoff)}
+      onHandback={() => {
+        void session.handback()
       }}
     />
   )

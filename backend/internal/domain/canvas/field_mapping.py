@@ -18,8 +18,8 @@ EDGE_FIELD_MAP = {
 
 # 节点 data 下的标准字段（不压入 config）
 NODE_STANDARD_INPUT_FIELDS = {
-    "inputParameters",      # 运行时入参
-    "settingOnError",       # 错误处理策略
+    "inputParameters",  # 运行时入参
+    "settingOnError",  # 错误处理策略
 }
 
 # ValueExpressionDTO 的字段名

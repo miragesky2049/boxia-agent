@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy.exc import IntegrityError
@@ -90,7 +91,7 @@ class EmploymentService:
         hr_fields = self._normalize_hr_fields(hr_fields or {}, tenant_id)
         self._validate_hr_dates(hr_fields, started_at=effective_date)
 
-        values = {
+        values: dict[str, Any] = {
             "id": new_uuid(),
             "tenant_id": tenant_id,
             "user_id": user_id,
@@ -202,7 +203,7 @@ class EmploymentService:
         self._validate_hr_dates(new_hr, started_at=effective_date)
 
         if department.id == current.department_id:
-            values = {"position": new_position}
+            values: dict[str, Any] = {"position": new_position}
             values.update(new_hr)
             values["change_type"] = change_type
             updated = self._uow.employments.update(current.id, values)
@@ -391,9 +392,7 @@ class EmploymentService:
         if "employment_nature" in raw:
             nature = raw["employment_nature"]
             if nature is not None and nature not in EMPLOYMENT_NATURES:
-                raise ValidationError(
-                    f"用工性质必须为：{', '.join(EMPLOYMENT_NATURES)}"
-                )
+                raise ValidationError(f"用工性质必须为：{', '.join(EMPLOYMENT_NATURES)}")
             out["employment_nature"] = nature
         elif inherit_from is not None:
             out["employment_nature"] = inherit_from.employment_nature
@@ -426,7 +425,7 @@ class EmploymentService:
         return out
 
     @staticmethod
-    def _normalize_weekly_hours(value) -> float | None:
+    def _normalize_weekly_hours(value: Any) -> float | None:
         """归一化标准工时；None 透传，数值范围 0-168。"""
         if value is None:
             return None
@@ -469,9 +468,7 @@ class EmploymentService:
         if not user.is_active:
             raise ValidationError("用户已停用")
 
-    def _require_active_department(
-        self, department_id: UUID, tenant_id: UUID
-    ) -> Department:
+    def _require_active_department(self, department_id: UUID, tenant_id: UUID) -> Department:
         department = self._uow.departments.get(department_id)
         if department is None or department.tenant_id != tenant_id:
             raise ValidationError("部门不存在或不属于当前租户")

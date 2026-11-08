@@ -95,6 +95,16 @@ export type AgentStreamEvent =
         suggestion?: string
       }
     }
+  /** M4 PRD F14.10：发言权移交/归位通告（result 帧前发出；returned=true 为归位） */
+  | {
+      event: 'handoff'
+      data: {
+        from_app_id: string
+        to_app_id: string
+        display_name: string
+        returned: boolean
+      }
+    }
   | { event: 'final'; data: Record<string, unknown> }
   | { event: 'result'; data: AgentRunResponse }
   | { event: 'error'; data: { message: string; code: number } }
@@ -242,6 +252,8 @@ export interface ConversationRunBody {
   resume?: Record<string, unknown>
   /** 对话流启动变量（agent 通道忽略） */
   inputs?: Record<string, unknown>
+  /** M4 PRD F14.9：手动归位（true 时不发 run，仅清路由态并回 handoff 通告帧） */
+  handback?: boolean
 }
 
 /**
@@ -263,6 +275,7 @@ export async function runAgentStream(
       history: body.history,
       images: body.images ?? [],
       resume: body.resume,
+      handback: body.handback || undefined,
     },
     onEvent,
     options,

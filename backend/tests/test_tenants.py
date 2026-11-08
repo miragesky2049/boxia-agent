@@ -230,9 +230,7 @@ def test_platform_resource_visible_but_readonly_for_tenant(
         == 403
     )
     assert (
-        acme.delete(
-            f"/api/v1/admin/resources/{platform_id}", headers=tenant_headers
-        ).status_code
+        acme.delete(f"/api/v1/admin/resources/{platform_id}", headers=tenant_headers).status_code
         == 403
     )
 
@@ -253,9 +251,7 @@ def test_tenant_resources_isolated(
 
     created = client.post(
         "/api/v1/admin/resources",
-        json=_resource_payload(
-            "租户技能", owner_type="tenant", owner_id=acme_tenant["id"]
-        ),
+        json=_resource_payload("租户技能", owner_type="tenant", owner_id=acme_tenant["id"]),
         headers=auth_headers,
     )
     assert created.status_code == 201, created.text
@@ -587,7 +583,6 @@ def test_local_bootstrap_host_allows_platform_header(monkeypatch: pytest.MonkeyP
     assert context.scope == PLATFORM_SCOPE
     assert context.tenant is None
     assert context.resolution == "header"
-
 
 
 def test_local_default_tenant_code_applies_to_localhost(

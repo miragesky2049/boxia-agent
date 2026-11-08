@@ -11,8 +11,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from typing import Any, Awaitable, Callable, Annotated
-from uuid import UUID
+from collections.abc import Awaitable, Callable
+from typing import Annotated, Any, cast
 
 from langgraph.graph import END, StateGraph
 
@@ -90,7 +90,7 @@ class Compiler:
         """
         self._graph = graph
         state_schema = _build_state_schema()
-        sg = StateGraph(state_schema)
+        sg: StateGraph[Any] = StateGraph(state_schema)
 
         # 注册每个节点
         node_fns: dict[str, Callable[[dict], Awaitable[dict]]] = {}
@@ -98,7 +98,7 @@ class Compiler:
             handler = get_node_handler(canvas_node.type)
             node_fn = self._build_node_fn(canvas_node, handler, env)
             node_fns[canvas_node.id] = node_fn
-            sg.add_node(canvas_node.id, node_fn)
+            sg.add_node(canvas_node.id, cast(Any, node_fn))
 
         # 找 START 节点
         start_node = graph.start_node
@@ -165,9 +165,7 @@ class Compiler:
                 "user_id": str(env.user_id) if env.user_id else None,
                 "run_id": str(env.run_id),
                 "thread_id": env.thread_id,
-                "conversation_id": (
-                    str(env.conversation_id) if env.conversation_id else None
-                ),
+                "conversation_id": (str(env.conversation_id) if env.conversation_id else None),
             },
         )
         evaluated_inputs = self._evaluator.eval_dict(canvas_node.inputs, eval_context)
@@ -256,9 +254,7 @@ class Compiler:
             )
 
             # 应用 ErrorPolicy 执行 handler
-            result, error_message = await self._execute_with_policy(
-                handler, node_ctx, error_policy
-            )
+            result, error_message = await self._execute_with_policy(handler, node_ctx, error_policy)
 
             # 构造 state 更新
             update: dict[str, Any] = {
@@ -314,7 +310,9 @@ class Compiler:
                 if attempt < max_attempts - 1:
                     logger.warning(
                         "节点 %s 执行失败，第 %d 次重试: %s",
-                        ctx.node_id, attempt + 1, exc,
+                        ctx.node_id,
+                        attempt + 1,
+                        exc,
                     )
                     continue
                 break
@@ -325,9 +323,11 @@ class Compiler:
         if policy.process_type == 1:
             logger.info(
                 "节点 %s 降级处理：process_type=1，dataOnErr=%s",
-                ctx.node_id, error_message,
+                ctx.node_id,
+                error_message,
             )
             from internal.domain.graph.node_base import NodeResult
+
             return NodeResult(outputs={"output": policy.data_on_err or ""}), error_message
 
         raise last_error

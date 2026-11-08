@@ -101,10 +101,12 @@ def test_llm_node_react_loop_executes_tool_and_returns_final_text() -> None:
         return "晴，20 度"
 
     mock_llm = _MockLLM()
-    services = ServiceRegistry({
-        "llm": mock_llm,
-        "tool_executor": _tool_executor,
-    })
+    services = ServiceRegistry(
+        {
+            "llm": mock_llm,
+            "tool_executor": _tool_executor,
+        }
+    )
 
     config = {
         "modleName": "test-model",
@@ -165,11 +167,14 @@ def test_llm_node_tool_executor_unavailable_returns_error_text() -> None:
     mock_llm = _OnceLLM()
     services = ServiceRegistry({"llm": mock_llm})  # 没有 tool_executor
 
-    ctx = _make_ctx(services, {
-        "modleName": "test-model",
-        "prompt": "{{input}}",
-        "tools": [{"name": "unknown_tool", "description": "", "parameters": {}}],
-    })
+    ctx = _make_ctx(
+        services,
+        {
+            "modleName": "test-model",
+            "prompt": "{{input}}",
+            "tools": [{"name": "unknown_tool", "description": "", "parameters": {}}],
+        },
+    )
 
     result = asyncio.run(LLMNodeHandler().run(ctx))
     assert result.outputs["output"] == "工具不可用，回答结束。"
@@ -198,16 +203,21 @@ def test_llm_node_rejects_undeclared_tool_without_touching_executor() -> None:
             return _Resp(content="回答结束。", tool_calls=None, usage=_Usage(1, 1))
 
     mock_llm = _HallucinationLLM()
-    services = ServiceRegistry({
-        "llm": mock_llm,
-        "tool_executor": _tool_executor,
-    })
+    services = ServiceRegistry(
+        {
+            "llm": mock_llm,
+            "tool_executor": _tool_executor,
+        }
+    )
 
-    ctx = _make_ctx(services, {
-        "modleName": "test-model",
-        "prompt": "{{input}}",
-        "tools": [{"name": "get_weather", "description": "", "parameters": {}}],
-    })
+    ctx = _make_ctx(
+        services,
+        {
+            "modleName": "test-model",
+            "prompt": "{{input}}",
+            "tools": [{"name": "get_weather", "description": "", "parameters": {}}],
+        },
+    )
 
     result = asyncio.run(LLMNodeHandler().run(ctx))
     assert result.outputs["output"] == "回答结束。"

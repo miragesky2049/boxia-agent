@@ -98,7 +98,9 @@ def list_conversation_messages(
     """拉取会话历史消息（升序）。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
     rows = make_conversation_admin_service(uow).list_messages(
-        conversation_id=conversation_id, tenant_id=scope_tenant, limit=limit,
+        conversation_id=conversation_id,
+        tenant_id=scope_tenant,
+        limit=limit,
     )
     return [_message_to_dict(row) for row in rows]
 
@@ -113,7 +115,8 @@ def delete_conversation(
     """删除会话；该会话下的消息由外键 ON DELETE CASCADE 一并清理。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
     make_conversation_admin_service(uow).delete_conversation(
-        conversation_id=conversation_id, tenant_id=scope_tenant,
+        conversation_id=conversation_id,
+        tenant_id=scope_tenant,
     )
     return {"ok": True}
 
@@ -129,6 +132,8 @@ def delete_conversation_message(
     """删除会话内单条消息。"""
     scope_tenant = _resolve_tenant(principal, tenant_id)
     make_conversation_admin_service(uow).delete_message(
-        conversation_id=conversation_id, message_id=message_id, tenant_id=scope_tenant,
+        conversation_id=conversation_id,
+        message_id=message_id,
+        tenant_id=scope_tenant,
     )
     return {"ok": True}

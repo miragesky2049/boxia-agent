@@ -37,17 +37,17 @@ async function adminToken(request: APIRequestContext): Promise<string> {
 
 async function ensureViewer(request: APIRequestContext, token: string): Promise<string> {
   const auth = { Authorization: `Bearer ${token}` }
-  const listResponse = await request.get(
-    `/api/v1/admin/admin-users?keyword=${VIEWER_USERNAME}`,
-    { headers: auth },
-  )
+  const listResponse = await request.get(`/api/v1/admin/admin-users?keyword=${VIEWER_USERNAME}`, {
+    headers: auth,
+  })
   const list = (await listResponse.json()) as { items: { id: string; username: string }[] }
   const existing = list.items.find((item) => item.username === VIEWER_USERNAME)
 
   if (!existing) {
-    const roles = (await (
-      await request.get('/api/v1/admin/roles', { headers: auth })
-    ).json()) as { id: string; code: string }[]
+    const roles = (await (await request.get('/api/v1/admin/roles', { headers: auth })).json()) as {
+      id: string
+      code: string
+    }[]
     const viewer = roles.find((item) => item.code === 'viewer')
     expect(viewer).toBeTruthy()
     const created = await request.post('/api/v1/admin/admin-users', {
@@ -116,11 +116,7 @@ test.describe('资源与应用', () => {
     await drawer.getByLabel('名称').fill(name)
     // antd Select 的可点击区域是 .ant-select-selector，search input 会被选中项遮挡
     await drawer.locator('.ant-select-selector').click()
-    await page
-      .locator('.ant-select-item-option')
-      .filter({ hasText: '技能' })
-      .first()
-      .click()
+    await page.locator('.ant-select-item-option').filter({ hasText: '技能' }).first().click()
     await drawer.getByRole('button', { name: /保\s*存/ }).click()
     await expect(page.getByText('已创建')).toBeVisible()
 

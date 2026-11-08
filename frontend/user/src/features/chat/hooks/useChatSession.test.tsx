@@ -2,6 +2,7 @@ import { act, renderHook } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { AgentStreamEvent, ChatflowStreamEvent } from '../../../api/agentRun'
 import { runAgentStream, runChatflowStream } from '../../../api/agentRun'
+import { listConversationMessages, listConversations } from '../../../api/conversations'
 import { useChatSession } from './useChatSession'
 
 vi.mock('../../../api/agentRun', () => ({
@@ -16,6 +17,8 @@ vi.mock('../../../api/conversations', () => ({
 
 const chatflowRun = vi.mocked(runChatflowStream)
 const agentRun = vi.mocked(runAgentStream)
+const conversationList = vi.mocked(listConversations)
+const messageList = vi.mocked(listConversationMessages)
 
 function emitAgent(events: AgentStreamEvent[]) {
   return async (
@@ -261,5 +264,238 @@ describe('useChatSession 智能体审批协议', () => {
 
     const rejectCall = agentRun.mock.calls[1][1] as Record<string, unknown>
     expect(rejectCall.resume).toEqual({ approved: false, comment: '先别发' })
+  })
+})
+
+// M4 PRD F14.10：接管发言权通告气泡、应答徽标与手动归位（handback）
+describe('useChatSession 接管协议', () => {
+  beforeEach(() => {
+    agentRun.mockReset()
+    conversationList.mockReset()
+    messageList.mockReset()
+    conversationList.mockResolvedValue([])
+    messageList.mockResolvedValue([])
+  })
+
+  const takeoverFrame: AgentStreamEvent = {
+    event: 'handoff',
+    data: {
+      from_app_id: 'agent-1', to_app_id: 'app-2',
+      display_name: '天气专家', returned: false,
+    },
+  }
+
+  async function startTakeover(result: { current: ReturnType<typeof useChatSession> }) {
+    await act(async () => {
+      await result.current.send('帮我查天气趋势')
+    })
+  }
+
+  it('handoff 帧追加通告气泡并登记发言权，下一轮应答气泡带专家徽标', async () => {
+    // 真实服务端 result 帧必然后于接管提交：摘要 mock 与提交时间线一致
+    conversationList.mockResolvedValue([
+      {
+        conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,
+        active_application_id: 'app-2', active_application: '天气专家',
+      },
+    ])
+    agentRun.mockImplementation(async (_agentId, body, onEvent) => {
+      if (body.message === '帮我查天气趋势') {
+        onEvent({ event: 'run_start', data: { run_id: 'r1', tools: [] } })
+        onEvent(takeoverFrame)
+        onEvent({
+          event: 'result',
+          data: { content: '', conversation_id: 'c1', finish_reason: 'handed_off' } as never,
+        })
+        return
+      }
+      onEvent({ event: 'run_start', data: { run_id: 'r2', tools: [] } })
+      onEvent({
+        event: 'result',
+        data: { content: '明天晴，20 度。', conversation_id: 'c1' } as never,
+      })
+    })
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    await startTakeover(result)
+
+    expect(result.current.activeHandoff).toEqual({
+      applicationId: 'app-2', displayName: '天气专家',
+    })
+    const notice = result.current.messages.find((item) => item.handoffNotice)
+    expect(notice?.handoffNotice).toBe('会话已移交给专家「天气专家」，后续对话由其应答。')
+    // 接管轮本身仍由归属应用应答，不打专家徽标
+    const takeoverAssistant = result.current.messages.find((item) => item.streaming === false && item.content === '')
+    expect(takeoverAssistant?.answeredBy).toBeUndefined()
+
+    await act(async () => {
+      await result.current.send('明天穿什么')
+    })
+    const last = result.current.messages[result.current.messages.length - 1]
+    expect(last.content).toBe('明天晴，20 度。')
+    expect(last.answeredBy).toBe('天气专家')
+  })
+
+  it('handback：handback:true 请求清发言权并追加归位通告；未接管时不发请求', async () => {
+    agentRun.mockImplementation(async (_agentId, body, onEvent) => {
+      if (body.handback) {
+        onEvent({
+          event: 'handoff',
+          data: {
+            from_app_id: 'app-2', to_app_id: 'agent-1',
+            display_name: '主助手', returned: true,
+          },
+        })
+        onEvent({ event: 'final', data: {} })
+        return
+      }
+      onEvent(takeoverFrame)
+      onEvent({
+        event: 'result',
+        data: { content: '', conversation_id: 'c1', finish_reason: 'handed_off' } as never,
+      })
+    })
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    // 未进入接管（无会话/无发言权）时 guard 不发请求
+    await act(async () => {
+      await result.current.handback()
+    })
+    expect(agentRun.mock.calls).toHaveLength(0)
+
+    // 接管提交后摘要反映移交（result 帧对齐兜底不误清）
+    conversationList.mockResolvedValue([
+      {
+        conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,
+        active_application_id: 'app-2', active_application: '天气专家',
+      },
+    ])
+    await startTakeover(result)
+    // 归位提交后摘要不再显示接管
+    conversationList.mockResolvedValue([])
+    await act(async () => {
+      await result.current.handback()
+    })
+
+    const handbackCall = agentRun.mock.calls[1][1] as Record<string, unknown>
+    expect(handbackCall).toMatchObject({ conversation_id: 'c1', handback: true })
+    expect(result.current.activeHandoff).toBeNull()
+    expect(result.current.streaming).toBe(false)
+    const notice = result.current.messages[result.current.messages.length - 1]
+    expect(notice.handoffNotice).toBe('接管已结束，会话已归位主助手「主助手」。')
+  })
+
+  it('历史回放：通告气泡重建、专家轮徽标、接管轮空正文行过滤', async () => {
+    conversationList.mockResolvedValue([
+      {
+        conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,
+        active_application_id: 'app-2', active_application: '天气专家',
+      },
+    ])
+    messageList.mockResolvedValue([
+      { message_id: 'm1', role: 'user', content: '帮我查天气', tool_calls: [], created_at: null },
+      {
+        message_id: 'm2', role: 'system', tool_calls: [], created_at: null,
+        content: '会话已移交给专家「天气专家」，后续对话由其应答。',
+        kind: 'handoff_notice', application_id: 'agent-1',
+      },
+      {
+        message_id: 'm3', role: 'assistant', content: '', tool_calls: [], created_at: null,
+        application_id: 'app-2',
+      },
+      {
+        message_id: 'm4', role: 'assistant', content: '明天晴，20 度。', tool_calls: [],
+        created_at: null, application_id: 'app-2',
+      },
+    ])
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    // 先让挂载期的会话列表刷新落地，selectConversation 才能从摘要重建发言权
+    await act(async () => {})
+    await act(async () => {
+      await result.current.selectConversation('c1')
+    })
+
+    expect(result.current.activeHandoff).toEqual({
+      applicationId: 'app-2', displayName: '天气专家',
+    })
+    expect(result.current.messages.map((item) => item.id)).toEqual(['m1', 'm2', 'm4'])
+    expect(result.current.messages[1].handoffNotice).toContain('天气专家')
+    expect(result.current.messages[2].answeredBy).toBe('天气专家')
+  })
+
+  it('会话列表透出接管标记（handoffAgent）', async () => {
+    conversationList.mockResolvedValue([
+      {
+        conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,
+        active_application_id: 'app-2', active_application: '天气专家',
+      },
+    ])
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    await act(async () => {})
+    expect(result.current.conversationItems[0]).toMatchObject({
+      id: 'c1', handoffAgent: '天气专家',
+    })
+  })
+
+  it('停止生成后按会话摘要对齐发言权（断连窗内服务端已提交接管）', async () => {
+    agentRun.mockImplementation(emitAgent([
+      { event: 'run_start', data: { run_id: 'r1', tools: [] } },
+      {
+        event: 'result',
+        data: { content: '移交完成', conversation_id: 'c1', finish_reason: 'handed_off' } as never,
+      },
+    ]))
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    await act(async () => {
+      await result.current.send('查北京天气')
+    })
+    // 帧未送达（断连窗）时本地不发言权
+    expect(result.current.activeHandoff).toBeNull()
+
+    // 服务端摘要显示接管已提交：stop 后向事实对齐
+    conversationList.mockResolvedValue([
+      {
+        conversation_id: 'c1', title: '查北京天气', created_at: null, updated_at: null,
+        active_application_id: 'app-2', active_application: '天气专家',
+      },
+    ])
+    await act(async () => {
+      result.current.stop()
+    })
+    expect(result.current.activeHandoff).toEqual({
+      applicationId: 'app-2', displayName: '天气专家',
+    })
+  })
+
+  it('摘要窗口未含该会话时不清零发言权（批末 review #6：limit 外保留现态）', async () => {
+    agentRun.mockImplementation(emitAgent([
+      { event: 'run_start', data: { run_id: 'r1', tools: [] } },
+      takeoverFrame,
+      {
+        event: 'result',
+        data: { content: '', conversation_id: 'c1', finish_reason: 'handed_off' } as never,
+      },
+    ]))
+    // 会话列表按 updated_at 取前 50 条：agent 通道不 touch updated_at，
+    // 长期接管会话可能滑出窗口，find miss 不能当作"未接管"误清现态
+    conversationList.mockResolvedValue([])
+
+    const { result } = renderHook(() => useChatSession({ agentId: 'agent-1', flowType: 'agent' }))
+    await act(async () => {
+      await result.current.send('查北京天气')
+    })
+    expect(result.current.activeHandoff).toEqual({
+      applicationId: 'app-2', displayName: '天气专家',
+    })
+
+    await act(async () => {
+      result.current.stop()
+    })
+    expect(result.current.activeHandoff).toEqual({
+      applicationId: 'app-2', displayName: '天气专家',
+    })
   })
 })

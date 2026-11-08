@@ -16,7 +16,14 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from internal.domain.agent.memory import parse_memory_config
+from internal.domain.agent.memory import (
+    MAX_MAX_MEMORIES,
+    MAX_RECALL_TOPK,
+    MIN_MAX_MEMORIES,
+    MIN_RECALL_TOPK,
+    parse_long_term_config,
+    parse_memory_config,
+)
 
 AGENT_NODE_TYPE_CODE = "100"
 
@@ -36,9 +43,25 @@ KNOWLEDGE_TOOL_NAME_PREFIX = "knowledge_search_"
 # 0074 PRD F7.1：工作流即工具合成名 workflow_N（同配置序），前缀同样保留
 WORKFLOW_TOOL_NAME_PREFIX = "workflow_"
 MAX_WORKFLOWS = 5
+# M4-c PRD F14.2：智能体即工具合成名 agent_{slug}，前缀同样保留（用户工具不得占用）
+AGENT_TOOL_NAME_PREFIX = "agent_"
+# 批末 review #5：hand_back 为内核保留的接管归位工具名（graph agent_loop 节点注入），
+# 与 agent_loop.HAND_BACK_TOOL_NAME 保持一致；用户自定义 toolName 撞名会导致归位注入被跳过
+HAND_BACK_TOOL_NAME = "hand_back"
+# M4-c PRD F14.1：协作挂载形态——delegate 工具化委派 / handoff 接管式移交
+SUB_AGENT_MODES = ("delegate", "handoff")
+DEFAULT_SUB_AGENT_MODE = "delegate"
+# delegate+handoff 合计上限（U7 裁决口径）：过多专家同样让模型路由困难
+MAX_SUB_AGENTS = 5
 # 0074 PRD F6：MCP server 数与单 server 勾选工具数上限（防 spec 膨胀）
 MAX_MCP_SERVERS = 5
 MAX_MCP_TOOLS_PER_SERVER = 20
+# M4-b F17.3②：条目级调用超时（秒，表单严格整数校验；运行期兜底解析在 agent_loop）
+MIN_MCP_TIMEOUT_SECONDS = 1
+MAX_MCP_TIMEOUT_SECONDS = 300
+# M4-b F17.4：会话保持档位；缺省 run 级（会话档池为 P1，本批仅落键与校验）
+MCP_SESSION_SCOPES = ("run", "conversation")
+DEFAULT_MCP_SESSION_SCOPE = "run"
 
 
 def find_agent_loop_node(graph: dict[str, Any]) -> dict[str, Any] | None:
@@ -51,7 +74,8 @@ def find_agent_loop_node(graph: dict[str, Any]) -> dict[str, Any] | None:
 
 def node_config_to_form(node_cfg: dict[str, Any]) -> dict[str, Any]:
     """把运行时口径节点 config 补齐为配置面表单（GET /agent-config 响应体）。"""
-    memory = parse_memory_config(node_cfg.get("memory"))
+    raw_memory = node_cfg.get("memory")
+    memory = parse_memory_config(raw_memory)
     return {
         "systemPrompt": str(node_cfg.get("systemPrompt") or ""),
         "modleName": str(node_cfg.get("modleName") or ""),
@@ -61,8 +85,13 @@ def node_config_to_form(node_cfg: dict[str, Any]) -> dict[str, Any]:
         "tools": _dict_list(node_cfg.get("tools")),
         "datasets": _dict_list(node_cfg.get("datasets")),
         "mcpServers": _dict_list(node_cfg.get("mcpServers")),
+        # M4-b F17.4：会话档位恒携带（历史图无此键时补默认 run），表单⇄config 口径一致
+        "mcpSession": _mcp_session_form(node_cfg.get("mcpSession")),
         "workflows": _dict_list(node_cfg.get("workflows")),
-        "memory": {"shortTerm": memory},
+        # M4-c F14.1：智能体协作挂载恒携带（历史图无此键补空列表），表单⇄config 口径一致
+        "subAgents": _dict_list(node_cfg.get("subAgents")),
+        # M4 PRD F16.1：longTerm 键组恒携带（默认关闭），表单⇄config 口径与短记忆一致
+        "memory": {"shortTerm": memory, "longTerm": parse_long_term_config(raw_memory)},
         "reasoningMode": (
             "planExecuteReflect"
             if str(node_cfg.get("reasoningMode")) == "planExecuteReflect"
@@ -78,8 +107,20 @@ def node_config_to_form(node_cfg: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def validate_form(form: dict[str, Any]) -> list[str]:
-    """校验配置表单，返回问题清单（空列表 = 通过）。契约式：调用方决定抛错形态。"""
+def validate_form(
+    form: dict[str, Any],
+    *,
+    long_term_admin_available: bool = True,
+    self_application_id: str | None = None,
+) -> list[str]:
+    """校验配置表单，返回问题清单（空列表 = 通过）。契约式：调用方决定抛错形态。
+
+    long_term_admin_available：M4 PRD F16.6 隐私硬条件的部署开关——用户端"我的记忆"
+    管理面未部署的实例必须拒绝开启 longTerm（组合根从 settings 传入）。
+    self_application_id：当前被配置应用 ID（M4-c F14.1）——传入时拒绝 subAgents
+    自引用；同租户可见/已发布/flow_type 属 DB 事实，配置面不做在线核验，
+    运行期由 AgentToolService.describe 兜底跳过（与 workflows 同口径）。
+    """
     issues: list[str] = []
 
     system_prompt = str(form.get("systemPrompt") or "").strip()
@@ -137,6 +178,10 @@ def validate_form(form: dict[str, Any]) -> list[str]:
             issues.append(
                 f"tools[{index}] 名称不得以 {WORKFLOW_TOOL_NAME_PREFIX} 开头（工作流工具保留前缀）"
             )
+        elif tool_name.startswith(AGENT_TOOL_NAME_PREFIX):
+            issues.append(
+                f"tools[{index}] 名称不得以 {AGENT_TOOL_NAME_PREFIX} 开头（智能体委派工具保留前缀）"
+            )
 
     # 0074 PRD F6：MCP server 快照结构校验（url 非空即可，SSRF 在 discover/运行时判）
     mcp_servers = form.get("mcpServers") or []
@@ -146,6 +191,15 @@ def validate_form(form: dict[str, Any]) -> list[str]:
         if not isinstance(entry, dict) or not str(entry.get("serverUrl") or "").strip():
             issues.append(f"mcpServers[{index}] 缺少 serverUrl")
             continue
+        # M4-b F17.3②：timeoutSeconds 可选，携带时必须为 1~300 的整数
+        timeout_raw = entry.get("timeoutSeconds")
+        if timeout_raw is not None and not _int_in_range(
+            timeout_raw, MIN_MCP_TIMEOUT_SECONDS, MAX_MCP_TIMEOUT_SECONDS
+        ):
+            issues.append(
+                f"mcpServers[{index}].timeoutSeconds 需为 "
+                f"{MIN_MCP_TIMEOUT_SECONDS}~{MAX_MCP_TIMEOUT_SECONDS} 的整数"
+            )
         enabled_tools = entry.get("enabledTools")
         if enabled_tools is None:
             continue
@@ -158,6 +212,15 @@ def validate_form(form: dict[str, Any]) -> list[str]:
             if not isinstance(tool, dict) or not str(tool.get("name") or "").strip():
                 issues.append(f"mcpServers[{index}].enabledTools[{tool_index}] 缺少 name")
 
+    # M4-b F17.4：会话保持档位键（缺省 run 级；conversation 档的连接池为 P1 T-b5，
+    # 本批只落键与校验，配置面可先行声明）
+    mcp_session = form.get("mcpSession")
+    if mcp_session is not None:
+        if not isinstance(mcp_session, dict):
+            issues.append("mcpSession 需为对象")
+        elif str(mcp_session.get("scope") or DEFAULT_MCP_SESSION_SCOPE) not in MCP_SESSION_SCOPES:
+            issues.append("mcpSession.scope 只能是 run 或 conversation")
+
     # 0074 PRD F7：工作流即工具条目校验（applicationId 必须是 UUID 形态）
     workflows = form.get("workflows") or []
     if len(workflows) > MAX_WORKFLOWS:
@@ -169,7 +232,69 @@ def validate_form(form: dict[str, Any]) -> list[str]:
         if not _is_uuid_str(str(entry.get("applicationId"))):
             issues.append(f"workflows[{index}] applicationId 不是合法 UUID")
 
+    # M4-c PRD F14.1：智能体协作挂载条目校验（上限含 handoff 形态，合计 5）
+    sub_agents = form.get("subAgents") or []
+    if len(sub_agents) > MAX_SUB_AGENTS:
+        issues.append(f"subAgents 最多 {MAX_SUB_AGENTS} 个")
+    mounted_ids: set[str] = set()
+    for index, entry in enumerate(sub_agents):
+        if not isinstance(entry, dict) or not str(entry.get("applicationId") or "").strip():
+            issues.append(f"subAgents[{index}] 缺少 applicationId")
+            continue
+        application_id = str(entry.get("applicationId")).strip()
+        if not _is_uuid_str(application_id):
+            issues.append(f"subAgents[{index}] applicationId 不是合法 UUID")
+        if application_id in mounted_ids:
+            issues.append(f"subAgents[{index}] applicationId 重复挂载")
+        mounted_ids.add(application_id)
+        if self_application_id and application_id == str(self_application_id):
+            issues.append(f"subAgents[{index}] 不能把当前应用委派给自己（自引用）")
+        mode = entry.get("mode")
+        if mode is not None and str(mode) not in SUB_AGENT_MODES:
+            issues.append(f"subAgents[{index}] mode 只能是 delegate 或 handoff")
+        tool_name = str(entry.get("toolName") or "").strip()
+        if tool_name == HAND_BACK_TOOL_NAME:
+            issues.append(
+                f"subAgents[{index}].toolName 不得使用内核保留名 {HAND_BACK_TOOL_NAME}（接管归位工具）"
+            )
+        if tool_name and (
+            tool_name.startswith(KNOWLEDGE_TOOL_NAME_PREFIX)
+            or tool_name.startswith(WORKFLOW_TOOL_NAME_PREFIX)
+        ):
+            issues.append(
+                f"subAgents[{index}].toolName 不得以 {KNOWLEDGE_TOOL_NAME_PREFIX} 或 "
+                f"{WORKFLOW_TOOL_NAME_PREFIX} 开头（合成工具保留前缀）"
+            )
+
+    # M4 PRD F16.1/F16.6：longTerm 键组显式校验（配置面报错优先于运行期静默回退）
+    memory_raw = form.get("memory")
+    long_term_raw = memory_raw.get("longTerm") if isinstance(memory_raw, dict) else None
+    if not isinstance(long_term_raw, dict):
+        long_term_raw = {}
+    if long_term_raw.get("enabled") and not long_term_admin_available:
+        issues.append("不能开启长期记忆：用户端记忆管理面未部署（F16.6 隐私硬条件）")
+    recall_top_k = long_term_raw.get("recallTopK")
+    if recall_top_k is not None and not _int_in_range(
+        recall_top_k, MIN_RECALL_TOPK, MAX_RECALL_TOPK
+    ):
+        issues.append(f"memory.longTerm.recallTopK 需为 {MIN_RECALL_TOPK}~{MAX_RECALL_TOPK} 的整数")
+    max_memories = long_term_raw.get("maxMemories")
+    if max_memories is not None and not _int_in_range(
+        max_memories, MIN_MAX_MEMORIES, MAX_MAX_MEMORIES
+    ):
+        issues.append(
+            f"memory.longTerm.maxMemories 需为 {MIN_MAX_MEMORIES}~{MAX_MAX_MEMORIES} 的整数"
+        )
+
     return issues
+
+
+def _int_in_range(value: Any, min_value: int, max_value: int) -> bool:
+    # review 修正：bool 是 int 子类、int(8.9) 静默截断，二者都不算配置面的"整数"
+    # 输入，严格类型判定让脏值显式报错而不是被转译成 1/8
+    if isinstance(value, bool) or not isinstance(value, int):
+        return False
+    return min_value <= value <= max_value
 
 
 def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
@@ -181,6 +306,7 @@ def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
     """
     inputs: dict[str, Any] = node.setdefault("data", {}).setdefault("inputs", {})
     memory = parse_memory_config(form.get("memory"))
+    long_term = parse_long_term_config(form.get("memory"))
 
     required: dict[str, Any] = {
         "modleName": str(form.get("modleName") or ""),
@@ -191,8 +317,13 @@ def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
         "suggestedQuestions": _string_list(form.get("suggestedQuestions")),
         "datasets": _dict_list(form.get("datasets")),
         "mcpServers": _dict_list(form.get("mcpServers")),
+        # M4-b F17.4：档位键全量覆盖写出（缺省恒为 {"scope": "run"}）
+        "mcpSession": _mcp_session_form(form.get("mcpSession")),
         "workflows": _dict_list(form.get("workflows")),
-        "memory": {"shortTerm": memory},
+        # M4-c F14.1：协作挂载全量覆盖写出（未挂载即显式空列表，与 workflows 同口径）
+        "subAgents": _dict_list(form.get("subAgents")),
+        # M4 PRD F16.1：shortTerm/longTerm 两组键全量覆盖写出（未勾选即显式 false）
+        "memory": {"shortTerm": memory, "longTerm": long_term},
         "reasoningMode": str(form.get("reasoningMode") or "react"),
         "sensitiveTools": _dict_list(form.get("sensitiveTools")),
         # 0074 PRD F9（M3）：视觉开关随表单全量覆盖，未勾选即显式写 false
@@ -215,6 +346,13 @@ def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
 
 
 # ---------- helpers ----------
+def _mcp_session_form(raw: Any) -> dict[str, str]:
+    """mcpSession 键组归一：缺键/非法 scope 补默认 run（F17.4 P0 默认档位）。"""
+    if isinstance(raw, dict) and str(raw.get("scope") or "") in MCP_SESSION_SCOPES:
+        return {"scope": str(raw["scope"])}
+    return {"scope": DEFAULT_MCP_SESSION_SCOPE}
+
+
 def _literal(value: Any) -> dict[str, Any]:
     """与 _default_graph / 前端画布一致的 literal 包装。"""
     return {"value": {"type": "literal", "content": value}}

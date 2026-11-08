@@ -42,25 +42,33 @@ const ICON_MAP: Record<string, { emoji: string; fallbackColor: string }> = {
   update_message: { emoji: '✎', fallbackColor: '#10b981' },
   delete_message: { emoji: '✕', fallbackColor: '#10b981' },
   clear_context: { emoji: '⌫', fallbackColor: '#10b981' },
-};
+}
 
 function hexToRgba(hex: string, alpha: number): string {
-  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-  if (!m) return `rgba(99,102,241,${alpha})`;
-  const r = parseInt(m[1]!, 16);
-  const g = parseInt(m[2]!, 16);
-  const b = parseInt(m[3]!, 16);
-  return `rgba(${r},${g},${b},${alpha})`;
+  const m = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex)
+  if (!m) return `rgba(99,102,241,${alpha})`
+  const r = parseInt(m[1]!, 16)
+  const g = parseInt(m[2]!, 16)
+  const b = parseInt(m[3]!, 16)
+  return `rgba(${r},${g},${b},${alpha})`
 }
 
 export function NodeIcon({
-  typeKey, color, icon, size = 24,
-}: { typeKey: string; color: string; icon?: string; size?: number }) {
-  const fallback = ICON_MAP[typeKey] || { emoji: '•', fallbackColor: color || '#6366f1' };
-  const emoji = icon || fallback.emoji;
-  const bgColor = hexToRgba(color || fallback.fallbackColor, 0.12);
-  const fgColor = color || fallback.fallbackColor;
-  const fontSize = emoji.length <= 2 ? 11 : 9;
+  typeKey,
+  color,
+  icon,
+  size = 24,
+}: {
+  typeKey: string
+  color: string
+  icon?: string
+  size?: number
+}) {
+  const fallback = ICON_MAP[typeKey] || { emoji: '•', fallbackColor: color || '#6366f1' }
+  const emoji = icon || fallback.emoji
+  const bgColor = hexToRgba(color || fallback.fallbackColor, 0.12)
+  const fgColor = color || fallback.fallbackColor
+  const fontSize = emoji.length <= 2 ? 11 : 9
   return (
     <div
       style={{
@@ -80,5 +88,5 @@ export function NodeIcon({
     >
       {emoji}
     </div>
-  );
+  )
 }

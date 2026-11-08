@@ -23,12 +23,7 @@ import { departmentsApi } from '../../api/department'
 import { employmentsApi } from '../../api/employment'
 import { hrDictionariesApi, type HrDictionaryCategory } from '../../api/hrDictionary'
 import { FormSection } from '../../components/common/FormSection'
-import type {
-  Department,
-  Employment,
-  HrDictionary,
-  HrFieldsPayload,
-} from '../../api/types'
+import type { Department, Employment, HrDictionary, HrFieldsPayload } from '../../api/types'
 import { usersApi } from '../../api/users'
 import { useAuth } from '../../auth/AuthContext'
 import { buildDepartmentTreeData } from '../../utils/departmentTree'
@@ -296,8 +291,7 @@ export default function EmploymentsPage() {
         page_size: pageSize,
         keyword: keyword || undefined,
         department_id: filterDepartmentId,
-        is_current:
-          statusFilter === 'all' ? undefined : statusFilter === 'current',
+        is_current: statusFilter === 'all' ? undefined : statusFilter === 'current',
       })
       setItems(result.items)
       setTotal(result.total)
@@ -387,9 +381,7 @@ export default function EmploymentsPage() {
       probation_started_at: record.probation_started_at
         ? dayjs(record.probation_started_at)
         : undefined,
-      probation_ended_at: record.probation_ended_at
-        ? dayjs(record.probation_ended_at)
-        : undefined,
+      probation_ended_at: record.probation_ended_at ? dayjs(record.probation_ended_at) : undefined,
       regularized_at: record.regularized_at ? dayjs(record.regularized_at) : undefined,
       change_reason: record.change_reason ?? undefined,
       remark: record.remark || undefined,
@@ -435,9 +427,7 @@ export default function EmploymentsPage() {
       probation_started_at: record.probation_started_at
         ? dayjs(record.probation_started_at)
         : undefined,
-      probation_ended_at: record.probation_ended_at
-        ? dayjs(record.probation_ended_at)
-        : undefined,
+      probation_ended_at: record.probation_ended_at ? dayjs(record.probation_ended_at) : undefined,
       regularized_at: record.regularized_at ? dayjs(record.regularized_at) : undefined,
       change_reason: record.change_reason ?? undefined,
       remark: record.remark || undefined,

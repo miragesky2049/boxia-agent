@@ -101,6 +101,8 @@ class ApplicationRepositoryProtocol(Protocol):
         owner_type: str | None = None,
         owner_id: UUID | None = None,
         include_marketplace_only: bool = False,
+        flow_type: str | None = None,
+        published_only: bool = False,
     ) -> list[dict]: ...
 
     def list_marketplace_paged(
@@ -224,15 +226,11 @@ class AdminScopeRepositoryProtocol(Protocol):
         """校验管理单元存在且属于本租户。"""
         ...
 
-    def add_scope(
-        self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID
-    ) -> None:
+    def add_scope(self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID) -> None:
         """新增关联（ON CONFLICT DO NOTHING，幂等）。"""
         ...
 
-    def remove_scope(
-        self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID
-    ) -> None:
+    def remove_scope(self, application_id: UUID, tenant_id: UUID, mgmt_unit_id: UUID) -> None:
         """解除关联（不存在时静默）。"""
         ...
 
@@ -314,6 +312,14 @@ class ConversationRepositoryProtocol(Protocol):
 
     def get_conversation(self, conversation_id: UUID) -> dict | None: ...
 
+    def update_handoff_state(
+        self,
+        conversation_id: UUID,
+        *,
+        active_application_id: UUID | None,
+        handoff_chain: list[str],
+    ) -> None: ...
+
     def list_conversations_by_user(
         self,
         *,
@@ -337,6 +343,17 @@ class ConversationRepositoryProtocol(Protocol):
     def update_title(self, conversation_id: UUID, title: str) -> None: ...
 
     def touch(self, conversation_id: UUID) -> None: ...
+
+    def update_summary_if_marker(
+        self,
+        conversation_id: UUID,
+        *,
+        old_marker: UUID | None,
+        summary: str,
+        new_marker: UUID | None,
+    ) -> bool: ...
+
+    def clear_summary(self, conversation_id: UUID) -> None: ...
 
     def delete_conversation(self, conversation_id: UUID) -> None: ...
 
@@ -366,6 +383,10 @@ class MessageRepositoryProtocol(Protocol):
         *,
         limit: int = 50,
     ) -> list[dict]: ...
+
+    def list_messages_by_run(self, run_id: UUID) -> list[dict]:
+        """本轮 run 的 user/assistant 文本行，时间正序（长期记忆抽取输入，F16.3）。"""
+        ...
 
     def get_message(self, message_id: UUID) -> dict | None: ...
 
@@ -401,6 +422,10 @@ class RunRepositoryProtocol(Protocol):
 
     def update_run_interrupt(self, run_id: UUID, payload: dict[str, Any]) -> None: ...
 
+    def merge_run_output(self, run_id: UUID, patch: dict[str, Any]) -> bool:
+        """把 patch 顶层键合并进 run.output JSONB（M4 PRD F16.7 观测性 additive）。"""
+        ...
+
     def get_run(self, run_id: UUID) -> dict | None: ...
 
     def list_child_runs(self, tenant_id: UUID, parent_run_id: UUID) -> list[dict]: ...
@@ -411,6 +436,10 @@ class RunRepositoryProtocol(Protocol):
         workflow_id: UUID,
         thread_id: str,
     ) -> dict | None: ...
+
+    def get_running_by_thread_any_app(self, tenant_id: UUID, thread_id: str) -> dict | None:
+        """M4 PRD R21：resume 在归属应用未命中时按线程兜底定位快照 run（含 workflow_id）。"""
+        ...
 
     def list_runs(
         self,
@@ -789,4 +818,95 @@ class EntitlementRequestLogRepositoryProtocol(Protocol):
 
     def mark_failed(self, request_id: str) -> None:
         """执行异常后标记 failed，保留 payload 供排查。"""
+        ...
+
+
+class AgentMemoryRepositoryProtocol(Protocol):
+    """长期记忆仓储端口：agent_memory（M4 PRD F16.2/F16.3/F16.4）。
+
+    作用域（tenant×app×user）由已鉴权的上游传入，仓储不做越权兜底；
+    "活跃"= status='active'，归档条目只读不回召回。
+    """
+
+    def insert(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        user_id: UUID,
+        kind: str,
+        content: str,
+        source_run_id: UUID | None = None,
+        metadata: dict | None = None,
+    ) -> UUID:
+        """新增一条活跃记忆，返回新行 id。"""
+        ...
+
+    def get(self, memory_id: UUID) -> dict | None:
+        """按 id 取单行（管理面/排障用）；不存在返回 None。"""
+        ...
+
+    def list_active(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        user_id: UUID,
+        limit: int = 100,
+    ) -> list[dict]:
+        """作用域内活跃记忆，updated_at 倒序（时近优先）。"""
+        ...
+
+    def count_active(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        user_id: UUID,
+    ) -> int:
+        """作用域内活跃记忆条数（容量收口与管理面计数用）。"""
+        ...
+
+    def archive_overflow(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        user_id: UUID,
+        max_active: int,
+    ) -> int:
+        """活跃数超 max_active 时按最旧优先置 archived，返回归档条数。"""
+        ...
+
+    def update_content(self, memory_id: UUID, *, content: str, kind: str | None = None) -> bool:
+        """仅活跃条目可改写；True=更新成功，False=不存在或已归档。"""
+        ...
+
+    def delete_scoped(
+        self,
+        memory_id: UUID,
+        *,
+        tenant_id: UUID,
+        user_id: UUID,
+        application_id: UUID | None = None,
+    ) -> bool:
+        """用户管理面按作用域删除；作用域不匹配返回 False（防 IDOR）。"""
+        ...
+
+    def delete_by_scope(
+        self,
+        *,
+        tenant_id: UUID,
+        application_id: UUID,
+        user_id: UUID,
+    ) -> int:
+        """清空当前 user×app 全部记忆（物理删除），返回删除条数。"""
+        ...
+
+    def bump_hit_count(self, memory_ids: list[UUID]) -> int:
+        """召回命中计数自增（best-effort），返回实际更新条数。"""
+        ...
+
+    def exists_by_source_run(self, source_run_id: UUID) -> bool:
+        """同一 run 是否已抽取过（Celery 重试幂等探测）。"""
         ...

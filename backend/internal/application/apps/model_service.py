@@ -37,27 +37,31 @@ class ModelService:
         rows = self._repo.list_catalog()
         if not rows:
             settings = get_settings()
-            return [{
-                "model_id": settings.llm_model_id,
-                "display_name": settings.llm_model_id,
-                "provider_name": "settings",
-                "capabilities": {
-                    "default_temperature": settings.llm_temperature,
-                    "default_max_tokens": settings.llm_max_tokens,
-                },
-            }]
+            return [
+                {
+                    "model_id": settings.llm_model_id,
+                    "display_name": settings.llm_model_id,
+                    "provider_name": "settings",
+                    "capabilities": {
+                        "default_temperature": settings.llm_temperature,
+                        "default_max_tokens": settings.llm_max_tokens,
+                    },
+                }
+            ]
         normalized: list[dict] = []
         for row in rows:
             caps = dict(row.get("capabilities") or {})
             settings = get_settings()
             caps.setdefault("default_temperature", settings.llm_temperature)
             caps.setdefault("default_max_tokens", settings.llm_max_tokens)
-            normalized.append({
-                "model_id": row["model_id"],
-                "display_name": row.get("display_name") or row["model_id"],
-                "provider_name": row.get("provider_name") or "",
-                "capabilities": caps,
-            })
+            normalized.append(
+                {
+                    "model_id": row["model_id"],
+                    "display_name": row.get("display_name") or row["model_id"],
+                    "provider_name": row.get("provider_name") or "",
+                    "capabilities": caps,
+                }
+            )
         return normalized
 
     def get_client(self, model_id: str) -> LLMClient:

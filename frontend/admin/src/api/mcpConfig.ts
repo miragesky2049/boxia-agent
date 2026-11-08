@@ -6,7 +6,9 @@ import { request } from './client'
 export interface McpToolSnapshot {
   name: string
   description?: string
-  inputSchema?: Record<string, unknown>
+  // JSON Schema 快照：admin 侧只整体透传回写（discover 勾选 → 画布 config），不读其结构；
+  // 声明为 object 根而非 Record<string, unknown>，兼容 antd 表单 store 的递归 Partial 推断
+  inputSchema?: object
 }
 
 export interface McpDiscoverResult {

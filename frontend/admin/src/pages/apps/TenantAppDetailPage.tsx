@@ -219,7 +219,9 @@ export default function TenantAppDetailPage() {
           应用配置
         </Typography.Title>
         {!configured && (
-          <Typography.Text type="secondary">（当前按平台默认模板生效，保存后即成为本租户配置）</Typography.Text>
+          <Typography.Text type="secondary">
+            （当前按平台默认模板生效，保存后即成为本租户配置）
+          </Typography.Text>
         )}
       </Space>
 
@@ -249,117 +251,138 @@ export default function TenantAppDetailPage() {
               label: '可见范围',
               children: (
                 <>
-        <Radio.Group
-          value={visibility}
-          disabled={!editable}
-          onChange={(event) => handleVisibilityChange(event.target.value)}
-          options={[
-            { value: 'all', label: '全员可见' },
-            { value: 'whitelist', label: '白名单可见' },
-          ]}
-        />
+                  <Radio.Group
+                    value={visibility}
+                    disabled={!editable}
+                    onChange={(event) => handleVisibilityChange(event.target.value)}
+                    options={[
+                      { value: 'all', label: '全员可见' },
+                      { value: 'whitelist', label: '白名单可见' },
+                    ]}
+                  />
 
-        {visibility === 'whitelist' && (
-          <div style={{ marginTop: 24 }}>
-            {rows.map((row) => (
-              <Space key={row.key} style={{ display: 'flex', marginBottom: 12 }} align="center">
-                <Select
-                  value={row.subject_type}
-                  style={{ width: 100 }}
-                  disabled={!editable}
-                  options={SUBJECT_TYPE_OPTIONS}
-                  onChange={(type) => updateRow(row.key, { subject_type: type, subject_id: '' })}
-                />
-                {row.subject_type === 'DEPARTMENT' && (
-                  <TreeSelect
-                    value={row.subject_id || undefined}
-                    style={{ width: 320 }}
-                    disabled={!editable}
-                    showSearch
-                    treeNodeFilterProp="title"
-                    placeholder="选择部门"
-                    treeData={deptTree}
-                    onChange={(value: string) => updateRow(row.key, { subject_id: value })}
-                  />
-                )}
-                {row.subject_type === 'ROLE' && (
-                  <Select
-                    value={row.subject_id || undefined}
-                    style={{ width: 320 }}
-                    disabled={!editable}
-                    showSearch
-                    optionFilterProp="label"
-                    placeholder="选择角色"
-                    options={roles.map((role) => ({ value: role.id, label: role.name }))}
-                    onChange={(value: string) => updateRow(row.key, { subject_id: value })}
-                  />
-                )}
-                {row.subject_type === 'USER' && (
-                  <Select
-                    value={row.subject_id || undefined}
-                    style={{ width: 320 }}
-                    disabled={!editable}
-                    showSearch
-                    filterOption={false}
-                    placeholder="搜索并选择用户"
-                    onSearch={async (keyword) => {
-                      if (!keyword) return
-                      mergeUserOptions(await usersApi.options(keyword))
-                    }}
-                    onChange={(value: string) => updateRow(row.key, { subject_id: value })}
-                    options={userOptions.map((user) => ({
-                      value: user.id,
-                      label: `${user.display_name || user.username}（${user.username}）`,
-                    }))}
-                  />
-                )}
-                {row.subject_type === 'DEPARTMENT' && (
-                  <Space size={4}>
-                    <Switch
-                      size="small"
-                      disabled={!editable}
-                      checked={row.include_subtree}
-                      onChange={(checked) => updateRow(row.key, { include_subtree: checked })}
-                    />
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      含子部门
-                    </Typography.Text>
-                  </Space>
-                )}
-                {editable && (
-                  <Button
-                    size="small"
-                    type="text"
-                    danger
-                    icon={<DeleteOutlined />}
-                    onClick={() => setRows((prev) => prev.filter((item) => item.key !== row.key))}
-                  />
-                )}
-              </Space>
-            ))}
-            {editable && (
-              <Button
-                icon={<PlusOutlined />}
-                onClick={() =>
-                  setRows((prev) => [
-                    ...prev,
-                    { key: Date.now(), subject_type: 'USER', subject_id: '', include_subtree: false },
-                  ])
-                }
-              >
-                添加白名单条目
-              </Button>
-            )}
-          </div>
-        )}
+                  {visibility === 'whitelist' && (
+                    <div style={{ marginTop: 24 }}>
+                      {rows.map((row) => (
+                        <Space
+                          key={row.key}
+                          style={{ display: 'flex', marginBottom: 12 }}
+                          align="center"
+                        >
+                          <Select
+                            value={row.subject_type}
+                            style={{ width: 100 }}
+                            disabled={!editable}
+                            options={SUBJECT_TYPE_OPTIONS}
+                            onChange={(type) =>
+                              updateRow(row.key, { subject_type: type, subject_id: '' })
+                            }
+                          />
+                          {row.subject_type === 'DEPARTMENT' && (
+                            <TreeSelect
+                              value={row.subject_id || undefined}
+                              style={{ width: 320 }}
+                              disabled={!editable}
+                              showSearch
+                              treeNodeFilterProp="title"
+                              placeholder="选择部门"
+                              treeData={deptTree}
+                              onChange={(value: string) =>
+                                updateRow(row.key, { subject_id: value })
+                              }
+                            />
+                          )}
+                          {row.subject_type === 'ROLE' && (
+                            <Select
+                              value={row.subject_id || undefined}
+                              style={{ width: 320 }}
+                              disabled={!editable}
+                              showSearch
+                              optionFilterProp="label"
+                              placeholder="选择角色"
+                              options={roles.map((role) => ({ value: role.id, label: role.name }))}
+                              onChange={(value: string) =>
+                                updateRow(row.key, { subject_id: value })
+                              }
+                            />
+                          )}
+                          {row.subject_type === 'USER' && (
+                            <Select
+                              value={row.subject_id || undefined}
+                              style={{ width: 320 }}
+                              disabled={!editable}
+                              showSearch
+                              filterOption={false}
+                              placeholder="搜索并选择用户"
+                              onSearch={async (keyword) => {
+                                if (!keyword) return
+                                mergeUserOptions(await usersApi.options(keyword))
+                              }}
+                              onChange={(value: string) =>
+                                updateRow(row.key, { subject_id: value })
+                              }
+                              options={userOptions.map((user) => ({
+                                value: user.id,
+                                label: `${user.display_name || user.username}（${user.username}）`,
+                              }))}
+                            />
+                          )}
+                          {row.subject_type === 'DEPARTMENT' && (
+                            <Space size={4}>
+                              <Switch
+                                size="small"
+                                disabled={!editable}
+                                checked={row.include_subtree}
+                                onChange={(checked) =>
+                                  updateRow(row.key, { include_subtree: checked })
+                                }
+                              />
+                              <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                                含子部门
+                              </Typography.Text>
+                            </Space>
+                          )}
+                          {editable && (
+                            <Button
+                              size="small"
+                              type="text"
+                              danger
+                              icon={<DeleteOutlined />}
+                              onClick={() =>
+                                setRows((prev) => prev.filter((item) => item.key !== row.key))
+                              }
+                            />
+                          )}
+                        </Space>
+                      ))}
+                      {editable && (
+                        <Button
+                          icon={<PlusOutlined />}
+                          onClick={() =>
+                            setRows((prev) => [
+                              ...prev,
+                              {
+                                key: Date.now(),
+                                subject_type: 'USER',
+                                subject_id: '',
+                                include_subtree: false,
+                              },
+                            ])
+                          }
+                        >
+                          添加白名单条目
+                        </Button>
+                      )}
+                    </div>
+                  )}
 
-        {editable && (
-          <Space style={{ marginTop: 24 }}>
-            <Button type="primary" loading={saving} onClick={handleSave}>
-              保存
-            </Button>
-          </Space>
-        )}
+                  {editable && (
+                    <Space style={{ marginTop: 24 }}>
+                      <Button type="primary" loading={saving} onClick={handleSave}>
+                        保存
+                      </Button>
+                    </Space>
+                  )}
                 </>
               ),
             },

@@ -18,6 +18,23 @@ export interface AgentShortTermMemory {
   strategy: string
 }
 
+// M4 PRD F16.1：长期记忆键组（后端恒携带，默认关闭）
+export interface AgentLongTermMemory {
+  enabled: boolean
+  extractModel: string | null
+  recallTopK: number
+  maxMemories: number
+}
+
+// M4-c PRD F14.1：智能体协作挂载项（delegate=工具化委派 / handoff=接管式移交）
+export interface AgentSubAgentEntry {
+  applicationId: string
+  mode?: 'delegate' | 'handoff'
+  toolName?: string
+  description?: string
+  [key: string]: unknown
+}
+
 export interface AgentConfigForm {
   systemPrompt: string
   modleName: string
@@ -27,8 +44,12 @@ export interface AgentConfigForm {
   tools: Array<Record<string, unknown>>
   datasets: AgentDatasetEntry[]
   mcpServers: Array<Record<string, unknown>>
+  // M4-b F17.4：MCP 会话保持档位（后端恒携带；会话档连接池为 P1，配置键先行）
+  mcpSession: { scope: 'run' | 'conversation' }
   workflows: Array<Record<string, unknown>>
-  memory: { shortTerm: AgentShortTermMemory }
+  // M4-c F14.1：协作挂载（后端恒携带，默认空列表；缺键会静默丢配置，必须显式声明）
+  subAgents: AgentSubAgentEntry[]
+  memory: { shortTerm: AgentShortTermMemory; longTerm: AgentLongTermMemory }
   reasoningMode: 'react' | 'planExecuteReflect'
   plannerPrompt?: string | null
   reflectorPrompt?: string | null

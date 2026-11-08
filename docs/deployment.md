@@ -237,6 +237,17 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 3. 外部 PostgreSQL 必须先 `CREATE EXTENSION IF NOT EXISTS vector;`；外部 Redis 需要开放 DB 0/1/2 三个逻辑库（或找运维开多 DB）。
 4. `migrate` 一次性任务仍由 compose 触发，它会直接连外部库执行 Alembic 升级，不需要改代码。
 
+### 14.4.2 MCP 会话保持档位（多 worker 粘性前提）
+
+智能体应用的 MCP「会话保持档位」（管理端配置页，`mcpSession.scope`）有两档：
+
+- **按运行（run，默认）**：每次运行独立建连、结束即关，对部署形态无要求，多 worker / 多副本可直接水平扩容。
+- **按会话（conversation）**：进程内会话池按 `(server 地址指纹, conversation_id)` 复用 MCP 连接，LRU 上限 64、空闲 300s 驱逐。池是**单进程内存态**，不跨 worker 共享。
+
+`WEB_CONCURRENCY>1` 或多副本部署且使用按会话档时，负载均衡需要**按会话做粘性路由**（如 Nginx `hash $conversation_id consistent`、网关按会话头分流），否则同一会话的请求落到不同 worker 只会各自重新握手——功能不受影响（未命中即退化为一次新握手，无错误语义），仅失去复用收益。用户端对话入口天然携带 conversation_id；无会话归属的调用（画布试运行、工作流子 run）会自动回落按运行档。
+
+Prometheus 指标 `boxia_mcp_handshake_total` / `boxia_mcp_session_reuse_total` / `boxia_mcp_pool_size` 可用于验证命中率：粘性生效时复用计数应随轮次增长、握手计数趋平。
+
 ### 14.5 创建首个管理员
 
 **方式 A：随容器启动自动初始化（推荐生产使用）**

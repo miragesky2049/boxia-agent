@@ -13,10 +13,11 @@ from __future__ import annotations
 
 import ast
 import re
+from collections.abc import Iterator
 from typing import Any
 
 from internal.domain.canvas.expression import TemplatedString, rewrite_template_refs
-from internal.domain.canvas.model import CanvasEdge, CanvasGraph, CanvasNode, PortSpec
+from internal.domain.canvas.model import CanvasGraph, CanvasNode
 from internal.domain.canvas.node_meta import get_node_meta_by_type_code
 from internal.domain.canvas.validate import ValidationIssue
 
@@ -106,19 +107,25 @@ def _check_template(
     for m in _TEMPLATE_RE.finditer(template):
         body = m.group(1).strip()
         if not body:
-            issues.append(ValidationIssue(
-                "error", "empty_expression",
-                f"节点 {node_id} 的模板里有空 {{}} 表达式",
-                node_id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "empty_expression",
+                    f"节点 {node_id} 的模板里有空 {{}} 表达式",
+                    node_id,
+                )
+            )
             continue
         problem = _parse_expression(body, ref_names)
         if problem:
-            issues.append(ValidationIssue(
-                "error", "expression_syntax",
-                f"节点 {node_id} 表达式语法错误 `{body[:60]}`：{problem}",
-                node_id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "expression_syntax",
+                    f"节点 {node_id} 表达式语法错误 `{body[:60]}`：{problem}",
+                    node_id,
+                )
+            )
     return issues
 
 
@@ -130,18 +137,24 @@ def _check_bare_expression(
     """if case 等场景：整字段就是一个表达式，没有 {{...}} 包裹。"""
     expr = expression.strip()
     if not expr:
-        return [ValidationIssue(
-            "error", "empty_expression",
-            f"节点 {node_id} 的 case 表达式为空",
-            node_id,
-        )]
+        return [
+            ValidationIssue(
+                "error",
+                "empty_expression",
+                f"节点 {node_id} 的 case 表达式为空",
+                node_id,
+            )
+        ]
     problem = _parse_expression(expr, ref_names)
     if problem:
-        return [ValidationIssue(
-            "error", "expression_syntax",
-            f"节点 {node_id} 表达式语法错误 `{expr[:60]}`：{problem}",
-            node_id,
-        )]
+        return [
+            ValidationIssue(
+                "error",
+                "expression_syntax",
+                f"节点 {node_id} 表达式语法错误 `{expr[:60]}`：{problem}",
+                node_id,
+            )
+        ]
     return []
 
 
@@ -167,11 +180,14 @@ def _lint_required_config(node: CanvasNode) -> list[ValidationIssue]:
             continue
         value = node.config.get(field.name)
         if _is_empty(value):
-            issues.append(ValidationIssue(
-                "error", "required_config_empty",
-                f"节点 {meta.title}({node.id}) 必填配置项「{field.label}」({field.name}) 为空",
-                node.id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "required_config_empty",
+                    f"节点 {meta.title}({node.id}) 必填配置项「{field.label}」({field.name}) 为空",
+                    node.id,
+                )
+            )
     return issues
 
 
@@ -180,9 +196,7 @@ def _is_empty(value: Any) -> bool:
         return True
     if isinstance(value, str) and value.strip() == "":
         return True
-    if isinstance(value, (list, dict)) and len(value) == 0:
-        return True
-    return False
+    return isinstance(value, (list, dict)) and len(value) == 0
 
 
 # ---------- 3. 未声明变量引用（warning） ----------
@@ -217,24 +231,38 @@ def lint_variable_refs(
                 if key in seen:
                     continue
                 seen.add(key)
-                if namespace == "variables" and variable_names is not None and name not in declared_variables:
-                    issues.append(ValidationIssue(
-                        "warning", "undeclared_variable",
-                        f"节点 {node.meta.title or node.id} 引用了未声明的应用变量 "
-                        f"{{{{variables.{name}}}}}",
-                        node.id,
-                    ))
-                elif namespace == "system" and system_names is not None and name not in declared_system:
-                    issues.append(ValidationIssue(
-                        "warning", "undeclared_variable",
-                        f"节点 {node.meta.title or node.id} 引用了当前形态不支持的系统变量 "
-                        f"{{{{system.{name}}}}}",
-                        node.id,
-                    ))
+                if (
+                    namespace == "variables"
+                    and variable_names is not None
+                    and name not in declared_variables
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "warning",
+                            "undeclared_variable",
+                            f"节点 {node.meta.title or node.id} 引用了未声明的应用变量 "
+                            f"{{{{variables.{name}}}}}",
+                            node.id,
+                        )
+                    )
+                elif (
+                    namespace == "system"
+                    and system_names is not None
+                    and name not in declared_system
+                ):
+                    issues.append(
+                        ValidationIssue(
+                            "warning",
+                            "undeclared_variable",
+                            f"节点 {node.meta.title or node.id} 引用了当前形态不支持的系统变量 "
+                            f"{{{{system.{name}}}}}",
+                            node.id,
+                        )
+                    )
     return issues
 
 
-def _iter_nodes(graph: CanvasGraph):
+def _iter_nodes(graph: CanvasGraph) -> Iterator[CanvasNode]:
     """递归遍历节点（含 loop/batch/subworkflow 子图）。"""
     for node in graph.nodes:
         yield node
@@ -242,7 +270,7 @@ def _iter_nodes(graph: CanvasGraph):
             yield from _iter_nodes(node.subgraph)
 
 
-def _iter_strings(value: Any):
+def _iter_strings(value: Any) -> Iterator[str]:
     """递归产出 config 中的字符串。"""
     if isinstance(value, TemplatedString):
         yield value.template
@@ -288,12 +316,15 @@ def lint_model_refs(graph: CanvasGraph, known_models: set[str] | None) -> list[V
             model_id = raw.strip()
             if not model_id or model_id in known_models:
                 continue
-            issues.append(ValidationIssue(
-                "error", "unknown_model",
-                f"节点 {node.meta.title or node.id} 配置的模型「{model_id}」"
-                "不在已启用的模型目录中，请在模型管理中配置该模型或重新选择",
-                node.id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "unknown_model",
+                    f"节点 {node.meta.title or node.id} 配置的模型「{model_id}」"
+                    "不在已启用的模型目录中，请在模型管理中配置该模型或重新选择",
+                    node.id,
+                )
+            )
     return issues
 
 
@@ -323,9 +354,7 @@ def _lint_port_types(graph: CanvasGraph) -> list[ValidationIssue]:
 
         severity = "warning"
         code = "port_type_mismatch"
-        message = (
-            f"边 {edge.source}({source_type}) → {edge.target}({target_type}) 类型不匹配"
-        )
+        message = f"边 {edge.source}({source_type}) → {edge.target}({target_type}) 类型不匹配"
         if source_type == "number" and target_type == "boolean":
             message = (
                 f"边 {edge.source}({source_type}) → {edge.target}({target_type}) "
@@ -350,9 +379,9 @@ def _resolve_output_type(node: CanvasNode, source_port: str | None) -> str:
 
     meta = get_node_meta_by_type_code(node.type.value)
     if meta and meta.outputs:
-        for port in meta.outputs:
-            if source_port is None or port.name == source_port:
-                return _normalize_type(port.type)
+        for meta_port in meta.outputs:
+            if source_port is None or meta_port.name == source_port:
+                return _normalize_type(meta_port.type)
         return _normalize_type(meta.outputs[0].type)
     return "any"
 

@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from internal.domain.llm.client import shutdown_llm_clients
-from internal.infrastructure.bootstrap import ensure_platform_admin, ensure_model_catalog
+from internal.infrastructure.bootstrap import ensure_model_catalog, ensure_platform_admin
 from internal.infrastructure.config.settings import Settings, get_settings
 from internal.infrastructure.middleware.access_log import AccessLogMiddleware
 from internal.infrastructure.middleware.audit import AuditMiddleware

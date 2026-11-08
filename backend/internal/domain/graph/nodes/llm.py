@@ -33,7 +33,7 @@ from internal.domain.agent.react import (
     build_tool_specs,
     run_react_loop,
 )
-from internal.domain.canvas.expression import Expr, Literal, TemplatedString
+from internal.domain.canvas.expression import Expr, LiteralValue, TemplatedString
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult
 from internal.domain.graph.nodes import register_node_handler
@@ -52,8 +52,9 @@ class LLMNodeHandler(NodeHandler):
     type_name = NodeType.LLM.value
 
     async def run(self, ctx: NodeContext) -> NodeResult:
-        config = ctx.config
-        llm_param = config.get("llmParam") if isinstance(config.get("llmParam"), dict) else {}
+        config: dict[str, Any] = ctx.config if isinstance(ctx.config, dict) else {}
+        raw_llm_param = config.get("llmParam")
+        llm_param: dict[str, Any] = raw_llm_param if isinstance(raw_llm_param, dict) else {}
 
         def _pick(*keys: str) -> Any:
             """优先从 config 顶层取（前端简化格式），再从 llmParam 取（coze 真实格式）。"""
@@ -92,15 +93,19 @@ class LLMNodeHandler(NodeHandler):
 
         # 未注入 llm 服务时返回 stub，保持开发态可跑
         if not ctx.services.has("llm"):
-            return NodeResult(outputs={
-                "output": f"[LLM stub] model={model_id} input={str(prompt_text)[:80]}",
-            })
+            return NodeResult(
+                outputs={
+                    "output": f"[LLM stub] model={model_id} input={str(prompt_text)[:80]}",
+                }
+            )
 
         llm_service = ctx.services.get("llm")
         # 20260731 双轨合并：工具 schema 归一化收敛到 react.build_tool_specs，
         # 声明名集合即内核执行白名单
         tool_specs = build_tool_specs(tools_raw)
-        tool_executor = ctx.services.get("tool_executor") if ctx.services.has("tool_executor") else None
+        tool_executor = (
+            ctx.services.get("tool_executor") if ctx.services.has("tool_executor") else None
+        )
 
         messages: list[dict[str, Any]] = []
         if system_prompt:
@@ -219,11 +224,13 @@ async def _run_react_collect(
         if event.kind == "llm_end":
             accumulate_usage(aggregated_usage, payload["usage"])
         elif event.kind == "tool_end":
-            tool_call_log.append({
-                "name": payload["name"],
-                "arguments": payload["arguments_raw"],
-                "observation": payload["observation"],
-            })
+            tool_call_log.append(
+                {
+                    "name": payload["name"],
+                    "arguments": payload["arguments_raw"],
+                    "observation": payload["observation"],
+                }
+            )
         elif event.kind == "result":
             final_content = payload["content"]
             final_reasoning = payload["reasoning_content"]
@@ -267,10 +274,13 @@ async def _run_streaming(
         delta = getattr(chunk, "content", "") or ""
         if delta:
             chunks.append(delta)
-            await ctx.emit_event("llm_token", {
-                "node_id": ctx.node_id,
-                "delta": delta,
-            })
+            await ctx.emit_event(
+                "llm_token",
+                {
+                    "node_id": ctx.node_id,
+                    "delta": delta,
+                },
+            )
         reasoning_delta = getattr(chunk, "reasoning_content", "") or ""
         if reasoning_delta:
             reasoning_chunks.append(reasoning_delta)
@@ -288,7 +298,7 @@ def _to_str(value: Any) -> str:
         return value
     if isinstance(value, TemplatedString):
         return value.template
-    if isinstance(value, Literal):
+    if isinstance(value, LiteralValue):
         return _to_str(value.value)
     if isinstance(value, Expr):
         return str(value)
@@ -362,7 +372,9 @@ async def _load_conversation_history(
     history: list[dict[str, Any]] = []
     for msg in rows:
         role = getattr(msg, "role", None) or (msg.get("role") if isinstance(msg, dict) else None)
-        content = getattr(msg, "content", None) or (msg.get("content") if isinstance(msg, dict) else None)
+        content = getattr(msg, "content", None) or (
+            msg.get("content") if isinstance(msg, dict) else None
+        )
         if role not in ("user", "assistant"):
             continue
         if not content:

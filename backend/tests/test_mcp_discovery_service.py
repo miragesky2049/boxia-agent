@@ -38,7 +38,9 @@ def test_discover_result_shape_and_cache_hit(monkeypatch) -> None:
 
     async def _fake_list_tools(server_url: str, headers=None):
         calls.append(server_url)
-        return [McpToolSpec(name="geocode", description="地址转坐标", input_schema={"type": "object"})]
+        return [
+            McpToolSpec(name="geocode", description="地址转坐标", input_schema={"type": "object"})
+        ]
 
     monkeypatch.setattr(module, "list_tools", _fake_list_tools)
     svc = McpDiscoveryService()

@@ -15,6 +15,9 @@ interface ComposerProps {
   maxImages?: number
   onAddImage?: (url: string) => void
   onRemoveImage?: (index: number) => void
+  /** M4 PRD F14.9：接管中展示"返回主助手"（触发 handback） */
+  handbackVisible?: boolean
+  onHandback?: () => void
 }
 
 const MAX_HEIGHT = 200
@@ -32,6 +35,8 @@ export function Composer({
   maxImages = 8,
   onAddImage,
   onRemoveImage,
+  handbackVisible,
+  onHandback,
 }: ComposerProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const [imageDraft, setImageDraft] = useState('')
@@ -54,6 +59,19 @@ export function Composer({
 
   return (
     <div className="lc-composer-area">
+      {handbackVisible && (
+        <div className="lc-handback-bar">
+          <span className="lc-handback-bar__hint">当前由专家应答中</span>
+          <button
+            type="button"
+            className="lc-handback-btn"
+            onClick={onHandback}
+            disabled={streaming}
+          >
+            返回主助手
+          </button>
+        </div>
+      )}
       {imagesEnabled && (
         <div className="lc-composer__images">
           {(images ?? []).map((url, index) => (

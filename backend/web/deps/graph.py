@@ -11,24 +11,19 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 from uuid import UUID, uuid4
 
+from internal.application.apps.agent_tool_service import AgentToolService
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.workflow_tool_service import WorkflowToolService
-from internal.application.retrieval_service import RetrievalService
+from internal.domain.agent.tool_executor import ToolExecutorService
 from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.graph.http_service import HttpService
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphRuntime
-from internal.domain.graph.http_service import HttpService
 from internal.domain.llm.adapter import (
     LLMServiceAdapter,
     build_model_resolver,
 )
-from internal.domain.agent.tool_executor import ToolExecutorService
-from internal.infrastructure.retrieval.factory import register_retrieval_services
-from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
-from internal.infrastructure.repository.apps.run_repository import RunRepository
-from internal.infrastructure.repository.apps.usage_repository import UsageRepository
-from internal.infrastructure.repository.apps.webhook_repository import WebhookRepository
 from internal.infrastructure.repository.apps.async_conversation_adapter import (
     AsyncConversationRepository,
     AsyncMessageRepository,
@@ -39,12 +34,17 @@ from internal.infrastructure.repository.apps.conversation_repository import (
 from internal.infrastructure.repository.apps.message_repository import (
     MessageRepository as SyncMessageRepository,
 )
+from internal.infrastructure.repository.apps.run_repository import RunRepository
+from internal.infrastructure.repository.apps.usage_repository import UsageRepository
+from internal.infrastructure.repository.apps.webhook_repository import WebhookRepository
 from internal.infrastructure.repository.postgres_audit_log_repository import (
     PostgresAuditLogRepository,
 )
 from internal.infrastructure.repository.resource_tool_repository import (
     ResourceToolRepository,
 )
+from internal.infrastructure.retrieval.factory import register_retrieval_services
+from internal.infrastructure.sandbox.python_sandbox import PythonSandbox
 from web.deps.apps_services import make_application_service, make_model_service
 
 logger = logging.getLogger(__name__)
@@ -108,8 +108,9 @@ def register_conversation_services(
     tenant_id 缺失时兜底平台租户（与原 apps_admin helper 行为一致）。
     """
     effective_tenant_id = tenant_id or PLATFORM_TENANT_ID
+    sync_conv_repo = SyncConversationRepository(uow.session)
     conv_repo = AsyncConversationRepository(
-        SyncConversationRepository(uow.session),
+        sync_conv_repo,
         tenant_id=effective_tenant_id,
         user_id=user_id,
         application_id=application_id,
@@ -124,6 +125,7 @@ def register_conversation_services(
         application_id=application_id,
         run_id=None,
         enforce_application=enforce_application,
+        conversation_repo=sync_conv_repo,
     )
     services.register("conversation_repo", conv_repo)
     services.register("message_repo", msg_repo)
@@ -146,7 +148,9 @@ def register_conversation_services(
 
 
 def register_subgraph_loader(
-    services: ServiceRegistry, service: ApplicationService, tenant_id: Any,
+    services: ServiceRegistry,
+    service: ApplicationService,
+    tenant_id: Any,
 ) -> None:
     """注册 subgraph_loader，供 Subworkflow（type=9）节点按 tenant 加载子应用 runtime graph。"""
 
@@ -174,7 +178,8 @@ def load_debug_variables(
         return {}, set(), None
     try:
         variables, user_keys = make_application_service(uow).build_runtime_variables(
-            application_id, principal.user_id,
+            application_id,
+            principal.user_id,
         )
     except Exception:  # noqa: BLE001
         logger.exception("加载画布试运行变量失败 application=%s", application_id)
@@ -207,7 +212,8 @@ def make_canvas_debug_runtime(
     services = ServiceRegistry()
     register_llm_and_http(services, uow, principal.tenant_id)
     register_conversation_services(
-        services, uow,
+        services,
+        uow,
         tenant_id=principal.tenant_id,
         user_id=principal.user_id,
         application_id=application_id,
@@ -229,8 +235,24 @@ def make_canvas_debug_runtime(
             conversation_id=conversation_id,
         ),
     )
+    # M4-c F14.2：智能体即工具端口（试运行同样可挂，调试点委派效果）
+    services.register(
+        "agent_tool",
+        AgentToolService(
+            debug_app_service,
+            build_runner,
+            uow,
+            None,
+            tenant_id=principal.tenant_id,
+            user_id=principal.user_id,
+            parent_run_id=run_id,
+            conversation_id=conversation_id,
+        ),
+    )
     debug_variables, debug_user_keys, debug_persist = load_debug_variables(
-        uow, variables_application_id, principal,
+        uow,
+        variables_application_id,
+        principal,
     )
     return GraphRuntime(
         canvas_json=graph,
@@ -276,7 +298,8 @@ async def build_runner(
     # 变量体系：应用变量取默认值，用户变量优先取当前用户已持久化的值
     try:
         runtime_variables, user_variable_keys = service.build_runtime_variables(
-            application_id, current_user_id,
+            application_id,
+            current_user_id,
         )
     except Exception:  # noqa: BLE001
         logger.exception("加载应用变量失败 application=%s", application_id)
@@ -319,8 +342,9 @@ async def build_runner(
     # conversation / message 节点（38/39/51-57）依赖的异步仓储。
     # user 端 current_user_id 必传；admin debug 路由走 _register_conversation_services 单独绑定。
     if current_user_id is not None:
+        sync_conv_repo = SyncConversationRepository(uow.session)
         async_conv_repo = AsyncConversationRepository(
-            SyncConversationRepository(uow.session),
+            sync_conv_repo,
             tenant_id=tenant_id,
             user_id=current_user_id,
             application_id=application_id,
@@ -331,6 +355,7 @@ async def build_runner(
             user_id=current_user_id,
             application_id=application_id,
             run_id=effective_run_id,
+            conversation_repo=sync_conv_repo,
         )
         services.register("conversation_repo", async_conv_repo)
         services.register("message_repo", async_msg_repo)
@@ -341,6 +366,22 @@ async def build_runner(
     services.register(
         "workflow_tool",
         WorkflowToolService(
+            service,
+            build_runner,
+            uow,
+            context,
+            tenant_id=tenant_id,
+            user_id=current_user_id,
+            parent_run_id=effective_run_id,
+            actor_username=actor_username,
+            conversation_id=conversation_id,
+        ),
+    )
+    # M4-c PRD F14.2：智能体即工具端口，agent 节点经 ctx.services["agent_tool"] 委派；
+    # build_runner 对子 run 同样注册，孙代运行时的 parent_run_id 逐层归因、链深度共享。
+    services.register(
+        "agent_tool",
+        AgentToolService(
             service,
             build_runner,
             uow,

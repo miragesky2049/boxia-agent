@@ -37,7 +37,9 @@ class SetVariableNodeHandler(NodeHandler):
             if coerced is None:
                 logger.warning(
                     "变量 %s 类型 %s 转换失败，保留原值: value=%r",
-                    var_name, declared_type, value,
+                    var_name,
+                    declared_type,
+                    value,
                 )
             else:
                 value = coerced

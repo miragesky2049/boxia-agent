@@ -35,7 +35,11 @@ def _service(flow_type: str, graph: dict | None) -> tuple[ApplicationService, _F
     uow = MagicMock()
     repo = _FakeRepo(flow_type, graph)
     service = ApplicationService(
-        uow, repo, cache=MagicMock(), object_storage=None, default_llm_model_id="test-model",
+        uow,
+        repo,
+        cache=MagicMock(),
+        object_storage=None,
+        default_llm_model_id="test-model",
     )
     return service, repo
 

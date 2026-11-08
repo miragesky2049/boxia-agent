@@ -44,8 +44,7 @@ def ensure_platform_admin(settings: Settings) -> None:
     with engine.begin() as conn:
         role_id = conn.execute(
             text(
-                "SELECT id FROM roles WHERE tenant_id = :tid AND code = :code "
-                "AND is_active = TRUE"
+                "SELECT id FROM roles WHERE tenant_id = :tid AND code = :code AND is_active = TRUE"
             ),
             {"code": role_code, "tid": str(PLATFORM_TENANT_ID)},
         ).scalar()
@@ -53,9 +52,7 @@ def ensure_platform_admin(settings: Settings) -> None:
             logger.warning("平台角色 %s 不存在或已停用，跳过自动初始化", role_code)
             return
 
-        existing = conn.execute(
-            text("SELECT 1 FROM admin_users LIMIT 1")
-        ).first()
+        existing = conn.execute(text("SELECT 1 FROM admin_users LIMIT 1")).first()
         if existing is not None:
             logger.info("admin_users 表已有账号，跳过自动初始化")
             return

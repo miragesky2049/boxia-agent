@@ -12,6 +12,7 @@ interrupted 帧承载 F10 工具审批挂起。
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from collections.abc import AsyncIterator
 from typing import Annotated, Any
@@ -22,8 +23,12 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from internal.application.apps.chat_service import ChatService
+from internal.application.apps.memory_service import MemorySummarizerService
+from internal.application.errors import ValidationError
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.tasks.memory_tasks import extract_memories
 from web.deps.apps_services import (
+    make_agent_memory_repository,
     make_app_resource_service,
     make_application_service,
     make_conversation_repository,
@@ -71,6 +76,9 @@ class ConversationRunRequest(BaseModel):
     history: list[HistoryMessage] | None = None
     # 0074 PRD F9：随消息携带的图片 URL（节点 visionEnabled 门控）
     images: list[str] = Field(default_factory=list, max_length=8)
+    # M4 PRD F14.9：手动归位（结束接管、发言权交回会话归属应用）；true 时不要求
+    # message、不发 run，仅清路由态并回一帧 handoff(returned=true)
+    handback: bool = False
 
 
 def get_chat_service(
@@ -93,6 +101,15 @@ def get_chat_service(
         tool_executor_factory=make_tool_executor_factory(
             uow.session, principal.tenant_id, principal.user_id
         ),
+        # M4 PRD F15：摘要式记忆执行服务（复用同请求的模型与会话仓储）
+        memory_summarizer=MemorySummarizerService(
+            model_service=make_model_service(uow.session),
+            conv_repo=make_conversation_repository(uow.session),
+        ),
+        # M4 PRD F16.3：轮后长期记忆抽取投递（Celery；broker 不可达由服务侧降级 warning）
+        memory_extract_enqueuer=lambda run_id: extract_memories.delay(str(run_id)),
+        # M4 PRD F16.4：召回注入仓储（longTerm.enabled 时才查询，关闭态零开销）
+        memory_repo=make_agent_memory_repository(uow.session),
     )
 
 
@@ -130,10 +147,8 @@ def _sse_response(
         finally:
             if not task.done():
                 task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):  # noqa: BLE001
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
 
     return StreamingResponse(
         event_stream(),
@@ -174,6 +189,28 @@ async def run_conversation_stream(
         message=payload.message,
         conversation_id=payload.conversation_id,
         resume=payload.resume,
+        handback=payload.handback,
+    )
+    if payload.handback:
+        # M4 PRD F14.9：手动归位不发 run，清路由态 + 通告帧（4xx 校验已在预检收口）
+        handback_cid = payload.conversation_id
+        if handback_cid is None:
+            # 预检已拦截此形态，此处仅类型收窄兜底
+            raise ValidationError("handback 必须提供 conversation_id")
+        handback_ctx = service.prepare_handback(application_id, handback_cid)
+        return _sse_response(
+            service.run_handback_stream(
+                application_id=application_id,
+                conversation_id=handback_cid,
+                prepared=handback_ctx,
+            ),
+            "chat_failed",
+        )
+    # M4 PRD F14.9：接管路由在 SSE 之前收口（目标不可见 → JSON 4xx，原路由保持不动）
+    route_app_id = service.resolve_handoff_application(
+        application_id,
+        conversation_id=payload.conversation_id,
+        resume=payload.resume,
     )
     history = [h.model_dump() for h in payload.history] if payload.history is not None else None
     return _sse_response(
@@ -185,6 +222,7 @@ async def run_conversation_stream(
             images=payload.images or None,
             resume=payload.resume,
             thread_id=payload.thread_id,
+            route_application_id=route_app_id if route_app_id != application_id else None,
         ),
         "chat_failed",
     )

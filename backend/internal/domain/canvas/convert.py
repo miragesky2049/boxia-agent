@@ -17,10 +17,9 @@ from __future__ import annotations
 from typing import Any
 
 from internal.domain.canvas.expression import (
-    EnvVar,
     Expr,
     GlobalVar,
-    Literal,
+    LiteralValue,
     Ref,
     TemplatedString,
 )
@@ -41,7 +40,7 @@ from internal.domain.canvas.model import (
     PortSpec,
     VariableDef,
 )
-from internal.domain.canvas.node_type import NodeType, UNSUPPORTED_TYPES
+from internal.domain.canvas.node_type import UNSUPPORTED_TYPES, NodeType
 
 
 class CanvasConvertError(ValueError):
@@ -219,7 +218,9 @@ def _flatten_named_param_lists(config: dict[str, Any]) -> None:
     for key, value in list(config.items()):
         if not isinstance(value, list):
             continue
-        if not value or not all(isinstance(item, dict) and "name" in item and "input" in item for item in value):
+        if not value or not all(
+            isinstance(item, dict) and "name" in item and "input" in item for item in value
+        ):
             continue
         config[key] = {item["name"]: item["input"] for item in value}
 
@@ -234,7 +235,7 @@ def _coerce_config_value(value: Any) -> Any:
     """
     if _is_value_expression(value):
         expr = _convert_value_expression(value)
-        if isinstance(expr, Literal):
+        if isinstance(expr, LiteralValue):
             return expr.value
         return expr
     if isinstance(value, list):
@@ -265,7 +266,7 @@ def _convert_value_expression(raw: Any) -> Expr | None:
 
     value = raw.get("value")
     if not isinstance(value, dict):
-        return Literal(value)
+        return LiteralValue(value)
 
     kind = value.get("type")
     content = value.get("content")
@@ -274,11 +275,11 @@ def _convert_value_expression(raw: Any) -> Expr | None:
         # 字符串字面量里如果带 {{...}}，翻译成模板表达式，运行时插值
         if isinstance(content, str) and "{{" in content:
             return TemplatedString(content)
-        return Literal(content)
+        return LiteralValue(content)
 
     if kind == "ref":
         if not isinstance(content, dict):
-            return Literal(content)
+            return LiteralValue(content)
         source = content.get("source")
         block_id = str(content.get("blockID") or "")
         name = str(content.get("name") or "")
@@ -294,9 +295,9 @@ def _convert_value_expression(raw: Any) -> Expr | None:
 
     if kind == "object_ref":
         # 结构化对象引用：暂时原样返回，后续按需展开
-        return Literal(content)
+        return LiteralValue(content)
 
-    return Literal(content)
+    return LiteralValue(content)
 
 
 def _convert_error_policy(raw: Any) -> ErrorPolicy | None:

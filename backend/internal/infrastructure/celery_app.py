@@ -16,6 +16,7 @@ def make_celery() -> Celery:
         backend=settings.celery_result_backend,
         include=[
             "internal.infrastructure.tasks.ingest_tasks",
+            "internal.infrastructure.tasks.memory_tasks",
             "internal.infrastructure.tasks.auth_tasks",
             "internal.infrastructure.tasks.entitlement_tasks",
             "internal.infrastructure.tasks.entitlement_reconcile",

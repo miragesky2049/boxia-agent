@@ -1,35 +1,47 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react'
 import {
-  AutoComplete, Button, Input, Popover, Select, Space, Tag, Tooltip, Tree, Typography,
-} from 'antd';
-import type { TreeProps } from 'antd';
-import { listAvailableModels, type ModelCatalogItem } from '../../../api/models';
-import type { DatasetItem } from '../../../api/datasets';
-import type { NodeMeta } from '../../../api/nodeMeta';
-import type { FlowType } from '../../../api/apps';
-import { hasOutputs } from '../canvas/metadata/capabilities';
-import { isNodeAvailable } from '../canvas/metadata/flowCapabilities';
-import { CHATFLOW_START_BUILTIN_PARAMS, listStartInputParams } from '../canvas/metadata/chatflowStart';
-import { FieldControl } from '../canvas/fields/fieldControls';
-import { ToolListEditor } from './ToolListEditor';
-import { groupConfigFields } from './configSections';
-import { getNextRecommendations } from './nodeNextRecommendations';
+  AutoComplete,
+  Button,
+  Input,
+  Popover,
+  Select,
+  Space,
+  Tag,
+  Tooltip,
+  Tree,
+  Typography,
+} from 'antd'
+import type { TreeProps } from 'antd'
+import { listAvailableModels, type ModelCatalogItem } from '../../../api/models'
+import type { DatasetItem } from '../../../api/datasets'
+import type { NodeMeta } from '../../../api/nodeMeta'
+import type { FlowType } from '../../../api/apps'
+import { hasOutputs } from '../canvas/metadata/capabilities'
+import { isNodeAvailable } from '../canvas/metadata/flowCapabilities'
+import {
+  CHATFLOW_START_BUILTIN_PARAMS,
+  listStartInputParams,
+} from '../canvas/metadata/chatflowStart'
+import { FieldControl } from '../canvas/fields/fieldControls'
+import { ToolListEditor } from './ToolListEditor'
+import { groupConfigFields } from './configSections'
+import { getNextRecommendations } from './nodeNextRecommendations'
 
-export type NodeConfigValues = Record<string, any>;
+export type NodeConfigValues = Record<string, any>
 
 export interface GraphNodeSummary {
-  id: string;
-  typeKey: string;
-  title: string;
-  config: Record<string, any>;
-  position?: { x: number; y: number };
+  id: string
+  typeKey: string
+  title: string
+  config: Record<string, any>
+  position?: { x: number; y: number }
 }
 
 // 抽屉「输入」区：按入边反查上游节点可引用字段
 export interface UpstreamInputGroup {
-  nodeId: string;
-  nodeTitle: string;
-  fields: Array<{ name: string; label: string }>;
+  nodeId: string
+  nodeTitle: string
+  fields: Array<{ name: string; label: string }>
 }
 
 function buildPickerTreeData(
@@ -41,12 +53,12 @@ function buildPickerTreeData(
   return nodes
     .filter((n) => n.id !== currentNodeId)
     .map((node) => {
-      const meta = keyToMeta[node.typeKey];
+      const meta = keyToMeta[node.typeKey]
       const portOutputs = (meta?.outputs || []).map((p) => ({
         key: `${node.id}.output.${p.name}`,
         title: p.label || p.name,
         isLeaf: true,
-      }));
+      }))
       // START 节点的启动参数（对话流含内置 USER_INPUT/CONVERSATION_NAME）作为虚拟输出
       const startInputs =
         node.typeKey === 'start'
@@ -55,13 +67,13 @@ function buildPickerTreeData(
               title: `入参: ${inp.name}`,
               isLeaf: true,
             }))
-          : [];
+          : []
       return {
         key: node.id,
         title: node.title || meta?.title || node.id,
         children: [...portOutputs, ...startInputs],
-      };
-    });
+      }
+    })
 }
 
 // 把上游节点 outputs 拍平为 AutoComplete options（用于 IF 左值 / 类似字段）
@@ -71,14 +83,14 @@ function buildLeftValueOptions(
   keyToMeta: Record<string, NodeMeta>,
   flowType?: FlowType,
 ): { value: string; label: React.ReactNode }[] {
-  const options: { value: string; label: React.ReactNode }[] = [];
+  const options: { value: string; label: React.ReactNode }[] = []
   for (const node of nodes) {
-    if (node.id === currentNodeId) continue;
-    const meta = keyToMeta[node.typeKey];
-    const nodeTitle = node.title || meta?.title || node.id;
-    const portOutputs = meta?.outputs || [];
+    if (node.id === currentNodeId) continue
+    const meta = keyToMeta[node.typeKey]
+    const nodeTitle = node.title || meta?.title || node.id
+    const portOutputs = meta?.outputs || []
     for (const p of portOutputs) {
-      const ref = `{{${node.id}.output.${p.name}}}`;
+      const ref = `{{${node.id}.output.${p.name}}}`
       options.push({
         value: ref,
         label: (
@@ -88,11 +100,11 @@ function buildLeftValueOptions(
             <span>{p.label || p.name}</span>
           </span>
         ),
-      });
+      })
     }
     if (node.typeKey === 'start') {
       for (const inp of listStartInputParams(node.config?.inputs, flowType)) {
-        const ref = `{{${node.id}.output.${inp.name}}}`;
+        const ref = `{{${node.id}.output.${inp.name}}}`
         options.push({
           value: ref,
           label: (
@@ -102,11 +114,11 @@ function buildLeftValueOptions(
               <span>入参: {inp.name}</span>
             </span>
           ),
-        });
+        })
       }
     }
   }
-  return options;
+  return options
 }
 
 function RefPickerButton({
@@ -116,17 +128,17 @@ function RefPickerButton({
   flowType,
   onPick,
 }: {
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  flowType?: FlowType;
-  onPick: (ref: string) => void;
+  nodes: GraphNodeSummary[]
+  currentNodeId: string | null
+  keyToMeta: Record<string, NodeMeta>
+  flowType?: FlowType
+  onPick: (ref: string) => void
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(false)
   const treeData = useMemo(
     () => buildPickerTreeData(nodes, currentNodeId, keyToMeta, flowType),
     [nodes, currentNodeId, keyToMeta, flowType],
-  );
+  )
   return (
     <Popover
       open={open}
@@ -140,10 +152,10 @@ function RefPickerButton({
             treeData={treeData}
             defaultExpandAll
             onSelect={(keys) => {
-              const key = keys[0];
+              const key = keys[0]
               if (typeof key === 'string' && key.includes('.output.')) {
-                onPick(`{{${key}}}`);
-                setOpen(false);
+                onPick(`{{${key}}}`)
+                setOpen(false)
               }
             }}
           />
@@ -154,15 +166,15 @@ function RefPickerButton({
         {'{ }'} 引用
       </Button>
     </Popover>
-  );
+  )
 }
 
 // ========== IF case 可视化编辑器（T7） ==========
 export interface CaseItem {
-  case_id: string;
-  left: string;
-  operator: string;
-  right: string;
+  case_id: string
+  left: string
+  operator: string
+  right: string
 }
 
 const CASE_OPERATORS: Array<{ value: string; label: string }> = [
@@ -176,7 +188,7 @@ const CASE_OPERATORS: Array<{ value: string; label: string }> = [
   { value: 'not_contains', label: '不包含' },
   { value: 'is_empty', label: '为空' },
   { value: 'is_not_empty', label: '不为空' },
-];
+]
 
 export function parseCasesValue(raw: any): CaseItem[] {
   if (Array.isArray(raw)) {
@@ -185,17 +197,17 @@ export function parseCasesValue(raw: any): CaseItem[] {
       left: String(c?.left ?? ''),
       operator: String(c?.operator || 'eq'),
       right: String(c?.right ?? ''),
-    }));
+    }))
   }
   if (typeof raw === 'string' && raw.trim()) {
     try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parseCasesValue(parsed);
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parseCasesValue(parsed)
     } catch {
       // ignore
     }
   }
-  return [];
+  return []
 }
 
 function CaseListEditor({
@@ -206,37 +218,37 @@ function CaseListEditor({
   keyToMeta,
   flowType,
 }: {
-  value: any;
-  onChange: (next: CaseItem[]) => void;
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  flowType?: FlowType;
+  value: any
+  onChange: (next: CaseItem[]) => void
+  nodes: GraphNodeSummary[]
+  currentNodeId: string | null
+  keyToMeta: Record<string, NodeMeta>
+  flowType?: FlowType
 }) {
-  const cases = useMemo(() => parseCasesValue(value), [value]);
+  const cases = useMemo(() => parseCasesValue(value), [value])
   const leftValueOptions = useMemo(
     () => buildLeftValueOptions(nodes, currentNodeId, keyToMeta, flowType),
     [nodes, currentNodeId, keyToMeta, flowType],
-  );
+  )
 
   const updateCase = (idx: number, patch: Partial<CaseItem>) => {
-    const next = cases.map((c, i) => (i === idx ? { ...c, ...patch } : c));
-    onChange(next);
-  };
+    const next = cases.map((c, i) => (i === idx ? { ...c, ...patch } : c))
+    onChange(next)
+  }
 
   const removeCase = (idx: number) => {
     // 条件节点至少保留一个「如果」，否则卡片与抽屉只剩「否则」
-    if (cases.length <= 1) return;
-    onChange(cases.filter((_, i) => i !== idx));
-  };
+    if (cases.length <= 1) return
+    onChange(cases.filter((_, i) => i !== idx))
+  }
 
   const addCase = () => {
     // 删除中间条件后再新增，直接用 length+1 会和已有 case_id 冲突
-    const used = new Set(cases.map((c) => c.case_id));
-    let n = cases.length + 1;
-    while (used.has(`case_${n}`)) n += 1;
-    onChange([...cases, { case_id: `case_${n}`, left: '', operator: 'eq', right: '' }]);
-  };
+    const used = new Set(cases.map((c) => c.case_id))
+    let n = cases.length + 1
+    while (used.has(`case_${n}`)) n += 1
+    onChange([...cases, { case_id: `case_${n}`, left: '', operator: 'eq', right: '' }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -323,55 +335,54 @@ function CaseListEditor({
         + 添加条件
       </Button>
     </div>
-  );
+  )
 }
 
 // ========== 意图列表编辑器（意图识别节点） ==========
 export interface IntentItem {
-  id: number;
-  name: string;
-  description: string;
+  id: number
+  name: string
+  description: string
 }
 
 export function parseIntentsValue(raw: any): IntentItem[] {
-  if (!Array.isArray(raw)) return [];
-  const items: IntentItem[] = [];
+  if (!Array.isArray(raw)) return []
+  const items: IntentItem[] = []
   raw.forEach((item, idx) => {
-    const name = typeof item === 'string'
-      ? item.trim()
-      : String(item?.name ?? item?.intent ?? '').trim();
-    if (!name) return;
-    const parsedId = Number(item?.id);
+    const name =
+      typeof item === 'string' ? item.trim() : String(item?.name ?? item?.intent ?? '').trim()
+    if (!name) return
+    const parsedId = Number(item?.id)
     items.push({
       id: Number.isFinite(parsedId) && parsedId > 0 ? parsedId : idx + 1,
       name,
       description: typeof item === 'object' && item ? String(item.description ?? '') : '',
-    });
-  });
-  return items;
+    })
+  })
+  return items
 }
 
 function IntentListEditor({
   value,
   onChange,
 }: {
-  value: any;
-  onChange: (next: IntentItem[]) => void;
+  value: any
+  onChange: (next: IntentItem[]) => void
 }) {
-  const items = useMemo(() => parseIntentsValue(value), [value]);
+  const items = useMemo(() => parseIntentsValue(value), [value])
 
   const updateItem = (idx: number, patch: Partial<IntentItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+  }
 
   const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
+    onChange(items.filter((_, i) => i !== idx))
+  }
 
   const addItem = () => {
-    const nextId = items.reduce((max, it) => Math.max(max, it.id), 0) + 1;
-    onChange([...items, { id: nextId, name: '', description: '' }]);
-  };
+    const nextId = items.reduce((max, it) => Math.max(max, it.id), 0) + 1
+    onChange([...items, { id: nextId, name: '', description: '' }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -419,17 +430,22 @@ function IntentListEditor({
           </div>
         </div>
       ))}
-      <div style={{
-        padding: '6px 8px', background: '#f9fafb', borderRadius: 6,
-        fontSize: 12, color: '#9ca3af',
-      }}>
+      <div
+        style={{
+          padding: '6px 8px',
+          background: '#f9fafb',
+          borderRadius: 6,
+          fontSize: 12,
+          color: '#9ca3af',
+        }}
+      >
         其他（未命中任何意图时的兜底出口）
       </div>
       <Button size="small" onClick={addItem} style={{ alignSelf: 'flex-start' }} type="dashed">
         + 添加意图
       </Button>
     </div>
-  );
+  )
 }
 
 // ========== 模型选择器（T8） ==========
@@ -449,18 +465,18 @@ const PROVIDER_COLORS: Record<string, string> = {
   glm: '#3B7DFF',
   moonshot: '#FF6B4A',
   kimi: '#FF6B4A',
-};
+}
 
 function providerColor(provider: string): string {
-  const key = (provider || '').toLowerCase().trim();
+  const key = (provider || '').toLowerCase().trim()
   for (const k of Object.keys(PROVIDER_COLORS)) {
-    if (key.includes(k)) return PROVIDER_COLORS[k] ?? '#6b7280';
+    if (key.includes(k)) return PROVIDER_COLORS[k] ?? '#6b7280'
   }
-  return '#6b7280';
+  return '#6b7280'
 }
 
 function ModelLabel({ name, provider }: { name: string; provider: string }) {
-  const color = providerColor(provider);
+  const color = providerColor(provider)
   return (
     <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
       <span
@@ -480,38 +496,38 @@ function ModelLabel({ name, provider }: { name: string; provider: string }) {
         </span>
       </span>
     </span>
-  );
+  )
 }
 
 function ModelPicker({
   value,
   onChange,
 }: {
-  value: any;
-  onChange: (patch: Partial<NodeConfigValues>) => void;
+  value: any
+  onChange: (patch: Partial<NodeConfigValues>) => void
 }) {
-  const [models, setModels] = useState<ModelCatalogItem[]>([]);
-  const [loading, setLoading] = useState(false);
+  const [models, setModels] = useState<ModelCatalogItem[]>([])
+  const [loading, setLoading] = useState(false)
 
   useEffect(() => {
-    let cancelled = false;
-    setLoading(true);
+    let cancelled = false
+    setLoading(true)
     listAvailableModels()
       .then((rows) => {
-        if (!cancelled) setModels(rows);
+        if (!cancelled) setModels(rows)
       })
       .catch(() => {
-        if (!cancelled) setModels([]);
+        if (!cancelled) setModels([])
       })
       .finally(() => {
-        if (!cancelled) setLoading(false);
-      });
+        if (!cancelled) setLoading(false)
+      })
     return () => {
-      cancelled = true;
-    };
-  }, []);
+      cancelled = true
+    }
+  }, [])
 
-  const selectedModel = models.find((m) => m.model_id === value);
+  const selectedModel = models.find((m) => m.model_id === value)
 
   return (
     <Select
@@ -538,46 +554,49 @@ function ModelPicker({
         capabilities: m.capabilities,
       }))}
       onChange={(modelId, option) => {
-        const patch: Partial<NodeConfigValues> = { modleName: modelId };
-        const caps = (option as { capabilities?: ModelCatalogItem['capabilities'] }).capabilities;
+        const patch: Partial<NodeConfigValues> = { modleName: modelId }
+        const caps = (option as { capabilities?: ModelCatalogItem['capabilities'] }).capabilities
         if (caps?.default_temperature !== undefined) {
-          patch.temperature = caps.default_temperature;
+          patch.temperature = caps.default_temperature
         }
         if (caps?.default_max_tokens !== undefined) {
-          patch.maxTokens = caps.default_max_tokens;
+          patch.maxTokens = caps.default_max_tokens
         }
-        onChange(patch);
+        onChange(patch)
       }}
       notFoundContent={loading ? '加载中...' : '暂无可用模型'}
     />
-  );
+  )
 }
 
 // ========== 动态 key-value 列表编辑器（T9：HTTP headers/query/form） ==========
 interface KeyValueItem {
-  key: string;
-  value: string;
+  key: string
+  value: string
 }
 
 function parseKvValue(raw: any): KeyValueItem[] {
   if (Array.isArray(raw)) {
     return raw
       .filter((r) => r && typeof r === 'object')
-      .map((r) => ({ key: String(r.key ?? r.name ?? ''), value: String(r.value ?? '') }));
+      .map((r) => ({ key: String(r.key ?? r.name ?? ''), value: String(r.value ?? '') }))
   }
   if (raw && typeof raw === 'object') {
-    return Object.entries(raw as Record<string, any>).map(([k, v]) => ({ key: k, value: String(v ?? '') }));
+    return Object.entries(raw as Record<string, any>).map(([k, v]) => ({
+      key: k,
+      value: String(v ?? ''),
+    }))
   }
   if (typeof raw === 'string' && raw.trim()) {
     try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parseKvValue(parsed);
-      if (parsed && typeof parsed === 'object') return parseKvValue(parsed);
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parseKvValue(parsed)
+      if (parsed && typeof parsed === 'object') return parseKvValue(parsed)
     } catch {
       // fall through
     }
   }
-  return [];
+  return []
 }
 
 function KeyValueListEditor({
@@ -588,26 +607,26 @@ function KeyValueListEditor({
   keyToMeta,
   flowType,
 }: {
-  value: any;
-  onChange: (next: KeyValueItem[]) => void;
-  nodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  flowType?: FlowType;
+  value: any
+  onChange: (next: KeyValueItem[]) => void
+  nodes: GraphNodeSummary[]
+  currentNodeId: string | null
+  keyToMeta: Record<string, NodeMeta>
+  flowType?: FlowType
 }) {
-  const items = useMemo(() => parseKvValue(value), [value]);
+  const items = useMemo(() => parseKvValue(value), [value])
 
   const updateItem = (idx: number, patch: Partial<KeyValueItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+  }
 
   const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
+    onChange(items.filter((_, i) => i !== idx))
+  }
 
   const addItem = () => {
-    onChange([...items, { key: '', value: '' }]);
-  };
+    onChange([...items, { key: '', value: '' }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -650,13 +669,7 @@ function KeyValueListEditor({
               />
             }
           />
-          <Button
-            size="small"
-            type="text"
-            danger
-            onClick={() => removeItem(idx)}
-            aria-label="删除"
-          >
+          <Button size="small" type="text" danger onClick={() => removeItem(idx)} aria-label="删除">
             删除
           </Button>
         </div>
@@ -665,104 +678,159 @@ function KeyValueListEditor({
         + 添加键值对
       </Button>
     </div>
-  );
+  )
 }
 
 // ========== T15：运行 trace 面板条目 ==========
 export function TraceEntry({ entry }: { entry: { type: string; payload: Record<string, any> } }) {
-  const { type, payload } = entry;
-  const phase = payload.phase ? `[${payload.phase}${payload.reflect_round != null ? `#${payload.reflect_round}` : ''}${payload.tool_round != null ? `.${payload.tool_round}` : ''}]` : '';
+  const { type, payload } = entry
+  const phase = payload.phase
+    ? `[${payload.phase}${payload.reflect_round != null ? `#${payload.reflect_round}` : ''}${payload.tool_round != null ? `.${payload.tool_round}` : ''}]`
+    : ''
   if (type === 'prompt_text') {
     if (Array.isArray(payload.messages)) {
       return (
         <div style={{ marginBottom: 6 }}>
-          <Tag color="blue" style={{ fontSize: 10 }}>prompt {phase}</Tag>
-          <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f5f5f5', padding: 4, borderRadius: 4 }}>
-            {payload.messages.map((m: any, i: number) =>
-              `#${i} [${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}\n`
-            ).join('')}
+          <Tag color="blue" style={{ fontSize: 10 }}>
+            prompt {phase}
+          </Tag>
+          <pre
+            style={{
+              margin: '4px 0 0',
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              background: '#f5f5f5',
+              padding: 4,
+              borderRadius: 4,
+            }}
+          >
+            {payload.messages
+              .map(
+                (m: any, i: number) =>
+                  `#${i} [${m.role}] ${typeof m.content === 'string' ? m.content : JSON.stringify(m.content)}\n`,
+              )
+              .join('')}
           </pre>
         </div>
-      );
+      )
     }
     return (
       <div style={{ marginBottom: 6 }}>
-        <Tag color="geekblue" style={{ fontSize: 10 }}>assistant {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f5f5f5', padding: 4, borderRadius: 4 }}>
+        <Tag color="geekblue" style={{ fontSize: 10 }}>
+          assistant {phase}
+        </Tag>
+        <pre
+          style={{
+            margin: '4px 0 0',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+            background: '#f5f5f5',
+            padding: 4,
+            borderRadius: 4,
+          }}
+        >
           {String(payload.content || '')}
-          {Array.isArray(payload.tool_calls) && payload.tool_calls.length > 0 && (
-            '\n→ tool_calls: ' + payload.tool_calls.map((tc: any) => tc.name).join(', ')
-          )}
+          {Array.isArray(payload.tool_calls) &&
+            payload.tool_calls.length > 0 &&
+            '\n→ tool_calls: ' + payload.tool_calls.map((tc: any) => tc.name).join(', ')}
         </pre>
       </div>
-    );
+    )
   }
   if (type === 'tool_call_start') {
     return (
       <div style={{ marginBottom: 6 }}>
-        <Tag color="orange" style={{ fontSize: 10 }}>tool_call_start {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#fff7e6', padding: 4, borderRadius: 4 }}>
+        <Tag color="orange" style={{ fontSize: 10 }}>
+          tool_call_start {phase}
+        </Tag>
+        <pre
+          style={{
+            margin: '4px 0 0',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+            background: '#fff7e6',
+            padding: 4,
+            borderRadius: 4,
+          }}
+        >
           {payload.name}({String(payload.arguments || '')})
         </pre>
       </div>
-    );
+    )
   }
   if (type === 'tool_call_end') {
     return (
       <div style={{ marginBottom: 6 }}>
-        <Tag color="green" style={{ fontSize: 10 }}>tool_call_end {phase}</Tag>
-        <pre style={{ margin: '4px 0 0', whiteSpace: 'pre-wrap', wordBreak: 'break-all', background: '#f6ffed', padding: 4, borderRadius: 4 }}>
+        <Tag color="green" style={{ fontSize: 10 }}>
+          tool_call_end {phase}
+        </Tag>
+        <pre
+          style={{
+            margin: '4px 0 0',
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+            background: '#f6ffed',
+            padding: 4,
+            borderRadius: 4,
+          }}
+        >
           {String(payload.observation || '')}
         </pre>
       </div>
-    );
+    )
   }
-  return null;
+  return null
 }
 
 // ========== T14：节点 outputs 自定义编辑器 ==========
 export type OutputFieldItem = {
-  name: string;
-  type: string;
-  description?: string;
-};
+  name: string
+  type: string
+  description?: string
+}
 
 const OUTPUT_TYPE_OPTIONS = [
-  'string', 'number', 'boolean', 'object', 'array',
-  'array[string]', 'array[number]', 'array[object]',
-];
+  'string',
+  'number',
+  'boolean',
+  'object',
+  'array',
+  'array[string]',
+  'array[number]',
+  'array[object]',
+]
 
 export function parseOutputsValue(raw: any): OutputFieldItem[] {
-  if (!Array.isArray(raw)) return [];
+  if (!Array.isArray(raw)) return []
   return raw
     .filter((r) => r && typeof r === 'object')
     .map((r) => ({
       name: String(r.name ?? ''),
       type: String(r.type ?? 'string'),
       description: r.description ? String(r.description) : '',
-    }));
+    }))
 }
 
 function OutputsEditor({
   value,
   onChange,
 }: {
-  value: any;
-  onChange: (next: OutputFieldItem[]) => void;
+  value: any
+  onChange: (next: OutputFieldItem[]) => void
 }) {
-  const items = useMemo(() => parseOutputsValue(value), [value]);
+  const items = useMemo(() => parseOutputsValue(value), [value])
 
   const updateItem = (idx: number, patch: Partial<OutputFieldItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+  }
 
   const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
+    onChange(items.filter((_, i) => i !== idx))
+  }
 
   const addItem = () => {
-    onChange([...items, { name: '', type: 'string', description: '' }]);
-  };
+    onChange([...items, { name: '', type: 'string', description: '' }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -803,13 +871,7 @@ function OutputsEditor({
             value={it.description || ''}
             onChange={(e) => updateItem(idx, { description: e.target.value })}
           />
-          <Button
-            size="small"
-            type="text"
-            danger
-            onClick={() => removeItem(idx)}
-            aria-label="删除"
-          >
+          <Button size="small" type="text" danger onClick={() => removeItem(idx)} aria-label="删除">
             删除
           </Button>
         </div>
@@ -818,7 +880,7 @@ function OutputsEditor({
         + 添加输出字段
       </Button>
     </div>
-  );
+  )
 }
 
 // 配置分组折叠容器：折叠状态按节点类型持久化到 localStorage
@@ -828,64 +890,70 @@ function ConfigSectionBox({
   defaultOpen,
   children,
 }: {
-  typeKey: string;
-  title: string;
-  defaultOpen: boolean;
-  children: React.ReactNode;
+  typeKey: string
+  title: string
+  defaultOpen: boolean
+  children: React.ReactNode
 }) {
-  const storageKey = `boxia_cfg_sections_${typeKey}`;
+  const storageKey = `boxia_cfg_sections_${typeKey}`
   const [open, setOpen] = useState<boolean>(() => {
     try {
-      const raw = localStorage.getItem(storageKey);
+      const raw = localStorage.getItem(storageKey)
       if (raw) {
-        const parsed = JSON.parse(raw) as Record<string, boolean>;
-        if (typeof parsed[title] === 'boolean') return parsed[title];
+        const parsed = JSON.parse(raw) as Record<string, boolean>
+        if (typeof parsed[title] === 'boolean') return parsed[title]
       }
     } catch {
       // 本地缓存损坏时回落到默认展开状态
     }
-    return defaultOpen;
-  });
+    return defaultOpen
+  })
 
   const toggle = () => {
     setOpen((prev) => {
-      const next = !prev;
+      const next = !prev
       try {
-        const raw = localStorage.getItem(storageKey);
-        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {};
-        parsed[title] = next;
-        localStorage.setItem(storageKey, JSON.stringify(parsed));
+        const raw = localStorage.getItem(storageKey)
+        const parsed = raw ? (JSON.parse(raw) as Record<string, boolean>) : {}
+        parsed[title] = next
+        localStorage.setItem(storageKey, JSON.stringify(parsed))
       } catch {
         // 缓存写入失败不影响折叠交互
       }
-      return next;
-    });
-  };
+      return next
+    })
+  }
 
   return (
     <div style={{ marginTop: 4 }}>
       <div
         onClick={toggle}
         style={{
-          display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          cursor: 'pointer',
           padding: '4px 0',
           marginBottom: open ? 8 : 0,
           borderBottom: open ? '1px solid #f0f0f0' : 'none',
         }}
       >
-        <span style={{
-          fontSize: 9, color: '#9ca3af',
-          display: 'inline-block',
-          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
-          transition: 'transform 0.15s',
-        }}>
+        <span
+          style={{
+            fontSize: 9,
+            color: '#9ca3af',
+            display: 'inline-block',
+            transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+            transition: 'transform 0.15s',
+          }}
+        >
           ▶
         </span>
         <span style={{ fontSize: 12, fontWeight: 600, color: '#374151' }}>{title}</span>
       </div>
       {open && children}
     </div>
-  );
+  )
 }
 
 export function NodeConfigForm({
@@ -902,32 +970,34 @@ export function NodeConfigForm({
   onAddNext,
   flowType,
 }: {
-  nodeMeta: NodeMeta;
-  values: NodeConfigValues;
-  onChange: (patch: Partial<NodeConfigValues>) => void;
-  pickerNodes: GraphNodeSummary[];
-  currentNodeId: string | null;
-  keyToMeta: Record<string, NodeMeta>;
-  outputs: OutputFieldItem[];
-  onOutputsChange: (next: OutputFieldItem[]) => void;
-  datasetOptions?: DatasetItem[];
-  upstreamInputs?: UpstreamInputGroup[];
-  onAddNext?: (typeKey: string) => void;
-  flowType?: FlowType;
+  nodeMeta: NodeMeta
+  values: NodeConfigValues
+  onChange: (patch: Partial<NodeConfigValues>) => void
+  pickerNodes: GraphNodeSummary[]
+  currentNodeId: string | null
+  keyToMeta: Record<string, NodeMeta>
+  outputs: OutputFieldItem[]
+  onOutputsChange: (next: OutputFieldItem[]) => void
+  datasetOptions?: DatasetItem[]
+  upstreamInputs?: UpstreamInputGroup[]
+  onAddNext?: (typeKey: string) => void
+  flowType?: FlowType
 }) {
   const handleFieldChange = (name: string, value: any) => {
-    onChange({ [name]: value });
-  };
+    onChange({ [name]: value })
+  }
 
   // 推荐下游节点按当前流程形态过滤，避免工作流里出现对话流专属节点
   const nextRecommendations = useMemo(
-    () => getNextRecommendations(nodeMeta.type_key, keyToMeta)
-      .filter((rec) => !flowType || isNodeAvailable(rec.typeKey, flowType)),
+    () =>
+      getNextRecommendations(nodeMeta.type_key, keyToMeta).filter(
+        (rec) => !flowType || isNodeAvailable(rec.typeKey, flowType),
+      ),
     [nodeMeta.type_key, keyToMeta, flowType],
-  );
+  )
 
   // 对话流开始节点：启动参数为内置锁定行，不允许添加/删除
-  const isChatflowStart = nodeMeta.type_key === 'start' && flowType === 'chatflow';
+  const isChatflowStart = nodeMeta.type_key === 'start' && flowType === 'chatflow'
 
   const buildPicker = (fieldName: string): React.ReactNode => {
     // 只有文本类字段才挂变量引用选择器
@@ -938,13 +1008,13 @@ export function NodeConfigForm({
         keyToMeta={keyToMeta}
         flowType={flowType}
         onPick={(ref) => {
-          const prev = String(values[fieldName] ?? '');
-          const next = prev ? `${prev}${prev.endsWith(' ') ? '' : ' '}${ref}` : ref;
-          handleFieldChange(fieldName, next);
+          const prev = String(values[fieldName] ?? '')
+          const next = prev ? `${prev}${prev.endsWith(' ') ? '' : ' '}${ref}` : ref
+          handleFieldChange(fieldName, next)
         }}
       />
-    );
-  };
+    )
+  }
 
   return (
     <Space direction="vertical" style={{ width: '100%' }} size={12}>
@@ -961,24 +1031,37 @@ export function NodeConfigForm({
         <Typography.Text type="secondary">输入（来自上游）</Typography.Text>
         <div style={{ marginTop: 6 }}>
           {(upstreamInputs || []).length === 0 ? (
-            <div style={{
-              padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
-              fontSize: 12, color: '#9ca3af',
-            }}>
+            <div
+              style={{
+                padding: '8px 10px',
+                background: '#f9fafb',
+                borderRadius: 6,
+                fontSize: 12,
+                color: '#9ca3af',
+              }}
+            >
               无上游输入，请先连接上游节点
             </div>
           ) : (
             <Space direction="vertical" size={6} style={{ width: '100%' }}>
               {(upstreamInputs || []).map((group) => (
-                <div key={group.nodeId} style={{
-                  padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
-                }}>
+                <div
+                  key={group.nodeId}
+                  style={{
+                    padding: '8px 10px',
+                    background: '#f9fafb',
+                    borderRadius: 6,
+                  }}
+                >
                   <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
                     {group.nodeTitle}
                   </div>
                   <Space size={[4, 4]} wrap>
                     {group.fields.map((f) => (
-                      <Tag key={f.name} style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}>
+                      <Tag
+                        key={f.name}
+                        style={{ margin: 0, fontFamily: 'monospace', fontSize: 11 }}
+                      >
                         {`{{${group.nodeId}.output.${f.name}}}`}
                       </Tag>
                     ))}
@@ -991,10 +1074,16 @@ export function NodeConfigForm({
       </div>
 
       {nodeMeta.config_fields.length === 0 && (
-        <div style={{
-          padding: '10px 12px', background: '#f9fafb', borderRadius: 6,
-          fontSize: 12, color: '#6b7280', lineHeight: 1.6,
-        }}>
+        <div
+          style={{
+            padding: '10px 12px',
+            background: '#f9fafb',
+            borderRadius: 6,
+            fontSize: 12,
+            color: '#6b7280',
+            lineHeight: 1.6,
+          }}
+        >
           该节点无需额外配置：输入来自上游连线，输出字段见下方列表。
         </div>
       )}
@@ -1035,10 +1124,7 @@ export function NodeConfigForm({
                     onChange={(next) => handleFieldChange(field.name, next)}
                   />
                 ) : field.field_type === 'model_picker' ? (
-                  <ModelPicker
-                    value={values[field.name]}
-                    onChange={onChange}
-                  />
+                  <ModelPicker value={values[field.name]} onChange={onChange} />
                 ) : field.field_type === 'key_value_list' ? (
                   <KeyValueListEditor
                     value={values[field.name]}
@@ -1082,41 +1168,64 @@ export function NodeConfigForm({
 
       {/* V10：下一步推荐 */}
       {onAddNext && nextRecommendations.length > 0 && (
-        <div style={{
-          marginTop: 12, paddingTop: 12, borderTop: '1px solid #f0f0f0',
-        }}>
-          <div style={{
-            fontSize: 12, fontWeight: 600, color: '#374151', marginBottom: 8,
-          }}>
+        <div
+          style={{
+            marginTop: 12,
+            paddingTop: 12,
+            borderTop: '1px solid #f0f0f0',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              color: '#374151',
+              marginBottom: 8,
+            }}
+          >
             下一步
           </div>
           <Space direction="vertical" style={{ width: '100%' }} size={6}>
             {nextRecommendations.map((rec) => {
-              const meta = keyToMeta[rec.typeKey];
+              const meta = keyToMeta[rec.typeKey]
               return (
                 <div
                   key={rec.typeKey}
                   style={{
-                    display: 'flex', alignItems: 'center', gap: 8,
-                    padding: '6px 8px', borderRadius: 6, cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '6px 8px',
+                    borderRadius: 6,
+                    cursor: 'pointer',
                     background: '#f9fafb',
                   }}
-                  onMouseEnter={(e) => { e.currentTarget.style.background = '#eef2ff'; }}
-                  onMouseLeave={(e) => { e.currentTarget.style.background = '#f9fafb'; }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = '#eef2ff'
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = '#f9fafb'
+                  }}
                   onClick={() => onAddNext(rec.typeKey)}
                 >
-                  <span style={{
-                    width: 10, height: 10, borderRadius: '50%',
-                    background: meta?.color || '#9ca3af',
-                  }} />
+                  <span
+                    style={{
+                      width: 10,
+                      height: 10,
+                      borderRadius: '50%',
+                      background: meta?.color || '#9ca3af',
+                    }}
+                  />
                   <span style={{ flex: 1, fontSize: 13, color: '#374151' }}>{rec.label}</span>
-                  <Button size="small" type="link">添加</Button>
+                  <Button size="small" type="link">
+                    添加
+                  </Button>
                 </div>
-              );
+              )
             })}
           </Space>
         </div>
       )}
     </Space>
-  );
+  )
 }

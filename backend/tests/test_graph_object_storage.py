@@ -13,11 +13,9 @@ import json
 from unittest.mock import MagicMock
 from uuid import uuid4
 
-import pytest
-
 from internal.application.apps.application_service import (
-    ApplicationService,
     GRAPH_INLINE_SIZE_THRESHOLD,
+    ApplicationService,
 )
 from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.storage.fake_storage import InMemoryObjectStorage
@@ -43,7 +41,9 @@ class FakeApplicationRepository:
     def get_graph_version(self, application_id, version):
         return self.versions.get((str(application_id), version))
 
-    def insert_graph_version(self, application_id, version, graph, runtime_mode, changelog="", created_by=None):
+    def insert_graph_version(
+        self, application_id, version, graph, runtime_mode, changelog="", created_by=None
+    ):
         app_id = str(application_id)
         self.versions[(app_id, version)] = {
             "id": uuid4(),
@@ -85,7 +85,11 @@ def _make_service(storage: ObjectStorage | None = None) -> ApplicationService:
     # DDD 四期：fake 仓储改由构造参数注入
     repo = FakeApplicationRepository()
     service = ApplicationService(
-        uow, repo, cache=MagicMock(), object_storage=storage, default_llm_model_id="test-model",
+        uow,
+        repo,
+        cache=MagicMock(),
+        object_storage=storage,
+        default_llm_model_id="test-model",
     )
     # 预置一个应用
     app_id = uuid4()

@@ -49,13 +49,16 @@ class ApiPluginNodeHandler(NodeHandler):
         if not ctx.services.has("tool_executor"):
             logger.info(
                 "api_plugin %s 无 tool_executor 服务，返回 stub（args=%s）",
-                plugin_name, args,
+                plugin_name,
+                args,
             )
-            return NodeResult(outputs={
-                "output": f"[plugin stub] {plugin_name}",
-                "plugin": plugin_name,
-                "args": args,
-            })
+            return NodeResult(
+                outputs={
+                    "output": f"[plugin stub] {plugin_name}",
+                    "plugin": plugin_name,
+                    "args": args,
+                }
+            )
 
         tool_executor = ctx.services.get("tool_executor")
 

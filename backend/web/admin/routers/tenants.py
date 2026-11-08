@@ -180,9 +180,15 @@ def batch_delete_tenants(
 
 # ========== T16 租户运行时配置（默认模型 + 插件白名单）==========
 class TenantSettingsUpdateRequest(BaseModel):
-    default_model_catalog_id: UUID | None = Field(None, description="默认模型 catalog id；置空表示走平台默认")
-    allowed_catalog_ids: list[UUID] = Field(default_factory=list, description="允许该租户可见的模型白名单；空数组=全量可见")
-    plugin_whitelist: list[str] = Field(default_factory=list, description="允许调用的工具名白名单；空数组=全量可见")
+    default_model_catalog_id: UUID | None = Field(
+        None, description="默认模型 catalog id；置空表示走平台默认"
+    )
+    allowed_catalog_ids: list[UUID] = Field(
+        default_factory=list, description="允许该租户可见的模型白名单；空数组=全量可见"
+    )
+    plugin_whitelist: list[str] = Field(
+        default_factory=list, description="允许调用的工具名白名单；空数组=全量可见"
+    )
 
 
 def _get_settings_service(uow: UowDep) -> TenantSettingsService:

@@ -10,12 +10,14 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import UUID
 
 from internal.domain.agent.model import Conversation, Message, ToolCall
 from internal.domain.agent.repository import (
     ConversationRepository as ConversationRepositoryABC,
+)
+from internal.domain.agent.repository import (
     MessageRepository as MessageRepositoryABC,
 )
 from internal.infrastructure.repository.apps.conversation_repository import (
@@ -34,8 +36,8 @@ def _row_to_conversation(row: dict) -> Conversation:
         tenant_id=row.get("tenant_id"),
         user_id=row.get("user_id"),
         title=row.get("title") or "",
-        created_at=row.get("created_at") or datetime.now(timezone.utc),
-        updated_at=row.get("updated_at") or datetime.now(timezone.utc),
+        created_at=row.get("created_at") or datetime.now(UTC),
+        updated_at=row.get("updated_at") or datetime.now(UTC),
         metadata={},
     )
 
@@ -64,7 +66,7 @@ def _row_to_message(row: dict) -> Message:
         tool_calls=tool_calls,
         tool_call_id=row.get("tool_call_id"),
         name=row.get("tool_name"),
-        created_at=row.get("created_at") or datetime.now(timezone.utc),
+        created_at=row.get("created_at") or datetime.now(UTC),
         metadata=row.get("metadata") or {},
     )
 
@@ -99,7 +101,10 @@ class AsyncConversationRepository(ConversationRepositoryABC):
             return None
         if self._user_id is not None and row.get("user_id") not in (None, self._user_id):
             return None
-        if self._enforce_application and row.get("application_id") not in (None, self._application_id):
+        if self._enforce_application and row.get("application_id") not in (
+            None,
+            self._application_id,
+        ):
             return None
         return row
 
@@ -117,12 +122,16 @@ class AsyncConversationRepository(ConversationRepositoryABC):
             channel=self._channel,
         )
         saved = self._repo.get_conversation(cid)
-        return _row_to_conversation(saved) if saved else Conversation(
-            conversation_id=cid,
-            app_id=app_id,
-            tenant_id=tenant_id,
-            user_id=user_id,
-            title=conversation.title,
+        return (
+            _row_to_conversation(saved)
+            if saved
+            else Conversation(
+                conversation_id=cid,
+                app_id=app_id,
+                tenant_id=tenant_id,
+                user_id=user_id,
+                title=conversation.title,
+            )
         )
 
     async def get(self, conversation_id: UUID) -> Conversation | None:
@@ -158,6 +167,12 @@ class AsyncConversationRepository(ConversationRepositoryABC):
             return
         self._repo.update_title(conversation_id, title)
 
+    async def clear_summary(self, conversation_id: UUID) -> None:
+        row = self._assert_in_scope(self._repo.get_conversation(conversation_id))
+        if row is None:
+            return
+        self._repo.clear_summary(conversation_id)
+
 
 class AsyncMessageRepository(MessageRepositoryABC):
     """把 sync MessageRepository 适配成 async ABC。"""
@@ -171,8 +186,12 @@ class AsyncMessageRepository(MessageRepositoryABC):
         application_id: UUID,
         run_id: UUID | None = None,
         enforce_application: bool = True,
+        conversation_repo: SyncConversationRepository,
     ) -> None:
+        # 会话归属校验（IDOR 防护）需要读 conversation 表，message 仓储本身不提供；
+        # 生产装配由 web/deps/graph.py 注入同一 session 上的 sync 会话仓储。
         self._repo = sync_repo
+        self._conversation_repo = conversation_repo
         self._tenant_id = tenant_id
         self._user_id = user_id
         self._application_id = application_id
@@ -181,14 +200,17 @@ class AsyncMessageRepository(MessageRepositoryABC):
 
     def _assert_conversation_in_scope(self, conversation_id: UUID) -> dict | None:
         """校验会话归属：不在绑定作用域内返回 None。"""
-        row = self._repo.get_conversation(conversation_id)
+        row = self._conversation_repo.get_conversation(conversation_id)
         if not row:
             return None
         if row.get("tenant_id") != self._tenant_id:
             return None
         if self._user_id is not None and row.get("user_id") not in (None, self._user_id):
             return None
-        if self._enforce_application and row.get("application_id") not in (None, self._application_id):
+        if self._enforce_application and row.get("application_id") not in (
+            None,
+            self._application_id,
+        ):
             return None
         return row
 
@@ -198,13 +220,16 @@ class AsyncMessageRepository(MessageRepositoryABC):
         # 跨租户写入保护：若会话已存在，必须归属当前作用域；不存在则放行
         # （chat_service 在 create_conversation 之后紧接着 append 第一条消息，
         #  此时会话刚写入事务可见性可能有差异；严格阻断会影响主流程）。
-        conv_row = self._repo.get_conversation(message.conversation_id)
+        conv_row = self._conversation_repo.get_conversation(message.conversation_id)
         if conv_row is not None:
             if conv_row.get("tenant_id") != self._tenant_id:
                 raise ValueError("会话不属于当前租户")
             if self._user_id is not None and conv_row.get("user_id") not in (None, self._user_id):
                 raise ValueError("会话不属于当前用户")
-            if self._enforce_application and conv_row.get("application_id") not in (None, self._application_id):
+            if self._enforce_application and conv_row.get("application_id") not in (
+                None,
+                self._application_id,
+            ):
                 raise ValueError("会话不属于当前应用")
         tool_calls = [
             {"call_id": tc.call_id, "name": tc.name, "arguments": tc.arguments}
@@ -231,7 +256,7 @@ class AsyncMessageRepository(MessageRepositoryABC):
             tool_calls=message.tool_calls,
             tool_call_id=message.tool_call_id,
             name=message.name,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             metadata=message.metadata,
         )
 
@@ -246,7 +271,8 @@ class AsyncMessageRepository(MessageRepositoryABC):
         if row is None:
             return []
         rows = self._repo.list_messages_by_conversation(
-            conversation_id, limit=limit,
+            conversation_id,
+            limit=limit,
         )
         return [_row_to_message(r) for r in rows]
 

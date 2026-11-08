@@ -9,6 +9,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from internal.domain.agent.mcp_observer import McpCallRecord, configure_mcp_observer
 from internal.domain.llm.observer import LlmCallRecord, configure_llm_observer
 from internal.infrastructure.model.database import get_engine
 
@@ -61,6 +62,29 @@ AGENT_ITERATIONS = Histogram(
     "单次 agent 运行的 LLM 迭代数",
     ["tenant"],
     buckets=(1, 2, 3, 5, 8, 12),
+)
+
+# MCP 会话与调用指标（M4-b F17.6）：server 标签基数受应用配置约束（每应用 ≤5 server）
+MCP_HANDSHAKES = Counter(
+    "boxia_mcp_handshake_total",
+    "MCP 新建连接协议握手次数",
+    ["server"],
+)
+MCP_SESSION_REUSE = Counter(
+    "boxia_mcp_session_reuse_total",
+    "MCP 会话池命中省去握手的次数",
+    ["server"],
+)
+MCP_CALL_DURATION = Histogram(
+    "boxia_mcp_call_duration_seconds",
+    "MCP 工具调用端到端耗时（含建连与治理检查）",
+    ["tenant", "server", "tool", "status"],
+    buckets=(0.1, 0.5, 1.0, 2.0, 5.0, 10.0, 30.0, 60.0, 120.0, 300.0),
+)
+# 会话池水位：进程级单值（多 worker 下为各自进程视角，R13 粘性部署前提）
+MCP_POOL_SIZE = Gauge(
+    "boxia_mcp_pool_size",
+    "MCP 会话池当前会话数",
 )
 
 
@@ -117,22 +141,41 @@ class PrometheusLlmCallObserver:
 
     def observe(self, record: LlmCallRecord) -> None:
         """记录耗时；tokens 为 None 表示失败路径，不写 0 值序列。"""
-        LLM_DURATION.labels(
-            tenant=record.tenant, model=record.model, status=record.status
-        ).observe(record.duration_seconds)
+        LLM_DURATION.labels(tenant=record.tenant, model=record.model, status=record.status).observe(
+            record.duration_seconds
+        )
         if record.prompt_tokens is not None:
-            LLM_TOKENS.labels(
-                tenant=record.tenant, model=record.model, type="prompt"
-            ).inc(record.prompt_tokens)
+            LLM_TOKENS.labels(tenant=record.tenant, model=record.model, type="prompt").inc(
+                record.prompt_tokens
+            )
         if record.completion_tokens is not None:
-            LLM_TOKENS.labels(
-                tenant=record.tenant, model=record.model, type="completion"
-            ).inc(record.completion_tokens)
+            LLM_TOKENS.labels(tenant=record.tenant, model=record.model, type="completion").inc(
+                record.completion_tokens
+            )
+
+
+class PrometheusMcpObserver:
+    """把 MCP 握手/复用/调用汇总/池水位记入 Prometheus（实现 domain 的 McpObserver 端口）。"""
+
+    def on_handshake(self, server: str) -> None:
+        MCP_HANDSHAKES.labels(server=server).inc()
+
+    def on_reuse(self, server: str) -> None:
+        MCP_SESSION_REUSE.labels(server=server).inc()
+
+    def observe_call(self, record: McpCallRecord) -> None:
+        MCP_CALL_DURATION.labels(
+            tenant=record.tenant, server=record.server, tool=record.tool, status=record.status
+        ).observe(record.duration_seconds)
+
+    def set_pool_size(self, size: int) -> None:
+        MCP_POOL_SIZE.set(size)
 
 
 # 本模块被导入（= 应用装配了 Prometheus）时注册观测实现；
 # 未导入的进程（纯脚本/单测）走 domain 默认 no-op，行为与原 client 直连指标等价。
 configure_llm_observer(PrometheusLlmCallObserver())
+configure_mcp_observer(PrometheusMcpObserver())
 
 
 def setup_metrics(app: FastAPI) -> None:

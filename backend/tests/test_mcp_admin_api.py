@@ -64,7 +64,9 @@ def test_discover_server_unavailable_maps_503(client: TestClient, monkeypatch) -
 def test_discover_success_response_shape(client: TestClient, monkeypatch) -> None:
     async def _ok(url: str, headers: dict[str, str] | None = None) -> list[Any]:
         return [
-            McpToolSpec(name="add", description="做加法", input_schema={"type": "object", "properties": {}})
+            McpToolSpec(
+                name="add", description="做加法", input_schema={"type": "object", "properties": {}}
+            )
         ]
 
     monkeypatch.setattr(discovery_module, "list_tools", _ok)

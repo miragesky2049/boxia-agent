@@ -19,13 +19,18 @@ from typing import Any
 from uuid import UUID
 
 from internal.application.apps.application_service import ApplicationService
+from internal.application.apps.call_chain import (
+    MAX_CALL_CHAIN_DEPTH,
+    ensure_chain_allowed,
+)
 from internal.application.apps.ports import RunnerFactory
 from internal.domain.canvas.workflow_tool import build_start_input_schema
 
 logger = logging.getLogger(__name__)
 
-# agent→workflow→agent 链最大深度（PRD F7.2）：超限拒绝，防成本/递归失控
-MAX_WORKFLOW_TOOL_DEPTH = 3
+# M4-c T-c1：深度上限泛化为调用链共享常量（agent+workflow 同预算）；
+# 保留旧名供既有引用/测试兼容
+MAX_WORKFLOW_TOOL_DEPTH = MAX_CALL_CHAIN_DEPTH
 
 # 子 run 线程前缀：每次工具调用独立 thread，避免与父会话 checkpoint 互相污染
 _CHILD_THREAD_PREFIX = "wf-tool"
@@ -89,12 +94,12 @@ class WorkflowToolService:
         """
         resolved = await self._resolve_target(application_id, chain, spec_only=False)
         if resolved is None:
-            raise RuntimeError(f"工作流工具不可用：应用 {application_id} 不存在、不可见或非工作流类型")
+            raise RuntimeError(
+                f"工作流工具不可用：应用 {application_id} 不存在、不可见或非工作流类型"
+            )
         card, _graph = resolved
 
-        child_thread_id = (
-            f"{_CHILD_THREAD_PREFIX}:{self._parent_run_id}:{application_id}"
-        )
+        child_thread_id = f"{_CHILD_THREAD_PREFIX}:{self._parent_run_id}:{application_id}"
         runner = await self._runner_factory(
             self._app_service,
             self._uow,
@@ -133,21 +138,13 @@ class WorkflowToolService:
         if self._user_id is None:
             logger.warning("工作流工具缺少用户身份，跳过 application=%s", app_id)
             return None
-        card = self._app_service.get_visible_app_for_user(
-            app_id, self._tenant_id, self._user_id
-        )
+        card = self._app_service.get_visible_app_for_user(app_id, self._tenant_id, self._user_id)
         if card is None or card.get("flow_type") != "workflow":
             return None
         if not spec_only:
-            normalized = str(app_id)
-            if normalized in chain:
-                raise RuntimeError(
-                    f"检测到工作流工具循环调用：「{card.get('name')}」已在调用链 {chain} 中"
-                )
-            if len(chain) >= MAX_WORKFLOW_TOOL_DEPTH:
-                raise RuntimeError(
-                    f"工作流工具嵌套深度超过上限 {MAX_WORKFLOW_TOOL_DEPTH}，请拆平流程或减少挂载"
-                )
+            ensure_chain_allowed(
+                chain, str(app_id), target_name=str(card.get("name") or ""), kind="工作流"
+            )
         graph = await self._app_service.get_runtime_graph(app_id, self._tenant_id)
         return card, graph
 

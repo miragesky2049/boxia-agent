@@ -42,10 +42,7 @@ function findUnitById(units: MgmtUnit[], id: string): MgmtUnit | null {
 }
 
 function flattenDepartments(departments: Department[]): Department[] {
-  return departments.flatMap((dept) => [
-    dept,
-    ...flattenDepartments(dept.children ?? []),
-  ])
+  return departments.flatMap((dept) => [dept, ...flattenDepartments(dept.children ?? [])])
 }
 
 export default function MgmtUnitDetailPage() {
@@ -264,8 +261,7 @@ export default function MgmtUnitDetailPage() {
       dataIndex: 'include_subtree',
       key: 'include_subtree',
       width: 100,
-      render: (include: boolean) =>
-        include ? <Tag color="blue">含下级</Tag> : <Tag>仅本级</Tag>,
+      render: (include: boolean) => (include ? <Tag color="blue">含下级</Tag> : <Tag>仅本级</Tag>),
     },
     {
       title: '操作',
@@ -480,9 +476,7 @@ export default function MgmtUnitDetailPage() {
                   onChange={(e) => {
                     setDeptSelections((prev) =>
                       prev.map((s) =>
-                        s.department_id === value
-                          ? { ...s, include_subtree: e.target.checked }
-                          : s,
+                        s.department_id === value ? { ...s, include_subtree: e.target.checked } : s,
                       ),
                     )
                   }}

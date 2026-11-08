@@ -65,7 +65,9 @@ async function resetTenantAdminPassword(request: APIRequestContext) {
     expect(changed.status(), await changed.text()).toBe(204)
     return
   }
-  throw new Error(`无法重置租户管理员密码：尝试的密码均不可用（可能已触发登录锁定） [${attempts.join(', ')}]`)
+  throw new Error(
+    `无法重置租户管理员密码：尝试的密码均不可用（可能已触发登录锁定） [${attempts.join(', ')}]`,
+  )
 }
 
 async function loginPlatform(page: Page) {

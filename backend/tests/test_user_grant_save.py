@@ -13,7 +13,7 @@ def test_tenant_admin_grant_user_with_mgmt_unit(
     auth_headers,
 ):
     """租户管理员编辑用户授权并指定管理单元，granted_by 是 users.id，不应报 CONFLICT。"""
-    tenant = create_tenant(client, auth_headers, code="acme")
+    create_tenant(client, auth_headers, code="acme")
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
     # 列出角色：取 admin 角色

@@ -20,19 +20,24 @@ from internal.domain.canvas.workflow_tool import build_start_input_schema
 def _graph_with_start(params: Any) -> dict:
     return {
         "nodes": [
-            {"type": "1", "data": {"inputs": {"params": {"value": {"type": "literal", "content": params}}}}},
+            {
+                "type": "1",
+                "data": {"inputs": {"params": {"value": {"type": "literal", "content": params}}}},
+            },
         ],
         "edges": [],
     }
 
 
 def test_start_schema_maps_types_and_required() -> None:
-    graph = _graph_with_start([
-        {"name": "order_no", "type": "string", "description": "订单号"},
-        {"name": "amount", "type": "number", "required": False},
-        {"name": "urgent", "type": "bool"},
-        {"name": "weird", "type": "unknown-type"},
-    ])
+    graph = _graph_with_start(
+        [
+            {"name": "order_no", "type": "string", "description": "订单号"},
+            {"name": "amount", "type": "number", "required": False},
+            {"name": "urgent", "type": "bool"},
+            {"name": "weird", "type": "unknown-type"},
+        ]
+    )
     schema = build_start_input_schema(graph)
     assert schema["type"] == "object"
     assert schema["properties"]["order_no"] == {"type": "string", "description": "订单号"}
@@ -91,8 +96,23 @@ def _service(
     output: Any = "done",
 ) -> tuple[WorkflowToolService, _FakeRunnerFactory]:
     app_id = str(_TARGET)
-    cards = {app_id: {"id": app_id, "name": "退款流程", "description": "按订单退款", "flow_type": "workflow"}} if cards is None else cards
-    graphs = {app_id: _graph_with_start([{"name": "order_no", "type": "string"}])} if graphs is None else graphs
+    cards = (
+        {
+            app_id: {
+                "id": app_id,
+                "name": "退款流程",
+                "description": "按订单退款",
+                "flow_type": "workflow",
+            }
+        }
+        if cards is None
+        else cards
+    )
+    graphs = (
+        {app_id: _graph_with_start([{"name": "order_no", "type": "string"}])}
+        if graphs is None
+        else graphs
+    )
     factory = _FakeRunnerFactory(output)
     svc = WorkflowToolService(
         _FakeAppService(cards, graphs),
@@ -124,7 +144,9 @@ def test_describe_unavailable_returns_none(mutate: str) -> None:
         svc, _ = _service(cards={})
         assert asyncio.run(svc.describe(str(_TARGET), [])) is None
     elif mutate == "wrong_type":
-        svc, _ = _service(cards={str(_TARGET): {"id": str(_TARGET), "name": "n", "flow_type": "agent"}})
+        svc, _ = _service(
+            cards={str(_TARGET): {"id": str(_TARGET), "name": "n", "flow_type": "agent"}}
+        )
         assert asyncio.run(svc.describe(str(_TARGET), [])) is None
     else:
         svc, _ = _service()
@@ -179,4 +201,7 @@ def test_observation_text_forms() -> None:
     assert asyncio.run(svc_empty_str.invoke(str(_TARGET), {}, [])) == "（工作流无输出）"
 
     svc_none, _ = _service(output=None)
-    assert asyncio.run(svc_none.invoke(str(_TARGET), {}, [])) == "工作流「退款流程」执行完成，无文本输出"
+    assert (
+        asyncio.run(svc_none.invoke(str(_TARGET), {}, []))
+        == "工作流「退款流程」执行完成，无文本输出"
+    )

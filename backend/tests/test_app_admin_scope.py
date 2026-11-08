@@ -29,14 +29,14 @@ def _create_enabled_platform_app(client: TestClient, headers: dict[str, str], na
     response = client.post(APPS_URL, json={"name": name}, headers=headers)
     assert response.status_code == 201, response.text
     app_id = response.json()["application_id"]
-    enabled = client.post(
-        f"{APPS_URL}/{app_id}/enabled", json={"enabled": True}, headers=headers
-    )
+    enabled = client.post(f"{APPS_URL}/{app_id}/enabled", json={"enabled": True}, headers=headers)
     assert enabled.status_code == 200, enabled.text
     return app_id
 
 
-def _set_admin_scope_mode(client: TestClient, headers: dict[str, str], app_id: str, mode: str) -> None:
+def _set_admin_scope_mode(
+    client: TestClient, headers: dict[str, str], app_id: str, mode: str
+) -> None:
     response = client.patch(
         f"{APPS_URL}/{app_id}", json={"admin_scope_mode": mode}, headers=headers
     )
@@ -83,7 +83,9 @@ def _admin_login(tenant_client, code: str, username: str, password: str):
     return site, {"Authorization": f"Bearer {response.json()['access_token']}"}
 
 
-def _grant_user_unit(site: TestClient, headers, user_id: str, role_id: str, unit_ids: list[str]) -> None:
+def _grant_user_unit(
+    site: TestClient, headers, user_id: str, role_id: str, unit_ids: list[str]
+) -> None:
     response = site.post(
         "/api/v1/admin/grants/users",
         json={
@@ -98,9 +100,7 @@ def _grant_user_unit(site: TestClient, headers, user_id: str, role_id: str, unit
 
 
 # ========== 用例 1：超管 CRUD 幂等 ==========
-def test_admin_scope_crud_idempotent_for_superadmin(
-    client, auth_headers, tenant_client
-) -> None:
+def test_admin_scope_crud_idempotent_for_superadmin(client, auth_headers, tenant_client) -> None:
     site, headers, _roles, _tid = _setup_tenant(client, auth_headers, tenant_client, "adm-crud")
     app_id = _create_enabled_platform_app(client, auth_headers, "关联应用")
     unit_id = _create_unit(site, headers, "华东大区", "adm-crud-unit")
@@ -121,17 +121,13 @@ def test_admin_scope_crud_idempotent_for_superadmin(
     assert [item["mgmt_unit_id"] for item in listed.json()] == [unit_id]
     assert listed.json()[0]["mgmt_unit_name"] == "华东大区"
 
-    removed = site.delete(
-        f"{TENANT_APPS_URL}/{app_id}/admin-scope/{unit_id}", headers=headers
-    )
+    removed = site.delete(f"{TENANT_APPS_URL}/{app_id}/admin-scope/{unit_id}", headers=headers)
     assert removed.status_code == 200, removed.text
     after = site.get(f"{TENANT_APPS_URL}/{app_id}/admin-scope", headers=headers)
     assert after.json() == []
 
     # 解除不存在的关联：幂等静默
-    again = site.delete(
-        f"{TENANT_APPS_URL}/{app_id}/admin-scope/{unit_id}", headers=headers
-    )
+    again = site.delete(f"{TENANT_APPS_URL}/{app_id}/admin-scope/{unit_id}", headers=headers)
     assert again.status_code == 200, again.text
 
 
@@ -192,9 +188,7 @@ def test_mgmt_unit_mode_requires_unit_grant_for_admin_role(
 
 
 # ========== 用例 3：scope=managed 过滤 ==========
-def test_managed_scope_filter(
-    client, auth_headers, tenant_client
-) -> None:
+def test_managed_scope_filter(client, auth_headers, tenant_client) -> None:
     site, headers, roles, tenant_id = _setup_tenant(client, auth_headers, tenant_client, "adm-mng")
     app_all = _create_enabled_platform_app(client, auth_headers, "全管应用")
     app_unit = _create_enabled_platform_app(client, auth_headers, "单元管控应用")
@@ -235,9 +229,7 @@ def test_managed_scope_filter(
 
 
 # ========== 用例 4：缺 app:admin_scope:write 时写接口 403 ==========
-def test_write_endpoints_require_admin_scope_write(
-    client, auth_headers, tenant_client
-) -> None:
+def test_write_endpoints_require_admin_scope_write(client, auth_headers, tenant_client) -> None:
     site, headers, _roles, _tid = _setup_tenant(client, auth_headers, tenant_client, "adm-nowrite")
     app_id = _create_enabled_platform_app(client, auth_headers, "无写权限应用")
     unit = _create_unit(site, headers, "单元", "adm-nowrite-unit")
@@ -265,10 +257,14 @@ def test_write_endpoints_require_admin_scope_write(
     assert granted.status_code == 200, granted.text
 
     create_user(site, headers, username="readonly01", role_id=role_id)
-    member_site, member_headers = _admin_login(tenant_client, "adm-nowrite", "readonly01", USER_PASSWORD)
+    member_site, member_headers = _admin_login(
+        tenant_client, "adm-nowrite", "readonly01", USER_PASSWORD
+    )
 
     assert (
-        member_site.get(f"{TENANT_APPS_URL}/{app_id}/admin-scope", headers=member_headers).status_code
+        member_site.get(
+            f"{TENANT_APPS_URL}/{app_id}/admin-scope", headers=member_headers
+        ).status_code
         == 200
     )
     denied = member_site.post(
@@ -293,7 +289,9 @@ def test_write_endpoints_require_admin_scope_write(
 def test_scope_rows_derive_mgmt_unit_without_platform_mode(
     client, auth_headers, tenant_client
 ) -> None:
-    site, headers, roles, tenant_id = _setup_tenant(client, auth_headers, tenant_client, "adm-deriv")
+    site, headers, roles, tenant_id = _setup_tenant(
+        client, auth_headers, tenant_client, "adm-deriv"
+    )
     app_id = _create_enabled_platform_app(client, auth_headers, "推导应用")
     _subscribe(tenant_id, app_id)
     nanjing = _create_unit(site, headers, "南京mou", "adm-deriv-nj")
@@ -322,16 +320,16 @@ def test_scope_rows_derive_mgmt_unit_without_platform_mode(
     # admin 角色、仅授予北京mou：不应在"我管理的应用"中看到该应用
     member = create_user(site, headers, username="derivops", role_id=roles["admin"]["id"])
     _grant_user_unit(site, headers, member["id"], roles["admin"]["id"], [beijing])
-    member_site, member_headers = _admin_login(tenant_client, "adm-deriv", "derivops", USER_PASSWORD)
+    member_site, member_headers = _admin_login(
+        tenant_client, "adm-deriv", "derivops", USER_PASSWORD
+    )
     member_list = member_site.get(f"{TENANT_APPS_URL}?scope=managed", headers=member_headers)
     assert member_list.status_code == 200, member_list.text
     assert app_id not in {row["id"] for row in member_list.json()}
 
     # 白名单编辑器下拉：admin 角色无 page:roles/page:users，但持 app:visibility:write → 读取放行
     assert member_site.get("/api/v1/admin/roles", headers=member_headers).status_code == 200
-    assert (
-        member_site.get("/api/v1/admin/users/options", headers=member_headers).status_code == 200
-    )
+    assert member_site.get("/api/v1/admin/users/options", headers=member_headers).status_code == 200
 
     # 已订阅 tab 仍可见，但 manageable=False（前端据此只读）
     member_all = member_site.get(TENANT_APPS_URL, headers=member_headers)
@@ -361,7 +359,9 @@ def test_scope_rows_derive_mgmt_unit_without_platform_mode(
 
     # 授予南京mou 后可见
     _grant_user_unit(site, headers, member["id"], roles["admin"]["id"], [beijing, nanjing])
-    member_site, member_headers = _admin_login(tenant_client, "adm-deriv", "derivops", USER_PASSWORD)
+    member_site, member_headers = _admin_login(
+        tenant_client, "adm-deriv", "derivops", USER_PASSWORD
+    )
     member_list2 = member_site.get(f"{TENANT_APPS_URL}?scope=managed", headers=member_headers)
     assert app_id in {row["id"] for row in member_list2.json()}
 

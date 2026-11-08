@@ -24,9 +24,19 @@ from internal.domain.canvas.convert import find_agent_loop_config
 class AgentConfigService:
     """智能体应用配置读写：GET 表单化读出、PUT 校验后写回画布 draft 版本。"""
 
-    def __init__(self, app_service: ApplicationService) -> None:
-        """app_service 由组合根注入（复用其画布事实源与 save_graph 版本链路）。"""
+    def __init__(
+        self,
+        app_service: ApplicationService,
+        *,
+        long_term_admin_available: bool = True,
+    ) -> None:
+        """app_service 由组合根注入（复用其画布事实源与 save_graph 版本链路）。
+
+        long_term_admin_available：M4 PRD F16.6 隐私硬条件开关，组合根从 settings
+        注入（用户端记忆管理面未部署的实例置 False，保存时拒绝开启长期记忆）。
+        """
         self._app_service = app_service
+        self._long_term_admin_available = long_term_admin_available
 
     def get_config(self, application_id: UUID) -> dict[str, Any]:
         """读取智能体配置表单；应用非 agent 型或画布缺 Agent 节点时抛业务异常。"""
@@ -46,7 +56,12 @@ class AgentConfigService:
     ) -> dict[str, Any]:
         """保存智能体配置：校验表单 → 写回节点 → save_graph 产生新版本，回读归一化结果。"""
         pack = self._load_agent_graph_pack(application_id)
-        issues = validate_form(form)
+        # M4-c F14.1：传入当前应用 ID 以拒绝 subAgents 自引用
+        issues = validate_form(
+            form,
+            long_term_admin_available=self._long_term_admin_available,
+            self_application_id=str(application_id),
+        )
         if issues:
             raise ValidationError("智能体配置不合法：" + "；".join(issues))
         node = find_agent_loop_node(pack["graph"])

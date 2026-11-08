@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { ChatHeader } from './components/ChatHeader'
 import { ChatSidebar } from './components/ChatSidebar'
+import { MemoryDrawer } from './components/MemoryDrawer'
 import { Composer } from './components/Composer'
 import { MessageList } from './components/MessageList'
 import { WelcomeHero } from './components/WelcomeHero'
@@ -28,6 +29,8 @@ export interface ChatWorkbenchProps {
   tenantCode?: string
   /** 0074 PRD F9：应用开启视觉时展示图片链接入口 */
   imagesEnabled?: boolean
+  /** M4 PRD F16.6：智能体应用展示"我的记忆"入口 */
+  memoriesEnabled?: boolean
   onSend?: (text: string, images?: string[]) => void
   onStop?: () => void
   onNewChat?: () => void
@@ -36,6 +39,9 @@ export interface ChatWorkbenchProps {
   onAnswer?: (answer: string) => void
   /** 0074 PRD F10：审批卡裁决 */
   onApprovalDecision?: (approved: boolean, comment: string, approval: ApprovalSpec) => void
+  /** M4 PRD F14.9：接管中 Composer 展示"返回主助手" */
+  handbackVisible?: boolean
+  onHandback?: () => void
 }
 
 export function ChatWorkbench({
@@ -51,6 +57,7 @@ export function ChatWorkbench({
   userName,
   tenantCode,
   imagesEnabled,
+  memoriesEnabled,
   onSend,
   onStop,
   onNewChat,
@@ -58,10 +65,13 @@ export function ChatWorkbench({
   onRetry,
   onAnswer,
   onApprovalDecision,
+  handbackVisible,
+  onHandback,
 }: ChatWorkbenchProps) {
   const navigate = useNavigate()
   const [collapsed, setCollapsed] = useState(false)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [memoriesOpen, setMemoriesOpen] = useState(false)
   const [input, setInput] = useState('')
   // 0074 PRD F9：随消息发送的图片 URL（粘贴式，不落文件上传）
   const [images, setImages] = useState<string[]>([])
@@ -119,6 +129,7 @@ export function ChatWorkbench({
           status={streaming ? 'thinking' : status}
           onBack={() => navigate('/agents')}
           onOpenMenu={() => setMobileOpen(true)}
+          onOpenMemories={memoriesEnabled ? () => setMemoriesOpen(true) : undefined}
         />
 
         <div className="lc-scroll" ref={scrollRef}>
@@ -153,8 +164,18 @@ export function ChatWorkbench({
           maxImages={MAX_IMAGES}
           onAddImage={(url) => setImages((prev) => (prev.length >= MAX_IMAGES ? prev : [...prev, url]))}
           onRemoveImage={(index) => setImages((prev) => prev.filter((_, i) => i !== index))}
+          handbackVisible={handbackVisible}
+          onHandback={onHandback}
         />
       </main>
+
+      {memoriesEnabled && (
+        <MemoryDrawer
+          open={memoriesOpen}
+          applicationId={agent.id}
+          onClose={() => setMemoriesOpen(false)}
+        />
+      )}
     </div>
   )
 }

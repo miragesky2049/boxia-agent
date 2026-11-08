@@ -7,7 +7,9 @@
 
 - 事件流：llm_start -> llm_end -> (tool_start -> tool_end)* -> ... -> result；
   F10 人审新增 approval_required（敏感工具轮整轮挂起前发出，随后 result 以
-  finish_reason=awaiting_approval 收尾）
+  finish_reason=awaiting_approval 收尾）；
+  F14.9 接管新增 handoff（接管声明轮整轮短路前发出，随后 result 以
+  finish_reason=handed_off/handed_back 收尾并携带 handoff 载荷）
 - llm 为 duck-typed：async chat(messages, tools, **chat_kwargs) -> LLMResponse；
   chat_kwargs 用于透传 AgentRunContext 等可选参数。
 - tool_executor 接受 async 或 sync 可调用：(name, arguments) -> str。
@@ -40,7 +42,9 @@ UNDECLARED_TOOL_MESSAGE = "工具未在应用中声明，拒绝执行: {name}"
 
 # 0074 PRD F11.1 单 run token 预算：超界停止循环时的 finish_reason 与兜底文案
 BUDGET_EXCEEDED_REASON = "budget_exceeded"
-BUDGET_EXCEEDED_MESSAGE = "（本次运行的 token 预算已用尽，停止继续推进，请简化问题或提高预算后重试）"
+BUDGET_EXCEEDED_MESSAGE = (
+    "（本次运行的 token 预算已用尽，停止继续推进，请简化问题或提高预算后重试）"
+)
 
 # 0074 PRD F10 人审（M3）：本轮含 sensitiveTools 声明的敏感工具时，不执行该轮
 # 任何工具，assistant(tool_calls) 已入 messages 后停止循环等待人工批准。
@@ -48,15 +52,24 @@ BUDGET_EXCEEDED_MESSAGE = "（本次运行的 token 预算已用尽，停止继�
 # 从头重放整个 agent_loop 节点（此前轮次的非幂等工具被重复执行、LLM 重采样
 # 可能不再请求同一调用），快照续跑无重放。
 AWAITING_APPROVAL_REASON = "awaiting_approval"
-APPROVAL_REJECTED_OBSERVATION = "[approval rejected] 用户拒绝了该工具调用{comment}，请不要重试此调用，直接基于现有信息回答。"
+APPROVAL_REJECTED_OBSERVATION = (
+    "[approval rejected] 用户拒绝了该工具调用{comment}，请不要重试此调用，直接基于现有信息回答。"
+)
+
+# M4 PRD F14.9（T-c6）接管门控：本轮 tool_calls 命中 handoff 声明工具（或目标侧
+# hand_back 伪工具）时，整轮不执行任何工具，发 handoff 事件后收尾；消费方据此
+# 切换/交还会话路由态。与 F10 审批门同机制，但接管门在前（接管优先于挂起）。
+HANDED_OFF_REASON = "handed_off"
+HANDED_BACK_REASON = "handed_back"
 
 
 @dataclass(frozen=True)
 class ReactEvent:
     """内核产出的一个循环事件。
 
-    kind: "llm_start" / "llm_end" / "tool_start" / "tool_end" / "result"；
-    payload 字段见各事件类型注释，消费方按需取子集映射到对外协议。
+    kind: "llm_start" / "llm_end" / "tool_start" / "tool_end" / "result" /
+    "approval_required" / "handoff"；payload 字段见各事件类型注释，
+    消费方按需取子集映射到对外协议。
     """
 
     kind: str
@@ -89,7 +102,8 @@ def _assistant_pending_calls(messages: list[dict[str, Any]]) -> list[_ToolCall]:
             "name": str(item.get("function", {}).get("name") or ""),
             "arguments_raw": str(item.get("function", {}).get("arguments") or ""),
         }
-        for item in last.get("tool_calls") or [] if isinstance(item, dict)
+        for item in last.get("tool_calls") or []
+        if isinstance(item, dict)
     ]
     return [_ToolCall(**c) for c in calls if c["id"] and c["name"]]
 
@@ -113,11 +127,17 @@ def build_tool_specs(tools_raw: Any) -> list[LLMToolSpec]:
         if not name:
             continue
         description = item.get("description") or item.get("function", {}).get("description", "")
-        parameters = item.get("parameters") or item.get("function", {}).get("parameters") or {
-            "type": "object",
-            "properties": {},
-        }
-        specs.append(LLMToolSpec(name=str(name), description=str(description), parameters=parameters))
+        parameters = (
+            item.get("parameters")
+            or item.get("function", {}).get("parameters")
+            or {
+                "type": "object",
+                "properties": {},
+            }
+        )
+        specs.append(
+            LLMToolSpec(name=str(name), description=str(description), parameters=parameters)
+        )
     return specs
 
 
@@ -232,6 +252,8 @@ async def run_react_loop(
     approved_call_ids: Any = None,
     rejected_call_ids: Any = None,
     rejection_comment: str = "",
+    handoff_targets: Mapping[str, str] | None = None,
+    hand_back_name: str | None = None,
 ) -> AsyncIterator[ReactEvent]:
     """跑 ReAct tool-calling 循环并以事件流产出过程与结果。
 
@@ -252,6 +274,12 @@ async def run_react_loop(
       （approved 集合正常执行、rejected 集合回灌拒绝 observation，均不再门控），
       再继续 LLM 轮次。max_rounds 预算按续跑轮重新起算（成本上限由 token_budget
       经 usage_base 跨续跑累计兜底）；
+    - M4 PRD F14.9 接管门控：handoff_targets 为"接管声明工具名 → 目标应用 ID"
+      映射，hand_back_name 为目标侧归位声明工具名；本轮调用命中其一（含快照续跑
+      轮）时该轮任何工具都不执行，发 handoff 事件后收尾
+      result.finish_reason="handed_off"/"handed_back"，且 result 载荷附加
+      handoff 键（仅此路径出现，未命中载荷与改造前逐字段一致）。接管门排在
+      人审门之前：同轮并存时接管生效，不产生审批挂起；
     - LLM 调用异常原样上抛，由消费方决定兜底文案。
     """
     extra = _filter_chat_kwargs(llm, chat_kwargs or {})
@@ -259,6 +287,8 @@ async def run_react_loop(
     sensitive_names = {str(name) for name in (sensitive_tool_names or set())}
     approved_ids = {str(cid) for cid in (approved_call_ids or set())}
     rejected_ids = {str(cid) for cid in (rejected_call_ids or set())}
+    handoff_map = {str(name): str(app_id) for name, app_id in (handoff_targets or {}).items()}
+    hand_back = str(hand_back_name or "")
     usage_total = empty_usage()
     accumulate_usage(usage_total, usage_base)
     tool_traces: list[dict[str, Any]] = []
@@ -266,24 +296,40 @@ async def run_react_loop(
     final_reasoning = ""
     finish_reason = "stop"
     iterations = 0
+    handoff_payload: dict[str, Any] | None = None
 
     def _unapproved_sensitive(calls: list[_ToolCall]) -> list[_ToolCall]:
         return [
-            c for c in calls
+            c
+            for c in calls
             if c.name in sensitive_names and c.id not in approved_ids and c.id not in rejected_ids
         ]
+
+    def _handoff_hit(calls: list[_ToolCall]) -> tuple[_ToolCall, bool] | None:
+        """F14.9：本轮调用中首个接管命中（调用, 是否归位）；未命中返回 None。"""
+        if not handoff_map and not hand_back:
+            return None
+        for c in calls:
+            if hand_back and c.name == hand_back:
+                return c, True
+            if c.name in handoff_map:
+                return c, False
+        return None
 
     async def _drain_round(calls: list[_ToolCall], round_idx: int) -> AsyncIterator[ReactEvent]:
         """执行一轮工具调用：逐调用发 tool_start/tool_end 并回灌 messages/traces。"""
         for tc in calls:
             args = parse_tool_arguments(tc.arguments_raw)
-            yield ReactEvent("tool_start", {
-                "tool_call_id": tc.id,
-                "name": tc.name,
-                "arguments": args,
-                "arguments_raw": tc.arguments_raw,
-                "tool_round": round_idx,
-            })
+            yield ReactEvent(
+                "tool_start",
+                {
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "arguments": args,
+                    "arguments_raw": tc.arguments_raw,
+                    "tool_round": round_idx,
+                },
+            )
             if tc.id in rejected_ids:
                 # F10 人审拒绝：不触达执行器，固定文案回灌让模型基于现有信息收尾
                 observation = APPROVAL_REJECTED_OBSERVATION.format(
@@ -296,26 +342,33 @@ async def run_react_loop(
                 is_error = True
             else:
                 observation, is_error = await _invoke_tool(tool_executor, tc.name, args)
-            yield ReactEvent("tool_end", {
-                "tool_call_id": tc.id,
-                "name": tc.name,
-                "arguments": args,
-                "arguments_raw": tc.arguments_raw,
-                "tool_round": round_idx,
-                "observation": observation,
-                "is_error": is_error,
-            })
-            tool_traces.append({
-                "tool_call_id": tc.id,
-                "name": tc.name,
-                "observation": observation,
-                "is_error": is_error,
-            })
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc.id,
-                "content": observation,
-            })
+            yield ReactEvent(
+                "tool_end",
+                {
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "arguments": args,
+                    "arguments_raw": tc.arguments_raw,
+                    "tool_round": round_idx,
+                    "observation": observation,
+                    "is_error": is_error,
+                },
+            )
+            tool_traces.append(
+                {
+                    "tool_call_id": tc.id,
+                    "name": tc.name,
+                    "observation": observation,
+                    "is_error": is_error,
+                }
+            )
+            messages.append(
+                {
+                    "role": "tool",
+                    "tool_call_id": tc.id,
+                    "content": observation,
+                }
+            )
 
     # F10 快照续跑：末条 assistant 带未回答 tool_calls 时，第 0 轮不请求 LLM，
     # 直接排空快照里的那一轮。
@@ -326,11 +379,14 @@ async def run_react_loop(
         if round_idx == 0 and resume_pending:
             calls = resume_pending
         else:
-            yield ReactEvent("llm_start", {
-                "iteration": iterations,
-                "messages": list(messages),
-                "tools": [spec.to_openai() for spec in tool_specs],
-            })
+            yield ReactEvent(
+                "llm_start",
+                {
+                    "iteration": iterations,
+                    "messages": list(messages),
+                    "tools": [spec.to_openai() for spec in tool_specs],
+                },
+            )
 
             resp = await _call_llm(llm, messages, tool_specs, extra)
             content = getattr(resp, "content", "") or ""
@@ -341,23 +397,26 @@ async def run_react_loop(
             accumulate_usage(usage_total, round_usage)
             finish_reason = getattr(resp, "finish_reason", None) or finish_reason
 
-            yield ReactEvent("llm_end", {
-                "iteration": iterations,
-                "content": content,
-                # 深度思考模型的分析段（非 llm.py 消费方不使用，additive 字段）
-                "reasoning_content": reasoning,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    }
-                    for tc in resp_tool_calls
-                ],
-                # 本轮 usage（与 llm_end 的 SSE 契约一致；累计值在 result 事件里）
-                "usage": round_usage,
-                "finish_reason": finish_reason,
-            })
+            yield ReactEvent(
+                "llm_end",
+                {
+                    "iteration": iterations,
+                    "content": content,
+                    # 深度思考模型的分析段（非 llm.py 消费方不使用，additive 字段）
+                    "reasoning_content": reasoning,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "name": tc.function.name,
+                            "arguments": tc.function.arguments,
+                        }
+                        for tc in resp_tool_calls
+                    ],
+                    # 本轮 usage（与 llm_end 的 SSE 契约一致；累计值在 result 事件里）
+                    "usage": round_usage,
+                    "finish_reason": finish_reason,
+                },
+            )
 
             if not resp_tool_calls:
                 final_content = content
@@ -374,37 +433,65 @@ async def run_react_loop(
                 final_reasoning = reasoning
                 break
 
-            messages.append({
-                "role": "assistant",
-                "content": content,
-                "tool_calls": [
-                    {
-                        "id": tc.id,
-                        "type": "function",
-                        "function": {"name": tc.function.name, "arguments": tc.function.arguments},
-                    }
-                    for tc in resp_tool_calls
-                ],
-            })
+            messages.append(
+                {
+                    "role": "assistant",
+                    "content": content,
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.function.name,
+                                "arguments": tc.function.arguments,
+                            },
+                        }
+                        for tc in resp_tool_calls
+                    ],
+                }
+            )
             calls = [
                 _ToolCall(id=tc.id, name=tc.function.name, arguments_raw=tc.function.arguments)
                 for tc in resp_tool_calls
             ]
 
+        hit = _handoff_hit(calls)
+        if hit is not None:
+            # F14.9：接管整轮短路（同轮其余调用也不执行），与 F10 整轮挂起同机制；
+            # 接管轮的 assistant(tool_calls) 已按既有路径入 messages，正文不作最终回答
+            call, returned = hit
+            handoff_payload = {
+                "iteration": iterations,
+                "tool_round": round_idx,
+                "tool_name": call.name,
+                "tool_call_id": call.id,
+                "arguments_raw": call.arguments_raw,
+                "application_id": None if returned else handoff_map.get(call.name),
+                "returned": returned,
+            }
+            yield ReactEvent("handoff", handoff_payload)
+            finish_reason = HANDED_BACK_REASON if returned else HANDED_OFF_REASON
+            break
+
         blocked = _unapproved_sensitive(calls)
         if blocked:
             # F10：整轮挂起（含同轮非敏感调用也不先执行），保证快照里
             # "待答调用 = 本轮全部调用"，续跑排空顺序与模型意图一致。
-            yield ReactEvent("approval_required", {
-                "iteration": iterations,
-                "tool_round": round_idx,
-                "pending_tool_calls": [
-                    {"id": c.id, "name": c.name, "arguments_raw": c.arguments_raw} for c in calls
-                ],
-                "awaiting_calls": [
-                    {"id": c.id, "name": c.name, "arguments_raw": c.arguments_raw} for c in blocked
-                ],
-            })
+            yield ReactEvent(
+                "approval_required",
+                {
+                    "iteration": iterations,
+                    "tool_round": round_idx,
+                    "pending_tool_calls": [
+                        {"id": c.id, "name": c.name, "arguments_raw": c.arguments_raw}
+                        for c in calls
+                    ],
+                    "awaiting_calls": [
+                        {"id": c.id, "name": c.name, "arguments_raw": c.arguments_raw}
+                        for c in blocked
+                    ],
+                },
+            )
             finish_reason = AWAITING_APPROVAL_REASON
             break
 
@@ -413,11 +500,15 @@ async def run_react_loop(
     else:
         final_content = max_rounds_message
 
-    yield ReactEvent("result", {
+    result_payload: dict[str, Any] = {
         "content": final_content,
         "reasoning_content": final_reasoning,
         "tool_traces": tool_traces,
         "iterations": iterations,
         "usage": usage_total,
         "finish_reason": finish_reason,
-    })
+    }
+    if handoff_payload is not None:
+        # additive：仅接管轮出现该键，消费方（agent_loop 节点）据此透出路由切换
+        result_payload["handoff"] = handoff_payload
+    yield ReactEvent("result", result_payload)

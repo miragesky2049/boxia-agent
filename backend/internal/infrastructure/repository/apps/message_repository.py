@@ -68,8 +68,8 @@ class MessageRepository:
     ) -> list[dict]:
         rows = self._session.execute(
             text(
-                "SELECT id, conversation_id, role, content, tool_calls, tool_call_id, "
-                "tool_name, run_id, metadata, created_at "
+                "SELECT id, conversation_id, application_id, role, content, tool_calls, "
+                "tool_call_id, tool_name, run_id, metadata, created_at "
                 "FROM message WHERE conversation_id = :cid "
                 "ORDER BY created_at DESC LIMIT :limit"
             ),
@@ -78,6 +78,20 @@ class MessageRepository:
         items = [dict(r._mapping) for r in rows]
         items.reverse()
         return items
+
+    def list_messages_by_run(self, run_id: UUID) -> list[dict]:
+        """按 run 取本轮 user/assistant 文本行（M4 PRD F16.3 抽取输入）。
+
+        排序用 id ASC：uuid7 时间有序，同事务落库的 created_at 相等不可辨序。
+        """
+        rows = self._session.execute(
+            text(
+                "SELECT id, conversation_id, role, content, created_at FROM message "
+                "WHERE run_id = :rid AND role IN ('user', 'assistant') ORDER BY id ASC"
+            ),
+            {"rid": run_id},
+        ).all()
+        return [dict(r._mapping) for r in rows]
 
     def get_message(self, message_id: UUID) -> dict | None:
         """按消息 ID 查行（用于跨租户删除前的归属校验）。"""

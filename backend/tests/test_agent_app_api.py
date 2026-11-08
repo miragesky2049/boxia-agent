@@ -40,7 +40,12 @@ def _create_app(client: TestClient, headers: dict[str, str], name: str, flow_typ
     )
     assert resp.status_code == 201, resp.text
     app_id = resp.json()["application_id"]
-    assert client.post(f"{ADMIN_APPS}/{app_id}/listing", json={"listed": True}, headers=headers).status_code == 200
+    assert (
+        client.post(
+            f"{ADMIN_APPS}/{app_id}/listing", json={"listed": True}, headers=headers
+        ).status_code
+        == 200
+    )
     with get_engine().begin() as conn:
         conn.execute(text("UPDATE application SET sale_mode = 2 WHERE id = :aid"), {"aid": app_id})
     return app_id
@@ -79,19 +84,33 @@ def test_agent_app_default_graph_and_config_roundtrip(
     assert base["modleName"] and base["systemPrompt"]
     assert base["maxToolRounds"] == 10
     assert base["memory"]["shortTerm"]["enabled"] is True
+    # M4-c F14.1：subAgents 键恒携带（默认画布无挂载 → 空列表）
+    assert base["subAgents"] == []
 
+    sub_id = "7b2e3d4c-0000-0000-0000-000000000002"
     saved = client.put(
         f"{ADMIN_APPS}/{app_id}/agent-config",
-        json=_agent_config_form(),
+        json=_agent_config_form(subAgents=[{"applicationId": sub_id, "mode": "handoff"}]),
         headers=platform,
     )
     assert saved.status_code == 200, saved.text
     assert saved.json()["datasets"][0]["datasetId"] == "d1"
+    assert saved.json()["subAgents"] == [{"applicationId": sub_id, "mode": "handoff"}]
 
     reread = client.get(f"{ADMIN_APPS}/{app_id}/agent-config", headers=platform).json()
     assert reread["systemPrompt"] == "你是产品顾问"
     assert reread["openingRemarks"] == "你好，我可以帮你查产品资料。"
     assert reread["suggestedQuestions"] == ["退款政策"]
+    assert reread["subAgents"] == [{"applicationId": sub_id, "mode": "handoff"}]
+
+    # M4-c F14.1：协作选择器清单端点（additive 过滤参数）——未发布被 published_only 排除
+    agents_all = client.get(f"{ADMIN_APPS}?flow_type=agent", headers=platform).json()
+    assert app_id in {item["id"] for item in agents_all}
+    assert all(item["flow_type"] == "agent" for item in agents_all)
+    agents_published = client.get(
+        f"{ADMIN_APPS}?flow_type=agent&published_only=true", headers=platform
+    ).json()
+    assert app_id not in {item["id"] for item in agents_published}
 
 
 def test_agent_config_rejects_invalid_and_wrong_flow_type(
@@ -116,13 +135,30 @@ def test_agent_config_rejects_invalid_and_wrong_flow_type(
     )
     assert reserved.status_code == 422, reserved.text
 
+    # M4-c F14.1：agent_ 保留前缀同样拒绝；subAgents 自引用拒绝（服务层传当前应用 ID）
+    reserved_agent = client.put(
+        f"{ADMIN_APPS}/{agent_id}/agent-config",
+        json=_agent_config_form(tools=[{"name": "agent_sneaky"}]),
+        headers=platform,
+    )
+    assert reserved_agent.status_code == 422, reserved_agent.text
+    self_ref = client.put(
+        f"{ADMIN_APPS}/{agent_id}/agent-config",
+        json=_agent_config_form(subAgents=[{"applicationId": agent_id, "mode": "delegate"}]),
+        headers=platform,
+    )
+    assert self_ref.status_code == 422, self_ref.text
+    assert "自引用" in self_ref.text
+
     wrong = client.get(f"{ADMIN_APPS}/{workflow_id}/agent-config", headers=platform)
     assert wrong.status_code == 422, wrong.text
     assert "不是智能体类型" in wrong.text
 
 
 def test_agent_app_user_side_visibility_and_workflow_gate(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     """可见范围继承：agent 与 workflow 走同一 0068 订阅链路出现在用户列表；
     workflow 运行接口闸门必须拒绝 agent（防绕道固定流程执行）。"""
@@ -130,7 +166,15 @@ def test_agent_app_user_side_visibility_and_workflow_gate(
     agent_id = _create_app(client, platform, "产品顾问2", "agent")
     client.put(
         f"{ADMIN_APPS}/{agent_id}/agent-config",
-        json=_agent_config_form(),
+        # M4-c F14.6：卡片透出 sub_agents；未订阅目标不可见 → name 收敛为空串
+        json=_agent_config_form(
+            subAgents=[
+                {
+                    "applicationId": "7b2e3d4c-0000-0000-0000-000000000009",
+                    "mode": "handoff",
+                }
+            ]
+        ),
         headers=platform,
     )
 
@@ -162,13 +206,22 @@ def test_agent_app_user_side_visibility_and_workflow_gate(
     assert detail["config"]["opening_remarks"] == "你好，我可以帮你查产品资料。"
     assert detail["config"]["suggested_questions"] == ["退款政策"]
     assert detail["config"]["datasets"][0]["dataset_id"] == "d1"
+    assert detail["config"]["sub_agents"] == [
+        {
+            "application_id": "7b2e3d4c-0000-0000-0000-000000000009",
+            "name": "",
+            "mode": "handoff",
+        }
+    ]
 
     blocked = site.get(f"{API}/agents/{agent_id}/workflow/schema", headers=headers)
     assert blocked.status_code == 422, blocked.text
 
 
 def test_unified_conversation_endpoint_validation(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     """0074 PRD M3 端点收敛：统一对话入口参数错误须在 SSE 之前以 JSON 4xx 返回。"""
     from uuid import uuid4
@@ -180,11 +233,14 @@ def test_unified_conversation_endpoint_validation(
     create_tenant(client, platform, code="univo", name="统一入口公司")
     admin_site, admin_headers, _ = tenant_admin_client(tenant_client, "univo")
     for app_id in (agent_id, chatflow_id):
-        assert admin_site.post(
-            "/api/v1/admin/marketplace/subscribe",
-            json={"application_id": app_id},
-            headers=admin_headers,
-        ).status_code == 200
+        assert (
+            admin_site.post(
+                "/api/v1/admin/marketplace/subscribe",
+                json={"application_id": app_id},
+                headers=admin_headers,
+            ).status_code
+            == 200
+        )
     viewer_role_id = list_roles(admin_site, admin_headers)["viewer"]["id"]
     create_user(admin_site, admin_headers, username="univ-owner", role_id=viewer_role_id)
     site = persistent_user_tenant_client("univo")
@@ -203,14 +259,18 @@ def test_unified_conversation_endpoint_validation(
     # agent 续跑缺 conversation_id / 缺 approved：422（F10 预检收口在 prepare_chat_run）
     resp = site.post(
         f"{API}/agents/{agent_id}/chatflow/run/stream",
-        json={"resume": {"approved": True}}, headers=headers,
+        json={"resume": {"approved": True}},
+        headers=headers,
     )
     assert resp.status_code == 422, resp.text
     resp = site.post(
         f"{API}/agents/{agent_id}/chatflow/run/stream",
-        json={"conversation_id": str(uuid4()), "resume": {"comment": "x"}}, headers=headers,
+        json={"conversation_id": str(uuid4()), "resume": {"comment": "x"}},
+        headers=headers,
     )
     assert resp.status_code == 422, resp.text
     # 旧端点已退役：路由层 405/404 均视为收敛达成（FastAPI 对已知前缀未注册方法返回 405）
-    retired = site.post(f"{API}/agents/{agent_id}/run/stream", json={"message": "hi"}, headers=headers)
+    retired = site.post(
+        f"{API}/agents/{agent_id}/run/stream", json={"message": "hi"}, headers=headers
+    )
     assert retired.status_code in (404, 405), retired.text

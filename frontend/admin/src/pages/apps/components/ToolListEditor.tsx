@@ -1,59 +1,64 @@
-import { Button, Input, Space } from 'antd';
+import { Button, Input, Space } from 'antd'
 
 export interface ToolItem {
-  name: string;
-  description: string;
+  name: string
+  description: string
 }
 
 // 兼容历史数据：字符串、对象数组、JSON 字符串都归一为 ToolItem[]
 function normalizeTools(raw: any): ToolItem[] {
   const toItem = (it: any): ToolItem => {
-    if (typeof it === 'string') return { name: it, description: '' };
+    if (typeof it === 'string') return { name: it, description: '' }
     return {
       name: String(it?.name ?? it?.tool_name ?? it?.toolName ?? it?.id ?? ''),
       description: String(it?.description ?? it?.desc ?? ''),
-    };
-  };
-  if (Array.isArray(raw)) return raw.map(toItem);
-  if (typeof raw === 'string' && raw.trim()) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (Array.isArray(parsed)) return parsed.map(toItem);
-    } catch {
-      // 非 JSON 文本按单个工具名处理
-      return [{ name: raw.trim(), description: '' }];
     }
   }
-  return [];
+  if (Array.isArray(raw)) return raw.map(toItem)
+  if (typeof raw === 'string' && raw.trim()) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) return parsed.map(toItem)
+    } catch {
+      // 非 JSON 文本按单个工具名处理
+      return [{ name: raw.trim(), description: '' }]
+    }
+  }
+  return []
 }
 
 interface ToolListEditorProps {
-  value: any;
-  onChange: (next: ToolItem[]) => void;
+  value: any
+  onChange: (next: ToolItem[]) => void
 }
 
 export function ToolListEditor({ value, onChange }: ToolListEditorProps) {
-  const items = normalizeTools(value);
+  const items = normalizeTools(value)
 
   const updateItem = (idx: number, patch: Partial<ToolItem>) => {
-    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)));
-  };
+    onChange(items.map((it, i) => (i === idx ? { ...it, ...patch } : it)))
+  }
 
   const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
+    onChange(items.filter((_, i) => i !== idx))
+  }
 
   const addItem = () => {
-    onChange([...items, { name: '', description: '' }]);
-  };
+    onChange([...items, { name: '', description: '' }])
+  }
 
   return (
     <Space direction="vertical" size={6} style={{ width: '100%' }}>
       {items.length === 0 && (
-        <div style={{
-          padding: '8px 10px', background: '#f9fafb', borderRadius: 6,
-          fontSize: 12, color: '#9ca3af',
-        }}>
+        <div
+          style={{
+            padding: '8px 10px',
+            background: '#f9fafb',
+            borderRadius: 6,
+            fontSize: 12,
+            color: '#9ca3af',
+          }}
+        >
           暂未添加工具，点击下方按钮添加
         </div>
       )}
@@ -80,5 +85,5 @@ export function ToolListEditor({ value, onChange }: ToolListEditorProps) {
         + 添加工具
       </Button>
     </Space>
-  );
+  )
 }

@@ -11,15 +11,11 @@ USER_PASSWORD = "User-password-123"
 _department_name_counter = count(1)
 
 
-def create_department(
-    site: TestClient, headers: dict[str, str], name: str | None = None
-) -> dict:
+def create_department(site: TestClient, headers: dict[str, str], name: str | None = None) -> dict:
     """创建租户部门并返回响应体；默认名带自增后缀避免同租户重名冲突。"""
     if name is None:
         name = f"默认部门-{next(_department_name_counter)}"
-    response = site.post(
-        "/api/v1/admin/departments", json={"name": name}, headers=headers
-    )
+    response = site.post("/api/v1/admin/departments", json={"name": name}, headers=headers)
     assert response.status_code == 201, response.text
     return response.json()
 

@@ -118,14 +118,13 @@ export default function AppListPage() {
   const [newFlowType, setNewFlowType] = useState<FlowType>('agent')
 
   // 编辑应用基本信息（名称/描述）与平台侧可见范围默认值（0068 v2）
-  const [editForm] =
-    Form.useForm<{
-      name: string
-      description: string
-      visibility_template: 'all' | 'whitelist'
-      visibility_lock: boolean
-      admin_scope_mode: 'creator_only' | 'mgmt_unit' | 'all_admin'
-    }>()
+  const [editForm] = Form.useForm<{
+    name: string
+    description: string
+    visibility_template: 'all' | 'whitelist'
+    visibility_lock: boolean
+    admin_scope_mode: 'creator_only' | 'mgmt_unit' | 'all_admin'
+  }>()
   const [editTarget, setEditTarget] = useState<Application | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [copyingId, setCopyingId] = useState<string | null>(null)
@@ -403,7 +402,10 @@ export default function AppListPage() {
               title: '名称',
               dataIndex: 'name',
               render: (name: string, record) => (
-                <a onClick={() => navigate(editPathFor(record.id, record.flow_type))} style={{ fontWeight: 500 }}>
+                <a
+                  onClick={() => navigate(editPathFor(record.id, record.flow_type))}
+                  style={{ fontWeight: 500 }}
+                >
                   {name}
                 </a>
               ),
@@ -508,12 +510,7 @@ export default function AppListPage() {
                       cancelText="取消"
                       onConfirm={() => handleDelete(record)}
                     >
-                      <Button
-                        type="link"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                      >
+                      <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                         删除
                       </Button>
                     </Popconfirm>

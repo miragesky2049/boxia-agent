@@ -21,7 +21,10 @@ class RunService:
         self._repo = run_repo
 
     def get_running_for_thread(
-        self, tenant_id: UUID, application_id: UUID, thread_id: str,
+        self,
+        tenant_id: UUID,
+        application_id: UUID,
+        thread_id: str,
     ) -> dict[str, Any]:
         """取该 thread 等待审批的运行记录；无则按业务错误抛出。"""
         run = self._repo.get_running_by_thread(tenant_id, application_id, thread_id)
@@ -30,7 +33,11 @@ class RunService:
         return run
 
     def list_runs(
-        self, tenant_id: UUID, *, workflow_id: UUID | None = None, limit: int = 50,
+        self,
+        tenant_id: UUID,
+        *,
+        workflow_id: UUID | None = None,
+        limit: int = 50,
     ) -> list[dict]:
         """租户查看某应用的运行历史。"""
         return self._repo.list_runs(tenant_id, workflow_id=workflow_id, limit=limit)

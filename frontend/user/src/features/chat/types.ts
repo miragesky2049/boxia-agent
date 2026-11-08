@@ -10,6 +10,14 @@ export interface ConversationItem {
   id: string
   title: string
   updatedAt: string
+  /** M4 PRD F14.10：接管中会话的应答专家名（侧栏接管标记） */
+  handoffAgent?: string
+}
+
+/** M4 PRD F14.10：会话当前发言权（非空=接管中，后续轮次由该专家应答） */
+export interface ActiveHandoff {
+  applicationId: string
+  displayName: string
 }
 
 export type ToolTraceStatus = 'running' | 'done' | 'error'
@@ -96,4 +104,8 @@ export interface ChatMessage {
   plan?: PlanTask[]
   /** 0074 PRD F4：反思轮次结论（reflect 帧，按轮累积） */
   reflects?: ReflectNote[]
+  /** M4 PRD F14.10：发言权移交通告（handoff 帧/历史通告行渲染，非真实应答） */
+  handoffNotice?: string
+  /** M4 PRD F14.10：接管轮应答专家名（消息 application_id≠会话归属应用时展示徽标） */
+  answeredBy?: string
 }

@@ -42,18 +42,14 @@ def test_default_dictionaries_seeded_on_tenant_create(
         ("job_level", 10),
         ("job_family", 6),
     ):
-        items = site.get(
-            DICT_URL, params={"category": category}, headers=headers
-        ).json()
+        items = site.get(DICT_URL, params={"category": category}, headers=headers).json()
         assert len(items) >= expected_min, f"{category} 默认字典项不足"
         # sort_order 升序
         orders = [item["sort_order"] for item in items]
         assert orders == sorted(orders)
 
 
-def test_create_employment_with_hr_fields(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_create_employment_with_hr_fields(client: TestClient, auth_headers, tenant_client) -> None:
     """新建任职应能写入字典外键、汇报上级、试用期与备注，并回填名称。"""
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client, code="hr")
     department = _create_dept(site, headers, "研发部")
@@ -63,12 +59,8 @@ def test_create_employment_with_hr_fields(
     employment_types = site.get(
         DICT_URL, params={"category": "employment_type"}, headers=headers
     ).json()
-    job_levels = site.get(
-        DICT_URL, params={"category": "job_level"}, headers=headers
-    ).json()
-    job_families = site.get(
-        DICT_URL, params={"category": "job_family"}, headers=headers
-    ).json()
+    job_levels = site.get(DICT_URL, params={"category": "job_level"}, headers=headers).json()
+    job_families = site.get(DICT_URL, params={"category": "job_family"}, headers=headers).json()
     ft = next(item for item in employment_types if item["code"] == "full_time")
     p5 = next(item for item in job_levels if item["code"] == "P5")
     tech = next(item for item in job_families if item["code"] == "tech")
@@ -128,9 +120,9 @@ def test_create_employment_rejects_invalid_dictionary(
     user_b = create_user(site_b, headers_b, username="user_b", role_id=roles_b["viewer"]["id"])
 
     # 租户 A 的字典项被租户 B 引用
-    type_a = site_a.get(
-        DICT_URL, params={"category": "employment_type"}, headers=headers_a
-    ).json()[0]
+    type_a = site_a.get(DICT_URL, params={"category": "employment_type"}, headers=headers_a).json()[
+        0
+    ]
     resp = site_b.post(
         EMP_URL,
         json={
@@ -143,9 +135,7 @@ def test_create_employment_rejects_invalid_dictionary(
     assert resp.status_code == 422, resp.text
 
     # 类别不匹配：用 job_level 的 id 当 employment_type_id
-    level_a = site_a.get(
-        DICT_URL, params={"category": "job_level"}, headers=headers_a
-    ).json()[0]
+    level_a = site_a.get(DICT_URL, params={"category": "job_level"}, headers=headers_a).json()[0]
     resp = site_a.post(
         EMP_URL,
         json={
@@ -167,9 +157,7 @@ def test_transfer_inherits_hr_fields_and_accepts_override(
     dept_two = _create_dept(site, headers, "二部")
     alice = create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
 
-    job_levels = site.get(
-        DICT_URL, params={"category": "job_level"}, headers=headers
-    ).json()
+    job_levels = site.get(DICT_URL, params={"category": "job_level"}, headers=headers).json()
     p3 = next(item for item in job_levels if item["code"] == "P3")
     p5 = next(item for item in job_levels if item["code"] == "P5")
 
@@ -205,17 +193,13 @@ def test_transfer_inherits_hr_fields_and_accepts_override(
     assert body["change_type"] == "promotion"
 
     # 原历史记录保留原字段
-    history = site.get(
-        EMP_URL, params={"user_id": alice["id"]}, headers=headers
-    ).json()
+    history = site.get(EMP_URL, params={"user_id": alice["id"]}, headers=headers).json()
     old = next(item for item in history["items"] if item["id"] == created["id"])
     assert old["job_level_id"] == p3["id"]
     assert old["is_current"] is False
 
 
-def test_archive_sets_termination_type(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_archive_sets_termination_type(client: TestClient, auth_headers, tenant_client) -> None:
     """结束任职时应写入离职类型与原因。"""
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client, code="t3")
     department = _create_dept(site, headers, "研发部")
@@ -283,9 +267,7 @@ def test_dictionary_delete_blocked_when_referenced(
     dict_item = created_dict.json()
 
     # 未被引用时删除成功
-    assert site.delete(
-        f"{DICT_URL}/{dict_item['id']}", headers=headers
-    ).status_code == 204
+    assert site.delete(f"{DICT_URL}/{dict_item['id']}", headers=headers).status_code == 204
 
     # 新建并引用
     created_dict2 = site.post(

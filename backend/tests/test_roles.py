@@ -74,9 +74,7 @@ def test_system_role_cannot_be_disabled_or_deleted(
     assert deleted.status_code == 422
 
 
-def test_referenced_role_cannot_be_deleted(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_referenced_role_cannot_be_deleted(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     custom = site.post(
@@ -133,9 +131,7 @@ def test_copy_role_copies_grants(client: TestClient, auth_headers, tenant_client
     assert copy["is_active"] is True
     assert copy["description"] == "销售角色"
 
-    summary = site.get(
-        f"/api/v1/admin/roles/{copy['id']}/grants/summary", headers=headers
-    )
+    summary = site.get(f"/api/v1/admin/roles/{copy['id']}/grants/summary", headers=headers)
     assert summary.status_code == 200, summary.text
     assert summary.json()["counts"]["tool"] == 1
 
@@ -201,17 +197,15 @@ def test_create_role_has_no_permissions_and_copy_inherits_permissions(
     )
     assert copied.status_code == 201, copied.text
     copied_codes = set(
-        site.get(
-            f"/api/v1/admin/roles/{copied.json()['id']}/permissions", headers=headers
-        ).json()["codes"]
+        site.get(f"/api/v1/admin/roles/{copied.json()['id']}/permissions", headers=headers).json()[
+            "codes"
+        ]
     )
     assert copied_codes == admin_codes
     assert "page:resources" in copied_codes
 
 
-def test_copy_role_is_tenant_isolated(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_copy_role_is_tenant_isolated(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers, "acme", "Acme 公司")
     create_tenant(client, auth_headers, "globex", "Globex 公司")
     acme_site, acme_headers, _ = tenant_admin_client(tenant_client, "acme")
@@ -230,9 +224,7 @@ def test_copy_role_is_tenant_isolated(
     assert denied.status_code == 404
 
 
-def test_platform_manages_own_roles_only(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_platform_manages_own_roles_only(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
 
     created = client.post(
@@ -261,9 +253,7 @@ def test_platform_manages_own_roles_only(
     assert forbidden.status_code == 403
 
 
-def test_roles_are_tenant_isolated(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_roles_are_tenant_isolated(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers, "acme", "Acme 公司")
     globex = create_tenant(client, auth_headers, "globex", "Globex 公司")
     acme_site, acme_headers, _ = tenant_admin_client(tenant_client, "acme")

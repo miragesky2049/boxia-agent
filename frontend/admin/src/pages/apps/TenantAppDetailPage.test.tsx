@@ -164,10 +164,10 @@ function renderPage() {
 }
 
 async function waitForPageLoaded() {
-  await waitFor(
-    () => expect(screen.getByRole('tab', { name: '可见范围' })).toBeInTheDocument(),
-    { timeout: 10000, interval: 50 },
-  )
+  await waitFor(() => expect(screen.getByRole('tab', { name: '可见范围' })).toBeInTheDocument(), {
+    timeout: 10000,
+    interval: 50,
+  })
 }
 
 beforeEach(() => {
@@ -182,12 +182,18 @@ afterEach(() => {
 
 describe('TenantAppDetailPage 可见范围配置', () => {
   it('全员可见切白名单后出现条目编辑区', async () => {
-    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
-      configured: true,
-      visibility: 'all',
-      whitelist: [],
-      visibilityLock: false,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(
+        { requests: [] },
+        {
+          configured: true,
+          visibility: 'all',
+          whitelist: [],
+          visibilityLock: false,
+        },
+      ),
+    )
     renderPage()
     await waitForPageLoaded()
 
@@ -196,12 +202,18 @@ describe('TenantAppDetailPage 可见范围配置', () => {
   })
 
   it('visibility_lock=true 时表单只读且无保存按钮', async () => {
-    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
-      configured: true,
-      visibility: 'whitelist',
-      whitelist: [{ subject_type: 'USER', subject_id: 'u1', include_subtree: false }],
-      visibilityLock: true,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(
+        { requests: [] },
+        {
+          configured: true,
+          visibility: 'whitelist',
+          whitelist: [{ subject_type: 'USER', subject_id: 'u1', include_subtree: false }],
+          visibilityLock: true,
+        },
+      ),
+    )
     renderPage()
     await waitForPageLoaded()
 
@@ -214,13 +226,19 @@ describe('TenantAppDetailPage 可见范围配置', () => {
   })
 
   it('manageable=false（不在管理范围）时整页只读并提示', async () => {
-    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
-      configured: true,
-      visibility: 'all',
-      whitelist: [],
-      visibilityLock: false,
-      manageable: false,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(
+        { requests: [] },
+        {
+          configured: true,
+          visibility: 'all',
+          whitelist: [],
+          visibilityLock: false,
+          manageable: false,
+        },
+      ),
+    )
     renderPage()
     await waitForPageLoaded()
 
@@ -233,20 +251,24 @@ describe('TenantAppDetailPage 可见范围配置', () => {
   })
 
   it('辅助下拉接口 403 不影响编辑态：manageable=true 时仍可保存', async () => {
-    vi.stubGlobal('fetch', mockApi({ requests: [] }, {
-      configured: true,
-      visibility: 'all',
-      whitelist: [],
-      visibilityLock: false,
-      manageable: true,
-      auxForbidden: true,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(
+        { requests: [] },
+        {
+          configured: true,
+          visibility: 'all',
+          whitelist: [],
+          visibilityLock: false,
+          manageable: true,
+          auxForbidden: true,
+        },
+      ),
+    )
     renderPage()
     await waitForPageLoaded()
 
-    expect(
-      screen.queryByText('你不在该应用的管理范围内，当前仅可查看配置'),
-    ).not.toBeInTheDocument()
+    expect(screen.queryByText('你不在该应用的管理范围内，当前仅可查看配置')).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /保\s*存/ })).toBeInTheDocument()
     const radio = screen.getByLabelText('白名单可见') as HTMLInputElement
     expect(radio.disabled).toBe(false)
@@ -254,12 +276,15 @@ describe('TenantAppDetailPage 可见范围配置', () => {
 
   it('白名单保存时 PUT 请求体格式正确', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal('fetch', mockApi(captured, {
-      configured: false,
-      visibility: 'all',
-      whitelist: [],
-      visibilityLock: false,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(captured, {
+        configured: false,
+        visibility: 'all',
+        whitelist: [],
+        visibilityLock: false,
+      }),
+    )
     renderPage()
     await waitForPageLoaded()
 
@@ -270,7 +295,9 @@ describe('TenantAppDetailPage 可见范围配置', () => {
     // 第一行为主体类型选择（默认用户），第二行为用户选择
     const userSelect = comboboxes[1] as HTMLElement
     fireEvent.mouseDown(userSelect)
-    const option = await screen.findByText('李雷（li4lei）', { selector: '.ant-select-item-option-content' })
+    const option = await screen.findByText('李雷（li4lei）', {
+      selector: '.ant-select-item-option-content',
+    })
     fireEvent.click(option)
 
     fireEvent.click(screen.getByRole('button', { name: /保\s*存/ }))
@@ -292,13 +319,16 @@ describe('TenantAppDetailPage 可见范围配置', () => {
 
   it('平台锁定后保存返回 403 时提示锁定文案', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal('fetch', mockApi(captured, {
-      configured: true,
-      visibility: 'all',
-      whitelist: [],
-      visibilityLock: false,
-      putStatus: 403,
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(captured, {
+        configured: true,
+        visibility: 'all',
+        whitelist: [],
+        visibilityLock: false,
+        putStatus: 403,
+      }),
+    )
     renderPage()
     await waitForPageLoaded()
 

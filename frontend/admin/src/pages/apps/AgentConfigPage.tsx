@@ -1,7 +1,20 @@
 // 0074 智能体配置页：表单是画布 agent_loop 节点的视图（画布为唯一事实源）。
 // 覆盖 人设/模型/推理模式/开场白/推荐问题/工具/知识库/短期记忆（M1）
 // + MCP 快照/工作流即工具/Token 预算（0074 PRD F6/F7/F11，M2）。
-import { App, Button, Card, Checkbox, Form, Input, InputNumber, Radio, Select, Space, Switch } from 'antd'
+import {
+  Alert,
+  App,
+  Button,
+  Card,
+  Checkbox,
+  Form,
+  Input,
+  InputNumber,
+  Radio,
+  Select,
+  Space,
+  Switch,
+} from 'antd'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -24,6 +37,8 @@ import { discoverMcpTools, type McpToolSnapshot } from '../../api/mcpConfig'
 const MAX_MCP_SERVERS = 5
 const MAX_MCP_TOOLS_PER_SERVER = 20
 const MAX_WORKFLOWS = 5
+// M4-c F14.1：协作挂载上限（delegate+handoff 合计，与后端 MAX_SUB_AGENTS 同口径）
+const MAX_SUB_AGENTS = 5
 
 // tools 在表单里的编辑形态：parameters 用 JSON 文本承载
 interface ToolRow {
@@ -49,6 +64,8 @@ interface McpServerRow {
   serverUrl?: string
   name?: string
   headersText?: string
+  // M4-b F17.3②：条目级调用超时（秒，1~300；留空=默认 30）
+  timeoutSeconds?: number
   enabledTools?: McpToolSnapshot[]
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   rest?: Record<string, any>
@@ -58,6 +75,14 @@ interface McpServerRow {
 interface WorkflowRow {
   applicationId?: string
   name?: string
+  description?: string
+}
+
+// M4-c F14.1：协作挂载行（mode 单选决定委派/接管；toolName/description 覆盖合成名与描述）
+interface SubAgentRow {
+  applicationId?: string
+  mode?: 'delegate' | 'handoff'
+  toolName?: string
   description?: string
 }
 
@@ -71,9 +96,17 @@ interface AgentConfigValues {
   tools?: ToolRow[]
   datasets?: DatasetRow[]
   mcpServers?: McpServerRow[]
+  // M4-b T-b7：MCP 会话保持档位（run=每次运行独立连接；conversation=会话池复用）
+  mcpSession?: { scope: 'run' | 'conversation' }
   workflows?: WorkflowRow[]
+  // M4-c F14.1：智能体协作挂载（delegate 委派 + handoff 接管，合计上限 5）
+  subAgents?: SubAgentRow[]
   tokenBudget?: number | null
-  memory: { shortTerm: { enabled: boolean; windowTurns: number; tokenBudget: number } }
+  memory: {
+    shortTerm: { enabled: boolean; windowTurns: number; tokenBudget: number }
+    // M4 PRD F16.1：extractModel 用 undefined 表示未设置（antd Select 清空态），提交时转 null
+    longTerm: { enabled: boolean; extractModel?: string; recallTopK: number; maxMemories: number }
+  }
   /** 0074 PRD F10：待人工审批的敏感工具名清单 */
   sensitiveToolNames?: string[]
   /** 0074 PRD F9：视觉开关 */
@@ -91,9 +124,15 @@ function toFormValues(config: AgentConfigForm): AgentConfigValues {
     tools: (config.tools || []).map((tool) => ({
       name: String(tool.name ?? ''),
       description: String(tool.description ?? ''),
-      parametersText: JSON.stringify(tool.parameters ?? { type: 'object', properties: {} }, null, 2),
+      parametersText: JSON.stringify(
+        tool.parameters ?? { type: 'object', properties: {} },
+        null,
+        2,
+      ),
       rest: Object.fromEntries(
-        Object.entries(tool).filter(([key]) => !['name', 'description', 'parameters'].includes(key)),
+        Object.entries(tool).filter(
+          ([key]) => !['name', 'description', 'parameters'].includes(key),
+        ),
       ),
     })),
     datasets: config.datasets,
@@ -101,22 +140,37 @@ function toFormValues(config: AgentConfigForm): AgentConfigValues {
       serverUrl: String(entry.serverUrl ?? ''),
       name: String(entry.name ?? ''),
       headersText: entry.headers ? JSON.stringify(entry.headers, null, 2) : '',
+      timeoutSeconds: typeof entry.timeoutSeconds === 'number' ? entry.timeoutSeconds : undefined,
       enabledTools: Array.isArray(entry.enabledTools)
         ? (entry.enabledTools as McpToolSnapshot[])
         : [],
       rest: Object.fromEntries(
         Object.entries(entry).filter(
-          ([key]) => !['serverUrl', 'name', 'headers', 'enabledTools'].includes(key),
+          ([key]) =>
+            !['serverUrl', 'name', 'headers', 'enabledTools', 'timeoutSeconds'].includes(key),
         ),
       ),
     })),
+    mcpSession: config.mcpSession ?? { scope: 'run' },
     workflows: config.workflows.map((entry) => ({
       applicationId: String(entry.applicationId ?? ''),
       name: String(entry.name ?? ''),
       description: String(entry.description ?? ''),
     })),
+    subAgents: (config.subAgents ?? []).map((entry) => ({
+      applicationId: String(entry.applicationId ?? ''),
+      mode: entry.mode === 'handoff' ? 'handoff' : 'delegate',
+      toolName: String(entry.toolName ?? ''),
+      description: String(entry.description ?? ''),
+    })),
     tokenBudget: config.tokenBudget ?? undefined,
-    memory: { shortTerm: config.memory.shortTerm },
+    memory: {
+      shortTerm: config.memory.shortTerm,
+      longTerm: {
+        ...config.memory.longTerm,
+        extractModel: config.memory.longTerm.extractModel ?? undefined,
+      },
+    },
     sensitiveToolNames: (config.sensitiveTools || [])
       .map((entry) => String((entry as { name?: unknown }).name ?? ''))
       .filter(Boolean),
@@ -150,13 +204,7 @@ function collectCandidateToolNames(
 }
 
 // 单个 MCP server 的编辑卡：discover 拉清单 → 勾选存快照（0074 PRD F6.1/F6.3）
-function McpServerCard({
-  fieldName,
-  onRemove,
-}: {
-  fieldName: number
-  onRemove: () => void
-}) {
+function McpServerCard({ fieldName, onRemove }: { fieldName: number; onRemove: () => void }) {
   const { message } = App.useApp()
   const form = Form.useFormInstance()
   const [discovered, setDiscovered] = useState<McpToolSnapshot[]>([])
@@ -173,7 +221,9 @@ function McpServerCard({
   }, [form, fieldName])
 
   const handleDiscover = useCallback(async () => {
-    const serverUrl = String(form.getFieldValue(['mcpServers', fieldName, 'serverUrl']) || '').trim()
+    const serverUrl = String(
+      form.getFieldValue(['mcpServers', fieldName, 'serverUrl']) || '',
+    ).trim()
     if (!serverUrl) {
       message.warning('请先填写 MCP 服务地址')
       return
@@ -204,7 +254,11 @@ function McpServerCard({
   }, [fieldName, form, message])
 
   const toggleTool = (tool: McpToolSnapshot, checked: boolean) => {
-    const current = enabledTools ?? []
+    // M4-b 冒烟修复：连点时 useWatch 驱动的渲染可能未跟上，闭包值会过期导致
+    // 后一次勾选覆盖前一次结果，改为从 form store 同步读最新值
+    const current =
+      (form.getFieldValue(['mcpServers', fieldName, 'enabledTools']) as
+        McpToolSnapshot[] | undefined) ?? []
     const kept = current.filter((item) => item.name !== tool.name)
     const next = checked ? [...kept, tool] : kept
     if (next.length > MAX_MCP_TOOLS_PER_SERVER) {
@@ -240,6 +294,10 @@ function McpServerCard({
         <Form.Item name={[fieldName, 'name']} noStyle>
           <Input style={{ width: 140 }} placeholder="显示名（可选）" />
         </Form.Item>
+        {/* M4-b F17.3②：条目级调用超时，留空走后端默认 30s（1~300） */}
+        <Form.Item name={[fieldName, 'timeoutSeconds']} noStyle>
+          <InputNumber min={1} max={300} style={{ width: 130 }} placeholder="超时秒（默认30）" />
+        </Form.Item>
         <Button size="small" loading={discovering} onClick={() => void handleDiscover()}>
           发现工具
         </Button>
@@ -250,6 +308,11 @@ function McpServerCard({
         style={{ marginBottom: 8 }}
       >
         <Input.TextArea rows={2} style={{ fontFamily: 'monospace', fontSize: 12 }} />
+      </Form.Item>
+      {/* M4-b 冒烟修复：enabledTools 仅靠 setFieldValue 写入，未注册字段不会出现在
+          validateFields() 返回值里，导致勾选快照保存时丢失，这里显式注册隐藏字段 */}
+      <Form.Item name={[fieldName, 'enabledTools']} hidden>
+        <Input />
       </Form.Item>
       {discovered.length > 0 ? (
         <div style={{ maxHeight: 180, overflow: 'auto' }}>
@@ -269,7 +332,8 @@ function McpServerCard({
         </div>
       ) : (
         <div style={{ color: '#9ca3af', fontSize: 12 }}>
-          点击「发现工具」拉取该 MCP 服务的工具清单后勾选；勾选结果将快照进配置，运行时不再连接发现接口。
+          点击「发现工具」拉取该 MCP
+          服务的工具清单后勾选；勾选结果将快照进配置，运行时不再连接发现接口。
         </div>
       )}
     </Card>
@@ -286,6 +350,8 @@ export default function AgentConfigPage() {
   const [datasets, setDatasets] = useState<DatasetItem[]>([])
   // 0074 PRD F7：可挂载为工具的工作流应用列表（工作流即工具选择器数据源）
   const [workflowApps, setWorkflowApps] = useState<Application[]>([])
+  // M4-c F14.1：协作区候选=已发布的智能体应用（排除自身，后端 validate 同步拒自引用）
+  const [subAgentApps, setSubAgentApps] = useState<Application[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   // 服务端读回的完整配置：保存时透传本期不编辑的扩展键
@@ -296,7 +362,9 @@ export default function AgentConfigPage() {
   const watchedDatasets = Form.useWatch('datasets', form)
   const watchedWorkflows = Form.useWatch('workflows', form)
   const watchedMcp = Form.useWatch('mcpServers', form)
+  const watchedMcpScope = Form.useWatch(['mcpSession', 'scope'], form)
   const watchedModel = Form.useWatch('modleName', form)
+  const watchedLongTerm = Form.useWatch(['memory', 'longTerm', 'enabled'], form)
   const candidateToolNames = useMemo(
     () => collectCandidateToolNames(watchedTools, watchedDatasets, watchedWorkflows, watchedMcp),
     [watchedTools, watchedDatasets, watchedWorkflows, watchedMcp],
@@ -328,6 +396,11 @@ export default function AgentConfigPage() {
         setModels(modelItems)
         setDatasets(datasetItems)
         setWorkflowApps(allApps.filter((a) => a.flow_type === 'workflow' && a.id !== id))
+        setSubAgentApps(
+          allApps.filter(
+            (a) => a.flow_type === 'agent' && a.id !== id && a.published_graph_version != null,
+          ),
+        )
         form.setFieldsValue(toFormValues(config))
       } catch (error) {
         if (alive) message.error(error instanceof Error ? error.message : '加载智能体配置失败')
@@ -390,6 +463,7 @@ export default function AgentConfigPage() {
         serverUrl,
         name: (row.name || '').trim(),
         ...(headers ? { headers } : {}),
+        ...(row.timeoutSeconds != null ? { timeoutSeconds: row.timeoutSeconds } : {}),
         enabledTools: row.enabledTools ?? [],
       })
     }
@@ -399,6 +473,17 @@ export default function AgentConfigPage() {
         applicationId: (entry.applicationId || '').trim(),
         name: entry.name || '',
         description: entry.description || '',
+      }))
+    // M4-c F14.1：协作挂载仅保留已选目标；空覆盖键不写出（后端按缺省口径处理）
+    const subAgents = (values.subAgents || [])
+      .filter((entry) => (entry.applicationId || '').trim())
+      .map((entry) => ({
+        applicationId: (entry.applicationId || '').trim(),
+        mode: entry.mode ?? ('delegate' as const),
+        ...((entry.toolName || '').trim() ? { toolName: (entry.toolName || '').trim() } : {}),
+        ...((entry.description || '').trim()
+          ? { description: (entry.description || '').trim() }
+          : {}),
       }))
     const payload: AgentConfigForm = {
       ...base,
@@ -411,9 +496,20 @@ export default function AgentConfigPage() {
       tools,
       datasets: (values.datasets || []).filter((entry) => entry?.datasetId) as AgentDatasetEntry[],
       mcpServers,
+      mcpSession: { scope: values.mcpSession?.scope ?? 'run' },
       workflows,
+      subAgents,
       tokenBudget: values.tokenBudget ?? null,
-      memory: { shortTerm: { ...base.memory.shortTerm, ...values.memory.shortTerm } },
+      memory: {
+        shortTerm: { ...base.memory.shortTerm, ...values.memory.shortTerm },
+        longTerm: {
+          ...base.memory.longTerm,
+          enabled: values.memory.longTerm.enabled,
+          extractModel: values.memory.longTerm.extractModel || null,
+          recallTopK: values.memory.longTerm.recallTopK,
+          maxMemories: values.memory.longTerm.maxMemories,
+        },
+      },
       // 0074 PRD F10：仅持久化被勾选的敏感工具名（后端节点按 name 集合门控）
       sensitiveTools: (values.sensitiveToolNames || []).map((name) => ({ name })),
       // 0074 PRD F9：视觉开关（模型不支持时强制关闭，防存量配置漂移）
@@ -454,7 +550,12 @@ export default function AgentConfigPage() {
             label="人设"
             rules={[{ required: true, message: '请填写人设（系统提示词）' }]}
           >
-            <Input.TextArea rows={6} maxLength={4000} showCount placeholder="描述角色、能力与边界" />
+            <Input.TextArea
+              rows={6}
+              maxLength={4000}
+              showCount
+              placeholder="描述角色、能力与边界"
+            />
           </Form.Item>
           <Form.Item
             name="modleName"
@@ -489,7 +590,13 @@ export default function AgentConfigPage() {
               label="单轮 Token 预算"
               tooltip="累计（输入+输出）达到预算后不再执行新工具、要求模型收敛作答；留空为不限制"
             >
-              <InputNumber min={1000} max={2000000} step={1000} style={{ width: 140 }} placeholder="不限制" />
+              <InputNumber
+                min={1000}
+                max={2000000}
+                step={1000}
+                style={{ width: 140 }}
+                placeholder="不限制"
+              />
             </Form.Item>
             {/* 0074 PRD F9（M3）：视觉开关，仅所选模型能力支持时可开 */}
             <Form.Item
@@ -517,7 +624,11 @@ export default function AgentConfigPage() {
                   开场问题（最多 4 条）
                 </div>
                 {fields.map((field) => (
-                  <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
+                  <Space
+                    key={field.key}
+                    align="baseline"
+                    style={{ display: 'flex', marginBottom: 8 }}
+                  >
                     <Form.Item name={[field.name]} noStyle>
                       <Input style={{ width: 420 }} maxLength={200} />
                     </Form.Item>
@@ -546,8 +657,16 @@ export default function AgentConfigPage() {
                   </div>
                 )}
                 {fields.map((field) => (
-                  <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
-                    <Form.Item name={[field.name, 'datasetId']} noStyle rules={[{ required: true, message: '选择知识库' }]}>
+                  <Space
+                    key={field.key}
+                    align="baseline"
+                    style={{ display: 'flex', marginBottom: 8 }}
+                  >
+                    <Form.Item
+                      name={[field.name, 'datasetId']}
+                      noStyle
+                      rules={[{ required: true, message: '选择知识库' }]}
+                    >
                       <Select
                         style={{ width: 220 }}
                         placeholder="选择知识库"
@@ -604,6 +723,43 @@ export default function AgentConfigPage() {
               <InputNumber min={500} max={200000} step={500} style={{ width: 140 }} />
             </Form.Item>
           </Space>
+          {/* M4 PRD F16.1：长期记忆跨会话抽取+召回；抽取模型留空跟随智能体主模型 */}
+          <Space size={48} wrap>
+            <Form.Item
+              name={['memory', 'longTerm', 'enabled']}
+              label="长期记忆"
+              valuePropName="checked"
+              tooltip="开启后每轮对话结束异步抽取用户偏好/事实，跨会话按相关度召回注入；用户可在「我的记忆」中查看删除"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item name={['memory', 'longTerm', 'extractModel']} label="抽取模型">
+              <Select
+                allowClear
+                placeholder="跟随主模型"
+                style={{ width: 220 }}
+                disabled={!watchedLongTerm}
+                options={models.map((m) => ({
+                  value: m.model_id,
+                  label: `${m.display_name}（${m.provider_name}）`,
+                }))}
+              />
+            </Form.Item>
+            <Form.Item
+              name={['memory', 'longTerm', 'recallTopK']}
+              label="召回条数"
+              tooltip="单轮注入的最大记忆条数，0~20"
+            >
+              <InputNumber min={0} max={20} disabled={!watchedLongTerm} />
+            </Form.Item>
+            <Form.Item
+              name={['memory', 'longTerm', 'maxMemories']}
+              label="记忆容量上限"
+              tooltip="单用户单应用活跃记忆条数上限，10~2000，超限按创建最早优先归档"
+            >
+              <InputNumber min={10} max={2000} disabled={!watchedLongTerm} style={{ width: 140 }} />
+            </Form.Item>
+          </Space>
         </Card>
 
         <Card title="工具" style={{ marginBottom: 16 }}>
@@ -627,7 +783,11 @@ export default function AgentConfigPage() {
                     }
                   >
                     <Space align="start" style={{ display: 'flex' }}>
-                      <Form.Item name={[field.name, 'name']} noStyle rules={[{ required: true, message: '工具名必填' }]}>
+                      <Form.Item
+                        name={[field.name, 'name']}
+                        noStyle
+                        rules={[{ required: true, message: '工具名必填' }]}
+                      >
                         <Input style={{ width: 200 }} placeholder="工具名（与租户工具目录一致）" />
                       </Form.Item>
                       <Form.Item name={[field.name, 'description']} noStyle>
@@ -685,12 +845,19 @@ export default function AgentConfigPage() {
               <div>
                 {fields.length === 0 && (
                   <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 8 }}>
-                    未挂载工作流。挂载后模型可按 workflow_1、workflow_2… 调用所选工作流，入参即工作流启动参数。
+                    未挂载工作流。挂载后模型可按 workflow_1、workflow_2…
+                    调用所选工作流，入参即工作流启动参数。
                   </div>
                 )}
                 {fields.map((field) => (
-                  <Space key={field.key} align="baseline" style={{ display: 'flex', marginBottom: 8 }}>
-                    <span style={{ color: '#9ca3af', fontSize: 12 }}>workflow_{field.name + 1}</span>
+                  <Space
+                    key={field.key}
+                    align="baseline"
+                    style={{ display: 'flex', marginBottom: 8 }}
+                  >
+                    <span style={{ color: '#9ca3af', fontSize: 12 }}>
+                      workflow_{field.name + 1}
+                    </span>
                     <Form.Item
                       name={[field.name, 'applicationId']}
                       noStyle
@@ -705,12 +872,18 @@ export default function AgentConfigPage() {
                         onChange={(value: string) => {
                           const hit = workflowApps.find((w) => w.id === value)
                           form.setFieldValue(['workflows', field.name, 'name'], hit?.name ?? '')
-                          form.setFieldValue(['workflows', field.name, 'description'], hit?.description ?? '')
+                          form.setFieldValue(
+                            ['workflows', field.name, 'description'],
+                            hit?.description ?? '',
+                          )
                         }}
                       />
                     </Form.Item>
                     <Form.Item name={[field.name, 'description']} noStyle>
-                      <Input style={{ width: 240 }} placeholder="给模型看的说明（默认取应用描述）" />
+                      <Input
+                        style={{ width: 240 }}
+                        placeholder="给模型看的说明（默认取应用描述）"
+                      />
                     </Form.Item>
                     <Button type="text" danger onClick={() => remove(field.name)}>
                       删除
@@ -718,12 +891,98 @@ export default function AgentConfigPage() {
                   </Space>
                 ))}
                 {fields.length < MAX_WORKFLOWS && (
-                  <Button type="dashed" onClick={() => add({ applicationId: '', name: '', description: '' })}>
+                  <Button
+                    type="dashed"
+                    onClick={() => add({ applicationId: '', name: '', description: '' })}
+                  >
                     + 挂载工作流
                   </Button>
                 )}
                 <div style={{ marginTop: 8, color: '#9ca3af', fontSize: 12 }}>
                   运行禁止循环挂载（含跨应用成环）与超过 3 层嵌套；被挂工作流需对当前用户可见。
+                </div>
+              </div>
+            )}
+          </Form.List>
+        </Card>
+
+        {/* M4-c PRD F14.1：智能体协作。delegate=工具化委派（agent_ 合成工具）；
+            handoff=接管式移交（发言权转移，运行内核接入后生效） */}
+        <Card title="智能体协作" style={{ marginBottom: 16 }}>
+          <Form.List name="subAgents">
+            {(fields, { add, remove }) => (
+              <div>
+                {fields.length === 0 && (
+                  <div style={{ color: '#9ca3af', fontSize: 13, marginBottom: 8 }}>
+                    未挂载协作智能体。委派模式让模型按 agent_ 工具把问题交给专家；
+                    接管模式将后续对话发言权移交给专家。
+                  </div>
+                )}
+                {fields.map((field) => (
+                  <div key={field.key} style={{ marginBottom: 8 }}>
+                    <Space align="baseline" style={{ display: 'flex' }}>
+                      <Form.Item
+                        name={[field.name, 'applicationId']}
+                        noStyle
+                        rules={[{ required: true, message: '选择智能体' }]}
+                      >
+                        <Select
+                          style={{ width: 240 }}
+                          placeholder="选择已发布的智能体"
+                          showSearch
+                          optionFilterProp="label"
+                          options={subAgentApps.map((a) => ({ value: a.id, label: a.name }))}
+                          onChange={(value: string) => {
+                            const hit = subAgentApps.find((a) => a.id === value)
+                            if (
+                              hit &&
+                              !(
+                                form.getFieldValue(['subAgents', field.name, 'description']) || ''
+                              ).trim()
+                            ) {
+                              form.setFieldValue(
+                                ['subAgents', field.name, 'description'],
+                                hit.description ?? '',
+                              )
+                            }
+                          }}
+                        />
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'mode']} noStyle initialValue="delegate">
+                        <Radio.Group>
+                          <Radio value="delegate">委派</Radio>
+                          <Radio value="handoff">接管</Radio>
+                        </Radio.Group>
+                      </Form.Item>
+                      <Form.Item name={[field.name, 'toolName']} noStyle>
+                        <Input style={{ width: 160 }} placeholder="工具名覆盖（可选）" />
+                      </Form.Item>
+                      <Button type="text" danger onClick={() => remove(field.name)}>
+                        删除
+                      </Button>
+                    </Space>
+                    <Form.Item name={[field.name, 'description']} noStyle>
+                      <Input
+                        style={{ width: 520, marginTop: 4 }}
+                        placeholder="给模型看的专长描述（默认取应用描述）"
+                      />
+                    </Form.Item>
+                  </div>
+                ))}
+                {fields.length < MAX_SUB_AGENTS && (
+                  <Button
+                    type="dashed"
+                    onClick={() =>
+                      add({ applicationId: '', mode: 'delegate', toolName: '', description: '' })
+                    }
+                  >
+                    + 挂载协作智能体
+                  </Button>
+                )}
+                <div style={{ marginTop: 8, color: '#9ca3af', fontSize: 12 }}>
+                  委派与接管合计最多 5 个；不能挂载自身。委派链与工作流共用防环预算 （禁成环、嵌套
+                  ≤3 层）；目标须已发布并对当前用户可见，否则运行期自动跳过。
+                  接管模式在智能体内核接入移交能力后生效。
                 </div>
               </div>
             )}
@@ -750,7 +1009,9 @@ export default function AgentConfigPage() {
                 {fields.length < MAX_MCP_SERVERS && (
                   <Button
                     type="dashed"
-                    onClick={() => add({ serverUrl: '', name: '', headersText: '', enabledTools: [] })}
+                    onClick={() =>
+                      add({ serverUrl: '', name: '', headersText: '', enabledTools: [] })
+                    }
                   >
                     + 添加 MCP 服务
                   </Button>
@@ -758,6 +1019,32 @@ export default function AgentConfigPage() {
               </div>
             )}
           </Form.List>
+
+          {/* M4-b T-b7 / F17.4：MCP 会话保持档位（应用级，作用于所有 MCP server）。
+              run=每次运行按 (url,headers) 指纹建独立会话并在出口关闭；
+              conversation=进程内会话池跨运行复用，受多 worker 粘性部署前提约束（R13）。 */}
+          <div style={{ marginTop: 16, paddingTop: 12, borderTop: '1px solid #f0f0f0' }}>
+            <Form.Item
+              label="会话保持档位"
+              name={['mcpSession', 'scope']}
+              initialValue="run"
+              tooltip="run：每次运行独立建连、结束即关；conversation：同一会话内多次运行复用连接池，降低握手开销"
+              style={{ marginBottom: watchedMcpScope === 'conversation' ? 8 : 0 }}
+            >
+              <Radio.Group>
+                <Radio value="run">按运行（默认，独立连接）</Radio>
+                <Radio value="conversation">按会话（连接池复用）</Radio>
+              </Radio.Group>
+            </Form.Item>
+            {watchedMcpScope === 'conversation' && (
+              <Alert
+                type="warning"
+                showIcon
+                message="按会话档位依赖多 worker 粘性部署"
+                description="会话连接池为进程内缓存，负载均衡需将同一会话的请求路由到同一 worker，否则未命中进程会退化为一次新握手（不影响正确性，仅失去复用收益）。详见部署文档。"
+              />
+            )}
+          </div>
         </Card>
       </Form>
     </div>

@@ -125,12 +125,18 @@ class QueryConversationListNodeHandler(NodeHandler):
             app_id=_parse_uuid(_pick(ctx, "app_id")),
             limit=int(_pick(ctx, "limit", 20) or 20),
         )
-        return NodeResult(outputs={
-            "conversations": [
-                {"id": str(c.conversation_id), "title": c.title, "updated_at": c.updated_at.isoformat()}
-                for c in convs
-            ],
-        })
+        return NodeResult(
+            outputs={
+                "conversations": [
+                    {
+                        "id": str(c.conversation_id),
+                        "title": c.title,
+                        "updated_at": c.updated_at.isoformat(),
+                    }
+                    for c in convs
+                ],
+            }
+        )
 
 
 class QueryConversationHistoryNodeHandler(NodeHandler):
@@ -147,14 +153,17 @@ class QueryConversationHistoryNodeHandler(NodeHandler):
             return NodeResult(outputs={"messages": []})
 
         messages = await ctx.services.get("message_repo").list_by_conversation(
-            conv_id, limit=int(_pick(ctx, "limit", 100) or 100),
+            conv_id,
+            limit=int(_pick(ctx, "limit", 100) or 100),
         )
-        return NodeResult(outputs={
-            "messages": [
-                {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
-                for m in messages
-            ],
-        })
+        return NodeResult(
+            outputs={
+                "messages": [
+                    {"role": m.role, "content": m.content, "created_at": m.created_at.isoformat()}
+                    for m in messages
+                ],
+            }
+        )
 
 
 class QueryMessageListNodeHandler(NodeHandler):
@@ -165,14 +174,20 @@ class QueryMessageListNodeHandler(NodeHandler):
     async def run(self, ctx: NodeContext) -> NodeResult:
         conv_id = _parse_uuid(_pick(ctx, "conversation_id")) or ctx.env.conversation_id
         if not conv_id or not ctx.services.has("message_repo"):
-            return NodeResult(outputs={
-                "messageList": [], "firstId": "", "lastId": "", "hasMore": False,
-            })
+            return NodeResult(
+                outputs={
+                    "messageList": [],
+                    "firstId": "",
+                    "lastId": "",
+                    "hasMore": False,
+                }
+            )
 
         limit = max(1, int(_pick(ctx, "limit", 20) or 20))
         # 游标切片需要更完整的历史，先按仓储上限拉取；单会话消息量级可控
         messages = await ctx.services.get("message_repo").list_by_conversation(
-            conv_id, limit=max(limit, 100),
+            conv_id,
+            limit=max(limit, 100),
         )
         rows = [
             {
@@ -193,15 +208,17 @@ class QueryMessageListNodeHandler(NodeHandler):
         if after_id:
             index = next((i for i, r in enumerate(rows) if r["messageId"] == after_id), None)
             if index is not None:
-                rows = rows[index + 1:]
+                rows = rows[index + 1 :]
 
         page = rows[:limit]
-        return NodeResult(outputs={
-            "messageList": page,
-            "firstId": page[0]["messageId"] if page else "",
-            "lastId": page[-1]["messageId"] if page else "",
-            "hasMore": len(rows) > len(page),
-        })
+        return NodeResult(
+            outputs={
+                "messageList": page,
+                "firstId": page[0]["messageId"] if page else "",
+                "lastId": page[-1]["messageId"] if page else "",
+                "hasMore": len(rows) > len(page),
+            }
+        )
 
 
 class CreateMessageNodeHandler(NodeHandler):
@@ -259,6 +276,9 @@ class ClearContextNodeHandler(NodeHandler):
         conv_id = _parse_uuid(_pick(ctx, "conversation_id")) or ctx.env.conversation_id
         if conv_id and ctx.services.has("message_repo"):
             await ctx.services.get("message_repo").clear(conv_id)
+        # M4 PRD F15.7：清空上下文必须同步失效摘要与水位线，否则清完仍带着旧摘要对话
+        if conv_id and ctx.services.has("conversation_repo"):
+            await ctx.services.get("conversation_repo").clear_summary(conv_id)
         return NodeResult(outputs={"success": True})
 
 

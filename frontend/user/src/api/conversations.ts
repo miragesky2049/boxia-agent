@@ -5,6 +5,9 @@ export interface ConversationSummary {
   title: string
   created_at: string | null
   updated_at: string | null
+  /** M4 PRD F14.10：接管中透出发言权应用（additive，不在接管中无此两键） */
+  active_application_id?: string
+  active_application?: string
 }
 
 export interface ConversationMessage {
@@ -17,6 +20,10 @@ export interface ConversationMessage {
     arguments?: string
   }>
   created_at: string | null
+  /** M4 PRD F14.10：消息归属应用（应答徽标判定 ≠ 会话归属应用） */
+  application_id?: string | null
+  /** M4 PRD F14.11：system 行仅放行 handoff_notice 通告形态（历史回放气泡） */
+  kind?: string
 }
 
 export async function listConversations(

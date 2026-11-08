@@ -1,7 +1,17 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
-  Button, Drawer, Empty, Input, Select, Space, Tabs, Tag, Tree, Typography, message,
-} from 'antd';
+  Button,
+  Drawer,
+  Empty,
+  Input,
+  Select,
+  Space,
+  Tabs,
+  Tag,
+  Tree,
+  Typography,
+  message,
+} from 'antd'
 import {
   getAppVariables,
   getUserVariables,
@@ -12,9 +22,9 @@ import {
   type AppVariableType,
   type FlowType,
   type SystemVariable,
-} from '../../../api/apps';
-import type { NodeMeta } from '../../../api/nodeMeta';
-import { listStartInputParams } from '../canvas/metadata/chatflowStart';
+} from '../../../api/apps'
+import type { NodeMeta } from '../../../api/nodeMeta'
+import { listStartInputParams } from '../canvas/metadata/chatflowStart'
 
 const VARIABLE_TYPE_OPTIONS: Array<{ value: AppVariableType; label: string }> = [
   { value: 'string', label: 'String' },
@@ -22,48 +32,48 @@ const VARIABLE_TYPE_OPTIONS: Array<{ value: AppVariableType; label: string }> = 
   { value: 'boolean', label: 'Boolean' },
   { value: 'object', label: 'Object' },
   { value: 'array', label: 'Array' },
-];
+]
 
 const SCOPE_OPTIONS: Array<{ value: AppVariableScope; label: string }> = [
   { value: 'app', label: '应用变量' },
   { value: 'user', label: '用户变量' },
-];
+]
 
 function defaultToText(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value === 'object') return JSON.stringify(value);
-  return String(value);
+  if (value === null || value === undefined) return ''
+  if (typeof value === 'object') return JSON.stringify(value)
+  return String(value)
 }
 
 function textToDefault(text: string, type: AppVariableType): unknown {
   if (type === 'number') {
-    const num = Number(text);
-    return Number.isFinite(num) ? num : 0;
+    const num = Number(text)
+    return Number.isFinite(num) ? num : 0
   }
-  if (type === 'boolean') return text === 'true';
+  if (type === 'boolean') return text === 'true'
   if (type === 'object' || type === 'array') {
-    if (!text.trim()) return type === 'array' ? [] : {};
+    if (!text.trim()) return type === 'array' ? [] : {}
     try {
-      return JSON.parse(text);
+      return JSON.parse(text)
     } catch {
-      return type === 'array' ? [] : {};
+      return type === 'array' ? [] : {}
     }
   }
-  return text;
+  return text
 }
 
 interface VariablesDrawerProps {
-  open: boolean;
-  onClose: () => void;
-  applicationId?: string;
+  open: boolean
+  onClose: () => void
+  applicationId?: string
   nodes: Array<{
-    id: string;
-    typeKey: string;
-    title: string;
-    config?: Record<string, any>;
-  }>;
-  keyToMeta: Record<string, NodeMeta>;
-  flowType?: FlowType;
+    id: string
+    typeKey: string
+    title: string
+    config?: Record<string, any>
+  }>
+  keyToMeta: Record<string, NodeMeta>
+  flowType?: FlowType
 }
 
 // 变量抽屉（U-L2）：应用变量 / 用户变量 / 系统变量 / 节点输出
@@ -75,109 +85,120 @@ export function VariablesDrawer({
   keyToMeta,
   flowType = 'workflow',
 }: VariablesDrawerProps) {
-  const [definitions, setDefinitions] = useState<AppVariable[]>([]);
-  const [systemVars, setSystemVars] = useState<SystemVariable[]>([]);
-  const [userValues, setUserValues] = useState<Record<string, unknown>>({});
-  const [loading, setLoading] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [savingUser, setSavingUser] = useState(false);
+  const [definitions, setDefinitions] = useState<AppVariable[]>([])
+  const [systemVars, setSystemVars] = useState<SystemVariable[]>([])
+  const [userValues, setUserValues] = useState<Record<string, unknown>>({})
+  const [loading, setLoading] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [savingUser, setSavingUser] = useState(false)
 
   const load = useCallback(async () => {
-    if (!applicationId) return;
-    setLoading(true);
+    if (!applicationId) return
+    setLoading(true)
     try {
-      const data = await getAppVariables(applicationId);
-      setDefinitions(data.variables ?? []);
-      setSystemVars(data.system ?? []);
+      const data = await getAppVariables(applicationId)
+      setDefinitions(data.variables ?? [])
+      setSystemVars(data.system ?? [])
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '加载变量失败');
+      message.error(err instanceof Error ? err.message : '加载变量失败')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  }, [applicationId]);
+  }, [applicationId])
 
   useEffect(() => {
-    if (open) load();
-  }, [open, load]);
+    if (open) load()
+  }, [open, load])
 
   const loadUserValues = useCallback(async () => {
-    if (!applicationId) return;
+    if (!applicationId) return
     try {
-      setUserValues(await getUserVariables(applicationId));
+      setUserValues(await getUserVariables(applicationId))
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '加载用户变量失败');
+      message.error(err instanceof Error ? err.message : '加载用户变量失败')
     }
-  }, [applicationId]);
+  }, [applicationId])
 
   const updateDefinition = (idx: number, patch: Partial<AppVariable>) => {
-    setDefinitions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)));
-  };
+    setDefinitions((prev) => prev.map((item, i) => (i === idx ? { ...item, ...patch } : item)))
+  }
 
   const handleSave = async () => {
-    if (!applicationId) return;
-    setSaving(true);
+    if (!applicationId) return
+    setSaving(true)
     try {
-      const data = await saveAppVariables(applicationId, definitions);
-      setDefinitions(data.variables ?? []);
-      setSystemVars(data.system ?? []);
-      message.success('变量定义已保存');
+      const data = await saveAppVariables(applicationId, definitions)
+      setDefinitions(data.variables ?? [])
+      setSystemVars(data.system ?? [])
+      message.success('变量定义已保存')
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存变量失败');
+      message.error(err instanceof Error ? err.message : '保存变量失败')
     } finally {
-      setSaving(false);
+      setSaving(false)
     }
-  };
+  }
 
   const handleSaveUserValues = async () => {
-    if (!applicationId) return;
-    setSavingUser(true);
+    if (!applicationId) return
+    setSavingUser(true)
     try {
-      const values = await saveUserVariables(applicationId, userValues);
-      setUserValues(values);
-      message.success('当前用户变量取值已保存');
+      const values = await saveUserVariables(applicationId, userValues)
+      setUserValues(values)
+      message.success('当前用户变量取值已保存')
     } catch (err) {
-      message.error(err instanceof Error ? err.message : '保存用户变量取值失败');
+      message.error(err instanceof Error ? err.message : '保存用户变量取值失败')
     } finally {
-      setSavingUser(false);
+      setSavingUser(false)
     }
-  };
+  }
 
   const userDefinitions = useMemo(
     () => definitions.filter((item) => item.scope === 'user'),
     [definitions],
-  );
+  )
 
   const outputTreeData = useMemo(() => {
-    if (nodes.length === 0) return [];
+    if (nodes.length === 0) return []
     return nodes.map((node) => {
-      const meta = keyToMeta[node.typeKey];
+      const meta = keyToMeta[node.typeKey]
       const outputs = (meta?.outputs || []).map((p) => ({
         key: `${node.id}.output.${p.name}`,
         title: (
           <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-            <code style={{ fontSize: 11, background: '#f3f4f6', padding: '0 4px', borderRadius: 3 }}>
+            <code
+              style={{ fontSize: 11, background: '#f3f4f6', padding: '0 4px', borderRadius: 3 }}
+            >
               {p.name}
             </code>
             <span style={{ color: '#9ca3af', fontSize: 11 }}>{p.label || ''}</span>
           </span>
         ),
         isLeaf: true,
-      }));
+      }))
       const startInputs =
         node.typeKey === 'start'
           ? listStartInputParams(node.config?.inputs, flowType).map((inp) => ({
               key: `${node.id}.output.${inp.name}`,
               title: (
                 <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>入参</Tag>
-                  <code style={{ fontSize: 11, background: '#f3f4f6', padding: '0 4px', borderRadius: 3 }}>
+                  <Tag color="blue" style={{ fontSize: 10, margin: 0 }}>
+                    入参
+                  </Tag>
+                  <code
+                    style={{
+                      fontSize: 11,
+                      background: '#f3f4f6',
+                      padding: '0 4px',
+                      borderRadius: 3,
+                    }}
+                  >
                     {inp.name}
                   </code>
                 </span>
               ),
               isLeaf: true,
             }))
-          : [];
+          : []
       return {
         key: node.id,
         title: (
@@ -189,20 +210,14 @@ export function VariablesDrawer({
           </span>
         ),
         children: [...outputs, ...startInputs],
-      };
-    });
-  }, [nodes, keyToMeta, flowType]);
+      }
+    })
+  }, [nodes, keyToMeta, flowType])
 
-  const noApplication = !applicationId;
+  const noApplication = !applicationId
 
   return (
-    <Drawer
-      title="变量"
-      open={open}
-      onClose={onClose}
-      width="min(460px, 92vw)"
-      placement="right"
-    >
+    <Drawer title="变量" open={open} onClose={onClose} width="min(460px, 92vw)" placement="right">
       {noApplication ? (
         <Empty description="请先保存应用后再配置变量" />
       ) : (
@@ -214,8 +229,8 @@ export function VariablesDrawer({
               children: (
                 <Space direction="vertical" style={{ width: '100%' }} size={10}>
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                    应用变量每次运行按默认值初始化；用户变量按当前用户持久化取值。
-                    引用方式：{'{{variables.变量名}}'}
+                    应用变量每次运行按默认值初始化；用户变量按当前用户持久化取值。 引用方式：
+                    {'{{variables.变量名}}'}
                   </Typography.Text>
                   {definitions.length === 0 && (
                     <div style={{ fontSize: 12, color: '#999' }}>暂无变量，点击下方按钮添加</div>
@@ -224,9 +239,13 @@ export function VariablesDrawer({
                     <div
                       key={idx}
                       style={{
-                        border: '1px solid #f0f0f0', borderRadius: 6,
-                        padding: 8, background: '#fafafa',
-                        display: 'flex', flexDirection: 'column', gap: 6,
+                        border: '1px solid #f0f0f0',
+                        borderRadius: 6,
+                        padding: 8,
+                        background: '#fafafa',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 6,
                       }}
                     >
                       <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -267,7 +286,9 @@ export function VariablesDrawer({
                           placeholder="默认值"
                           value={defaultToText(item.default)}
                           onChange={(e) =>
-                            updateDefinition(idx, { default: textToDefault(e.target.value, item.type) })
+                            updateDefinition(idx, {
+                              default: textToDefault(e.target.value, item.type),
+                            })
                           }
                         />
                         <Input
@@ -293,7 +314,12 @@ export function VariablesDrawer({
                     >
                       + 添加变量
                     </Button>
-                    <Button size="small" type="primary" loading={saving || loading} onClick={handleSave}>
+                    <Button
+                      size="small"
+                      type="primary"
+                      loading={saving || loading}
+                      onClick={handleSave}
+                    >
                       保存定义
                     </Button>
                   </div>
@@ -313,8 +339,13 @@ export function VariablesDrawer({
                   ) : (
                     <>
                       {userDefinitions.map((item) => (
-                        <div key={item.name} style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                          <span style={{ width: 120, fontSize: 12, color: '#6b7280' }}>{item.name}</span>
+                        <div
+                          key={item.name}
+                          style={{ display: 'flex', gap: 8, alignItems: 'center' }}
+                        >
+                          <span style={{ width: 120, fontSize: 12, color: '#6b7280' }}>
+                            {item.name}
+                          </span>
                           <Input
                             size="small"
                             style={{ flex: 1 }}
@@ -330,8 +361,15 @@ export function VariablesDrawer({
                         </div>
                       ))}
                       <div style={{ display: 'flex', gap: 8 }}>
-                        <Button size="small" onClick={loadUserValues}>加载当前值</Button>
-                        <Button size="small" type="primary" loading={savingUser} onClick={handleSaveUserValues}>
+                        <Button size="small" onClick={loadUserValues}>
+                          加载当前值
+                        </Button>
+                        <Button
+                          size="small"
+                          type="primary"
+                          loading={savingUser}
+                          onClick={handleSaveUserValues}
+                        >
                           保存取值
                         </Button>
                       </div>
@@ -348,21 +386,36 @@ export function VariablesDrawer({
                   <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                     系统变量由运行入口注入，只读。引用方式：{'{{system.变量名}}'}
                   </Typography.Text>
-                  {(systemVars.length > 0 ? systemVars : fallbackSystemVars(flowType)).map((item) => (
-                    <div
-                      key={item.name}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8,
-                        padding: '6px 8px', background: '#f9fafb', borderRadius: 6,
-                      }}
-                    >
-                      <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>系统</Tag>
-                      <code style={{ fontSize: 11, background: '#f3f4f6', padding: '0 4px', borderRadius: 3 }}>
-                        {item.name}
-                      </code>
-                      <span style={{ color: '#9ca3af', fontSize: 11 }}>{item.label}</span>
-                    </div>
-                  ))}
+                  {(systemVars.length > 0 ? systemVars : fallbackSystemVars(flowType)).map(
+                    (item) => (
+                      <div
+                        key={item.name}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 8,
+                          padding: '6px 8px',
+                          background: '#f9fafb',
+                          borderRadius: 6,
+                        }}
+                      >
+                        <Tag color="purple" style={{ fontSize: 10, margin: 0 }}>
+                          系统
+                        </Tag>
+                        <code
+                          style={{
+                            fontSize: 11,
+                            background: '#f3f4f6',
+                            padding: '0 4px',
+                            borderRadius: 3,
+                          }}
+                        >
+                          {item.name}
+                        </code>
+                        <span style={{ color: '#9ca3af', fontSize: 11 }}>{item.label}</span>
+                      </div>
+                    ),
+                  )}
                 </Space>
               ),
             },
@@ -384,9 +437,9 @@ export function VariablesDrawer({
                       treeData={outputTreeData as any}
                       defaultExpandAll
                       onSelect={(keys) => {
-                        const key = keys[0];
+                        const key = keys[0]
                         if (typeof key === 'string' && key.includes('.output.')) {
-                          navigator.clipboard?.writeText(`{{${key}}}`).catch(() => {});
+                          navigator.clipboard?.writeText(`{{${key}}}`).catch(() => {})
                         }
                       }}
                     />
@@ -398,7 +451,7 @@ export function VariablesDrawer({
         />
       )}
     </Drawer>
-  );
+  )
 }
 
 // 后端 system 列表为空时的本地兜底（例如接口不可达）
@@ -406,14 +459,14 @@ function fallbackSystemVars(flowType: FlowType): SystemVariable[] {
   const common: SystemVariable[] = [
     { name: 'USER_ID', label: '当前用户 ID' },
     { name: 'RUN_ID', label: '本次运行 ID' },
-  ];
+  ]
   if (flowType === 'chatflow') {
     return [
       { name: 'USER_INPUT', label: '本轮用户输入' },
       { name: 'CONVERSATION_NAME', label: '会话名称' },
       { name: 'CONVERSATION_ID', label: '会话 ID' },
       ...common,
-    ];
+    ]
   }
-  return common;
+  return common
 }

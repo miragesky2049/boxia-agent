@@ -14,10 +14,11 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from typing import Any
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 from internal.infrastructure.id.uuid7 import new_uuid
@@ -94,11 +95,26 @@ class RunRepository:
             {"id": run_id, "payload": json.dumps(payload)},
         )
 
+    def merge_run_output(self, run_id: UUID, patch: dict[str, Any]) -> bool:
+        """run.output 顶层键 JSONB 合并（M4 PRD F16.7：轮后异步产物回写观测计数）。
+
+        仅追加/覆盖 patch 内的顶层键，不动既有 output 其余内容；run 不存在返回 False。
+        """
+        result = self._session.execute(
+            text(
+                "UPDATE run SET output = COALESCE(output, '{}'::jsonb) "
+                "|| CAST(:patch AS JSONB) WHERE id = :id"
+            ),
+            {"id": run_id, "patch": json.dumps(patch)},
+        )
+        return cast("CursorResult[Any]", result).rowcount > 0
+
     def get_run(self, run_id: UUID) -> dict | None:
         row = self._session.execute(
             text(
                 "SELECT id, tenant_id, workflow_id, user_id, input, output, execute_status, error_message, "
-                "thread_id, interrupt_payload, parent_run_id, started_at, finished_at FROM run WHERE id = :id"
+                "thread_id, interrupt_payload, parent_run_id, graph_snapshot, started_at, finished_at "
+                "FROM run WHERE id = :id"
             ),
             {"id": run_id},
         ).first()
@@ -120,6 +136,24 @@ class RunRepository:
                 "ORDER BY started_at DESC LIMIT 1"
             ),
             {"tid": tenant_id, "wid": workflow_id, "thread": thread_id},
+        ).first()
+        return dict(row._mapping) if row else None
+
+    def get_running_by_thread_any_app(self, tenant_id: UUID, thread_id: str) -> dict | None:
+        """按 thread 定位未结束 run（不限应用）——M4 PRD R21 resume 护栏。
+
+        接管轮的审批快照 run 归目标应用，而 resume 请求 URL 恒为会话归属应用；
+        thread 含会话 id 天然不跨会话，仅在同一会话的子线程形态上兜底二次定位，
+        快照续跑的应用归属取自 run 行自身（workflow_id），绝不参考 active 路由。
+        """
+        row = self._session.execute(
+            text(
+                "SELECT id, workflow_id, execute_status, interrupt_payload FROM run "
+                "WHERE tenant_id = :tid AND thread_id = :thread "
+                "AND execute_status IN ('running', 'interrupted') "
+                "ORDER BY started_at DESC LIMIT 1"
+            ),
+            {"tid": tenant_id, "thread": thread_id},
         ).first()
         return dict(row._mapping) if row else None
 

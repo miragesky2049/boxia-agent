@@ -42,7 +42,9 @@ class FakeAppRepo:
     def get_graph_version(self, application_id, version):
         return self.versions.get((str(application_id), version))
 
-    def insert_graph_version(self, application_id, version, graph, runtime_mode, changelog="", created_by=None):
+    def insert_graph_version(
+        self, application_id, version, graph, runtime_mode, changelog="", created_by=None
+    ):
         app_id = str(application_id)
         self.versions[(app_id, version)] = {
             "id": uuid4(),
@@ -86,8 +88,10 @@ class FakeModelRepo:
         self._model_ids = model_ids
 
     def list_catalog(self) -> list[dict]:
-        return [{"model_id": m, "display_name": m, "capabilities": {}, "provider_name": "deepseek"}
-                for m in self._model_ids]
+        return [
+            {"model_id": m, "display_name": m, "capabilities": {}, "provider_name": "deepseek"}
+            for m in self._model_ids
+        ]
 
 
 def _make_service(model_repo: object | None = None) -> tuple[ApplicationService, UUID, FakeAppRepo]:
@@ -100,7 +104,11 @@ def _make_service(model_repo: object | None = None) -> tuple[ApplicationService,
     repo = FakeAppRepo()
     # DDD 四期：fake 仓储改由构造参数注入
     service = ApplicationService(
-        uow, repo, cache=cache, object_storage=None, default_llm_model_id="test-model",
+        uow,
+        repo,
+        cache=cache,
+        object_storage=None,
+        default_llm_model_id="test-model",
         model_repo=model_repo,
     )
     app_id = uuid4()
@@ -159,14 +167,32 @@ def test_publish_without_graph_raises():
 
 def _save_agent_draft(service: ApplicationService, app_id: UUID, model_id: str) -> int:
     """start→agent 两节点画布（coze 数字形态），agent 节点绑定指定模型。"""
-    graph = {"nodes": [
-        {"id": "start_1", "type": "1", "data": {"inputs": {"inputParameters": []}, "outputs": [],
-         "nodeMeta": {"title": "开始"}}},
-        {"id": "agent_1", "type": "100", "data": {"inputs": {
-            "modleName": {"value": {"type": "literal", "content": model_id}},
-            "systemPrompt": {"value": {"type": "literal", "content": "S"}},
-        }, "outputs": [], "nodeMeta": {"title": "Agent"}}},
-    ], "edges": []}
+    graph = {
+        "nodes": [
+            {
+                "id": "start_1",
+                "type": "1",
+                "data": {
+                    "inputs": {"inputParameters": []},
+                    "outputs": [],
+                    "nodeMeta": {"title": "开始"},
+                },
+            },
+            {
+                "id": "agent_1",
+                "type": "100",
+                "data": {
+                    "inputs": {
+                        "modleName": {"value": {"type": "literal", "content": model_id}},
+                        "systemPrompt": {"value": {"type": "literal", "content": "S"}},
+                    },
+                    "outputs": [],
+                    "nodeMeta": {"title": "Agent"},
+                },
+            },
+        ],
+        "edges": [],
+    }
     return service.save_graph(app_id, graph, changelog="agent draft")["version"]
 
 

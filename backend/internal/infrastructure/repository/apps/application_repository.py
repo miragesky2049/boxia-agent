@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime
 from typing import Any
 from uuid import UUID
 
@@ -127,10 +128,7 @@ class ApplicationRepository:
 
     def set_enabled(self, application_id: UUID, enabled: bool) -> None:
         self._session.execute(
-            text(
-                "UPDATE application SET is_enabled = :enabled, updated_at = NOW() "
-                "WHERE id = :id"
-            ),
+            text("UPDATE application SET is_enabled = :enabled, updated_at = NOW() WHERE id = :id"),
             {"enabled": enabled, "id": application_id},
         )
 
@@ -326,9 +324,7 @@ class ApplicationRepository:
                 "visibility_lock": r._mapping["visibility_lock"],
                 "visibility_template": r._mapping["visibility_template"],
                 "admin_scope_mode": r._mapping["admin_scope_mode"],
-                "created_by": (
-                    str(r._mapping["created_by"]) if r._mapping["created_by"] else None
-                ),
+                "created_by": (str(r._mapping["created_by"]) if r._mapping["created_by"] else None),
                 "configured": r._mapping["configured"],
                 "visibility": r._mapping["visibility"],
                 "whitelist_count": int(r._mapping["whitelist_count"]),
@@ -357,7 +353,10 @@ class ApplicationRepository:
                 "UPDATE application SET variables = CAST(:variables AS JSONB), updated_at = NOW() "
                 "WHERE id = :aid"
             ),
-            {"aid": application_id, "variables": json.dumps(variables, ensure_ascii=False, default=str)},
+            {
+                "aid": application_id,
+                "variables": json.dumps(variables, ensure_ascii=False, default=str),
+            },
         )
 
     def get_user_variables(self, application_id: UUID, user_id: UUID) -> dict[str, Any]:
@@ -425,11 +424,13 @@ class ApplicationRepository:
         owner_type: str | None = None,
         owner_id: UUID | None = None,
         include_marketplace_only: bool = False,
+        flow_type: str | None = None,
+        published_only: bool = False,
     ) -> list[dict]:
         sql = (
             "SELECT id, owner_type, owner_id, name, avatar_url, description, is_enabled, "
             "is_listed_in_market, flow_type, visibility_lock, visibility_template, "
-            "admin_scope_mode, created_at, updated_at FROM application"
+            "admin_scope_mode, published_graph_version, created_at, updated_at FROM application"
         )
         conditions: list[str] = []
         params: dict[str, Any] = {}
@@ -441,6 +442,11 @@ class ApplicationRepository:
             params["owner_id"] = owner_id
         if include_marketplace_only:
             conditions.append("is_listed_in_market = true")
+        if flow_type:
+            conditions.append("flow_type = :flow_type")
+            params["flow_type"] = flow_type
+        if published_only:
+            conditions.append("published_graph_version IS NOT NULL")
         if conditions:
             sql += " WHERE " + " AND ".join(conditions)
         sql += " ORDER BY updated_at DESC"
@@ -986,4 +992,3 @@ class ApplicationRepository:
             },
         )
         return vid
-

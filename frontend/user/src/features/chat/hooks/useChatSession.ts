@@ -16,6 +16,7 @@ import {
 } from '../../../api/conversations'
 import { chatReducer, initialChatState, type ChatAction } from '../state/chatReducer'
 import type {
+  ActiveHandoff,
   ApprovalSpec,
   ChatMessage,
   ConversationItem,
@@ -25,6 +26,16 @@ import type {
   SourceChunk,
   ToolTrace,
 } from '../types'
+
+/** M4 PRD F14.10：SSE handoff 帧载荷（移交/归位两用，returned 区分） */
+type HandoffFrame = Extract<AgentStreamEvent, { event: 'handoff' }>['data']
+
+// 通告文案与后端 chat_service system 行逐字一致，保证 live 帧与历史回放渲染同一气泡
+function handoffNoticeText(frame: Pick<HandoffFrame, 'display_name' | 'returned'>): string {
+  return frame.returned
+    ? `接管已结束，会话已归位主助手「${frame.display_name}」。`
+    : `会话已移交给专家「${frame.display_name}」，后续对话由其应答。`
+}
 
 // 0074 PRD F3.5(c)：画布通道无 token 级流，最终回答整段到达后前端按打字机逐段输出
 const TYPING_INTERVAL_MS = 33
@@ -155,26 +166,52 @@ function traceFromResult(trace: ToolCallTrace): ToolTrace {
   }
 }
 
-function historyToMessages(rows: ConversationMessage[]): ChatMessage[] {
-  return rows
-    .filter((row) => row.role === 'user' || row.role === 'assistant')
-    .map((row) => {
-      const tools =
-        row.role === 'assistant' && row.tool_calls?.length
-          ? row.tool_calls.map((call, index) => ({
-              id: call.id ?? `hist_${row.message_id}_${index}`,
-              name: call.name ?? 'tool',
-              status: 'done' as const,
-              args: call.arguments,
-            }))
-          : undefined
-      return {
-        id: row.message_id,
-        role: row.role as 'user' | 'assistant',
-        content: row.content,
-        tools,
+function historyToMessages(
+  rows: ConversationMessage[],
+  ownerApplicationId: string,
+  activeHandoff: ActiveHandoff | null,
+): ChatMessage[] {
+  const messages: ChatMessage[] = []
+  for (const row of rows) {
+    if (row.role === 'system') {
+      // M4 PRD F14.10/11：后端只放行 kind=handoff_notice 通告行，重建居中转接气泡
+      if (row.kind === 'handoff_notice') {
+        messages.push({
+          id: row.message_id,
+          role: 'assistant',
+          content: '',
+          handoffNotice: row.content,
+        })
       }
+      continue
+    }
+    if (row.role !== 'user' && row.role !== 'assistant') continue
+    const tools =
+      row.role === 'assistant' && row.tool_calls?.length
+        ? row.tool_calls.map((call, index) => ({
+            id: call.id ?? `hist_${row.message_id}_${index}`,
+            name: call.name ?? 'tool',
+            status: 'done' as const,
+            args: call.arguments,
+          }))
+        : undefined
+    // 接管轮助手空正文行仅承载 run 归因，历史回放无展示价值
+    if (row.role === 'assistant' && !row.content && !tools?.length) continue
+    const answeredBy =
+      row.role === 'assistant' && row.application_id && row.application_id !== ownerApplicationId
+        ? (activeHandoff && row.application_id === activeHandoff.applicationId
+            ? activeHandoff.displayName
+            : '专家')
+        : undefined
+    messages.push({
+      id: row.message_id,
+      role: row.role,
+      content: row.content,
+      tools,
+      ...(answeredBy ? { answeredBy } : {}),
     })
+  }
+  return messages
 }
 
 function extractOutputText(outputs: unknown): string {
@@ -256,18 +293,53 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
     [flushTokens],
   )
 
+  const fetchConversations = useCallback(async (): Promise<ConversationSummary[]> => {
+    if (!agentId) return []
+    return await listConversations(agentId, { limit: 50 })
+  }, [agentId])
+
   const refreshConversations = useCallback(async () => {
     if (!agentId) return
     setConversationsLoading(true)
     try {
-      const list = await listConversations(agentId, { limit: 50 })
-      setConversations(list)
+      setConversations(await fetchConversations())
     } catch (err) {
       console.error('加载会话列表失败', err)
     } finally {
       setConversationsLoading(false)
     }
-  }, [agentId])
+  }, [agentId, fetchConversations])
+
+  /**
+   * M4-c T-c9 冒烟修正：停止生成/断连后按服务端会话摘要对齐发言权。
+   * handoff 帧可能在断连窗内丢失，而服务端接管仅在 run 成功提交后生效（T-c5 口径），
+   * 以摘要为事实重建 activeHandoff，避免"专家应答中但 UI 无归位入口"的悬挂态。
+   */
+  const syncHandoffFromSummary = useCallback(() => {
+    const cid = conversationIdRef.current
+    if (!cid) return
+    void fetchConversations()
+      .then((list) => {
+        setConversations(list)
+        const summary = list.find((item) => item.conversation_id === cid)
+        // 批末 review #6：列表只取最近更新的前 50 条，agent 通道不 touch updated_at，
+        // 长期接管会话可能滑出窗口；miss 时不能误判为"未接管"，保留现态待命中收敛
+        if (!summary) return
+        dispatch({
+          type: 'set_active_handoff',
+          active:
+            summary.active_application_id != null
+              ? {
+                  applicationId: summary.active_application_id,
+                  displayName: summary.active_application ?? '',
+                }
+              : null,
+        })
+      })
+      .catch((err: unknown) => {
+        console.error('对齐接管路由态失败', err)
+      })
+  }, [fetchConversations])
 
   useEffect(() => {
     void refreshConversations()
@@ -280,6 +352,26 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
       typewriterRef.current?.finish()
     }
   }, [])
+
+  /** M4 PRD F14.10：handoff 帧统一处理——追加通告气泡、维护发言权，并刷新侧栏接管标记 */
+  const applyHandoffFrame = useCallback(
+    (frame: HandoffFrame) => {
+      dispatch({
+        type: 'handoff',
+        message: {
+          id: nextId(),
+          role: 'assistant',
+          content: '',
+          handoffNotice: handoffNoticeText(frame),
+        },
+        active: frame.returned
+          ? null
+          : { applicationId: frame.to_app_id, displayName: frame.display_name },
+      })
+      void refreshConversations()
+    },
+    [refreshConversations],
+  )
 
   const runChatflow = useCallback(
     async (text: string, answering: boolean, controller: AbortController) => {
@@ -494,6 +586,9 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
                   },
                 })
                 break
+              case 'handoff':
+                applyHandoffFrame(evt.data)
+                break
               case 'result': {
                 flushTokens()
                 const conversationId = evt.data.conversation_id
@@ -501,7 +596,20 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
                   conversationIdRef.current = conversationId
                   dispatch({ type: 'set_conversation', conversationId })
                 }
-                void refreshConversations()
+                // M4-c T-c9：result 帧必然后于服务端 run 提交发出，每轮结束都向
+                // 会话摘要对齐一次发言权（断连窗丢帧、专家自动归位等路径的兜底收敛）
+                syncHandoffFromSummary()
+                // M4 PRD F14.10：接管/归位轮 result 正文为空（通告走 handoff 帧），
+                // 用 stop 收口并移除无内容的助手占位，避免 live 留下空泡
+                if (
+                  (evt.data.finish_reason === 'handed_off' ||
+                    evt.data.finish_reason === 'handed_back') &&
+                  !evt.data.content
+                ) {
+                  typewriterRef.current?.finish()
+                  dispatch({ type: 'stop', id: assistantId })
+                  break
+                }
                 // 后端 result.tool_traces 无 chunks，按 tool_call_id 保留流内已展示的来源
                 const previous = stateRef.current.messages.find((message) => message.id === assistantId)
                 const chunksById = new Map(
@@ -583,6 +691,8 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         if (controller.signal.aborted) {
           typewriterRef.current?.halt()
           dispatch({ type: 'stop', id: assistantId })
+          // M4-c T-c9：被动断连（网络闪断）同样向摘要对齐发言权
+          syncHandoffFromSummary()
         } else {
           flushTokens()
           typewriterRef.current?.finish()
@@ -593,6 +703,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
             message: error.message,
             detail: error.detail,
           })
+          syncHandoffFromSummary()
         }
       } finally {
         flushTokens()
@@ -603,7 +714,14 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         if (abortRef.current === controller) abortRef.current = null
       }
     },
-    [agentId, flushTokens, queueToken, refreshConversations],
+    [
+      agentId,
+      applyHandoffFrame,
+      flushTokens,
+      queueToken,
+      refreshConversations,
+      syncHandoffFromSummary,
+    ],
   )
 
   const send = useCallback(
@@ -626,6 +744,8 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         userText: text,
         userId: nextId(),
         assistantId: flowType === 'chatflow' ? undefined : assistantId,
+        // M4 PRD F14.10：send 时刻的发言权即本轮应答方，接管轮助手气泡打专家徽标
+        answeredBy: snapshot.activeHandoff?.displayName,
       })
 
       if (flowType === 'chatflow') {
@@ -652,7 +772,13 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
       const base = approved ? '批准执行工具调用' : '拒绝执行工具调用'
       const decisionText = comment ? `${base}（理由：${comment}）` : base
       const assistantId = nextId()
-      dispatch({ type: 'start_run', userText: decisionText, userId: nextId(), assistantId })
+      dispatch({
+        type: 'start_run',
+        userText: decisionText,
+        userId: nextId(),
+        assistantId,
+        answeredBy: snapshot.activeHandoff?.displayName,
+      })
 
       // 续跑：快照自带执行现场，不带历史；message 留空由后端生成裁决文案
       await runAgent({
@@ -688,7 +814,12 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
     abortRef.current?.abort()
     const controller = new AbortController()
     abortRef.current = controller
-    dispatch({ type: 'retry_start', messages: kept, assistantId })
+    dispatch({
+      type: 'retry_start',
+      messages: kept,
+      assistantId,
+      answeredBy: snapshot.activeHandoff?.displayName,
+    })
     await runAgent({ text: lastUser.content, controller, history, assistantId })
   }, [agentId, flowType, runAgent])
 
@@ -714,7 +845,45 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         },
       })
     }
-  }, [flushTokens, flowType])
+    // M4-c T-c9：断连窗内 handoff 帧可能未送达，向服务端摘要对齐发言权
+    syncHandoffFromSummary()
+  }, [flushTokens, flowType, syncHandoffFromSummary])
+
+  const handback = useCallback(async () => {
+    // M4 PRD F14.9：手动归位不发 run，同一 stream 端点 handback:true，仅消费 handoff 帧
+    const snapshot = stateRef.current
+    const cid = conversationIdRef.current
+    if (!agentId || !cid || snapshot.streaming || !snapshot.activeHandoff) return
+
+    const controller = new AbortController()
+    abortRef.current = controller
+    dispatch({ type: 'set_streaming', streaming: true })
+    try {
+      await runAgentStream(
+        agentId,
+        { message: '', conversation_id: cid, handback: true },
+        (evt: AgentStreamEvent) => {
+          if (evt.event === 'handoff') applyHandoffFrame(evt.data)
+        },
+        { signal: controller.signal },
+      )
+    } catch (err) {
+      if (!controller.signal.aborted) {
+        dispatch({
+          type: 'append_assistant',
+          message: {
+            id: nextId(),
+            role: 'assistant',
+            content: '',
+            error: toMessageError(err, '归位失败'),
+          },
+        })
+      }
+    } finally {
+      dispatch({ type: 'set_streaming', streaming: false })
+      if (abortRef.current === controller) abortRef.current = null
+    }
+  }, [agentId, applyHandoffFrame])
 
   const selectConversation = useCallback(
     async (conversationId: string) => {
@@ -722,13 +891,22 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
       if (stateRef.current.streaming) return
       setConversationsLoading(true)
       try {
+        const summary = conversations.find((item) => item.conversation_id === conversationId)
+        const activeHandoff: ActiveHandoff | null =
+          summary?.active_application_id != null
+            ? {
+                applicationId: summary.active_application_id,
+                displayName: summary.active_application ?? '',
+              }
+            : null
         const rows = await listConversationMessages(agentId, conversationId)
         conversationIdRef.current = conversationId
         threadIdRef.current = null
         dispatch({
           type: 'set_messages',
-          messages: historyToMessages(rows),
+          messages: historyToMessages(rows, agentId, activeHandoff),
           conversationId,
+          activeHandoff,
         })
       } catch (err) {
         console.error('加载历史消息失败', err)
@@ -736,7 +914,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         setConversationsLoading(false)
       }
     },
-    [agentId],
+    [agentId, conversations],
   )
 
   const newConversation = useCallback(() => {
@@ -754,6 +932,8 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         id: item.conversation_id,
         title: item.title || '未命名会话',
         updatedAt: formatConversationTime(item.updated_at),
+        // M4 PRD F14.10：接管中会话在侧栏透出应答专家名
+        handoffAgent: item.active_application || undefined,
       })),
     [conversations],
   )
@@ -766,6 +946,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
     stop,
     retry,
     resolveApproval,
+    handback,
     selectConversation,
     newConversation,
     refreshConversations,

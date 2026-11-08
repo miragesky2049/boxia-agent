@@ -19,14 +19,21 @@ def _pack(flow_type: str = "agent", inputs: dict | None = None) -> dict:
         "flow_type": flow_type,
         "version": 1,
         "graph": {
-            "nodes": [{
-                "id": "agent_1",
-                "type": "100",
-                "data": {"inputs": inputs if inputs is not None else {
-                    "modleName": _literal("m1"),
-                    "systemPrompt": _literal("你是助手"),
-                }, "outputs": []},
-            }],
+            "nodes": [
+                {
+                    "id": "agent_1",
+                    "type": "100",
+                    "data": {
+                        "inputs": inputs
+                        if inputs is not None
+                        else {
+                            "modleName": _literal("m1"),
+                            "systemPrompt": _literal("你是助手"),
+                        },
+                        "outputs": [],
+                    },
+                }
+            ],
             "edges": [],
         },
     }

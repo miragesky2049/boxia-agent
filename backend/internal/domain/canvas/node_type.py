@@ -6,34 +6,34 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class NodeType(str, Enum):
+class NodeType(StrEnum):
     # 基础节点
     START = "1"
     END = "2"
     LLM = "3"
-    API = "4"            # 插件 / 工具调用
-    CODE = "5"           # 代码沙箱
-    DATASET = "6"        # 知识库检索
-    NOTE = "7"           # 注释节点（无执行语义）
-    IF = "8"             # 条件分支
-    SUB_WORKFLOW = "9"   # 子图调用
-    VARIABLE = "11"      # 旧版变量节点（废弃）
-    DATABASE = "12"      # 数据库节点（本项目砍掉，用 HTTP 替代）
+    API = "4"  # 插件 / 工具调用
+    CODE = "5"  # 代码沙箱
+    DATASET = "6"  # 知识库检索
+    NOTE = "7"  # 注释节点（无执行语义）
+    IF = "8"  # 条件分支
+    SUB_WORKFLOW = "9"  # 子图调用
+    VARIABLE = "11"  # 旧版变量节点（废弃）
+    DATABASE = "12"  # 数据库节点（本项目砍掉，用 HTTP 替代）
     OUTPUT = "13"
-    TEXT = "15"          # 文本处理
+    TEXT = "15"  # 文本处理
     QUESTION = "18"
-    BREAK = "19"         # loop 内 break
+    BREAK = "19"  # loop 内 break
     SET_VARIABLE = "20"
     LOOP = "21"
     INTENT = "22"
     IMAGE_CANVAS = "23"  # 画板（依赖外部图像服务，当前仅占位）
-    LTM = "26"           # 长期记忆
+    LTM = "26"  # 长期记忆
     DATASET_WRITE = "27"
     BATCH = "28"
-    CONTINUE = "29"      # loop 内 continue
+    CONTINUE = "29"  # loop 内 continue
     INPUT = "30"
     COMMENT = "31"
     VARIABLE_MERGE = "32"
@@ -62,15 +62,15 @@ class NodeType(str, Enum):
     AGENT_LOOP = "100"
 
     # 本地扩展：coze 未公开数字编码或依赖外部服务的节点，使用 200+ 段位避免冲突
-    DATASET_DELETE = "211"       # 知识库删除
-    ASYNC_TASK = "212"           # 异步任务（依赖任务中心）
-    IMAGE_GENERATE = "213"       # 图像生成
-    IMAGE_CUTOUT = "214"         # 抠图
-    PROMPT_OPTIMIZE = "215"      # 提示词优化
-    IMAGE_ENHANCE = "216"        # 画质提升
-    VIDEO_GENERATE = "217"       # 视频生成
+    DATASET_DELETE = "211"  # 知识库删除
+    ASYNC_TASK = "212"  # 异步任务（依赖任务中心）
+    IMAGE_GENERATE = "213"  # 图像生成
+    IMAGE_CUTOUT = "214"  # 抠图
+    PROMPT_OPTIMIZE = "215"  # 提示词优化
+    IMAGE_ENHANCE = "216"  # 画质提升
+    VIDEO_GENERATE = "217"  # 视频生成
     VIDEO_EXTRACT_AUDIO = "218"  # 视频提取音频
-    VIDEO_FRAME = "219"          # 视频抽帧
+    VIDEO_FRAME = "219"  # 视频抽帧
 
 
 # 本项目当前阶段不实现的节点类型（convert 时显式报错）

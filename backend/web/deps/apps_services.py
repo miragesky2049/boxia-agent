@@ -25,6 +25,7 @@ from internal.infrastructure.cache.factory import get_kv_cache
 from internal.infrastructure.config.settings import get_settings
 from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.infrastructure.repository.apps.admin_scope_repository import AdminScopeRepository
+from internal.infrastructure.repository.apps.agent_memory_repository import AgentMemoryRepository
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
 from internal.infrastructure.repository.apps.conversation_repository import (
@@ -121,6 +122,10 @@ def make_message_repository(session: Session) -> MessageRepository:
 
 def make_run_repository(session: Session) -> RunRepository:
     return RunRepository(session)
+
+
+def make_agent_memory_repository(session: Session) -> AgentMemoryRepository:
+    return AgentMemoryRepository(session)
 
 
 def make_workflow_service(uow: SqlAlchemyUnitOfWork, principal: object) -> WorkflowService:

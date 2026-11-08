@@ -14,7 +14,7 @@ import asyncio
 import contextlib
 import json
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from internal.application.apps.chat_service import ChatService
 from internal.domain.agent.run_context import AgentRunContext
@@ -43,17 +43,37 @@ class _AppService:
     def assert_user_can_view(self, application_id, tenant_id, user_id) -> dict:
         return {"name": "天气助手", "description": "", "flow_type": self._flow_type}
 
+    def get_visible_app_for_user(self, application_id, tenant_id, user_id) -> dict:
+        # T-c7 归位帧取归属应用名走此口
+        return {"name": "天气助手", "description": "", "flow_type": self._flow_type}
+
     async def get_runtime_graph(self, application_id, tenant_id) -> dict:
         return self._graph
 
 
 class _ConvRepo:
     def __init__(self, cid, principal, application_id) -> None:
-        self._conv = {"id": cid, "user_id": principal.user_id,
-                      "application_id": application_id, "tenant_id": principal.tenant_id}
+        self._conv = {
+            "id": cid,
+            "user_id": principal.user_id,
+            "application_id": application_id,
+            "tenant_id": principal.tenant_id,
+        }
+        self.handoff_updates: list[dict[str, Any]] = []
 
     def get_conversation(self, conversation_id):
         return self._conv
+
+    def update_handoff_state(
+        self, conversation_id, *, active_application_id, handoff_chain
+    ) -> None:
+        self.handoff_updates.append(
+            {
+                "conversation_id": conversation_id,
+                "active_application_id": active_application_id,
+                "handoff_chain": handoff_chain,
+            }
+        )
 
     def touch(self, conversation_id) -> None:
         pass
@@ -106,8 +126,13 @@ class _ToolFnHolder:
 
 
 class _RespObj:
-    def __init__(self, content: str, tool_calls: list | None = None,
-                 usage: _UsageObj | None = None, finish_reason: str = "stop") -> None:
+    def __init__(
+        self,
+        content: str,
+        tool_calls: list | None = None,
+        usage: _UsageObj | None = None,
+        finish_reason: str = "stop",
+    ) -> None:
         self.content = content
         self.tool_calls = tool_calls or []
         self.usage = usage or _UsageObj(1, 1)
@@ -118,8 +143,9 @@ class _RespObj:
 class _FakeChatClient:
     """进程内通道用：scripted chat / chat_stream。"""
 
-    def __init__(self, script: list[_RespObj] | None = None,
-                 stream_chunks: list[Any] | None = None) -> None:
+    def __init__(
+        self, script: list[_RespObj] | None = None, stream_chunks: list[Any] | None = None
+    ) -> None:
         self._script = list(script or [])
         self._chunks = list(stream_chunks or [])
         self.chat_calls: list[dict] = []
@@ -142,23 +168,29 @@ def _canvas_graph() -> dict:
         return {"value": {"type": "literal", "content": value}}
 
     return {
-        "nodes": [{
-            "id": "loop_x",
-            "type": "100",
-            "data": {
-                "inputs": {
-                    "modleName": literal("m1"),
-                    "systemPrompt": literal("你是天气助手"),
-                    "maxToolRounds": literal(3),
-                    "tools": literal([{
-                        "name": "get_weather",
-                        "description": "天气",
-                        "parameters": {"type": "object", "properties": {}},
-                    }]),
+        "nodes": [
+            {
+                "id": "loop_x",
+                "type": "100",
+                "data": {
+                    "inputs": {
+                        "modleName": literal("m1"),
+                        "systemPrompt": literal("你是天气助手"),
+                        "maxToolRounds": literal(3),
+                        "tools": literal(
+                            [
+                                {
+                                    "name": "get_weather",
+                                    "description": "天气",
+                                    "parameters": {"type": "object", "properties": {}},
+                                }
+                            ]
+                        ),
+                    },
+                    "outputs": [],
                 },
-                "outputs": [],
-            },
-        }],
+            }
+        ],
         "edges": [],
     }
 
@@ -167,49 +199,108 @@ def _canvas_trace_events() -> list[tuple[str, dict]]:
     """与 AgentLoopNodeHandler._execute 实际外抛的 trace 形态一致（含 P3 additive 字段）。"""
     return [
         ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
-        ("prompt_text", {
-            "phase": "execute", "reflect_round": 0, "tool_round": 0,
-            "iteration": 1,
-            "tools": [{"type": "function", "function": {"name": "get_weather", "description": "天气", "parameters": {}}}],
-            "messages": [{"role": "system", "content": "你是天气助手"}, {"role": "user", "content": "北京天气"}],
-        }),
-        ("prompt_text", {
-            "phase": "execute", "reflect_round": 0, "tool_round": 0,
-            "iteration": 1, "role": "assistant", "content": "",
-            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
-            "finish_reason": "tool_calls",
-            "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}],
-        }),
-        ("tool_call_start", {
-            "name": "get_weather", "arguments": '{"city": "北京"}',
-            "tool_call_id": "c1", "arguments_parsed": {"city": "北京"},
-            "reflect_round": 0, "tool_round": 0,
-        }),
-        ("tool_call_end", {
-            "name": "get_weather", "arguments": '{"city": "北京"}',
-            "tool_call_id": "c1", "is_error": False,
-            "reflect_round": 0, "tool_round": 0, "observation": "晴，20 度",
-        }),
-        ("prompt_text", {
-            "phase": "execute", "reflect_round": 0, "tool_round": 1,
-            "iteration": 2,
-            "tools": [], "messages": [],
-        }),
-        ("prompt_text", {
-            "phase": "execute", "reflect_round": 0, "tool_round": 1,
-            "iteration": 2, "role": "assistant", "content": "北京 20 度。",
-            "usage": {"prompt_tokens": 6, "completion_tokens": 6, "total_tokens": 12},
-            "finish_reason": "stop",
-            "tool_calls": [],
-        }),
-        ("node_end", {
-            "node_id": "loop_x", "status": "success",
-            "outputs": {
-                "output": "北京 20 度。", "plan": [], "reflect_history": [], "model": "m1",
-                "usage": {"prompt_tokens": 9, "completion_tokens": 10, "total_tokens": 19},
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "reflect_round": 0,
+                "tool_round": 0,
+                "iteration": 1,
+                "tools": [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "get_weather",
+                            "description": "天气",
+                            "parameters": {},
+                        },
+                    }
+                ],
+                "messages": [
+                    {"role": "system", "content": "你是天气助手"},
+                    {"role": "user", "content": "北京天气"},
+                ],
             },
-            "duration_ms": 12,
-        }),
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "reflect_round": 0,
+                "tool_round": 0,
+                "iteration": 1,
+                "role": "assistant",
+                "content": "",
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+                "finish_reason": "tool_calls",
+                "tool_calls": [
+                    {"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}
+                ],
+            },
+        ),
+        (
+            "tool_call_start",
+            {
+                "name": "get_weather",
+                "arguments": '{"city": "北京"}',
+                "tool_call_id": "c1",
+                "arguments_parsed": {"city": "北京"},
+                "reflect_round": 0,
+                "tool_round": 0,
+            },
+        ),
+        (
+            "tool_call_end",
+            {
+                "name": "get_weather",
+                "arguments": '{"city": "北京"}',
+                "tool_call_id": "c1",
+                "is_error": False,
+                "reflect_round": 0,
+                "tool_round": 0,
+                "observation": "晴，20 度",
+            },
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "reflect_round": 0,
+                "tool_round": 1,
+                "iteration": 2,
+                "tools": [],
+                "messages": [],
+            },
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "reflect_round": 0,
+                "tool_round": 1,
+                "iteration": 2,
+                "role": "assistant",
+                "content": "北京 20 度。",
+                "usage": {"prompt_tokens": 6, "completion_tokens": 6, "total_tokens": 12},
+                "finish_reason": "stop",
+                "tool_calls": [],
+            },
+        ),
+        (
+            "node_end",
+            {
+                "node_id": "loop_x",
+                "status": "success",
+                "outputs": {
+                    "output": "北京 20 度。",
+                    "plan": [],
+                    "reflect_history": [],
+                    "model": "m1",
+                    "usage": {"prompt_tokens": 9, "completion_tokens": 10, "total_tokens": 19},
+                },
+                "duration_ms": 12,
+            },
+        ),
     ]
 
 
@@ -310,8 +401,16 @@ def _make_service(
         default_llm_model_id="default-m",
         tool_executor_factory=tool_executor_factory,
     )
-    captured.update(uow=uow, msg_repo=msg_repo, model_service=model_service, cid=cid,
-                    application_id=app_id, tenant_id=tenant_id, user_id=user_id)
+    captured.update(
+        uow=uow,
+        msg_repo=msg_repo,
+        model_service=model_service,
+        cid=cid,
+        application_id=app_id,
+        tenant_id=tenant_id,
+        user_id=user_id,
+        conv_repo=conv_repo,
+    )
     return service, captured
 
 
@@ -326,12 +425,20 @@ def test_chat_canvas_maps_trace_to_sse_contract_and_persists() -> None:
     service, cap = _make_service(_canvas_graph())
     app_id, cid = cap["application_id"], cap["cid"]
 
-    frames = asyncio.run(_collect(service, app_id, "北京天气", cid,
-                                  history=[{"role": "user", "content": "早"}]))
+    frames = asyncio.run(
+        _collect(service, app_id, "北京天气", cid, history=[{"role": "user", "content": "早"}])
+    )
     names = [name for name, _ in frames]
     assert names == [
-        "run_start", "llm_start", "llm_end", "tool_start", "tool_end",
-        "llm_start", "llm_end", "result", "final",
+        "run_start",
+        "llm_start",
+        "llm_end",
+        "tool_start",
+        "tool_end",
+        "llm_start",
+        "llm_end",
+        "result",
+        "final",
     ]
 
     run_start = frames[0][1]
@@ -340,18 +447,34 @@ def test_chat_canvas_maps_trace_to_sse_contract_and_persists() -> None:
     # 帧 payload 与进程内通道逐字段对齐
     llm_end1 = frames[2][1]
     assert llm_end1["iteration"] == 1 and llm_end1["usage"]["total_tokens"] == 7
-    assert llm_end1["tool_calls"] == [{"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}]
+    assert llm_end1["tool_calls"] == [
+        {"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}
+    ]
     tool_start = frames[3][1]
-    assert tool_start == {"tool_call_id": "c1", "name": "get_weather", "arguments": {"city": "北京"}}
+    assert tool_start == {
+        "tool_call_id": "c1",
+        "name": "get_weather",
+        "arguments": {"city": "北京"},
+    }
     tool_end = frames[4][1]
-    assert tool_end == {"tool_call_id": "c1", "name": "get_weather", "observation": "晴，20 度", "is_error": False}
+    assert tool_end == {
+        "tool_call_id": "c1",
+        "name": "get_weather",
+        "observation": "晴，20 度",
+        "is_error": False,
+    }
     result = frames[7][1]
     assert result["content"] == "北京 20 度。"
     assert result["iterations"] == 2
     assert result["finish_reason"] == "stop"
     assert result["usage"] == {"prompt_tokens": 9, "completion_tokens": 10, "total_tokens": 19}
     assert result["tool_traces"] == [
-        {"tool_call_id": "c1", "name": "get_weather", "observation": "晴，20 度", "is_error": False},
+        {
+            "tool_call_id": "c1",
+            "name": "get_weather",
+            "observation": "晴，20 度",
+            "is_error": False,
+        },
     ]
 
     # 运行入参走 react_only 通道，run_id 与 run_start 帧一致
@@ -395,19 +518,32 @@ def test_chat_falls_back_to_inprocess_kernel_when_system_prompt_missing() -> Non
     """systemPrompt 缺失时画布节点会回退默认 system，与旧通道不等价——必须留在进程内通道。"""
     graph = _canvas_graph()
     del graph["nodes"][0]["data"]["inputs"]["systemPrompt"]
-    client = _FakeChatClient(script=[
-        _RespObj(content="", tool_calls=[_ToolCallObj("c1", "get_weather", '{"city": "北京"}')],
-                 usage=_UsageObj(3, 4), finish_reason="tool_calls"),
-        _RespObj(content="北京 20 度。", usage=_UsageObj(6, 6)),
-    ])
+    client = _FakeChatClient(
+        script=[
+            _RespObj(
+                content="",
+                tool_calls=[_ToolCallObj("c1", "get_weather", '{"city": "北京"}')],
+                usage=_UsageObj(3, 4),
+                finish_reason="tool_calls",
+            ),
+            _RespObj(content="北京 20 度。", usage=_UsageObj(6, 6)),
+        ]
+    )
     service, cap = _make_service(graph, client=client)
     app_id, cid = cap["application_id"], cap["cid"]
 
     frames = asyncio.run(_collect(service, app_id, "北京天气", cid))
     names = [name for name, _ in frames]
     assert names == [
-        "run_start", "llm_start", "llm_end", "tool_start", "tool_end",
-        "llm_start", "llm_end", "result", "final",
+        "run_start",
+        "llm_start",
+        "llm_end",
+        "tool_start",
+        "tool_end",
+        "llm_start",
+        "llm_end",
+        "result",
+        "final",
     ]
     # 进程内通道：runner_factory 未被触达，且消息落库 run_id 为空
     assert cap["factory_kwargs"] == []
@@ -428,13 +564,24 @@ def test_chat_falls_back_to_typewriter_without_tools() -> None:
             self.usage = usage or _UsageObj(0, 0)
             self.finish_reason = reason
 
-    client = _FakeChatClient(stream_chunks=[
-        _Chunk("北京", reason=""), _Chunk(" 20 度。", usage=_UsageObj(5, 6), reason="stop"),
-    ])
+    client = _FakeChatClient(
+        stream_chunks=[
+            _Chunk("北京", reason=""),
+            _Chunk(" 20 度。", usage=_UsageObj(5, 6), reason="stop"),
+        ]
+    )
     service, cap = _make_service(graph, client=client)
     frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
     names = [name for name, _ in frames]
-    assert names == ["run_start", "llm_start", "llm_token", "llm_token", "llm_end", "result", "final"]
+    assert names == [
+        "run_start",
+        "llm_start",
+        "llm_token",
+        "llm_token",
+        "llm_end",
+        "result",
+        "final",
+    ]
     assert frames[2][1] == {"delta": "北京"}
     result = frames[5][1]
     assert result["content"] == "北京 20 度。"
@@ -444,8 +591,9 @@ def test_chat_falls_back_to_typewriter_without_tools() -> None:
 
 
 def test_chat_canvas_error_yields_error_frame_without_assistant_persist() -> None:
-    service, cap = _make_service(_canvas_graph(), runner_events=[],
-                                 runner_error=RuntimeError("模型服务不可用"))
+    service, cap = _make_service(
+        _canvas_graph(), runner_events=[], runner_error=RuntimeError("模型服务不可用")
+    )
     frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
     names = [name for name, _ in frames]
     assert names == ["run_start", "error", "final"]
@@ -483,7 +631,10 @@ def _datasets_canvas_graph(*, memory: dict | None = None) -> dict:
     }
     if memory is not None:
         inputs["memory"] = literal(memory)
-    return {"nodes": [{"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}], "edges": []}
+    return {
+        "nodes": [{"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}],
+        "edges": [],
+    }
 
 
 def test_chat_datasets_only_agent_goes_canvas_channel() -> None:
@@ -556,15 +707,20 @@ def _agent_graph_with(**literal_inputs: object) -> dict:
     def literal(value: object) -> dict:
         return {"value": {"type": "literal", "content": value}}
 
-    inputs = {k: (v["value"]["content"] if isinstance(v, dict) else v) for k, v in literal_inputs.items()}
+    inputs = {
+        k: (v["value"]["content"] if isinstance(v, dict) else v) for k, v in literal_inputs.items()
+    }
     return {
-        "nodes": [{
-            "id": "loop_x", "type": "100",
-            "data": {
-                "inputs": {key: literal(value) for key, value in inputs.items()},
-                "outputs": [],
-            },
-        }],
+        "nodes": [
+            {
+                "id": "loop_x",
+                "type": "100",
+                "data": {
+                    "inputs": {key: literal(value) for key, value in inputs.items()},
+                    "outputs": [],
+                },
+            }
+        ],
         "edges": [],
     }
 
@@ -573,22 +729,41 @@ def test_chat_mcp_or_workflows_only_agent_goes_canvas_channel() -> None:
     """F6/F7：仅挂 MCP 快照或工作流的 agent（无 tools/datasets）也必须走画布通道。"""
     graphs = [
         _agent_graph_with(
-            modleName="m1", systemPrompt="S",
-            mcpServers=[{"serverUrl": "http://10.0.0.8/mcp", "enabledTools": [{"name": "geocode"}]}],
+            modleName="m1",
+            systemPrompt="S",
+            mcpServers=[
+                {"serverUrl": "http://10.0.0.8/mcp", "enabledTools": [{"name": "geocode"}]}
+            ],
         ),
         _agent_graph_with(
-            modleName="m1", systemPrompt="S",
+            modleName="m1",
+            systemPrompt="S",
             workflows=[{"applicationId": str(uuid4())}],
         ),
     ]
     for graph in graphs:
-        service, cap = _make_service(graph, runner_events=[
-            ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
-            ("prompt_text", {"phase": "execute", "iteration": 1, "role": "assistant",
-                             "content": "done", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                             "finish_reason": "stop", "tool_calls": []}),
-            ("node_end", {"node_id": "loop_x", "status": "success", "outputs": {"output": "done"}}),
-        ])
+        service, cap = _make_service(
+            graph,
+            runner_events=[
+                ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+                (
+                    "prompt_text",
+                    {
+                        "phase": "execute",
+                        "iteration": 1,
+                        "role": "assistant",
+                        "content": "done",
+                        "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                        "finish_reason": "stop",
+                        "tool_calls": [],
+                    },
+                ),
+                (
+                    "node_end",
+                    {"node_id": "loop_x", "status": "success", "outputs": {"output": "done"}},
+                ),
+            ],
+        )
         frames = asyncio.run(_collect(service, cap["application_id"], "q", cap["cid"]))
         assert cap["runner"] is not None
         assert frames[0][0] == "run_start"
@@ -604,18 +779,48 @@ def test_chat_deep_mode_reacts_only_false_and_emits_plan_reflect_frames() -> Non
     }
     events = [
         ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
-        ("prompt_text", {"phase": "plan", "role": "assistant",
-                         "content": '{"tasks": [{"id": "t1", "goal": "查天气"}]}'}),
-        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0, "role": "assistant",
-                         "content": "北京 20 度。",
-                         "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                         "finish_reason": "stop", "tool_calls": []}),
-        ("prompt_text", {"phase": "reflect", "reflect_round": 0, "role": "assistant",
-                         "content": '{"done": false, "critique": "缺湿度", "suggestion": "补充"}'}),
-        ("node_end", {"node_id": "loop_x", "status": "success", "outputs": {
-            "output": "北京 20 度。", "plan": [{"id": "t1"}],
-            "finish_reason": "budget_exceeded",
-        }}),
+        (
+            "prompt_text",
+            {
+                "phase": "plan",
+                "role": "assistant",
+                "content": '{"tasks": [{"id": "t1", "goal": "查天气"}]}',
+            },
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "iteration": 1,
+                "reflect_round": 0,
+                "role": "assistant",
+                "content": "北京 20 度。",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "stop",
+                "tool_calls": [],
+            },
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "reflect",
+                "reflect_round": 0,
+                "role": "assistant",
+                "content": '{"done": false, "critique": "缺湿度", "suggestion": "补充"}',
+            },
+        ),
+        (
+            "node_end",
+            {
+                "node_id": "loop_x",
+                "status": "success",
+                "outputs": {
+                    "output": "北京 20 度。",
+                    "plan": [{"id": "t1"}],
+                    "finish_reason": "budget_exceeded",
+                },
+            },
+        ),
     ]
     service, cap = _make_service(graph, runner_events=events)
     frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
@@ -626,7 +831,11 @@ def test_chat_deep_mode_reacts_only_false_and_emits_plan_reflect_frames() -> Non
     plan = frames[1][1]
     assert plan["tasks"] == [{"id": "t1", "goal": "查天气"}]
     reflect = frames[3][1]
-    assert reflect["reflect_round"] == 0 and reflect["done"] is False and reflect["suggestion"] == "补充"
+    assert (
+        reflect["reflect_round"] == 0
+        and reflect["done"] is False
+        and reflect["suggestion"] == "补充"
+    )
     # node_end 透出 budget_exceeded 覆盖 execute llm_end 的 stop
     assert frames[4][1]["finish_reason"] == "budget_exceeded"
 
@@ -636,10 +845,22 @@ def test_chat_tool_end_maps_chunks_meta_to_chunks_frame() -> None:
     events = _canvas_trace_events()
     for index, (event_type, payload) in enumerate(events):
         if event_type == "tool_call_end":
-            events[index] = (event_type, {**payload, "chunks_meta": [
-                {"dataset_id": "d1", "dataset_name": "售后手册", "chunk_id": "c-1",
-                 "document_id": "doc-1", "score": 0.91, "excerpt": "退款需在7天内"},
-            ]})
+            events[index] = (
+                event_type,
+                {
+                    **payload,
+                    "chunks_meta": [
+                        {
+                            "dataset_id": "d1",
+                            "dataset_name": "售后手册",
+                            "chunk_id": "c-1",
+                            "document_id": "doc-1",
+                            "score": 0.91,
+                            "excerpt": "退款需在7天内",
+                        },
+                    ],
+                },
+            )
     service, cap = _make_service(_canvas_graph(), runner_events=events)
     frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
 
@@ -655,14 +876,41 @@ def test_chat_canvas_disconnect_marks_cancelled_and_purges_checkpoints() -> None
     run_repo = _FakeRunRepo()
     events = [
         ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
-        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0,
-                         "tool_round": 0, "tools": [], "messages": []}),
-        ("prompt_text", {"phase": "execute", "iteration": 1, "reflect_round": 0, "role": "assistant",
-                         "content": "", "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
-                         "finish_reason": "tool_calls",
-                         "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": "{}"}]}),
-        ("tool_call_start", {"name": "get_weather", "arguments": "{}", "tool_call_id": "c1",
-                             "arguments_parsed": {}, "reflect_round": 0, "tool_round": 0}),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "iteration": 1,
+                "reflect_round": 0,
+                "tool_round": 0,
+                "tools": [],
+                "messages": [],
+            },
+        ),
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "iteration": 1,
+                "reflect_round": 0,
+                "role": "assistant",
+                "content": "",
+                "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                "finish_reason": "tool_calls",
+                "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": "{}"}],
+            },
+        ),
+        (
+            "tool_call_start",
+            {
+                "name": "get_weather",
+                "arguments": "{}",
+                "tool_call_id": "c1",
+                "arguments_parsed": {},
+                "reflect_round": 0,
+                "tool_round": 0,
+            },
+        ),
     ]
 
     async def _go():
@@ -688,17 +936,22 @@ def test_chat_canvas_disconnect_marks_cancelled_and_purges_checkpoints() -> None
         return seen
 
     service, cap = _make_service(
-        _canvas_graph(), runner_events=events, runner_hang=True, run_repo=run_repo,
+        _canvas_graph(),
+        runner_events=events,
+        runner_hang=True,
+        run_repo=run_repo,
     )
     seen = asyncio.run(_go())
 
     assert seen == ["run_start", "llm_start", "llm_end", "tool_start", "final"]
     runner = cap["runner"]
-    assert run_repo.status_updates == [{
-        "run_id": runner.run_id,
-        "execute_status": "cancelled",
-        "error_message": "客户端断连，执行已取消",
-    }]
+    assert run_repo.status_updates == [
+        {
+            "run_id": runner.run_id,
+            "execute_status": "cancelled",
+            "error_message": "客户端断连，执行已取消",
+        }
+    ]
     # 断连收口提交一次（run 行 + user 消息不随连接回滚）
     assert cap["uow"].commits == 1
     assert runner.purged == 1
@@ -709,11 +962,15 @@ class _ApprovalRunRepo:
     """带挂起审批检索面的 run_repo fake：get_running_by_thread + update_run_interrupt。"""
 
     def __init__(self, pending_run_id, pending_payload: dict | None) -> None:
-        self._pending = {
-            "id": pending_run_id,
-            "execute_status": "interrupted",
-            "interrupt_payload": pending_payload,
-        } if pending_payload is not None else None
+        self._pending = (
+            {
+                "id": pending_run_id,
+                "execute_status": "interrupted",
+                "interrupt_payload": pending_payload,
+            }
+            if pending_payload is not None
+            else None
+        )
         self.interrupt_updates: list[dict[str, Any]] = []
         self.status_updates: list[dict[str, Any]] = []
         self.queried_threads: list[str] = []
@@ -733,43 +990,70 @@ def _awaiting_trace_events() -> list[tuple[str, dict]]:
     """节点整轮挂起形态的画布 trace：assistant 轮后 node_end 带 awaiting_approval。"""
     return [
         ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
-        ("prompt_text", {
-            "phase": "execute", "reflect_round": 0, "tool_round": 0,
-            "iteration": 1, "role": "assistant", "content": "",
-            "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
-            "finish_reason": "awaiting_approval",
-            "tool_calls": [{"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}],
-        }),
-        ("node_end", {
-            "node_id": "loop_x", "status": "success",
-            "outputs": {
-                "output": "", "plan": [], "model": "m1", "awaiting_approval": True,
-                "approval": {
-                    "type": "tool_approval", "node_id": "loop_x",
-                    "iteration": 1, "tool_round": 0,
-                    "pending_tool_calls": [{"id": "c1", "name": "get_weather",
-                                            "arguments": '{"city": "北京"}'}],
-                    "awaiting_calls": [{"id": "c1", "name": "get_weather",
-                                         "arguments": '{"city": "北京"}'}],
-                },
-                "snapshot": {
-                    "messages": [{"role": "user", "content": "北京天气"}],
-                    "plan_tasks": [], "reflect_round": 0, "reflect_history": [],
-                    "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+        (
+            "prompt_text",
+            {
+                "phase": "execute",
+                "reflect_round": 0,
+                "tool_round": 0,
+                "iteration": 1,
+                "role": "assistant",
+                "content": "",
+                "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+                "finish_reason": "awaiting_approval",
+                "tool_calls": [
+                    {"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}
+                ],
+            },
+        ),
+        (
+            "node_end",
+            {
+                "node_id": "loop_x",
+                "status": "success",
+                "outputs": {
+                    "output": "",
+                    "plan": [],
+                    "model": "m1",
+                    "awaiting_approval": True,
+                    "approval": {
+                        "type": "tool_approval",
+                        "node_id": "loop_x",
+                        "iteration": 1,
+                        "tool_round": 0,
+                        "pending_tool_calls": [
+                            {"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}
+                        ],
+                        "awaiting_calls": [
+                            {"id": "c1", "name": "get_weather", "arguments": '{"city": "北京"}'}
+                        ],
+                    },
+                    "snapshot": {
+                        "messages": [{"role": "user", "content": "北京天气"}],
+                        "plan_tasks": [],
+                        "reflect_round": 0,
+                        "reflect_history": [],
+                        "usage": {"prompt_tokens": 3, "completion_tokens": 4, "total_tokens": 7},
+                    },
                 },
             },
-        }),
+        ),
     ]
 
 
 def _approval_pending_payload() -> dict:
     return {
-        "type": "tool_approval", "node_id": "loop_x", "iteration": 1, "tool_round": 0,
+        "type": "tool_approval",
+        "node_id": "loop_x",
+        "iteration": 1,
+        "tool_round": 0,
         "pending_tool_calls": [{"id": "c1", "name": "send_email", "arguments": "{}"}],
         "awaiting_calls": [{"id": "c1", "name": "send_email", "arguments": "{}"}],
         "snapshot": {
             "messages": [{"role": "user", "content": "发邮件"}],
-            "plan_tasks": [], "reflect_round": 0, "reflect_history": [],
+            "plan_tasks": [],
+            "reflect_round": 0,
+            "reflect_history": [],
             "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
         },
     }
@@ -777,7 +1061,10 @@ def _approval_pending_payload() -> dict:
 
 def _collect_full(service, app_id, query, cid, **kwargs):
     async def _go():
-        return [(n, p) async for n, p in service.run_agent_stream(app_id, query, cid, None, **kwargs)]
+        return [
+            (n, p) async for n, p in service.run_agent_stream(app_id, query, cid, None, **kwargs)
+        ]
+
     return asyncio.run(_go())
 
 
@@ -786,7 +1073,9 @@ def test_chat_approval_interrupt_frame_and_snapshot_persist() -> None:
     pending_id = uuid4()
     run_repo = _ApprovalRunRepo(pending_id, None)
     service, cap = _make_service(
-        _canvas_graph(), runner_events=_awaiting_trace_events(), run_repo=run_repo,
+        _canvas_graph(),
+        runner_events=_awaiting_trace_events(),
+        run_repo=run_repo,
     )
     frames = _collect_full(service, cap["application_id"], "北京天气", cap["cid"])
     names = [name for name, _ in frames]
@@ -816,7 +1105,10 @@ def test_chat_approval_resume_reuses_pending_run_and_snapshot() -> None:
     service, cap = _make_service(_canvas_graph(), run_repo=run_repo)
 
     frames = _collect_full(
-        service, cap["application_id"], "", cap["cid"],
+        service,
+        cap["application_id"],
+        "",
+        cap["cid"],
         resume={"approved": True, "comment": "可以发"},
     )
     names = [name for name, _ in frames]
@@ -843,8 +1135,9 @@ def test_chat_approval_resume_without_pending_raises() -> None:
     import pytest
 
     with pytest.raises(Exception) as exc_info:
-        _collect_full(service, cap["application_id"], "", cap["cid"],
-                      resume={"approved": True, "comment": ""})
+        _collect_full(
+            service, cap["application_id"], "", cap["cid"], resume={"approved": True, "comment": ""}
+        )
     assert "没有待恢复的工具审批" in str(exc_info.value)
     assert cap["factory_kwargs"] == []
     assert cap["msg_repo"].appended == []
@@ -879,11 +1172,149 @@ def test_chat_prepare_run_and_channel_resolution() -> None:
     with pytest.raises(_VE):
         service.prepare_chat_run(app_id, message="  ", conversation_id=None, resume=None)
     with pytest.raises(_VE):
-        service.prepare_chat_run(app_id, message="", conversation_id=None,
-                                 resume={"approved": True})
+        service.prepare_chat_run(
+            app_id, message="", conversation_id=None, resume={"approved": True}
+        )
     with pytest.raises(_VE):
-        service.prepare_chat_run(app_id, message="", conversation_id=cap["cid"],
-                                 resume={"comment": "x"})
+        service.prepare_chat_run(
+            app_id, message="", conversation_id=cap["cid"], resume={"comment": "x"}
+        )
     service.prepare_chat_run(app_id, message="hi", conversation_id=None, resume=None)
     # resolve_conversation_channel：路由分派依据（flow_type）
     assert service.resolve_conversation_channel(app_id)["flow_type"] == "agent"
+
+
+def test_chat_canvas_handoff_round_frames_exclude_round_text() -> None:
+    """M4 PRD F14.9（T-c6 + T-c7 收口）帧锁定：接管轮的 llm_end 正文外发但不进
+    result 帧与 assistant 落库；tool_handoff trace 被安全忽略（无 tool_start/
+    tool_end 帧）；outputs.finish_reason 覆盖通道透出 handed_off；
+    outputs.handoff 经 8b 收口切路由并先于 result 发 handoff 帧。"""
+    target_app = str(uuid4())
+    graph = _agent_graph_with(
+        modleName="m1",
+        systemPrompt="S",
+        subAgents=[{"applicationId": target_app, "mode": "handoff"}],
+    )
+    service, cap = _make_service(
+        graph,
+        runner_events=[
+            ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+            (
+                "prompt_text",
+                {"phase": "execute", "iteration": 1, "tool_round": 0, "tools": [], "messages": []},
+            ),
+            (
+                "prompt_text",
+                {
+                    "phase": "execute",
+                    "iteration": 1,
+                    "tool_round": 0,
+                    "role": "assistant",
+                    "content": "好的，我帮你转给票务专家。",
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+                    "finish_reason": "tool_calls",
+                    "tool_calls": [
+                        {"id": "c1", "name": "agent_7b2e3d4c", "arguments": '{"question":"订票"}'}
+                    ],
+                },
+            ),
+            (
+                "tool_handoff",
+                {
+                    "phase": "execute",
+                    "iteration": 1,
+                    "tool_round": 0,
+                    "tool_name": "agent_7b2e3d4c",
+                    "tool_call_id": "c1",
+                    "arguments_raw": '{"question":"订票"}',
+                    "application_id": target_app,
+                    "returned": False,
+                },
+            ),
+            (
+                "node_end",
+                {
+                    "node_id": "loop_x",
+                    "status": "success",
+                    "outputs": {
+                        "output": "",
+                        "plan": [],
+                        "model": "m1",
+                        "finish_reason": "handed_off",
+                        "handoff": {
+                            "tool_name": "agent_7b2e3d4c",
+                            "application_id": target_app,
+                            "returned": False,
+                        },
+                        "usage": {"prompt_tokens": 5, "completion_tokens": 5, "total_tokens": 10},
+                    },
+                },
+            ),
+        ],
+    )
+    frames = asyncio.run(_collect(service, cap["application_id"], "帮我订票", cap["cid"]))
+    assert [name for name, _ in frames] == [
+        "run_start",
+        "llm_start",
+        "llm_end",
+        "handoff",
+        "result",
+        "final",
+    ]
+
+    llm_end = frames[2][1]
+    assert "转给票务专家" in llm_end["content"]
+    handoff_frame = frames[3][1]
+    assert handoff_frame == {
+        "from_app_id": str(cap["application_id"]),
+        "to_app_id": target_app,
+        "display_name": "天气助手",
+        "returned": False,
+    }
+    result = frames[-2][1]
+    assert result["content"] == ""
+    assert result["finish_reason"] == "handed_off"
+    assert result["tool_traces"] == []
+    # assistant 落库同样为空正文（接管轮不作最终回答）
+    assistant_rows = [m for m in cap["msg_repo"].appended if m["role"] == "assistant"]
+    assert [m["content"] for m in assistant_rows] == [""]
+    # T-c7 路由收口：active=目标、链以归属应用为首种子
+    assert cap["conv_repo"].handoff_updates == [
+        {
+            "conversation_id": cap["cid"],
+            "active_application_id": UUID(target_app),
+            "handoff_chain": [str(cap["application_id"]), target_app],
+        }
+    ]
+
+
+def test_chat_sub_agents_only_agent_goes_canvas_channel() -> None:
+    """M4-c F14.6：仅挂 subAgents 的 agent（无 tools/datasets/mcp/workflows）也走画布通道。"""
+    graph = _agent_graph_with(
+        modleName="m1",
+        systemPrompt="S",
+        subAgents=[{"applicationId": str(uuid4()), "mode": "delegate"}],
+    )
+    service, cap = _make_service(
+        graph,
+        runner_events=[
+            ("node_start", {"node_id": "loop_x", "node_type": "100", "inputs": {}}),
+            (
+                "prompt_text",
+                {
+                    "phase": "execute",
+                    "iteration": 1,
+                    "role": "assistant",
+                    "content": "done",
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2},
+                    "finish_reason": "stop",
+                    "tool_calls": [],
+                },
+            ),
+            ("node_end", {"node_id": "loop_x", "status": "success", "outputs": {"output": "done"}}),
+        ],
+    )
+    frames = asyncio.run(_collect(service, cap["application_id"], "q", cap["cid"]))
+    assert cap["runner"] is not None
+    assert frames[0][0] == "run_start"
+    assert cap["model_service"].calls == []

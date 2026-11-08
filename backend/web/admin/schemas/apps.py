@@ -47,7 +47,13 @@ class AgentConfigPayload(BaseModel):
     tools: list[dict[str, Any]] = Field(default_factory=list)
     datasets: list[dict[str, Any]] = Field(default_factory=list)
     mcpServers: list[dict[str, Any]] = Field(default_factory=list)
+    # M4-b F17.4/T-b7：MCP 会话保持档位（{scope: run|conversation}，缺省/非法由
+    # domain 归一为 run；此前模型缺键导致 PUT 静默丢档，会话档 UI 无法落库）
+    mcpSession: dict[str, Any] = Field(default_factory=dict)
     workflows: list[dict[str, Any]] = Field(default_factory=list)
+    # M4-c F14.1：智能体协作挂载 [{applicationId, mode, toolName?, description?}]
+    # （缺键即静默丢配置的同类缺陷，必须在模型上显式承载）
+    subAgents: list[dict[str, Any]] = Field(default_factory=list)
     memory: dict[str, Any] = Field(default_factory=dict)
     reasoningMode: str = "react"
     plannerPrompt: str | None = None
