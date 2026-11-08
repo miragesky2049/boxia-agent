@@ -28,9 +28,20 @@ function setupFetch() {
     const method = (init?.method ?? 'GET').toUpperCase()
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     calls.push({ method, pathname, body })
-    if (method === 'GET' && pathname.endsWith('/admin/eval/datasets')) return jsonResponse(datasetsBody)
+    if (method === 'GET' && pathname.endsWith('/admin/eval/datasets'))
+      return jsonResponse(datasetsBody)
     if (method === 'POST' && pathname.endsWith('/cases/from-run')) {
-      return jsonResponse({ id: 'c-new', dataset_id: 'd1', input: { message: 'q' }, expected: null, expected_tool_calls: null, position: 0 }, 201)
+      return jsonResponse(
+        {
+          id: 'c-new',
+          dataset_id: 'd1',
+          input: { message: 'q' },
+          expected: null,
+          expected_tool_calls: null,
+          position: 0,
+        },
+        201,
+      )
     }
     return jsonResponse({ items: [] })
   })
@@ -40,7 +51,9 @@ function setupFetch() {
 beforeEach(() => {
   setAccessToken('t')
   calls = []
-  datasetsBody = { items: [{ id: 'd1', application_id: 'app-1', name: '问答基线集', description: '' }] }
+  datasetsBody = {
+    items: [{ id: 'd1', application_id: 'app-1', name: '问答基线集', description: '' }],
+  }
   setupFetch()
 })
 
@@ -62,11 +75,19 @@ describe('EvalCaptureButton', () => {
     renderButton()
     fireEvent.click(screen.getByRole('button', { name: '加入评测集' }))
     await waitFor(() => expect(screen.getByText('问答基线集')).toBeTruthy())
-    expect(calls.some((c) => c.method === 'GET' && c.pathname.endsWith('/admin/eval/datasets'))).toBe(true)
+    expect(
+      calls.some((c) => c.method === 'GET' && c.pathname.endsWith('/admin/eval/datasets')),
+    ).toBe(true)
 
     fireEvent.click(screen.getByRole('radio', { name: '问答基线集' }))
     fireEvent.click(screen.getByRole('button', { name: '导 入' }))
-    await waitFor(() => expect(calls.some((c) => c.method === 'POST' && c.pathname.includes('/datasets/d1/cases/from-run'))).toBe(true))
+    await waitFor(() =>
+      expect(
+        calls.some(
+          (c) => c.method === 'POST' && c.pathname.includes('/datasets/d1/cases/from-run'),
+        ),
+      ).toBe(true),
+    )
     const post = calls.find((c) => c.method === 'POST')
     expect(post?.body).toEqual({ run_id: 'run-9' })
     expect(await screen.findByText('已加入评测集')).toBeTruthy()

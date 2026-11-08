@@ -77,7 +77,9 @@ function setupFetch() {
     const parsed = new URL(url, 'http://localhost')
     const body = init?.body ? JSON.parse(String(init.body)) : undefined
     calls.push({ method, pathname: parsed.pathname, search: parsed.search, body })
-    const route = handlers.find((h) => h.match.test(parsed.pathname) && (h.method ?? 'GET') === method)
+    const route = handlers.find(
+      (h) => h.match.test(parsed.pathname) && (h.method ?? 'GET') === method,
+    )
     if (route) return jsonResponse(route.body ?? {}, route.status ?? 200)
     return jsonResponse(fallback(parsed.pathname))
   })
@@ -121,7 +123,9 @@ describe('EvalPanel 数据集', () => {
     for (const label of ['数据集', '评估器', '评测运行', '质量']) {
       expect(screen.getByRole('tab', { name: label })).toBeTruthy()
     }
-    await waitFor(() => expect(findCall('GET', '/admin/eval/datasets')?.search).toContain('application_id=app-1'))
+    await waitFor(() =>
+      expect(findCall('GET', '/admin/eval/datasets')?.search).toContain('application_id=app-1'),
+    )
   })
 
   it('新建数据集提交 application_id/name/description 并刷新列表', async () => {
@@ -179,7 +183,11 @@ describe('EvalPanel 评估器', () => {
 
   it('新建评估器提交 name/type/config', async () => {
     route('/admin/eval/evaluators$', { items: [] })
-    route('/admin/eval/evaluators$', { id: 'e9', name: '语义判定', type: 'llm_judge', config: {} }, 'POST')
+    route(
+      '/admin/eval/evaluators$',
+      { id: 'e9', name: '语义判定', type: 'llm_judge', config: {} },
+      'POST',
+    )
     renderPanel()
     fireEvent.click(screen.getByRole('tab', { name: '评估器' }))
     await waitFor(() => expect(findCall('GET', '/admin/eval/evaluators')).toBeTruthy())
@@ -187,8 +195,12 @@ describe('EvalPanel 评估器', () => {
     fireEvent.click(screen.getByRole('button', { name: '新建评估器' }))
     fireEvent.change(screen.getByPlaceholderText('评估器名称'), { target: { value: '语义判定' } })
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '类型' }))
-    fireEvent.click(await screen.findByText('LLM 判定', { selector: '.ant-select-item-option-content' }))
-    fireEvent.change(screen.getByPlaceholderText('配置 JSON'), { target: { value: '{"criteria":"回答与期望语义一致"}' } })
+    fireEvent.click(
+      await screen.findByText('LLM 判定', { selector: '.ant-select-item-option-content' }),
+    )
+    fireEvent.change(screen.getByPlaceholderText('配置 JSON'), {
+      target: { value: '{"criteria":"回答与期望语义一致"}' },
+    })
     fireEvent.click(screen.getByRole('button', { name: '保 存' }))
     await waitFor(() => expect(findCall('POST', '/admin/eval/evaluators')).toBeTruthy())
     expect(findCall('POST', '/admin/eval/evaluators')?.body).toEqual({
@@ -204,8 +216,22 @@ describe('EvalPanel 评测运行', () => {
     route('/admin/eval/datasets$', { items: [datasetA] })
     route('/admin/eval/evaluators$', { items: [evaluatorRule] })
     route('/admin/apps/app-1/graph-versions$', [
-      { id: 'v2', version: 2, runtime_mode: 'agent_loop', changelog: null, created_by: null, created_at: '2026-01-02T00:00:00Z' },
-      { id: 'v1', version: 1, runtime_mode: 'agent_loop', changelog: null, created_by: null, created_at: '2026-01-01T00:00:00Z' },
+      {
+        id: 'v2',
+        version: 2,
+        runtime_mode: 'agent_loop',
+        changelog: null,
+        created_by: null,
+        created_at: '2026-01-02T00:00:00Z',
+      },
+      {
+        id: 'v1',
+        version: 1,
+        runtime_mode: 'agent_loop',
+        changelog: null,
+        created_by: null,
+        created_at: '2026-01-01T00:00:00Z',
+      },
     ])
     route('/admin/eval/eval-runs$', { items: [] })
     route('/admin/eval/eval-runs$', { eval_run_id: 'r9' }, 'POST')
@@ -291,23 +317,20 @@ describe('EvalPanel 评测运行', () => {
 
   it('勾选两条运行后对比，按勾选顺序传 run_a/run_b', async () => {
     route('/admin/eval/eval-runs$', { items: [runOld, runCompleted] })
-    route(
-      '/admin/eval/eval-runs/diff$',
-      {
-        items: [
-          {
-            case_id: 'c1',
-            position: 0,
-            status_a: 'pass',
-            score_a: 1,
-            reason_a: 'ok',
-            status_b: 'fail',
-            score_b: 0,
-            reason_b: '缺少关键词',
-          },
-        ],
-      },
-    )
+    route('/admin/eval/eval-runs/diff$', {
+      items: [
+        {
+          case_id: 'c1',
+          position: 0,
+          status_a: 'pass',
+          score_a: 1,
+          reason_a: 'ok',
+          status_b: 'fail',
+          score_b: 0,
+          reason_b: '缺少关键词',
+        },
+      ],
+    })
     renderPanel()
     fireEvent.click(screen.getByRole('tab', { name: '评测运行' }))
     await waitFor(() => expect(screen.getAllByText('已完成')).toHaveLength(2))
@@ -319,7 +342,9 @@ describe('EvalPanel 评测运行', () => {
     fireEvent.click(checkboxes[0]!)
     fireEvent.click(checkboxes[1]!)
     fireEvent.click(screen.getByRole('button', { name: '对比选中' }))
-    await waitFor(() => expect(findCall('GET', '/admin/eval/eval-runs/diff')?.search).toContain('run_a=r0&run_b=r1'))
+    await waitFor(() =>
+      expect(findCall('GET', '/admin/eval/eval-runs/diff')?.search).toContain('run_a=r0&run_b=r1'),
+    )
     expect(await screen.findByText('缺少关键词')).toBeTruthy()
     // 后端 status 原值 pass/fail 应映射为中文展示
     expect(screen.getByText('未通过')).toBeTruthy()
@@ -390,8 +415,12 @@ describe('EvalPanel 质量', () => {
     fireEvent.click(screen.getByRole('tab', { name: '质量' }))
     await waitFor(() => expect(findCall('GET', '/quality/summary')?.search).toContain('days=7'))
     fireEvent.mouseDown(screen.getByRole('combobox', { name: '统计窗口' }))
-    fireEvent.click(await screen.findByText('近 14 天', { selector: '.ant-select-item-option-content' }))
-    await waitFor(() => expect(calls.filter((c) => c.pathname.includes('/quality/summary'))).toHaveLength(2))
+    fireEvent.click(
+      await screen.findByText('近 14 天', { selector: '.ant-select-item-option-content' }),
+    )
+    await waitFor(() =>
+      expect(calls.filter((c) => c.pathname.includes('/quality/summary'))).toHaveLength(2),
+    )
     const second = calls.filter((c) => c.pathname.includes('/quality/summary'))[1]
     expect(second?.search).toContain('days=14')
   })

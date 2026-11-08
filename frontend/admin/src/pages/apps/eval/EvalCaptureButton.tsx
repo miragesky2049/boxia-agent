@@ -64,10 +64,7 @@ export default function EvalCaptureButton({ applicationId, runId }: EvalCaptureB
         {datasets.length === 0 && !loading ? (
           <Alert type="info" message="还没有评测数据集，请先在「智能体评测」工作区创建" />
         ) : (
-          <Radio.Group
-            value={picked}
-            onChange={(event) => setPicked(String(event.target.value))}
-          >
+          <Radio.Group value={picked} onChange={(event) => setPicked(String(event.target.value))}>
             <Space direction="vertical">
               {datasets.map((dataset) => (
                 <Radio key={dataset.id} value={dataset.id}>

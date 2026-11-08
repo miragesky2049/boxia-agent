@@ -49,9 +49,7 @@ describe('eval api', () => {
 
   it('startEvalRun 提交发起体并返回 eval_run_id', async () => {
     setAccessToken('t')
-    const fetchMock = vi
-      .fn()
-      .mockResolvedValue(jsonResponse({ eval_run_id: 'r1' }, 201))
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ eval_run_id: 'r1' }, 201))
     vi.stubGlobal('fetch', fetchMock)
     const runId = await startEvalRun({
       dataset_id: 'd1',

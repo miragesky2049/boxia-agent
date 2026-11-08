@@ -117,7 +117,10 @@ export default function DatasetsPanel({ applicationId }: DatasetsPanelProps) {
       return
     }
     try {
-      await addCase(activeDataset.id, { input: { message: values.message }, expected: values.expected || null })
+      await addCase(activeDataset.id, {
+        input: { message: values.message },
+        expected: values.expected || null,
+      })
       caseForm.resetFields()
       loadCases(activeDataset.id)
     } catch (err) {
@@ -147,7 +150,10 @@ export default function DatasetsPanel({ applicationId }: DatasetsPanelProps) {
           <Button type="link" size="small" onClick={() => openCases(record)}>
             用例管理
           </Button>
-          <Popconfirm title="删除数据集会同时删除其用例，确认？" onConfirm={() => void handleDelete(record.id)}>
+          <Popconfirm
+            title="删除数据集会同时删除其用例，确认？"
+            onConfirm={() => void handleDelete(record.id)}
+          >
             <Button type="link" size="small" danger>
               删除
             </Button>
@@ -183,7 +189,14 @@ export default function DatasetsPanel({ applicationId }: DatasetsPanelProps) {
           新建数据集
         </Button>
       </Space>
-      <Table rowKey="id" loading={items === null} columns={columns} dataSource={items ?? []} size="small" pagination={false} />
+      <Table
+        rowKey="id"
+        loading={items === null}
+        columns={columns}
+        dataSource={items ?? []}
+        size="small"
+        pagination={false}
+      />
 
       <Modal
         title="新建数据集"
@@ -197,7 +210,11 @@ export default function DatasetsPanel({ applicationId }: DatasetsPanelProps) {
         }}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入数据集名称' }]}>
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: '请输入数据集名称' }]}
+          >
             <Input placeholder="数据集名称" />
           </Form.Item>
           <Form.Item name="description" label="描述">
@@ -221,15 +238,31 @@ export default function DatasetsPanel({ applicationId }: DatasetsPanelProps) {
           </Button>
         }
       >
-        <Form form={caseForm} layout="inline" style={{ marginBottom: 16 }} onFinish={() => void handleAddCase()}>
-          <Form.Item name="message" rules={[{ required: true, message: '请输入问句' }]} style={{ flex: 1 }}>
+        <Form
+          form={caseForm}
+          layout="inline"
+          style={{ marginBottom: 16 }}
+          onFinish={() => void handleAddCase()}
+        >
+          <Form.Item
+            name="message"
+            rules={[{ required: true, message: '请输入问句' }]}
+            style={{ flex: 1 }}
+          >
             <Input placeholder="请输入用户问句" />
           </Form.Item>
           <Form.Item name="expected" style={{ flex: 1 }}>
             <Input placeholder="期望答案（选填）" />
           </Form.Item>
         </Form>
-        <Table rowKey="id" loading={cases === null} columns={caseColumns} dataSource={cases ?? []} size="small" pagination={false} />
+        <Table
+          rowKey="id"
+          loading={cases === null}
+          columns={caseColumns}
+          dataSource={cases ?? []}
+          size="small"
+          pagination={false}
+        />
       </Drawer>
     </Space>
   )

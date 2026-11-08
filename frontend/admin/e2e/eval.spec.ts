@@ -26,7 +26,11 @@ test('评测页签全链路', async ({ page }) => {
 
   // 从应用列表行内「评测」入口进入；列表按更新时间排序，须按目标应用行定位而非 first()
   await page.goto('/apps')
-  await page.getByRole('row').filter({ hasText: '接管冒烟主助手' }).getByRole('button', { name: '评测' }).click()
+  await page
+    .getByRole('row')
+    .filter({ hasText: '接管冒烟主助手' })
+    .getByRole('button', { name: '评测' })
+    .click()
   await page.waitForURL(EVAL_PATH)
 
   // 1) 历史冒烟数据集应可见
@@ -43,7 +47,10 @@ test('评测页签全链路', async ({ page }) => {
   await page.getByPlaceholder('请输入用户问句').fill('冒烟UI问句：你好')
   await page.getByRole('button', { name: '新增用例' }).click()
   await expect(page.getByText('冒烟UI问句：你好')).toBeVisible()
-  await page.getByRole('button', { name: /关\s*闭|Close/ }).first().click()
+  await page
+    .getByRole('button', { name: /关\s*闭|Close/ })
+    .first()
+    .click()
 
   // 3) 评估器列表含历史「恒过」
   await page.getByRole('tab', { name: '评估器' }).click()
@@ -53,7 +60,10 @@ test('评测页签全链路', async ({ page }) => {
   await page.getByRole('tab', { name: '评测运行' }).click()
   await expect(page.getByText('已完成').first()).toBeVisible()
 
-  await page.getByRole('button', { name: /详\s*情/ }).first().click()
+  await page
+    .getByRole('button', { name: /详\s*情/ })
+    .first()
+    .click()
   await expect(page.getByText('通过率')).toBeVisible()
   await expect(page.getByText('100%')).toBeVisible()
   // 用例管理抽屉关闭后 DOM 残留，限定当前打开的抽屉再点关闭
@@ -67,7 +77,9 @@ test('评测页签全链路', async ({ page }) => {
   await diffButton.click()
   await expect(page.getByText('运行对比')).toBeVisible()
   // 后端 eval_result.status 为 pass，页面映射为「通过」；限定在对比弹窗内断言
-  await expect(page.locator('.ant-modal-content').getByText('通过', { exact: true }).first()).toBeVisible()
+  await expect(
+    page.locator('.ant-modal-content').getByText('通过', { exact: true }).first(),
+  ).toBeVisible()
   // 已关闭的 Modal 仍留 DOM，限定当前可见弹窗关闭
   await page.locator('.ant-modal-wrap:visible .ant-modal-close').click()
 
@@ -81,7 +93,9 @@ test('评测页签全链路', async ({ page }) => {
   await expect(page.locator('.ant-select-item-option', { hasText: datasetName })).toBeVisible()
   await closeDropdown()
   await page.getByRole('combobox', { name: '图版本' }).click()
-  await expect(page.locator('.ant-select-item-option', { hasText: /^版本 \d+$/ }).first()).toBeVisible()
+  await expect(
+    page.locator('.ant-select-item-option', { hasText: /^版本 \d+$/ }).first(),
+  ).toBeVisible()
   await closeDropdown()
   await page.getByRole('combobox', { name: '评估器' }).click()
   await expect(page.locator('.ant-select-item-option', { hasText: '恒过' }).first()).toBeVisible()
@@ -92,5 +106,4 @@ test('评测页签全链路', async ({ page }) => {
   // 6) 质量页签骨架指标
   await page.getByRole('tab', { name: '质量' }).click()
   await expect(page.getByText('评测批次数')).toBeVisible()
-
 })

@@ -147,7 +147,14 @@ export default function EvaluatorsPanel() {
       <Button type="primary" onClick={openCreate}>
         新建评估器
       </Button>
-      <Table rowKey="id" loading={items === null} columns={columns} dataSource={items ?? []} size="small" pagination={false} />
+      <Table
+        rowKey="id"
+        loading={items === null}
+        columns={columns}
+        dataSource={items ?? []}
+        size="small"
+        pagination={false}
+      />
 
       <Modal
         title={editing ? '编辑评估器' : '新建评估器'}
@@ -158,7 +165,11 @@ export default function EvaluatorsPanel() {
         onCancel={() => setModalOpen(false)}
       >
         <Form form={form} layout="vertical">
-          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入评估器名称' }]}>
+          <Form.Item
+            name="name"
+            label="名称"
+            rules={[{ required: true, message: '请输入评估器名称' }]}
+          >
             <Input placeholder="评估器名称" />
           </Form.Item>
           <Form.Item name="type" label="类型" rules={[{ required: true }]}>
@@ -167,9 +178,7 @@ export default function EvaluatorsPanel() {
           <Form.Item name="config" label="配置">
             <Input.TextArea placeholder="配置 JSON" rows={4} />
           </Form.Item>
-          {configError ? (
-            <div style={{ color: '#ff4d4f' }}>{configError}</div>
-          ) : null}
+          {configError ? <div style={{ color: '#ff4d4f' }}>{configError}</div> : null}
         </Form>
       </Modal>
     </Space>

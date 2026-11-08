@@ -114,7 +114,13 @@ interface AgentConfigValues {
   }
   // M4-d F19.2/F19.3：质量门与线上采样键组（judgeModel undefined=未设置，提交转空串；
   // 后端恒携带默认组，此处必须显式声明随表单回传，防 PUT 洗掉 API 侧配置）
-  qualityGate: { enabled: boolean; passScore: number; maxRegen: number; judgeModel?: string; rubric: string }
+  qualityGate: {
+    enabled: boolean
+    passScore: number
+    maxRegen: number
+    judgeModel?: string
+    rubric: string
+  }
   judgeSampling: { enabled: boolean; rate: number; judgeModel?: string; rubric: string }
   /** 0074 PRD F10：待人工审批的敏感工具名清单 */
   sensitiveToolNames?: string[]

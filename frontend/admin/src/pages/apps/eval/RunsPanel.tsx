@@ -1,5 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Button, Descriptions, Drawer, Form, InputNumber, Modal, Select, Space, Table } from 'antd'
+import {
+  App,
+  Button,
+  Descriptions,
+  Drawer,
+  Form,
+  InputNumber,
+  Modal,
+  Select,
+  Space,
+  Table,
+} from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { listGraphVersions } from '../../../api/apps'
 import {
@@ -98,7 +109,10 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
       startForm.setFieldsValue({ concurrency: MinConcurrency })
     })
     try {
-      const [versions, evaluators] = await Promise.all([listGraphVersions(applicationId), listEvaluators()])
+      const [versions, evaluators] = await Promise.all([
+        listGraphVersions(applicationId),
+        listEvaluators(),
+      ])
       setVersionOptions(versions.map((v) => ({ value: v.version, label: `版本 ${v.version}` })))
       setEvaluatorOptions(evaluators.map((e) => ({ value: e.id, label: e.name })))
     } catch (err) {
@@ -221,8 +235,18 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
       width: 90,
       render: (status: string | null) => (status ? (RESULT_TEXT[status] ?? status) : '—'),
     },
-    { title: 'A 原因', dataIndex: 'reason_a', ellipsis: true, render: (v: string | null) => v ?? '—' },
-    { title: 'B 原因', dataIndex: 'reason_b', ellipsis: true, render: (v: string | null) => v ?? '—' },
+    {
+      title: 'A 原因',
+      dataIndex: 'reason_a',
+      ellipsis: true,
+      render: (v: string | null) => v ?? '—',
+    },
+    {
+      title: 'B 原因',
+      dataIndex: 'reason_b',
+      ellipsis: true,
+      render: (v: string | null) => v ?? '—',
+    },
   ]
 
   const resultColumns: ColumnsType<EvalRunDetail['results'][number]> = [
@@ -237,7 +261,12 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
       width: 100,
       render: (status: string) => RESULT_TEXT[status] ?? status,
     },
-    { title: '分数', dataIndex: 'score', width: 80, render: (v: number | null) => (v === null ? '—' : v) },
+    {
+      title: '分数',
+      dataIndex: 'score',
+      width: 80,
+      render: (v: number | null) => (v === null ? '—' : v),
+    },
     { title: '原因', dataIndex: 'reason', ellipsis: true },
   ]
 
@@ -279,16 +308,28 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
         }}
       >
         <Form form={startForm} layout="vertical">
-          <Form.Item name="dataset_id" label="数据集" rules={[{ required: true, message: '请选择数据集' }]}>
+          <Form.Item
+            name="dataset_id"
+            label="数据集"
+            rules={[{ required: true, message: '请选择数据集' }]}
+          >
             <Select
               placeholder="选择数据集"
               options={datasets.map((d) => ({ value: d.id, label: d.name }))}
             />
           </Form.Item>
-          <Form.Item name="graph_version" label="图版本" rules={[{ required: true, message: '请选择已发布版本' }]}>
+          <Form.Item
+            name="graph_version"
+            label="图版本"
+            rules={[{ required: true, message: '请选择已发布版本' }]}
+          >
             <Select placeholder="选择发布版本" options={versionOptions} />
           </Form.Item>
-          <Form.Item name="evaluator_ids" label="评估器" rules={[{ required: true, message: '至少选择一个评估器' }]}>
+          <Form.Item
+            name="evaluator_ids"
+            label="评估器"
+            rules={[{ required: true, message: '至少选择一个评估器' }]}
+          >
             <Select mode="multiple" placeholder="选择评估器" options={evaluatorOptions} />
           </Form.Item>
           <Form.Item name="concurrency" label="并发数" tooltip="执行侧当前串行消费，仅记录意图">
@@ -301,7 +342,9 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
         {detail ? (
           <Space direction="vertical" style={{ width: '100%' }}>
             <Descriptions column={3} size="small">
-              <Descriptions.Item label="通过率">{percentText(detail.summary.pass_rate)}</Descriptions.Item>
+              <Descriptions.Item label="通过率">
+                {percentText(detail.summary.pass_rate)}
+              </Descriptions.Item>
               <Descriptions.Item label="通过">{String(detail.summary.passed)}</Descriptions.Item>
               <Descriptions.Item label="失败">{String(detail.summary.failed)}</Descriptions.Item>
             </Descriptions>
@@ -323,7 +366,13 @@ export default function RunsPanel({ applicationId }: RunsPanelProps) {
         width={720}
         onCancel={() => setDiffOpen(false)}
       >
-        <Table rowKey="case_id" size="small" columns={diffColumns} dataSource={diffItems ?? []} pagination={false} />
+        <Table
+          rowKey="case_id"
+          size="small"
+          columns={diffColumns}
+          dataSource={diffItems ?? []}
+          pagination={false}
+        />
       </Modal>
     </Space>
   )

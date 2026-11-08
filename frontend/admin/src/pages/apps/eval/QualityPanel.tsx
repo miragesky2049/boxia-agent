@@ -1,6 +1,22 @@
 import { useEffect, useState } from 'react'
-import { Alert, Card, Descriptions, Select, Space, Spin, Table, Tag, Tooltip, Typography } from 'antd'
-import { getQualitySummary, type QualityLowItem, type QualitySummary, type QualityTrendPoint } from '../../../api/eval'
+import {
+  Alert,
+  Card,
+  Descriptions,
+  Select,
+  Space,
+  Spin,
+  Table,
+  Tag,
+  Tooltip,
+  Typography,
+} from 'antd'
+import {
+  getQualitySummary,
+  type QualityLowItem,
+  type QualitySummary,
+  type QualityTrendPoint,
+} from '../../../api/eval'
 import EvalCaptureButton from './EvalCaptureButton'
 
 interface QualityPanelProps {
@@ -123,13 +139,27 @@ export default function QualityPanel({ applicationId }: QualityPanelProps) {
           ]}
         />
       </Space>
-      <Card size="small" title={`近 ${summary.window_days} 天质量概览`} style={{ marginBottom: 16 }}>
+      <Card
+        size="small"
+        title={`近 ${summary.window_days} 天质量概览`}
+        style={{ marginBottom: 16 }}
+      >
         <Descriptions column={3} size="small">
-          <Descriptions.Item label="评测批次数">{String(summary.eval_batches.count)}</Descriptions.Item>
-          <Descriptions.Item label="最新批通过率">{percentText(summary.eval_batches.latest_pass_rate)}</Descriptions.Item>
-          <Descriptions.Item label="线上采样数">{String(summary.runtime_samples.count)}</Descriptions.Item>
-          <Descriptions.Item label="采样平均分">{scoreText(summary.runtime_samples.avg_score)}</Descriptions.Item>
-          <Descriptions.Item label="低分样本数">{String(summary.runtime_samples.low_score_count)}</Descriptions.Item>
+          <Descriptions.Item label="评测批次数">
+            {String(summary.eval_batches.count)}
+          </Descriptions.Item>
+          <Descriptions.Item label="最新批通过率">
+            {percentText(summary.eval_batches.latest_pass_rate)}
+          </Descriptions.Item>
+          <Descriptions.Item label="线上采样数">
+            {String(summary.runtime_samples.count)}
+          </Descriptions.Item>
+          <Descriptions.Item label="采样平均分">
+            {scoreText(summary.runtime_samples.avg_score)}
+          </Descriptions.Item>
+          <Descriptions.Item label="低分样本数">
+            {String(summary.runtime_samples.low_score_count)}
+          </Descriptions.Item>
         </Descriptions>
       </Card>
       <Card size="small" title="逐日采样均分" style={{ marginBottom: 16 }}>
@@ -148,7 +178,9 @@ export default function QualityPanel({ applicationId }: QualityPanelProps) {
           columns={lowColumns}
           dataSource={summary.low_score_items}
           pagination={false}
-          locale={{ emptyText: <Typography.Text type="secondary">窗口内暂无低分样本</Typography.Text> }}
+          locale={{
+            emptyText: <Typography.Text type="secondary">窗口内暂无低分样本</Typography.Text>,
+          }}
         />
       </Card>
     </div>
