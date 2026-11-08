@@ -35,6 +35,23 @@ export interface AgentSubAgentEntry {
   [key: string]: unknown
 }
 
+// M4-d PRD F19.2：运行时质量门键组（后端恒携带；judgeModel/rubric 空串=未设置）
+export interface AgentQualityGate {
+  enabled: boolean
+  judgeModel: string
+  rubric: string
+  passScore: number
+  maxRegen: number
+}
+
+// M4-d PRD F19.3：线上采样键组（后端恒携带；缺键会静默丢配置，必须显式声明）
+export interface AgentJudgeSampling {
+  enabled: boolean
+  rate: number
+  judgeModel: string
+  rubric: string
+}
+
 export interface AgentConfigForm {
   systemPrompt: string
   modleName: string
@@ -50,6 +67,8 @@ export interface AgentConfigForm {
   // M4-c F14.1：协作挂载（后端恒携带，默认空列表；缺键会静默丢配置，必须显式声明）
   subAgents: AgentSubAgentEntry[]
   memory: { shortTerm: AgentShortTermMemory; longTerm: AgentLongTermMemory }
+  qualityGate: AgentQualityGate
+  judgeSampling: AgentJudgeSampling
   reasoningMode: 'react' | 'planExecuteReflect'
   plannerPrompt?: string | null
   reflectorPrompt?: string | null

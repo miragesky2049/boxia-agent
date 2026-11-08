@@ -107,6 +107,20 @@ class ModelService:
             model=model_id,
         )
 
+    def resolve_judge_client(self, model_id: str, default_client: LLMClient) -> LLMClient:
+        """M4-d PRD F19.5：解析 judge 模型（qualityGate/judgeSampling.judgeModel）。
+
+        空值或目录解析失败时仅记 warning 并回退答题模型客户端——judge 模型错配
+        属配置质量问题，不应打断评测运行或对话主链路。
+        """
+        if not model_id:
+            return default_client
+        try:
+            return self.get_client(model_id)
+        except (NotFoundError, ValidationError) as exc:
+            logger.warning("judge 模型 %s 解析失败，回退答题模型：%s", model_id, exc)
+            return default_client
+
     def _build_cached_client(self, *, base_url: str, api_key: str, model: str) -> LLMClient:
         """按 (base_url, api_key) 缓存 client，模型切换不重建连接池。"""
         cache_key = (base_url, api_key)

@@ -21,6 +21,7 @@ import asyncio
 import contextlib
 import json
 import logging
+import random
 from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -55,6 +56,7 @@ from internal.domain.agent.react import (
     run_react_loop,
 )
 from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.canvas.agent_config import parse_judge_sampling_config
 from internal.domain.canvas.convert import find_agent_loop_config
 from internal.domain.llm.client import LLMToolSpec
 from internal.domain.repository.apps_protocols import (
@@ -153,6 +155,8 @@ class _ChatRunState:
     awaiting: dict[str, Any] | None = None
     # M4 PRD F14.9：内核接管/归位命中时节点透出的 handoff 事件载荷；None = 本轮未接管
     handoff: dict[str, Any] | None = None
+    # M4 PRD F19.2：质量门终判 {score,passed,attempts[,error]}；None = 本轮门未执行/关闭
+    judge: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -197,6 +201,9 @@ class _ChatRunSpec:
     # M4 PRD F14.9：接管轮入站现场 {"from_application_id": 会话归属应用}；None = 归属
     # 应用应答轮。节点据此注入 hand_back 归位伪工具，ChatService 据此校验归位合法性
     handoff_inbound: dict[str, str] | None = None
+    # M4-d PRD F19.3：线上采样配置（agent 型且 judgeSampling.enabled 时非空，
+    # {"enabled", "rate", "judgeModel", "rubric"}）；run 成功落库后按 rate 投递 judge 任务
+    judge_sampling: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -236,6 +243,7 @@ class ChatService:
         memory_summarizer: MemorySummarizerService | None = None,
         memory_extract_enqueuer: Callable[[UUID], None] | None = None,
         memory_repo: AgentMemoryRepositoryProtocol | None = None,
+        judge_sampling_enqueuer: Callable[[UUID], None] | None = None,
     ) -> None:
         """runner_factory 与各服务/仓储由组合根注入（web.deps.graph / apps_services），
         应用层不自行构造 infra 具体类，也不反向 import web。
@@ -263,6 +271,9 @@ class ChatService:
         self._memory_extract_enqueuer = memory_extract_enqueuer
         # M4 PRD F16.4：长期记忆召回仓储（None 或未开启时零查询，关闭态无开销）
         self._memory_repo = memory_repo
+        # M4-d T-d8 F19.3：线上采样投递函数（组合根注入 celery task delay；采样纯
+        # 观测旁路——未注入/投递异常仅 warning，判定在 worker 异步执行，绝不进 SSE 关键路径）
+        self._judge_sampling_enqueuer = judge_sampling_enqueuer
 
     def _resolve_chat_conversation(
         self,
@@ -457,7 +468,12 @@ class ChatService:
                     content=state.final_content,
                     tool_calls=state.assistant_tool_calls or None,
                     run_id=state.run_id,
-                    metadata={"usage": state.usage_total, "iterations": state.iterations},
+                    # M4-d F19.4：质量门终判入 metadata（additive，门关/进程内通道无此键）
+                    metadata={
+                        "usage": state.usage_total,
+                        "iterations": state.iterations,
+                        **({"judge": state.judge} if state.judge is not None else {}),
+                    },
                 )
 
                 # 消息落库后先提交再发帧（批末 review #1：对齐审批挂起现场"先提交
@@ -480,6 +496,8 @@ class ChatService:
                         "iterations": state.iterations,
                         "usage": state.usage_total,
                         "finish_reason": state.finish_reason,
+                        # M4-d F19.2：质量门终判 additive 透出（门关态帧与基线逐字段一致）
+                        **({"judge": state.judge} if state.judge is not None else {}),
                     },
                 )
                 # M4 PRD F16.3：提交后投递长期记忆抽取（仅画布通道有 run 行；
@@ -491,6 +509,23 @@ class ChatService:
                     except Exception as exc:  # noqa: BLE001 - 旁路投递失败绝不升级为对话错误
                         logger.warning(
                             "长期记忆抽取投递失败（不影响对话）run_id=%s: %s", state.run_id, exc
+                        )
+                # M4-d PRD F19.3：线上采样投递（判定在投递点、打分在 worker）：run 成功
+                # 且 assistant 答案已提交后按 rate 抽中才投；挂起轮走 8a 分支到不了本行，
+                # 接管轮按应答应用快照正常投递，空答案不投。rate=0 恒不投、rate=1 恒投，
+                # 投递异常仅 warning 不升级。
+                if (
+                    spec.judge_sampling is not None
+                    and state.run_id
+                    and state.final_content.strip()
+                    and random.random() < float(spec.judge_sampling["rate"])
+                    and self._judge_sampling_enqueuer is not None
+                ):
+                    try:
+                        self._judge_sampling_enqueuer(state.run_id)
+                    except Exception as exc:  # noqa: BLE001 - 旁路投递失败绝不升级为对话错误
+                        logger.warning(
+                            "judge 采样投递失败（不影响对话）run_id=%s: %s", state.run_id, exc
                         )
         except Exception as exc:
             logger.exception("chat 运行失败 application=%s", application_id)
@@ -561,9 +596,17 @@ class ChatService:
         # 没有 run 行、抽取投递恒被跳过，记忆永不沉淀且无告警。开启 longTerm 一律走画布。
         long_term_enabled = False
         long_term: dict[str, Any] = {}
+        # M4-d PRD F19.3：采样配置解析（agent 型 + enabled 才非空）。与 longTerm 同形
+        # 计入画布通道判据：worker 判定依赖 run 行，进程内通道无 run，开启采样若仍走
+        # 进程内会"配置了但永远不采样"静默空转。注意判据仍与显式 modleName/systemPrompt
+        # 相与（longTerm 同款残余缝隙：未显式配模型的 legacy 图开采样仍走进程内，留档）。
+        judge_sampling: dict[str, Any] | None = None
         if app_card.get("flow_type") == "agent":
             long_term = parse_long_term_config(node_cfg.get("memory"))
             long_term_enabled = bool(long_term["enabled"])
+            sampling_parsed = parse_judge_sampling_config(node_cfg.get("judgeSampling"))
+            if sampling_parsed["enabled"]:
+                judge_sampling = sampling_parsed
         use_canvas = bool(
             loop_node_id
             and (
@@ -574,6 +617,7 @@ class ChatService:
                 # M4-c F14.6：subAgents 非空等同有合成工具（对齐 datasets 先例）
                 or node_cfg.get("subAgents")
                 or long_term_enabled
+                or judge_sampling is not None
             )
             and (node_cfg.get("modleName") or node_cfg.get("modelName"))
             and node_cfg.get("systemPrompt")
@@ -624,6 +668,7 @@ class ChatService:
             memory_ids=memory_ids,
             user_message_application_id=user_message_application_id,
             handoff_inbound=handoff_inbound,
+            judge_sampling=judge_sampling,
         )
 
     async def _load_agent_memory(
@@ -1181,6 +1226,21 @@ class ChatService:
                     },
                 )
             ]
+        if event_type == "judge":
+            # M4-d PRD F19.2：judge 判定 trace → SSE judge 帧（重生时每判定一次一帧）；
+            # 只透传判定字段，critique 等评审正文不出网（前端未识别帧安全忽略先例 F4.1）
+            frame: dict[str, Any] = {
+                "score": data.get("score"),
+                "passed": bool(data.get("passed")),
+                "attempts": data.get("attempts"),
+            }
+            if data.get("error"):
+                # 验收 7：judge 服务异常 fail-open 时带标记，前端可提示"未质检"
+                frame["error"] = True
+            judge_model = data.get("model")
+            if isinstance(judge_model, str) and judge_model:
+                frame["model"] = judge_model
+            return [("judge", frame)]
         if event_type == "node_end" and data.get("status") == "success":
             # 20261106 review 修正：以 agent_loop 节点 ID 精确匹配完成事件，
             # 不再按输出键名嗅探（end/subworkflow 节点可能恰好带 plan/output 键，
@@ -1202,6 +1262,10 @@ class ChatService:
                 if isinstance(handoff_info, dict) and handoff_info:
                     # M4 PRD F14.9：内核接管/归位命中轮，收口在 8b 统一处理
                     state.handoff = handoff_info
+                judge_info = outputs.get("judge")
+                if isinstance(judge_info, dict) and judge_info:
+                    # M4-d F19.2：质量门终判（result 帧与落库 metadata 的 judge 键来源）
+                    state.judge = judge_info
                 state.final_content = str(outputs.get("output") or "")
                 state.agent_finished = True
                 usage = outputs.get("usage")

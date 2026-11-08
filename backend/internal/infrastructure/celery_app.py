@@ -17,6 +17,8 @@ def make_celery() -> Celery:
         include=[
             "internal.infrastructure.tasks.ingest_tasks",
             "internal.infrastructure.tasks.memory_tasks",
+            "internal.infrastructure.tasks.judge_sampling_tasks",
+            "web.tasks.eval_tasks",
             "internal.infrastructure.tasks.auth_tasks",
             "internal.infrastructure.tasks.entitlement_tasks",
             "internal.infrastructure.tasks.entitlement_reconcile",
@@ -29,6 +31,10 @@ def make_celery() -> Celery:
         accept_content=["json"],
         timezone="UTC",
         enable_utc=True,
+        # 批末 review P2-4：chat SSE 收尾段同步调用 .delay()（记忆抽取/采样投递同路径），
+        # broker 被防火墙黑洞时 kombu 默认 OS 级 connect 超时可达数十秒、阻塞事件循环殃及
+        # 全部并发对话流。收紧为秒级，让投递快速失败并由调用侧 except 降级为 warning。
+        broker_transport_options={"socket_connect_timeout": 2, "socket_timeout": 5},
         task_acks_late=True,
         worker_prefetch_multiplier=1,
         task_track_started=True,

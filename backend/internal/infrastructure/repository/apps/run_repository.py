@@ -42,14 +42,16 @@ class RunRepository:
         thread_id: str,
         user_id: UUID | None = None,
         parent_run_id: UUID | None = None,
+        is_eval: bool = False,
     ) -> None:
         # parent_run_id：0074 PRD F7.2 工作流即工具的子 run 归因（顶层 run 为 NULL）
+        # is_eval：0080 PRD F18.3 评测批跑归因（评测 run 落表但运行日志默认隐身）
         self._session.execute(
             text(
                 "INSERT INTO run (id, tenant_id, workflow_id, graph_snapshot, input, "
-                "thread_id, execute_status, user_id, parent_run_id) VALUES "
+                "thread_id, execute_status, user_id, parent_run_id, is_eval) VALUES "
                 "(:id, :tid, :wid, CAST(:snapshot AS JSONB), CAST(:input AS JSONB), :thread, "
-                "'running', :uid, :parent)"
+                "'running', :uid, :parent, :is_eval)"
             ),
             {
                 "id": run_id,
@@ -60,6 +62,7 @@ class RunRepository:
                 "thread": thread_id,
                 "uid": user_id,
                 "parent": parent_run_id,
+                "is_eval": is_eval,
             },
         )
 
@@ -113,7 +116,7 @@ class RunRepository:
         row = self._session.execute(
             text(
                 "SELECT id, tenant_id, workflow_id, user_id, input, output, execute_status, error_message, "
-                "thread_id, interrupt_payload, parent_run_id, graph_snapshot, started_at, finished_at "
+                "thread_id, interrupt_payload, parent_run_id, graph_snapshot, is_eval, started_at, finished_at "
                 "FROM run WHERE id = :id"
             ),
             {"id": run_id},
@@ -165,10 +168,11 @@ class RunRepository:
         user_id: UUID | None = None,
         limit: int = 50,
     ) -> list[dict]:
+        # F18.3：运行日志默认过滤评测批跑产生的 run（报告跳转走 get_run，不受限）
         sql = (
             "SELECT id, workflow_id, user_id, thread_id, execute_status, input, output, error_message, "
             "interrupt_payload, parent_run_id, started_at, finished_at "
-            "FROM run WHERE tenant_id = :tid"
+            "FROM run WHERE tenant_id = :tid AND is_eval = false"
         )
         params: dict[str, Any] = {"tid": tenant_id}
         if workflow_id is not None:

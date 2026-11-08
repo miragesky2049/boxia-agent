@@ -284,6 +284,8 @@ async def build_runner(
     conversation_id: UUID | None = None,
     on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
     parent_run_id: UUID | None = None,
+    graph_version: int | None = None,
+    is_eval: bool = False,
 ) -> GraphRuntime:
     """构造 GraphRuntime：加载 coze 画布 JSON + 注册 llm/http/subgraph_loader 服务。
 
@@ -291,9 +293,18 @@ async def build_runner(
     - thread_id 由调用方传入；不传时由 runtime 内部生成
     - run_id 不传时由 runtime 内部生成
     - parent_run_id：工作流即工具子 run 归因（0074 PRD F7.2），顶层不传
+    - graph_version：评测批跑锁定发布快照版本（0079 PRD F18.4），非空时绕开
+      租户 pin/config 覆盖，直取 application_graph_version 行
+    - is_eval：评测直调 run 落表标记（0079 PRD F18.3），运行日志默认隐身
     """
-    canvas_json = await service.get_runtime_graph(application_id, tenant_id)
     app_repo = ApplicationRepository(uow.session)
+    if graph_version is None:
+        canvas_json = await service.get_runtime_graph(application_id, tenant_id)
+    else:
+        snapshot = app_repo.get_graph_version(application_id, graph_version)
+        if snapshot is None or snapshot.get("graph") is None:
+            raise ValueError(f"应用 {application_id} 不存在图版本 {graph_version}")
+        canvas_json = snapshot["graph"]
 
     # 变量体系：应用变量取默认值，用户变量优先取当前用户已持久化的值
     try:
@@ -413,4 +424,5 @@ async def build_runner(
         user_variable_keys=user_variable_keys,
         on_user_variables_changed=_persist_user_variables if current_user_id else None,
         parent_run_id=parent_run_id,
+        is_eval=is_eval,
     )

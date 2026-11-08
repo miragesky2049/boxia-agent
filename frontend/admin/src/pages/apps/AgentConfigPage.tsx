@@ -86,6 +86,11 @@ interface SubAgentRow {
   description?: string
 }
 
+// M4-d：judge 键组数值控件被清空时的兜底口径（与后端 agent_config.py 默认值对齐）
+const QualityGateDefaultPassScore = 7
+const QualityGateDefaultMaxRegen = 1
+const JudgeSamplingDefaultRate = 0.1
+
 interface AgentConfigValues {
   systemPrompt: string
   modleName: string
@@ -107,6 +112,10 @@ interface AgentConfigValues {
     // M4 PRD F16.1：extractModel 用 undefined 表示未设置（antd Select 清空态），提交时转 null
     longTerm: { enabled: boolean; extractModel?: string; recallTopK: number; maxMemories: number }
   }
+  // M4-d F19.2/F19.3：质量门与线上采样键组（judgeModel undefined=未设置，提交转空串；
+  // 后端恒携带默认组，此处必须显式声明随表单回传，防 PUT 洗掉 API 侧配置）
+  qualityGate: { enabled: boolean; passScore: number; maxRegen: number; judgeModel?: string; rubric: string }
+  judgeSampling: { enabled: boolean; rate: number; judgeModel?: string; rubric: string }
   /** 0074 PRD F10：待人工审批的敏感工具名清单 */
   sensitiveToolNames?: string[]
   /** 0074 PRD F9：视觉开关 */
@@ -170,6 +179,19 @@ function toFormValues(config: AgentConfigForm): AgentConfigValues {
         ...config.memory.longTerm,
         extractModel: config.memory.longTerm.extractModel ?? undefined,
       },
+    },
+    qualityGate: {
+      enabled: config.qualityGate?.enabled ?? false,
+      passScore: config.qualityGate?.passScore ?? QualityGateDefaultPassScore,
+      maxRegen: config.qualityGate?.maxRegen ?? QualityGateDefaultMaxRegen,
+      judgeModel: config.qualityGate?.judgeModel || undefined,
+      rubric: config.qualityGate?.rubric ?? '',
+    },
+    judgeSampling: {
+      enabled: config.judgeSampling?.enabled ?? false,
+      rate: config.judgeSampling?.rate ?? JudgeSamplingDefaultRate,
+      judgeModel: config.judgeSampling?.judgeModel || undefined,
+      rubric: config.judgeSampling?.rubric ?? '',
     },
     sensitiveToolNames: (config.sensitiveTools || [])
       .map((entry) => String((entry as { name?: unknown }).name ?? ''))
@@ -365,6 +387,8 @@ export default function AgentConfigPage() {
   const watchedMcpScope = Form.useWatch(['mcpSession', 'scope'], form)
   const watchedModel = Form.useWatch('modleName', form)
   const watchedLongTerm = Form.useWatch(['memory', 'longTerm', 'enabled'], form)
+  const watchedQualityGate = Form.useWatch(['qualityGate', 'enabled'], form)
+  const watchedJudgeSampling = Form.useWatch(['judgeSampling', 'enabled'], form)
   const candidateToolNames = useMemo(
     () => collectCandidateToolNames(watchedTools, watchedDatasets, watchedWorkflows, watchedMcp),
     [watchedTools, watchedDatasets, watchedWorkflows, watchedMcp],
@@ -509,6 +533,20 @@ export default function AgentConfigPage() {
           recallTopK: values.memory.longTerm.recallTopK,
           maxMemories: values.memory.longTerm.maxMemories,
         },
+      },
+      // M4-d F19.2/F19.3：judge 键组全量回传（数值控件清空回后端默认口径）
+      qualityGate: {
+        enabled: values.qualityGate.enabled,
+        passScore: values.qualityGate.passScore ?? QualityGateDefaultPassScore,
+        maxRegen: values.qualityGate.maxRegen ?? QualityGateDefaultMaxRegen,
+        judgeModel: values.qualityGate.judgeModel || '',
+        rubric: values.qualityGate.rubric || '',
+      },
+      judgeSampling: {
+        enabled: values.judgeSampling.enabled,
+        rate: values.judgeSampling.rate ?? JudgeSamplingDefaultRate,
+        judgeModel: values.judgeSampling.judgeModel || '',
+        rubric: values.judgeSampling.rubric || '',
       },
       // 0074 PRD F10：仅持久化被勾选的敏感工具名（后端节点按 name 集合门控）
       sensitiveTools: (values.sensitiveToolNames || []).map((name) => ({ name })),
@@ -760,6 +798,107 @@ export default function AgentConfigPage() {
               <InputNumber min={10} max={2000} disabled={!watchedLongTerm} style={{ width: 140 }} />
             </Form.Item>
           </Space>
+        </Card>
+
+        {/* M4-d F19.2/F19.3：运行时质量门 + 线上采样（两处 judge 消费点共用内核，配置互不影响） */}
+        <Card title="回答质量（judge）" style={{ marginBottom: 16 }}>
+          <Space size={48} wrap>
+            <Form.Item
+              name={['qualityGate', 'enabled']}
+              label="质量门"
+              valuePropName="checked"
+              tooltip="开启后终答先经 judge 打分，未达分数线自动重生（有界）；judge 服务异常时放行原答案"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name={['qualityGate', 'passScore']}
+              label="分数线"
+              tooltip="judge 打分 0~10，低于该分触发重生"
+            >
+              <InputNumber min={0} max={10} precision={0} disabled={!watchedQualityGate} />
+            </Form.Item>
+            <Form.Item
+              name={['qualityGate', 'maxRegen']}
+              label="最大重生次数"
+              tooltip="0~2；重生耗尽后放行最后版本并记录门失败原因"
+            >
+              <InputNumber min={0} max={2} precision={0} disabled={!watchedQualityGate} />
+            </Form.Item>
+            <Form.Item name={['qualityGate', 'judgeModel']} label="判定模型">
+              <Select
+                allowClear
+                placeholder="跟随答题模型"
+                style={{ width: 220 }}
+                disabled={!watchedQualityGate}
+                options={models.map((m) => ({
+                  value: m.model_id,
+                  label: `${m.display_name}（${m.provider_name}）`,
+                }))}
+              />
+            </Form.Item>
+          </Space>
+          <Form.Item
+            name={['qualityGate', 'rubric']}
+            label="评分准则"
+            tooltip="留空使用默认准则；最长 2000 字"
+          >
+            <Input.TextArea
+              rows={2}
+              maxLength={2000}
+              showCount
+              disabled={!watchedQualityGate}
+              placeholder="如：必须引用知识库出处，否则 0 分"
+            />
+          </Form.Item>
+          <Space size={48} wrap>
+            <Form.Item
+              name={['judgeSampling', 'enabled']}
+              label="线上采样"
+              valuePropName="checked"
+              tooltip="按概率对成功对话异步 judge 打分入评测库（仅观测不干预回答）；结果见「评测」工作区质量页签"
+            >
+              <Switch />
+            </Form.Item>
+            <Form.Item
+              name={['judgeSampling', 'rate']}
+              label="采样概率"
+              tooltip="0~1，如 0.1 表示约十分之一的对话被判定"
+            >
+              <InputNumber
+                min={0}
+                max={1}
+                step={0.05}
+                disabled={!watchedJudgeSampling}
+                style={{ width: 120 }}
+              />
+            </Form.Item>
+            <Form.Item name={['judgeSampling', 'judgeModel']} label="判定模型">
+              <Select
+                allowClear
+                placeholder="跟随答题模型"
+                style={{ width: 220 }}
+                disabled={!watchedJudgeSampling}
+                options={models.map((m) => ({
+                  value: m.model_id,
+                  label: `${m.display_name}（${m.provider_name}）`,
+                }))}
+              />
+            </Form.Item>
+          </Space>
+          <Form.Item
+            name={['judgeSampling', 'rubric']}
+            label="采样评分准则"
+            tooltip="留空使用默认准则；最长 2000 字"
+          >
+            <Input.TextArea
+              rows={2}
+              maxLength={2000}
+              showCount
+              disabled={!watchedJudgeSampling}
+              placeholder="采样判定用准则，与质量门独立生效"
+            />
+          </Form.Item>
         </Card>
 
         <Card title="工具" style={{ marginBottom: 16 }}>

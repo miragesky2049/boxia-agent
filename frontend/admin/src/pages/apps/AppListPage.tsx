@@ -461,7 +461,7 @@ export default function AppListPage() {
             {
               title: '操作',
               key: 'actions',
-              width: 300,
+              width: 340,
               onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
               render: (_, record) => (
                 <Space size={4} style={{ whiteSpace: 'nowrap' }}>
@@ -482,6 +482,13 @@ export default function AppListPage() {
                     onClick={() => navigate(`/apps/${record.id}/edit`)}
                   >
                     编辑画布
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => navigate(`/apps/${record.id}/eval`)}
+                  >
+                    评测
                   </Button>
                   <Button
                     type="link"

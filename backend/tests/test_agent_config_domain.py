@@ -501,3 +501,191 @@ class TestSubAgentsConfig:
     def test_legacy_graph_defaults_to_empty_list(self) -> None:
         legacy = _agent_node({"systemPrompt": _literal("S")})
         assert node_config_to_form(legacy["data"]["inputs"])["subAgents"] == []
+
+
+class TestQualityGateConfig:
+    """M4-d T-d7 F19.2：qualityGate 键组校验与表单⇄config⇄API 四处同构。"""
+
+    _DEFAULT_GATE = {"enabled": False, "judgeModel": "", "rubric": "", "passScore": 7, "maxRegen": 1}
+
+    def test_valid_quality_gate_accepted(self) -> None:
+        form = _base_form()
+        form["qualityGate"] = {
+            "enabled": True,
+            "judgeModel": "judge-m",
+            "rubric": "必须引用知识库出处",
+            "passScore": 8,
+            "maxRegen": 2,
+        }
+        assert validate_form(form) == []
+        # 缺键合法（= 门关闭默认组）
+        assert validate_form(_base_form()) == []
+
+    def test_shape_and_bounds_rejected(self) -> None:
+        form = _base_form()
+        form["qualityGate"] = "on"
+        assert any("qualityGate" in issue for issue in validate_form(form))
+
+        for bad_score in (11, -1, "8", True, 8.5):
+            form = _base_form()
+            form["qualityGate"] = {"enabled": True, "passScore": bad_score}
+            issues = validate_form(form)
+            assert any("passScore" in issue for issue in issues), bad_score
+
+        # maxRegen 允许 0（只评不重生），上界 2
+        form = _base_form()
+        form["qualityGate"] = {"enabled": True, "maxRegen": 0}
+        assert validate_form(form) == []
+        for bad_regen in (3, -1, "1", False, 1.5):
+            form = _base_form()
+            form["qualityGate"] = {"enabled": True, "maxRegen": bad_regen}
+            issues = validate_form(form)
+            assert any("maxRegen" in issue for issue in issues), bad_regen
+
+    def test_rubric_length_limit(self) -> None:
+        form = _base_form()
+        form["qualityGate"] = {"enabled": True, "rubric": "长" * 2001}
+        assert any("rubric" in issue for issue in validate_form(form))
+
+    def test_enabled_and_judge_model_types_rejected(self) -> None:
+        """批末 review P2-3：校验覆盖全键——enabled/judgeModel 脏类型不得被归一
+        静默洗成 True/""（"false" 字符串 bool() 为真会误开门）。"""
+        form = _base_form()
+        form["qualityGate"] = {"enabled": "false"}
+        assert any("qualityGate.enabled" in issue for issue in validate_form(form))
+
+        form = _base_form()
+        form["qualityGate"] = {"enabled": True, "judgeModel": 123}
+        assert any("qualityGate.judgeModel" in issue for issue in validate_form(form))
+
+    def test_quality_gate_round_trip_parity(self) -> None:
+        gate = {
+            "enabled": True,
+            "judgeModel": "judge-m",
+            "rubric": "三段准则",
+            "passScore": 9,
+            "maxRegen": 2,
+        }
+        node = _agent_node()
+        apply_form_to_node(node, {**_base_form(), "qualityGate": gate})
+        assert node["data"]["inputs"]["qualityGate"] == _literal(gate)
+
+        runtime_cfg = find_agent_loop_config({"nodes": [node], "edges": []})[1]
+        re_form = node_config_to_form(runtime_cfg)
+        assert re_form["qualityGate"] == gate
+        node2 = _agent_node()
+        apply_form_to_node(node2, re_form)
+        assert node2["data"]["inputs"]["qualityGate"] == _literal(gate)
+
+    def test_legacy_graph_defaults_to_closed_gate(self) -> None:
+        legacy = _agent_node({"systemPrompt": _literal("S")})
+        assert node_config_to_form(legacy["data"]["inputs"])["qualityGate"] == self._DEFAULT_GATE
+        weird = _agent_node(
+            {"qualityGate": _literal({"enabled": True, "passScore": 99, "maxRegen": -3})}
+        )
+        # 与生产读路径一致：先经转换层脱 literal，再表单化（直接喂 wrapper 会键名错位）
+        runtime_cfg = find_agent_loop_config({"nodes": [weird], "edges": []})[1]
+        normalized = node_config_to_form(runtime_cfg)["qualityGate"]
+        assert normalized == {"enabled": True, "judgeModel": "", "rubric": "", "passScore": 7, "maxRegen": 1}
+
+    def test_apply_normalizes_missing_gate_to_closed_defaults(self) -> None:
+        node = _agent_node()
+        apply_form_to_node(node, _base_form())
+        assert node["data"]["inputs"]["qualityGate"] == _literal(self._DEFAULT_GATE)
+
+    def test_api_payload_preserves_quality_gate(self) -> None:
+        """同类 T-b7 缺陷防御：AgentConfigPayload 缺键会让 PUT 静默丢门配置。"""
+        from web.admin.schemas.apps import AgentConfigPayload
+
+        gate = {"enabled": True, "passScore": 8}
+        dumped = AgentConfigPayload(**{**_base_form(), "qualityGate": gate}).model_dump()
+        assert dumped["qualityGate"] == gate
+
+        node = _agent_node()
+        apply_form_to_node(node, dumped)
+        assert node["data"]["inputs"]["qualityGate"]["value"]["content"]["passScore"] == 8
+
+
+class TestJudgeSamplingConfig:
+    """M4-d T-d8 F19.3：judgeSampling 键组校验与四处同构（采样只观测不干预）。"""
+
+    _DEFAULT_SAMPLING = {"enabled": False, "rate": 0.1, "judgeModel": "", "rubric": ""}
+
+    def test_valid_sampling_accepted(self) -> None:
+        form = _base_form()
+        form["judgeSampling"] = {
+            "enabled": True,
+            "rate": 0.3,
+            "judgeModel": "judge-m",
+            "rubric": "事实性以检索结果为准",
+        }
+        assert validate_form(form) == []
+        # 缺键合法（= 采样关闭默认组）
+        assert validate_form(_base_form()) == []
+
+    def test_shape_and_bounds_rejected(self) -> None:
+        form = _base_form()
+        form["judgeSampling"] = "on"
+        assert any("judgeSampling" in issue for issue in validate_form(form))
+
+        form = _base_form()
+        form["judgeSampling"] = {"enabled": "true"}
+        assert any("judgeSampling.enabled" in issue for issue in validate_form(form))
+
+        for bad_rate in (-0.1, 1.1, "0.5", True):
+            form = _base_form()
+            form["judgeSampling"] = {"enabled": True, "rate": bad_rate}
+            assert any("judgeSampling.rate" in issue for issue in validate_form(form)), bad_rate
+
+        form = _base_form()
+        form["judgeSampling"] = {"enabled": True, "judgeModel": 123}
+        assert any("judgeSampling.judgeModel" in issue for issue in validate_form(form))
+
+        form = _base_form()
+        form["judgeSampling"] = {"enabled": True, "rubric": "长" * 2001}
+        assert any("judgeSampling.rubric" in issue for issue in validate_form(form))
+
+        # rate 边界值合法：0.0（恒不投）与 1.0（必投）
+        form = _base_form()
+        form["judgeSampling"] = {"enabled": True, "rate": 0.0}
+        assert validate_form(form) == []
+        form["judgeSampling"] = {"enabled": True, "rate": 1.0}
+        assert validate_form(form) == []
+
+    def test_sampling_round_trip_parity(self) -> None:
+        sampling = {"enabled": True, "rate": 0.25, "judgeModel": "judge-m", "rubric": "三段准则"}
+        node = _agent_node()
+        apply_form_to_node(node, {**_base_form(), "judgeSampling": sampling})
+        assert node["data"]["inputs"]["judgeSampling"] == _literal(sampling)
+
+        runtime_cfg = find_agent_loop_config({"nodes": [node], "edges": []})[1]
+        re_form = node_config_to_form(runtime_cfg)
+        assert re_form["judgeSampling"] == sampling
+        node2 = _agent_node()
+        apply_form_to_node(node2, re_form)
+        assert node2["data"]["inputs"]["judgeSampling"] == _literal(sampling)
+
+    def test_legacy_graph_defaults_to_closed_sampling(self) -> None:
+        legacy = _agent_node({"systemPrompt": _literal("S")})
+        assert node_config_to_form(legacy["data"]["inputs"])["judgeSampling"] == self._DEFAULT_SAMPLING
+        weird = _agent_node({"judgeSampling": _literal({"enabled": True, "rate": 9.9})})
+        runtime_cfg = find_agent_loop_config({"nodes": [weird], "edges": []})[1]
+        normalized = node_config_to_form(runtime_cfg)["judgeSampling"]
+        assert normalized == {"enabled": True, "rate": 0.1, "judgeModel": "", "rubric": ""}
+
+    def test_apply_normalizes_missing_sampling_to_closed_defaults(self) -> None:
+        node = _agent_node()
+        apply_form_to_node(node, _base_form())
+        assert node["data"]["inputs"]["judgeSampling"] == _literal(self._DEFAULT_SAMPLING)
+
+    def test_api_payload_preserves_judge_sampling(self) -> None:
+        """T-b7/T-d7 同类缺陷防御：Payload 缺 judgeSampling 键会让 PUT 静默丢采样配置。"""
+        from web.admin.schemas.apps import AgentConfigPayload
+
+        sampling = {"enabled": True, "rate": 1.0}
+        dumped = AgentConfigPayload(**{**_base_form(), "judgeSampling": sampling}).model_dump()
+        assert dumped["judgeSampling"] == sampling
+
+        node = _agent_node()
+        apply_form_to_node(node, dumped)
+        assert node["data"]["inputs"]["judgeSampling"]["value"]["content"]["rate"] == 1.0

@@ -63,6 +63,13 @@ class AgentConfigPayload(BaseModel):
     # 0074 PRD F9（M3）：视觉开关（前端按所选模型 capabilities.supports_vision 门控）
     visionEnabled: bool = False
     tokenBudget: int | None = None
+    # M4-d F19.2：运行时质量门 {enabled, judgeModel?, rubric?, passScore?, maxRegen?}
+    # （同 T-b7 mcpSession 教训：模型缺键会让 PUT 静默丢门配置，必须显式承载；
+    # 缺省空 dict 由 domain 归一为默认关闭组）
+    qualityGate: dict[str, Any] = Field(default_factory=dict)
+    # M4-d F19.3：线上采样 judge {enabled, rate?, judgeModel?, rubric?}（四处同构
+    # 同类防御：缺键会让 PUT 静默丢采样配置；缺省空 dict 由 domain 归一为默认关闭组）
+    judgeSampling: dict[str, Any] = Field(default_factory=dict)
 
 
 class ListingPayload(BaseModel):

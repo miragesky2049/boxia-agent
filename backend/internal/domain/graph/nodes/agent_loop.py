@@ -32,6 +32,13 @@ config 约定：
   {name} 或裸字符串；命中敏感工具的轮次整轮挂起等待批准（见下 F10 流程）
 - visionEnabled: 视觉开关（0074 PRD F9）。仅当运行入参携带 images 且本开关为
   true 时，把当前 user 消息组装为多模态 content parts；否则忽略图片
+- qualityGate: 运行时质量门（M4 PRD F19.2），{enabled, judgeModel?, rubric?,
+  passScore?, maxRegen?}。节点收敛产出终稿后调 judge 内核打分（score>=passScore
+  为过，阈值判定在本消费方，不信内核 payload.passed）；不达标且重生未超
+  maxRegen → critique 作 user 消息追加后再跑一次 execute（judge 与重生消耗均
+  计入本 run usage/tokenBudget）；达上限仍不过或 judge 异常 → fail-open 放行
+  （U13 裁决）；终判经 outputs.judge 与 trace "judge" 事件 additive 透出。
+  审批挂起轮/接管轮/预算触顶轮/空答案轮/子 run（workflow_chain 非空，C8）跳过
 
 运行期入参（ctx.eval_context.input，20261106 P3 chat 兼容通道专用；
 画布试运行/工作流不携带这些键，行为与改造前一致）：
@@ -85,12 +92,17 @@ JSONB 可序列化）；消费方（ChatService）据此切换或归位会话路
 
 from __future__ import annotations
 
+import functools
 import inspect
 import json
 import logging
 import time
+import types
+from collections.abc import Awaitable, Callable
+from dataclasses import dataclass
 from typing import Any
 
+from internal.domain.agent.judge import judge
 from internal.domain.agent.mcp_client import (
     DEFAULT_TIMEOUT_SECONDS,
     McpClientError,
@@ -124,6 +136,12 @@ from internal.domain.canvas.agent_config import (
     KNOWLEDGE_TOOL_NAME_PREFIX,
     MAX_SUB_AGENTS,
     MCP_SESSION_SCOPES,
+    QUALITY_GATE_DEFAULT_MAX_REGEN,
+    QUALITY_GATE_DEFAULT_PASS_SCORE,
+    QUALITY_GATE_MAX_MAX_REGEN,
+    QUALITY_GATE_MAX_PASS_SCORE,
+    QUALITY_GATE_MIN_MAX_REGEN,
+    QUALITY_GATE_MIN_PASS_SCORE,
     SUB_AGENT_MODES,
     WORKFLOW_TOOL_NAME_PREFIX,
 )
@@ -143,6 +161,15 @@ DEFAULT_MAX_REFLECT_ROUNDS = 3
 
 # M4 PRD F14.9：接管目标侧自动注入的归位声明工具名（不进执行器，内核门控短路）
 HAND_BACK_TOOL_NAME = "hand_back"
+
+# M4-d PRD F19.2：judge 参考资料体量护栏——只保留最近 N 条工具观察项、
+# 单条截断 M 字，防长工具链把评审 prompt 撑爆（阈值判定语义不受影响）
+GATE_MAX_OBSERVATIONS = 5
+GATE_OBSERVATION_TRIM = 1000
+
+# execute 阶段 LLM 异常桩前缀（与 _execute 异常分支文案同源）：质量门重生时
+# 见到它视同重生失败，不得当作新答案顶掉原稿（批末 review P1-2）
+EXECUTE_ERROR_PREFIX = "[execute error]"
 
 # 0074 PRD F5 知识库即工具：前缀/模式枚举复用配置面定义，防止两处口径漂移
 DEFAULT_KNOWLEDGE_TOP_K = 5
@@ -220,6 +247,85 @@ def _parse_approval_resume(raw: Any) -> dict[str, Any] | None:
     }
 
 
+def _gate_int(value: Any, min_value: int, max_value: int, default: int) -> int:
+    """质量门数值容错：非严格整数或越界一律回配置面默认（与 agent_config 同口径）。"""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return default
+    if not min_value <= value <= max_value:
+        return default
+    return value
+
+
+def _parse_quality_gate(raw: Any) -> dict[str, Any]:
+    """M4 PRD F19.2：运行侧容错解析 qualityGate（历史图/脏值不抛错，界值复用配置面常量）。"""
+    gate = raw if isinstance(raw, dict) else {}
+    judge_model = gate.get("judgeModel")
+    rubric = gate.get("rubric")
+    return {
+        "enabled": bool(gate.get("enabled")),
+        "judgeModel": str(judge_model) if isinstance(judge_model, str) else "",
+        "rubric": str(rubric) if isinstance(rubric, str) else "",
+        "passScore": _gate_int(
+            gate.get("passScore"),
+            QUALITY_GATE_MIN_PASS_SCORE,
+            QUALITY_GATE_MAX_PASS_SCORE,
+            QUALITY_GATE_DEFAULT_PASS_SCORE,
+        ),
+        "maxRegen": _gate_int(
+            gate.get("maxRegen"),
+            QUALITY_GATE_MIN_MAX_REGEN,
+            QUALITY_GATE_MAX_MAX_REGEN,
+            QUALITY_GATE_DEFAULT_MAX_REGEN,
+        ),
+    }
+
+
+def _bind_judge_llm(llm: Any, model_id: str) -> Any:
+    """为 judge 内核绑定显式模型 ID。
+
+    judge() 调 chat 不传 model（F19.1 三消费方同源），而画布通道的
+    LLMServiceAdapter 必须按 model 解析客户端；探测 chat 签名含 model 参数时
+    用 partial 绑定，裸 LLMClient（模型已 bake、无该参数）原样透传。
+    """
+    if not model_id:
+        return llm
+    try:
+        params = inspect.signature(llm.chat).parameters
+    except (TypeError, ValueError):
+        return llm
+    if "model" not in params:
+        return llm
+    return types.SimpleNamespace(chat=functools.partial(llm.chat, model=model_id))
+
+
+@dataclass
+class _GateState:
+    """质量门可变态：judge/重生过程中被门方法就地更新的执行现场。"""
+
+    answer: str
+    messages: list[dict[str, Any]]
+    observations: list[str]
+    reflect_round: int = 0
+    awaiting: dict[str, Any] | None = None
+    handoff: dict[str, Any] | None = None
+    budget_hit: bool = False
+
+
+@dataclass
+class _GateContext:
+    """质量门依赖打包（避免 _apply_quality_gate 参数爆炸，编码规则 ≤6 参数）。"""
+
+    gate: dict[str, Any]
+    state: _GateState
+    llm: Any
+    model_id: str
+    question: str
+    usage_total: dict[str, int]
+    token_budget: int | None
+    emit: Any
+    do_execute: Callable[[int], Awaitable[dict[str, Any]]]
+
+
 class AgentLoopNodeHandler(NodeHandler):
     """plan/execute/reflect 三阶段 Agent 循环节点。"""
 
@@ -267,6 +373,8 @@ class AgentLoopNodeHandler(NodeHandler):
         max_reflect_rounds = _to_int(config.get("maxReflectRounds")) or DEFAULT_MAX_REFLECT_ROUNDS
         # 0074 PRD F11.1：单 run token 预算（缺省/非法 = 不限制）
         token_budget = _to_int(config.get("tokenBudget"))
+        # M4-d PRD F19.2：运行时质量门（缺省/脏值 = 关闭，界值与配置面同源）
+        quality_gate = _parse_quality_gate(config.get("qualityGate"))
         # 0074 PRD F10：敏感工具名单（空集 = 不启用人审门控）
         sensitive_names = _parse_sensitive_tool_names(config.get("sensitiveTools"))
         # 0074 PRD F9：图片入参受节点视觉开关门控，未开启直接忽略
@@ -660,11 +768,15 @@ class AgentLoopNodeHandler(NodeHandler):
                 },
             )
 
+        # M4-d F19.2：质量门入参现场（终稿观察项/最近轮次，供 judge 参考资料与重生 trace）
+        last_round = 0
+        last_observations: list[str] = []
         try:
             if react_only:
                 execute_result = await _do_execute(0)
                 awaiting_info = execute_result["awaiting"]
                 handoff_info = execute_result["handoff"]
+                last_observations = list(execute_result.get("observations") or [])
                 if awaiting_info is None and handoff_info is None:
                     final_answer = execute_result["content"]
                     execute_budget_hit = execute_result["budget_hit"]
@@ -674,6 +786,8 @@ class AgentLoopNodeHandler(NodeHandler):
                     (resume["reflect_round"] if resume else 0), max_reflect_rounds
                 ):
                     execute_result = await _do_execute(reflect_round)
+                    last_round = reflect_round
+                    last_observations = list(execute_result.get("observations") or [])
                     awaiting_info = execute_result["awaiting"]
                     if awaiting_info is not None:
                         awaiting_round = reflect_round
@@ -718,6 +832,46 @@ class AgentLoopNodeHandler(NodeHandler):
                             "content": f"上一轮结果未达标：{suggestion}。请基于上述反馈继续推进，避免重复已完成的步骤。",
                         }
                     )
+
+            # M4-d PRD F19.2：收敛终稿后接质量门（在节点层，不侵入 react 内核）。
+            # 跳过口径：审批挂起轮/接管轮/预算触顶轮/空答案轮/子 run（C8：
+            # workflow_chain 非空即委派或工作流子调用，防成本逐层放大）。
+            # 门置于审批 return 之前，使重生途中新产生的挂起/接管仍能走原通道出快照。
+            gate_outcome: dict[str, Any] | None = None
+            if (
+                quality_gate["enabled"]
+                and not workflow_chain
+                and awaiting_info is None
+                and handoff_info is None
+                and not execute_budget_hit
+                and final_answer.strip()
+            ):
+                gate_state = _GateState(
+                    answer=final_answer,
+                    messages=execution_messages,
+                    observations=last_observations,
+                    reflect_round=last_round,
+                )
+                gate_outcome = await self._apply_quality_gate(
+                    _GateContext(
+                        gate=quality_gate,
+                        state=gate_state,
+                        llm=llm,
+                        model_id=model_id,
+                        question=user_input,
+                        usage_total=usage_total,
+                        token_budget=token_budget,
+                        emit=_emit,
+                        do_execute=_do_execute,
+                    )
+                )
+                final_answer = gate_state.answer
+                awaiting_info = gate_state.awaiting
+                handoff_info = gate_state.handoff
+                execute_budget_hit = gate_state.budget_hit
+                # 批末 review P1-1：重生途中新产生的挂起，审批续跑轮次以门内推进后的
+                # 真实轮为准——恒用门外旧值会让批准后的续跑复跑已完成轮次、放大成本
+                awaiting_round = gate_state.reflect_round
 
             if awaiting_info is not None:
                 # 0074 PRD F10：本轮含未获批的敏感工具调用，整轮挂起，
@@ -769,6 +923,9 @@ class AgentLoopNodeHandler(NodeHandler):
                 # C1：内核 payload 为纯 dict（str/int/bool/None），天然 JSONB 可序列化；
                 # 消费方（ChatService，T-c7）据此切换或归位会话路由态
                 outputs["handoff"] = handoff_info
+            if gate_outcome is not None:
+                # M4-d F19.2：judge 终判 additive 透出（门关/判废时不写该键，门关态帧与基线逐字段一致）
+                outputs["judge"] = gate_outcome
             return NodeResult(outputs=outputs, usage=usage_total)
         finally:
             # M4-b F17.2：一切出口（正常收敛 / 审批挂起 return / 异常上抛）
@@ -854,6 +1011,8 @@ class AgentLoopNodeHandler(NodeHandler):
         budget_hit = False
         awaiting: dict[str, Any] | None = None
         handoff: dict[str, Any] | None = None
+        # M4-d F19.2：工具观察项收集（质量门 judge 参考资料，单条与总量截断见 GATE_* 常量）
+        observations: list[str] = []
         event_iter = run_react_loop(
             llm=llm,
             messages=messages,
@@ -874,7 +1033,7 @@ class AgentLoopNodeHandler(NodeHandler):
                 break
             except Exception as exc:  # noqa: BLE001
                 logger.warning("execute 阶段 LLM 调用失败: %s", exc)
-                final_content = f"[execute error] {exc}"
+                final_content = f"{EXECUTE_ERROR_PREFIX} {exc}"
                 break
 
             payload = event.payload
@@ -926,6 +1085,7 @@ class AgentLoopNodeHandler(NodeHandler):
                 chunks_meta = (
                     knowledge_chunks.pop(payload["name"], None) if knowledge_chunks else None
                 )
+                observations.append(str(payload["observation"] or "")[:GATE_OBSERVATION_TRIM])
                 await emit(
                     "tool_call_end",
                     {
@@ -973,7 +1133,93 @@ class AgentLoopNodeHandler(NodeHandler):
             "budget_hit": budget_hit,
             "awaiting": awaiting,
             "handoff": handoff,
+            # M4-d F19.2：additive 观察项（仅质量门消费；门关通道不读取）
+            "observations": observations[-GATE_MAX_OBSERVATIONS:],
         }
+
+    # ---------- 质量门（M4 PRD F19.2）----------
+    async def _apply_quality_gate(self, gc: _GateContext) -> dict[str, Any] | None:
+        """对收敛终稿跑 judge 打分与有限次重生，返回 outputs.judge 终判。
+
+        返回 None 表示重生途中出现审批挂起/接管短路，门结论作废（gc.state 已同步
+        更新，调用方按原通道出快照/切路由）；达 maxRegen 仍不过、judge 调用异常、
+        预算耗尽均 fail-open 放行（U13 裁决 + 验收 7），judge 异常时带 error 标记。
+        阈值判定在本消费方（score >= passScore），不信内核 payload.passed——
+        内核缺省 7 兜底会与自定义 passScore 漂移。
+        """
+        gate = gc.gate
+        max_regen = int(gate["maxRegen"])
+        judge_model_id = gate["judgeModel"] or gc.model_id
+        judge_llm = _bind_judge_llm(gc.llm, judge_model_id)
+        refs: list[str] | None = gc.state.observations or None
+        attempts = 0
+        while True:
+            attempts += 1
+            try:
+                verdict = await judge(
+                    judge_llm,
+                    model=judge_model_id,
+                    rubric=gate["rubric"],
+                    question=gc.question,
+                    answer=gc.state.answer,
+                    context_refs=refs,
+                )
+            except Exception as exc:  # noqa: BLE001
+                # 批末 review：带堆栈，judge 传输层异常与解析异常需可区分排查
+                logger.warning("质量门 judge 调用失败，fail-open 放行原答案: %s", exc, exc_info=True)
+                await gc.emit(
+                    "judge",
+                    {
+                        "score": None,
+                        "passed": False,
+                        "attempts": attempts,
+                        "model": judge_model_id,
+                        "error": True,
+                    },
+                )
+                return {"score": None, "passed": False, "attempts": attempts, "error": True}
+            accumulate_usage(gc.usage_total, verdict.usage)
+            passed = verdict.score >= gate["passScore"]
+            await gc.emit(
+                "judge",
+                {"score": verdict.score, "passed": passed, "attempts": attempts, "model": judge_model_id},
+            )
+            outcome: dict[str, Any] = {"score": verdict.score, "passed": passed, "attempts": attempts}
+            if passed or attempts > max_regen:
+                return outcome
+            if gc.token_budget and gc.usage_total["total_tokens"] >= gc.token_budget:
+                # F19.2：judge 自身消耗已计入预算，触顶即不再付重生成本，终判留档
+                return outcome
+            gc.state.messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        f"质量门评审：回答未达标（{verdict.score}/{gate['passScore']}），"
+                        f"评审意见：{verdict.critique}。请针对性修正后直接给出最终回答，不要重复已完成的步骤。"
+                    ),
+                }
+            )
+            # 批末 review P1-1：重生推进一个真实轮次，挂起/接管走原通道时
+            # 快照轮次与现场自洽（续跑从该轮起点继续，不复跑已完成轮）
+            gc.state.reflect_round += 1
+            execute_result = await gc.do_execute(gc.state.reflect_round)
+            gc.state.awaiting = execute_result["awaiting"]
+            gc.state.handoff = execute_result["handoff"]
+            if gc.state.awaiting is not None or gc.state.handoff is not None:
+                # 重生途中进入审批/接管通道：门结论作废，挂起现场与接管语义优先透出
+                return None
+            gc.state.budget_hit = execute_result["budget_hit"]
+            new_answer = str(execute_result["content"] or "")
+            if not new_answer.strip() or new_answer.startswith(EXECUTE_ERROR_PREFIX):
+                # 批末 review P1-2：重生 execute 异常时内核回异常桩，视同重生失败，
+                # 保留原答案与最后一次有效判定 fail-open 放行
+                return outcome
+            gc.state.answer = new_answer
+            gc.state.observations = list(execute_result.get("observations") or [])
+            refs = gc.state.observations or None
+            if gc.state.budget_hit:
+                # 重生途中触顶：保留最后一次判定留档，收尾走预算通道
+                return outcome
 
     # ---------- REFLECT ----------
     async def _reflect(

@@ -160,36 +160,36 @@ class _FakeChatClient:
             yield chunk
 
 
-def _canvas_graph() -> dict:
+def _canvas_graph(node_inputs: dict | None = None) -> dict:
     """真实持久化形态（coze 数字 type "100" + data.inputs ValueExpressionDTO），
-    与 application_service._default_graph 的写入结构一致。"""
+    与 application_service._default_graph 的写入结构一致。
+
+    node_inputs：追加的节点配置键（自动包 literal），供采样/门等键组用例复用。
+    """
 
     def literal(value: object) -> dict:
         return {"value": {"type": "literal", "content": value}}
 
+    inputs: dict = {
+        "modleName": literal("m1"),
+        "systemPrompt": literal("你是天气助手"),
+        "maxToolRounds": literal(3),
+        "tools": literal(
+            [
+                {
+                    "name": "get_weather",
+                    "description": "天气",
+                    "parameters": {"type": "object", "properties": {}},
+                }
+            ]
+        ),
+    }
+    for key, value in (node_inputs or {}).items():
+        inputs[key] = literal(value)
+
     return {
         "nodes": [
-            {
-                "id": "loop_x",
-                "type": "100",
-                "data": {
-                    "inputs": {
-                        "modleName": literal("m1"),
-                        "systemPrompt": literal("你是天气助手"),
-                        "maxToolRounds": literal(3),
-                        "tools": literal(
-                            [
-                                {
-                                    "name": "get_weather",
-                                    "description": "天气",
-                                    "parameters": {"type": "object", "properties": {}},
-                                }
-                            ]
-                        ),
-                    },
-                    "outputs": [],
-                },
-            }
+            {"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}
         ],
         "edges": [],
     }
@@ -360,6 +360,7 @@ def _make_service(
     flow_type: str = "agent",
     runner_hang: bool = False,
     run_repo: Any | None = None,
+    judge_sampling_enqueuer: Any | None = None,
 ) -> tuple[ChatService, dict[str, Any]]:
     tenant_id, user_id = uuid4(), uuid4()
     cid = uuid4()
@@ -400,6 +401,7 @@ def _make_service(
         run_repo=run_repo or object(),
         default_llm_model_id="default-m",
         tool_executor_factory=tool_executor_factory,
+        judge_sampling_enqueuer=judge_sampling_enqueuer,
     )
     captured.update(
         uow=uow,
@@ -1318,3 +1320,129 @@ def test_chat_sub_agents_only_agent_goes_canvas_channel() -> None:
     assert cap["runner"] is not None
     assert frames[0][0] == "run_start"
     assert cap["model_service"].calls == []
+
+
+# ---------- M4-d F19.2：质量门帧透出。门关态与基线逐字段一致（上一用例即守卫），
+# 门开态 judge trace 帧 + result/落库 metadata 均为 additive ----------
+
+
+def _gate_canvas_trace_events() -> list[tuple[str, dict]]:
+    """在基线 trace 序列的 node_end 前插入 judge 判定帧，并给终稿 outputs 加 judge 键。"""
+    events = _canvas_trace_events()
+    node_end_type, node_end_payload = events.pop()
+    events.append(("judge", {"score": 8, "passed": True, "attempts": 1, "model": "m"}))
+    outputs = dict(node_end_payload["outputs"])
+    outputs["judge"] = {"score": 8, "passed": True, "attempts": 1}
+    events.append((node_end_type, {**node_end_payload, "outputs": outputs}))
+    return events
+
+
+def test_chat_canvas_gate_frames_additive() -> None:
+    service, cap = _make_service(_canvas_graph(), runner_events=_gate_canvas_trace_events())
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+    names = [name for name, _ in frames]
+    assert names == [
+        "run_start",
+        "llm_start",
+        "llm_end",
+        "tool_start",
+        "tool_end",
+        "llm_start",
+        "llm_end",
+        "judge",
+        "result",
+        "final",
+    ]
+
+    # judge 帧透传判定结果；critique 等冗余字段不转发（前端未识别帧安全忽略先例 F4.1）
+    judge_frame = frames[7][1]
+    assert judge_frame["score"] == 8
+    assert judge_frame["passed"] is True
+    assert judge_frame["attempts"] == 1
+
+    # result 帧与 assistant 落库 metadata 均 additive judge 终判（F19.4）
+    result = frames[8][1]
+    assert result["judge"] == {"score": 8, "passed": True, "attempts": 1}
+    assistant_msg = cap["msg_repo"].appended[1]
+    assert assistant_msg["metadata"]["judge"] == {"score": 8, "passed": True, "attempts": 1}
+    assert assistant_msg["metadata"]["usage"] == {
+        "prompt_tokens": 9,
+        "completion_tokens": 10,
+        "total_tokens": 19,
+    }
+
+
+def test_chat_canvas_gate_absent_keeps_baseline_frames() -> None:
+    service, cap = _make_service(_canvas_graph())
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+    assert "judge" not in [name for name, _ in frames]
+    assert "judge" not in frames[7][1]
+    assert "judge" not in cap["msg_repo"].appended[1]["metadata"]
+
+
+# ---------- M4-d T-d8 F19.3：采样 judge 按概率投递（异步旁路，不进 SSE 关键路径） ----------
+
+
+def test_chat_judge_sampling_enqueued_at_full_rate() -> None:
+    """rate=1.0 恒投：主会话 run 成功收尾后投递 run_id（决策在投递点，执行在 worker）。"""
+    enqueued: list = []
+    graph = _canvas_graph(node_inputs={"judgeSampling": {"enabled": True, "rate": 1.0}})
+    service, cap = _make_service(graph, judge_sampling_enqueuer=enqueued.append)
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    assert frames[-1] == ("final", {})
+    assert len(enqueued) == 1 and enqueued[0] is not None
+
+
+def test_chat_judge_sampling_not_enqueued_when_disabled_or_zero_rate() -> None:
+    for sampling in ({"enabled": False, "rate": 1.0}, {"enabled": True, "rate": 0.0}):
+        enqueued: list = []
+        graph = _canvas_graph(node_inputs={"judgeSampling": sampling})
+        service, cap = _make_service(graph, judge_sampling_enqueuer=enqueued.append)
+        asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+        assert enqueued == [], sampling
+
+
+def test_chat_judge_sampling_pure_chat_agent_switches_to_canvas() -> None:
+    """批末 review P2-5①：无 tools/datasets/longTerm 的纯聊天 agent 开启采样必须转
+    画布通道（longTerm F16.1 同款缺陷钉子：进程内通道无 run 行，投递恒静默落空）。"""
+    enqueued: list = []
+    graph = _canvas_graph(node_inputs={"tools": [], "judgeSampling": {"enabled": True, "rate": 1.0}})
+    service, cap = _make_service(graph, judge_sampling_enqueuer=enqueued.append)
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    assert frames[-1] == ("final", {})
+    # 投递发生 = state.run_id 已绑 = 走了画布通道（进程内通道 run_id 恒 None）
+    assert len(enqueued) == 1 and enqueued[0] is not None
+
+
+def test_chat_judge_sampling_skips_empty_answer() -> None:
+    """批末 review P2-5②：终答为空的收尾轮（rate=1.0）不投递——空答案无可判定，
+    投给 worker 只会白烧 judge 调用。"""
+    events = _canvas_trace_events()
+    events[-2][1]["content"] = ""  # 末条 assistant 回复
+    events[-1][1]["outputs"]["output"] = "   "  # node_end 终答（含空白，strip 后为空）
+    enqueued: list = []
+    graph = _canvas_graph(node_inputs={"judgeSampling": {"enabled": True, "rate": 1.0}})
+    service, cap = _make_service(
+        graph, runner_events=events, judge_sampling_enqueuer=enqueued.append
+    )
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    assert frames[-1] == ("final", {})
+    assert enqueued == []
+
+
+def test_chat_judge_sampling_enqueuer_failure_does_not_break_stream() -> None:
+    """U12 降级契约：broker 不可达仅旁路 warning，对话帧序与基线一致、不出 error 帧。"""
+
+    def _boom(run_id) -> None:
+        raise ConnectionRefusedError("broker 不可达")
+
+    graph = _canvas_graph(node_inputs={"judgeSampling": {"enabled": True, "rate": 1.0}})
+    service, cap = _make_service(graph, judge_sampling_enqueuer=_boom)
+    frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
+
+    assert not [f for f in frames if f[0] == "error"]
+    assert any(f[0] == "result" for f in frames)
+    assert frames[-1] == ("final", {})

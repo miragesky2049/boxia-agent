@@ -26,6 +26,7 @@ from internal.application.apps.chat_service import ChatService
 from internal.application.apps.memory_service import MemorySummarizerService
 from internal.application.errors import ValidationError
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.tasks.judge_sampling_tasks import judge_sampling
 from internal.infrastructure.tasks.memory_tasks import extract_memories
 from web.deps.apps_services import (
     make_agent_memory_repository,
@@ -110,6 +111,9 @@ def get_chat_service(
         memory_extract_enqueuer=lambda run_id: extract_memories.delay(str(run_id)),
         # M4 PRD F16.4：召回注入仓储（longTerm.enabled 时才查询，关闭态零开销）
         memory_repo=make_agent_memory_repository(uow.session),
+        # M4-d PRD F19.3：线上采样投递（与抽取同任务通道；rate 判定在 ChatService，
+        # broker 不可达由服务侧降级 warning，不影响对话）
+        judge_sampling_enqueuer=lambda run_id: judge_sampling.delay(str(run_id)),
     )
 
 

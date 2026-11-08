@@ -62,6 +62,22 @@ MAX_MCP_TIMEOUT_SECONDS = 300
 # M4-b F17.4：会话保持档位；缺省 run 级（会话档池为 P1，本批仅落键与校验）
 MCP_SESSION_SCOPES = ("run", "conversation")
 DEFAULT_MCP_SESSION_SCOPE = "run"
+# M4-d PRD F19.2：运行时质量门键组。passScore 判定线（judge 按 0~10 打分，>= 线为过）；
+# maxRegen 重生上限 0~2（0=只评不重生），上界防单 run 成本失控；rubric 为自定义评审准则。
+# 运行侧容错解析（agent_loop._parse_quality_gate）复用本组常量，防两处口径漂移。
+QUALITY_GATE_DEFAULT_PASS_SCORE = 7
+QUALITY_GATE_DEFAULT_MAX_REGEN = 1
+QUALITY_GATE_MIN_PASS_SCORE = 0
+QUALITY_GATE_MAX_PASS_SCORE = 10
+QUALITY_GATE_MIN_MAX_REGEN = 0
+QUALITY_GATE_MAX_MAX_REGEN = 2
+QUALITY_GATE_MAX_RUBRIC_LENGTH = 2000
+# M4-d PRD F19.3：线上采样 judge 键组。rate 为 run 成功落库后的采样概率（0.0~1.0），
+# enabled 默认 false（默认关，防意外计费）；judgeModel 空 = 回退答题模型；rubric 长度
+# 复用质量门上限。运行侧 parse_judge_sampling_config 与投递点共用本组常量。
+JUDGE_SAMPLING_DEFAULT_RATE = 0.1
+JUDGE_SAMPLING_MIN_RATE = 0.0
+JUDGE_SAMPLING_MAX_RATE = 1.0
 
 
 def find_agent_loop_node(graph: dict[str, Any]) -> dict[str, Any] | None:
@@ -87,6 +103,10 @@ def node_config_to_form(node_cfg: dict[str, Any]) -> dict[str, Any]:
         "mcpServers": _dict_list(node_cfg.get("mcpServers")),
         # M4-b F17.4：会话档位恒携带（历史图无此键时补默认 run），表单⇄config 口径一致
         "mcpSession": _mcp_session_form(node_cfg.get("mcpSession")),
+        # M4-d F19.2：质量门键组恒携带（历史图无此键补默认关闭组），四处同构
+        "qualityGate": _quality_gate_form(node_cfg.get("qualityGate")),
+        # M4-d F19.3：采样键组恒携带（历史图无此键补默认关闭组），四处同构
+        "judgeSampling": _judge_sampling_form(node_cfg.get("judgeSampling")),
         "workflows": _dict_list(node_cfg.get("workflows")),
         # M4-c F14.1：智能体协作挂载恒携带（历史图无此键补空列表），表单⇄config 口径一致
         "subAgents": _dict_list(node_cfg.get("subAgents")),
@@ -221,6 +241,67 @@ def validate_form(
         elif str(mcp_session.get("scope") or DEFAULT_MCP_SESSION_SCOPE) not in MCP_SESSION_SCOPES:
             issues.append("mcpSession.scope 只能是 run 或 conversation")
 
+    # M4-d PRD F19.2：质量门键组校验。缺键合法（= 默认关闭）；携带时形状/边界必须严格，
+    # 脏值在配置面显式报错，而不是运行期被静默钳成默认（运行侧钳制仅作历史图兜底）
+    quality_gate = form.get("qualityGate")
+    if quality_gate is not None:
+        if not isinstance(quality_gate, dict):
+            issues.append("qualityGate 需为对象")
+        else:
+            # 批末 review P2-3：全键类型校验——"false" 字符串会被归一的 bool() 判真
+            # 误开门，脏类型必须在配置面显式报错，而不是静默洗成默认值
+            if "enabled" in quality_gate and not isinstance(quality_gate["enabled"], bool):
+                issues.append("qualityGate.enabled 需为布尔值")
+            judge_model_raw = quality_gate.get("judgeModel")
+            if judge_model_raw is not None and not isinstance(judge_model_raw, str):
+                issues.append("qualityGate.judgeModel 需为字符串")
+            pass_score_raw = quality_gate.get("passScore")
+            if pass_score_raw is not None and not _int_in_range(
+                pass_score_raw, QUALITY_GATE_MIN_PASS_SCORE, QUALITY_GATE_MAX_PASS_SCORE
+            ):
+                issues.append(
+                    f"qualityGate.passScore 需为 {QUALITY_GATE_MIN_PASS_SCORE}~"
+                    f"{QUALITY_GATE_MAX_PASS_SCORE} 的整数"
+                )
+            max_regen_raw = quality_gate.get("maxRegen")
+            if max_regen_raw is not None and not _int_in_range(
+                max_regen_raw, QUALITY_GATE_MIN_MAX_REGEN, QUALITY_GATE_MAX_MAX_REGEN
+            ):
+                issues.append(
+                    f"qualityGate.maxRegen 需为 {QUALITY_GATE_MIN_MAX_REGEN}~"
+                    f"{QUALITY_GATE_MAX_MAX_REGEN} 的整数"
+                )
+            rubric_raw = quality_gate.get("rubric")
+            if rubric_raw is not None and len(str(rubric_raw)) > QUALITY_GATE_MAX_RUBRIC_LENGTH:
+                issues.append(f"qualityGate.rubric 超长（最多 {QUALITY_GATE_MAX_RUBRIC_LENGTH} 字）")
+
+    # M4-d PRD F19.3：采样键组校验。缺键合法（= 默认关闭）；携带时形状/边界严格——
+    # 与 qualityGate 同口径，脏值在配置面显式报错，而不是运行期被静默洗成默认。
+    # 采样是纯观测旁路（只计费不干预回答），校验重点在 rate 边界防误配全量采样。
+    judge_sampling = form.get("judgeSampling")
+    if judge_sampling is not None:
+        if not isinstance(judge_sampling, dict):
+            issues.append("judgeSampling 需为对象")
+        else:
+            if "enabled" in judge_sampling and not isinstance(judge_sampling["enabled"], bool):
+                issues.append("judgeSampling.enabled 需为布尔值")
+            rate_raw = judge_sampling.get("rate")
+            if rate_raw is not None and not _float_in_range(
+                rate_raw, JUDGE_SAMPLING_MIN_RATE, JUDGE_SAMPLING_MAX_RATE
+            ):
+                issues.append(
+                    f"judgeSampling.rate 需为 {JUDGE_SAMPLING_MIN_RATE}~"
+                    f"{JUDGE_SAMPLING_MAX_RATE} 的数值"
+                )
+            judge_model_raw = judge_sampling.get("judgeModel")
+            if judge_model_raw is not None and not isinstance(judge_model_raw, str):
+                issues.append("judgeSampling.judgeModel 需为字符串")
+            rubric_raw = judge_sampling.get("rubric")
+            if rubric_raw is not None and len(str(rubric_raw)) > QUALITY_GATE_MAX_RUBRIC_LENGTH:
+                issues.append(
+                    f"judgeSampling.rubric 超长（最多 {QUALITY_GATE_MAX_RUBRIC_LENGTH} 字）"
+                )
+
     # 0074 PRD F7：工作流即工具条目校验（applicationId 必须是 UUID 形态）
     workflows = form.get("workflows") or []
     if len(workflows) > MAX_WORKFLOWS:
@@ -297,6 +378,23 @@ def _int_in_range(value: Any, min_value: int, max_value: int) -> bool:
     return min_value <= value <= max_value
 
 
+def _float_in_range(value: Any, min_value: float, max_value: float) -> bool:
+    """数值边界判定（rate 等浮点配置键）：口径对齐 _int_in_range——bool 拒、
+    字符串拒（"0.5" 不得静默转译），int/float 等价（JSON 里 1 与 1.0 同值）。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    return min_value <= value <= max_value
+
+
+def parse_judge_sampling_config(raw: Any) -> dict[str, Any]:
+    """运行侧采样配置归一（chat 投递点消费）：恒返回四键 dict，脏值回默认不抛错。
+
+    与配置面 node_config_to_form 同一份归一代码，保证"配置面读出的 rate 就是
+    投递点用的 rate"（qualityGate 同源原则）。
+    """
+    return _judge_sampling_form(raw)
+
+
 def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
     """把表单写回 agent_loop 节点 data.inputs（literal 脱壳形态）。
 
@@ -319,6 +417,10 @@ def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
         "mcpServers": _dict_list(form.get("mcpServers")),
         # M4-b F17.4：档位键全量覆盖写出（缺省恒为 {"scope": "run"}）
         "mcpSession": _mcp_session_form(form.get("mcpSession")),
+        # M4-d F19.2：质量门键组全量覆盖写出（未配置即显式关闭默认组）
+        "qualityGate": _quality_gate_form(form.get("qualityGate")),
+        # M4-d F19.3：采样键组全量覆盖写出（未配置即显式关闭默认组）
+        "judgeSampling": _judge_sampling_form(form.get("judgeSampling")),
         "workflows": _dict_list(form.get("workflows")),
         # M4-c F14.1：协作挂载全量覆盖写出（未挂载即显式空列表，与 workflows 同口径）
         "subAgents": _dict_list(form.get("subAgents")),
@@ -346,6 +448,47 @@ def apply_form_to_node(node: dict[str, Any], form: dict[str, Any]) -> None:
 
 
 # ---------- helpers ----------
+def _quality_gate_form(raw: Any) -> dict[str, Any]:
+    """qualityGate 键组归一：缺键补默认（关闭 + passScore 7 + maxRegen 1）；
+
+    数值越界/脏类型回默认而非钳到边界，与运行侧 agent_loop._parse_quality_gate 同口径，
+    保证配置面读出的判定线就是运行时实际生效的判定线。
+    """
+    gate = raw if isinstance(raw, dict) else {}
+    pass_score = gate.get("passScore")
+    if not _int_in_range(pass_score, QUALITY_GATE_MIN_PASS_SCORE, QUALITY_GATE_MAX_PASS_SCORE):
+        pass_score = QUALITY_GATE_DEFAULT_PASS_SCORE
+    max_regen = gate.get("maxRegen")
+    if not _int_in_range(max_regen, QUALITY_GATE_MIN_MAX_REGEN, QUALITY_GATE_MAX_MAX_REGEN):
+        max_regen = QUALITY_GATE_DEFAULT_MAX_REGEN
+    judge_model = gate.get("judgeModel")
+    rubric = gate.get("rubric")
+    return {
+        "enabled": bool(gate.get("enabled")),
+        "judgeModel": str(judge_model) if isinstance(judge_model, str) else "",
+        "rubric": str(rubric) if isinstance(rubric, str) else "",
+        "passScore": pass_score,
+        "maxRegen": max_regen,
+    }
+
+
+def _judge_sampling_form(raw: Any) -> dict[str, Any]:
+    """judgeSampling 键组归一：缺键补默认（关闭 + rate 0.1）；越界/脏类型回默认
+    而非钳到边界，与 qualityGate 同口径，保证配置面读出与运行侧判定同源。"""
+    sampling = raw if isinstance(raw, dict) else {}
+    rate = sampling.get("rate")
+    if not _float_in_range(rate, JUDGE_SAMPLING_MIN_RATE, JUDGE_SAMPLING_MAX_RATE):
+        rate = JUDGE_SAMPLING_DEFAULT_RATE
+    judge_model = sampling.get("judgeModel")
+    rubric = sampling.get("rubric")
+    return {
+        "enabled": bool(sampling.get("enabled")),
+        "rate": rate,
+        "judgeModel": str(judge_model) if isinstance(judge_model, str) else "",
+        "rubric": str(rubric) if isinstance(rubric, str) else "",
+    }
+
+
 def _mcp_session_form(raw: Any) -> dict[str, str]:
     """mcpSession 键组归一：缺键/非法 scope 补默认 run（F17.4 P0 默认档位）。"""
     if isinstance(raw, dict) and str(raw.get("scope") or "") in MCP_SESSION_SCOPES:

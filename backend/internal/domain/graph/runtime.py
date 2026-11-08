@@ -72,12 +72,15 @@ class GraphRuntime:
         user_variable_keys: set[str] | None = None,
         on_user_variables_changed: Any = None,
         parent_run_id: UUID | None = None,
+        is_eval: bool = False,
     ):
         self.canvas_json = canvas_json
         self.services = services or ServiceRegistry()
         self.run_repo = run_repo
         # 0074 PRD F7.2：工作流即工具时子 run 关联父 run（顶层 run 为 None）
         self.parent_run_id = parent_run_id
+        # 0080 PRD F18.3：评测批直调的 run 落表打 is_eval 标记（运行日志默认隐身）
+        self.is_eval = is_eval
         self.usage_repo = usage_repo
         self.audit_repo = audit_repo
         self.webhook_repo = webhook_repo
@@ -226,6 +229,9 @@ class GraphRuntime:
             if self.parent_run_id is not None:
                 # 仅在子 run 时传：存量 insert_run 桩签名不带该键（0074 PRD F7.2）
                 kwargs["parent_run_id"] = self.parent_run_id
+            if self.is_eval:
+                # 仅在评测直调时传：存量 insert_run 桩签名不带该键（0080 PRD F18.3）
+                kwargs["is_eval"] = True
             self.run_repo.insert_run(**kwargs)
         except Exception:  # noqa: BLE001
             logger.exception("写 run 记录失败")

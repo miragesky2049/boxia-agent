@@ -21,7 +21,8 @@ const acmeApp = {
   visibility_lock: false,
   visibility_template: 'all',
   admin_scope_mode: 'all_admin',
-  flow_type: 'chatflow',
+  // 页面默认按「智能体」过滤（c41fd5a），fixture 类型需与默认过滤一致才会出现在表格里
+  flow_type: 'agent',
   created_by: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -38,7 +39,7 @@ const betaApp = {
   visibility_lock: false,
   visibility_template: 'all',
   admin_scope_mode: 'all_admin',
-  flow_type: 'workflow',
+  flow_type: 'agent',
   created_by: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
