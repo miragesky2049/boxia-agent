@@ -40,7 +40,11 @@ def main() -> None:
 
     ds = client.post(
         "/eval/datasets",
-        json={"application_id": APP, "name": f"T-d4真机集-{int(time.time())}", "description": "smoke"},
+        json={
+            "application_id": APP,
+            "name": f"T-d4真机集-{int(time.time())}",
+            "description": "smoke",
+        },
     )
     assert ds.status_code == 201, ds.text
     ds_id = ds.json()["id"]
@@ -54,8 +58,10 @@ def main() -> None:
     started = client.post(
         "/eval/eval-runs",
         json={
-            "dataset_id": ds_id, "graph_version": GRAPH_VERSION,
-            "evaluator_ids": [ev_id], "concurrency": 6,
+            "dataset_id": ds_id,
+            "graph_version": GRAPH_VERSION,
+            "evaluator_ids": [ev_id],
+            "concurrency": 6,
         },
     )
     assert started.status_code == 201, started.text

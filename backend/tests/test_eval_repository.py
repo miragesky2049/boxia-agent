@@ -140,7 +140,9 @@ class TestEvaluator:
         )
         uow.commit()
         assert len(repo.list_evaluators(tenant_id)) == 2
-        assert [e["id"] for e in repo.list_evaluators(tenant_id, type_="llm_judge")] == [judge["id"]]
+        assert [e["id"] for e in repo.list_evaluators(tenant_id, type_="llm_judge")] == [
+            judge["id"]
+        ]
         assert repo.update_evaluator(
             tenant_id, rule["id"], name="包含2", type_="rule", config={"contains": "晴"}
         )
@@ -177,7 +179,10 @@ class TestEvalRunAndResults:
         assert run is not None and run["status"] == "running"
         assert run["progress"] == {} and run["graph_version"] == 3
         repo.update_eval_run(
-            run_id, status="completed", progress={"total": 2, "done": 2}, usage={"total_tokens": 120}
+            run_id,
+            status="completed",
+            progress={"total": 2, "done": 2},
+            usage={"total_tokens": 120},
         )
         uow.commit()
         done = repo.get_eval_run(tenant_id, run_id)
@@ -193,8 +198,12 @@ class TestEvalRunAndResults:
         tenant_id, app_id = scope
         repo = _repo(uow)
         ds = repo.create_dataset(tenant_id=tenant_id, application_id=app_id, name="集")
-        case_a = repo.add_case(tenant_id=tenant_id, dataset_id=ds["id"], input_data={"message": "a"})
-        case_b = repo.add_case(tenant_id=tenant_id, dataset_id=ds["id"], input_data={"message": "b"})
+        case_a = repo.add_case(
+            tenant_id=tenant_id, dataset_id=ds["id"], input_data={"message": "a"}
+        )
+        case_b = repo.add_case(
+            tenant_id=tenant_id, dataset_id=ds["id"], input_data={"message": "b"}
+        )
         run_a, run_b = uuid4(), uuid4()
         for rid in (run_a, run_b):
             repo.insert_eval_run(
@@ -208,19 +217,37 @@ class TestEvalRunAndResults:
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": run_a,
-                    "case_id": case_a["id"], "status": "pass", "score": 9,
-                    "reason": "", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": run_a,
+                    "case_id": case_a["id"],
+                    "status": "pass",
+                    "score": 9,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 },
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": run_a,
-                    "case_id": case_b["id"], "status": "fail", "score": 4,
-                    "reason": "事实错误", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": run_a,
+                    "case_id": case_b["id"],
+                    "status": "fail",
+                    "score": 4,
+                    "reason": "事实错误",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 },
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": run_b,
-                    "case_id": case_a["id"], "status": "fail", "score": 3,
-                    "reason": "回归", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": run_b,
+                    "case_id": case_a["id"],
+                    "status": "fail",
+                    "score": 3,
+                    "reason": "回归",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 },
                 # run_b 未跑 case_b：diff 行应出现且 b 侧为 NULL
             ]
@@ -242,15 +269,26 @@ class TestEvalRunAndResults:
         # 采样结果关联真实会话 run（看板按应用归因需 JOIN run 归因）
         sample_run_id = uuid4()
         RunRepository(uow.session).insert_run(
-            run_id=sample_run_id, tenant_id=tenant_id, workflow_id=app_id,
-            graph_snapshot={}, input_data={"input": "线上问句甲"}, thread_id=f"t-{sample_run_id}",
+            run_id=sample_run_id,
+            tenant_id=tenant_id,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"input": "线上问句甲"},
+            thread_id=f"t-{sample_run_id}",
         )
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": None,
-                    "run_id": sample_run_id, "case_id": None, "status": "pass", "score": 8,
-                    "reason": "", "judge_usage": {"total_tokens": 30}, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": None,
+                    "run_id": sample_run_id,
+                    "case_id": None,
+                    "status": "pass",
+                    "score": 8,
+                    "reason": "",
+                    "judge_usage": {"total_tokens": 30},
+                    "source": "runtime_sample",
                 }
             ]
         )
@@ -258,15 +296,26 @@ class TestEvalRunAndResults:
         # 看板只按应用归因；若沿用平台租户过滤，线上采样将恒不可见
         other_run_id = uuid4()
         RunRepository(uow.session).insert_run(
-            run_id=other_run_id, tenant_id=PLATFORM_TENANT_ID, workflow_id=app_id,
-            graph_snapshot={}, input_data={"message": "线上问句乙"}, thread_id=f"t-{other_run_id}",
+            run_id=other_run_id,
+            tenant_id=PLATFORM_TENANT_ID,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"message": "线上问句乙"},
+            thread_id=f"t-{other_run_id}",
         )
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": PLATFORM_TENANT_ID, "eval_run_id": None,
-                    "run_id": other_run_id, "case_id": None, "status": "fail", "score": 3,
-                    "reason": "漏答", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "eval_run_id": None,
+                    "run_id": other_run_id,
+                    "case_id": None,
+                    "status": "fail",
+                    "score": 3,
+                    "reason": "漏答",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 }
             ]
         )
@@ -285,7 +334,9 @@ class TestEvalRunAndResults:
         tenant_id, app_id = scope
         repo = _repo(uow)
         oldest_day = datetime.now(UTC).date() - timedelta(days=6)
-        oldest_bucket_start = datetime(oldest_day.year, oldest_day.month, oldest_day.day, tzinfo=UTC)
+        oldest_bucket_start = datetime(
+            oldest_day.year, oldest_day.month, oldest_day.day, tzinfo=UTC
+        )
         seeds = [
             # 最旧桶日前一天 23:59（UTC）：日历日窗口必须排除（滚动窗口会误收）
             oldest_bucket_start - timedelta(minutes=1),
@@ -299,15 +350,26 @@ class TestEvalRunAndResults:
         row_ids = [uuid4() for _ in seeds]
         for tag, rid in zip(("edge", "boundary", "stale"), run_ids, strict=True):
             RunRepository(uow.session).insert_run(
-                run_id=rid, tenant_id=tenant_id, workflow_id=app_id,
-                graph_snapshot={}, input_data={"input": f"线上问句{tag}"}, thread_id=f"t-{rid}",
+                run_id=rid,
+                tenant_id=tenant_id,
+                workflow_id=app_id,
+                graph_snapshot={},
+                input_data={"input": f"线上问句{tag}"},
+                thread_id=f"t-{rid}",
             )
         repo.insert_results(
             [
                 {
-                    "id": row_id, "tenant_id": tenant_id, "eval_run_id": None,
-                    "run_id": rid, "case_id": None, "status": "pass" if score >= 5 else "fail",
-                    "score": score, "reason": "", "judge_usage": None, "source": "runtime_sample",
+                    "id": row_id,
+                    "tenant_id": tenant_id,
+                    "eval_run_id": None,
+                    "run_id": rid,
+                    "case_id": None,
+                    "status": "pass" if score >= 5 else "fail",
+                    "score": score,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 }
                 for row_id, rid, score in zip(row_ids, run_ids, scores, strict=True)
             ]
@@ -329,13 +391,24 @@ class TestEvalRunAndResults:
         repo = _repo(uow)
         sample_run_id = uuid4()
         RunRepository(uow.session).insert_run(
-            run_id=sample_run_id, tenant_id=tenant_id, workflow_id=app_id,
-            graph_snapshot={}, input_data={"message": "hi"}, thread_id=f"t-{sample_run_id}",
+            run_id=sample_run_id,
+            tenant_id=tenant_id,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"message": "hi"},
+            thread_id=f"t-{sample_run_id}",
         )
         row = {
-            "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": None,
-            "run_id": sample_run_id, "case_id": None, "status": "pass", "score": 8,
-            "reason": "", "judge_usage": None, "source": "runtime_sample",
+            "id": uuid4(),
+            "tenant_id": tenant_id,
+            "eval_run_id": None,
+            "run_id": sample_run_id,
+            "case_id": None,
+            "status": "pass",
+            "score": 8,
+            "reason": "",
+            "judge_usage": None,
+            "source": "runtime_sample",
         }
         repo.insert_results([row])
         uow.commit()
@@ -349,16 +422,27 @@ class TestEvalRunAndResults:
         repo = _repo(uow)
         sample_run_id = uuid4()
         RunRepository(uow.session).insert_run(
-            run_id=sample_run_id, tenant_id=tenant_id, workflow_id=app_id,
-            graph_snapshot={}, input_data={"message": "hi"}, thread_id=f"t-{sample_run_id}",
+            run_id=sample_run_id,
+            tenant_id=tenant_id,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"message": "hi"},
+            thread_id=f"t-{sample_run_id}",
         )
         assert repo.has_runtime_sample(sample_run_id) is False
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": None,
-                    "run_id": sample_run_id, "case_id": None, "status": "pass", "score": 8,
-                    "reason": "", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": None,
+                    "run_id": sample_run_id,
+                    "case_id": None,
+                    "status": "pass",
+                    "score": 8,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 }
             ]
         )
@@ -373,15 +457,25 @@ class TestEvalRunAndResults:
         case = repo.add_case(tenant_id=tenant_id, dataset_id=ds["id"], input_data={"message": "a"})
         run_id = uuid4()
         repo.insert_eval_run(
-            run_id=run_id, tenant_id=tenant_id, application_id=app_id,
-            graph_version=1, dataset_id=ds["id"], evaluator_ids=[],
+            run_id=run_id,
+            tenant_id=tenant_id,
+            application_id=app_id,
+            graph_version=1,
+            dataset_id=ds["id"],
+            evaluator_ids=[],
         )
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": tenant_id, "eval_run_id": run_id,
-                    "case_id": case["id"], "status": "pass", "score": 9,
-                    "reason": "", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": tenant_id,
+                    "eval_run_id": run_id,
+                    "case_id": case["id"],
+                    "status": "pass",
+                    "score": 9,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 }
             ]
         )
@@ -426,8 +520,12 @@ class TestRunIsEval:
         tenant_id, app_id = scope
         run_id = uuid4()
         RunRepository(uow.session).insert_run(
-            run_id=run_id, tenant_id=tenant_id, workflow_id=app_id,
-            graph_snapshot={}, input_data={}, thread_id="t-default",
+            run_id=run_id,
+            tenant_id=tenant_id,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={},
+            thread_id="t-default",
         )
         uow.commit()
         assert RunRepository(uow.session).get_run(run_id)["is_eval"] is False

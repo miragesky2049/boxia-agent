@@ -24,7 +24,10 @@ def _canvas_graph(judge_sampling: dict[str, Any] | None, model: str = "m-main") 
     inputs: dict[str, Any] = {"modleName": _literal(model)}
     if judge_sampling is not None:
         inputs["judgeSampling"] = _literal(judge_sampling)
-    return {"nodes": [{"id": "loop_1", "type": "100", "data": {"inputs": inputs, "outputs": []}}], "edges": []}
+    return {
+        "nodes": [{"id": "loop_1", "type": "100", "data": {"inputs": inputs, "outputs": []}}],
+        "edges": [],
+    }
 
 
 class _FakeJudgeLLM:
@@ -254,7 +257,9 @@ def test_sample_model_fallback_chain() -> None:
 def test_sample_invalid_judge_model_falls_back_not_zeroes_all() -> None:
     """批末 review P2-2：judgeModel 拼错/已删 → 按回退链降级继续判（F19.5：模型错配
     是配置质量问题，不应让整应用采样静默归零），并保留错配请求记录供排障。"""
-    run = _run(graph_snapshot=_canvas_graph({"enabled": True, "judgeModel": "m-typo"}, model="m-app"))
+    run = _run(
+        graph_snapshot=_canvas_graph({"enabled": True, "judgeModel": "m-typo"}, model="m-app")
+    )
     service, parts = _service(run, unknown_models=("m-typo",))
 
     result = asyncio.run(service.sample_for_run(run["id"]))

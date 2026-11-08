@@ -87,9 +87,10 @@ def _chat_once(chat: httpx.Client, message: str) -> str:
 
 def _psq(sql: str) -> str:
     out = subprocess.run(
-        ["docker", "exec", "postgres", "psql", "-U", "postgres", "-d", "boxia_agent",
-         "-tAc", sql],
-        capture_output=True, text=True, timeout=30,
+        ["docker", "exec", "postgres", "psql", "-U", "postgres", "-d", "boxia_agent", "-tAc", sql],
+        capture_output=True,
+        text=True,
+        timeout=30,
     )
     if out.returncode != 0:
         raise SystemExit(f"psql 失败：{out.stderr[:200]}")

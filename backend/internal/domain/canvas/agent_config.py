@@ -273,7 +273,9 @@ def validate_form(
                 )
             rubric_raw = quality_gate.get("rubric")
             if rubric_raw is not None and len(str(rubric_raw)) > QUALITY_GATE_MAX_RUBRIC_LENGTH:
-                issues.append(f"qualityGate.rubric 超长（最多 {QUALITY_GATE_MAX_RUBRIC_LENGTH} 字）")
+                issues.append(
+                    f"qualityGate.rubric 超长（最多 {QUALITY_GATE_MAX_RUBRIC_LENGTH} 字）"
+                )
 
     # M4-d PRD F19.3：采样键组校验。缺键合法（= 默认关闭）；携带时形状/边界严格——
     # 与 qualityGate 同口径，脏值在配置面显式报错，而不是运行期被静默洗成默认。

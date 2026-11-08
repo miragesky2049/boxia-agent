@@ -13,7 +13,6 @@
 
 import json
 import os
-import time
 
 import httpx
 
@@ -56,7 +55,9 @@ def _put_gate(admin: httpx.Client, gate: dict) -> None:
     r = admin.put(f"/apps/{APP}/agent-config", json=form)
     assert r.status_code == 200, f"PUT 失败 {r.status_code}: {r.text[:300]}"
     back = admin.get(f"/apps/{APP}/agent-config").json()["qualityGate"]
-    assert back["enabled"] == gate["enabled"] and back["passScore"] == gate.get("passScore", 7), back
+    assert back["enabled"] == gate["enabled"] and back["passScore"] == gate.get("passScore", 7), (
+        back
+    )
     p = admin.post(f"/apps/{APP}/publish")
     assert p.status_code == 200, f"发布失败 {p.status_code}: {p.text[:200]}"
 
@@ -108,7 +109,9 @@ def main() -> None:
     )
     frames = _stream_chat_once(chat, "用一句话介绍光合作用")
     verdict = _assert_gate_open_stream(frames, "重生链路")
-    assert verdict["attempts"] == 2, f"未观察到重生（attempts={verdict['attempts']}，judge 两轮都给了满分？）"
+    assert verdict["attempts"] == 2, (
+        f"未观察到重生（attempts={verdict['attempts']}，judge 两轮都给了满分？）"
+    )
     assert frames["result"][-1]["content"], "重生后答案为空"
 
     # 场景2（验收 7）：judgeModel 不存在 → judge 调用异常 fail-open，带 error 标记且对话正常
@@ -118,7 +121,9 @@ def main() -> None:
     )
     frames2 = _stream_chat_once(chat, "用一句话介绍蒸腾作用")
     verdict2 = _assert_gate_open_stream(frames2, "fail-open")
-    assert verdict2.get("error") is True and verdict2["score"] is None, f"fail-open 标记缺失：{verdict2}"
+    assert verdict2.get("error") is True and verdict2["score"] is None, (
+        f"fail-open 标记缺失：{verdict2}"
+    )
     assert verdict2["attempts"] == 1, f"judge 异常不应触发重生：{verdict2}"
     assert frames2["result"][-1]["content"], "fail-open 后原答案未放行"
 

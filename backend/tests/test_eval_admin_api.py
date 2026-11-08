@@ -154,7 +154,9 @@ def test_evaluator_crud_and_bad_type(client: TestClient, headers: dict, app_id: 
         BASE + "/evaluators", json={"name": "坏", "type": "magic", "config": {}}, headers=headers
     )
     assert bad.status_code == 422 and bad.json()["code"] == "VALIDATION_ERROR"
-    assert client.delete(f"{BASE}/evaluators/{rule.json()['id']}", headers=headers).status_code == 204
+    assert (
+        client.delete(f"{BASE}/evaluators/{rule.json()['id']}", headers=headers).status_code == 204
+    )
 
 
 def test_cross_tenant_resource_returns_404(client: TestClient, headers: dict, app_id: UUID) -> None:
@@ -268,14 +270,26 @@ def test_eval_run_detail_and_diff(
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": PLATFORM_TENANT_ID, "eval_run_id": UUID(run_id),
-                    "case_id": cases[0]["id"], "status": "pass", "score": 9,
-                    "reason": "", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "eval_run_id": UUID(run_id),
+                    "case_id": cases[0]["id"],
+                    "status": "pass",
+                    "score": 9,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 },
                 {
-                    "id": uuid4(), "tenant_id": PLATFORM_TENANT_ID, "eval_run_id": UUID(run_id),
-                    "case_id": cases[1]["id"], "status": "fail", "score": 4,
-                    "reason": "事实错误", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "eval_run_id": UUID(run_id),
+                    "case_id": cases[1]["id"],
+                    "status": "fail",
+                    "score": 4,
+                    "reason": "事实错误",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 },
             ]
         )
@@ -319,12 +333,17 @@ def test_capture_case_from_run(client: TestClient, headers: dict, app_id: UUID) 
     try:
         # 对齐生产形态：run.input 落 invoke 入参（问句键为 input，非 message）
         RunRepository(uow.session).insert_run(
-            run_id=run_uuid, tenant_id=PLATFORM_TENANT_ID, workflow_id=app_id,
-            graph_snapshot={}, input_data={"input": "北京天气？"},
+            run_id=run_uuid,
+            tenant_id=PLATFORM_TENANT_ID,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"input": "北京天气？"},
             thread_id=f"cap-{run_uuid}",
         )
         uow.session.execute(
-            text("UPDATE run SET output = CAST(:o AS JSONB), execute_status='success' WHERE id=:id"),
+            text(
+                "UPDATE run SET output = CAST(:o AS JSONB), execute_status='success' WHERE id=:id"
+            ),
             {"o": '{"output": "晴 25℃"}', "id": run_uuid},
         )
         uow.commit()
@@ -386,9 +405,15 @@ def test_quality_summary_skeleton(
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": PLATFORM_TENANT_ID, "eval_run_id": eval_run_id,
-                    "case_id": cases[i]["id"], "status": st, "score": sc,
-                    "reason": "", "judge_usage": None, "source": "eval_run",
+                    "id": uuid4(),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "eval_run_id": eval_run_id,
+                    "case_id": cases[i]["id"],
+                    "status": st,
+                    "score": sc,
+                    "reason": "",
+                    "judge_usage": None,
+                    "source": "eval_run",
                 }
                 for i, (st, sc) in enumerate((("pass", 9), ("fail", 4)))
             ]
@@ -396,15 +421,26 @@ def test_quality_summary_skeleton(
         repo.update_eval_run(eval_run_id, status="completed")
         # judge 采样行：source=runtime_sample 需挂真实 run 行（看板按 run 归因到应用）
         RunRepository(uow.session).insert_run(
-            run_id=run_uuid, tenant_id=PLATFORM_TENANT_ID, workflow_id=app_id,
-            graph_snapshot={}, input_data={"message": "线上问句"}, thread_id=f"q-{run_uuid}",
+            run_id=run_uuid,
+            tenant_id=PLATFORM_TENANT_ID,
+            workflow_id=app_id,
+            graph_snapshot={},
+            input_data={"message": "线上问句"},
+            thread_id=f"q-{run_uuid}",
         )
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": PLATFORM_TENANT_ID, "eval_run_id": None,
-                    "run_id": run_uuid, "case_id": None, "status": "fail", "score": 3,
-                    "reason": "漏答关键信息", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "eval_run_id": None,
+                    "run_id": run_uuid,
+                    "case_id": None,
+                    "status": "fail",
+                    "score": 3,
+                    "reason": "漏答关键信息",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 }
             ]
         )
@@ -433,51 +469,79 @@ def test_quality_summary_board_trend_and_flywheel(
         repo = EvalRepository(uow.session)
         for rid in (run_low, run_high, run_edge):
             runs.insert_run(
-                run_id=rid, tenant_id=tenant.id, workflow_id=app_id,
-                graph_snapshot={}, input_data={"input": f"线上问句{rid}"},
+                run_id=rid,
+                tenant_id=tenant.id,
+                workflow_id=app_id,
+                graph_snapshot={},
+                input_data={"input": f"线上问句{rid}"},
                 thread_id=f"b-{rid}",
             )
             # 采样只发生在 success 终局后：播种对齐生产形态（from-run 捕获校验依赖此态）
             uow.session.execute(
-                text("UPDATE run SET execute_status='success', output = CAST(:o AS JSONB) "
-                     "WHERE id=:id"),
+                text(
+                    "UPDATE run SET execute_status='success', output = CAST(:o AS JSONB) "
+                    "WHERE id=:id"
+                ),
                 {"o": '{"output": "线上回答"}', "id": rid},
             )
         repo.insert_results(
             [
                 {
-                    "id": uuid4(), "tenant_id": tenant.id, "eval_run_id": None,
-                    "run_id": run_low, "case_id": None, "status": "fail", "score": 3,
-                    "reason": "漏答关键信息", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": tenant.id,
+                    "eval_run_id": None,
+                    "run_id": run_low,
+                    "case_id": None,
+                    "status": "fail",
+                    "score": 3,
+                    "reason": "漏答关键信息",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 },
                 {
-                    "id": uuid4(), "tenant_id": tenant.id, "eval_run_id": None,
-                    "run_id": run_high, "case_id": None, "status": "pass", "score": 9,
-                    "reason": "回答完整", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": tenant.id,
+                    "eval_run_id": None,
+                    "run_id": run_high,
+                    "case_id": None,
+                    "status": "pass",
+                    "score": 9,
+                    "reason": "回答完整",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 },
                 # 批末 review F1：滚动窗口会把最旧桶日前一天尾段的低分样本混进概览/清单，
                 # 但日桶无该日 → 与 trend 口径错位；日历日窗口应整行排除
                 {
-                    "id": uuid4(), "tenant_id": tenant.id, "eval_run_id": None,
-                    "run_id": run_edge, "case_id": None, "status": "fail", "score": 1,
-                    "reason": "窗口外旧样本", "judge_usage": None, "source": "runtime_sample",
+                    "id": uuid4(),
+                    "tenant_id": tenant.id,
+                    "eval_run_id": None,
+                    "run_id": run_edge,
+                    "case_id": None,
+                    "status": "fail",
+                    "score": 1,
+                    "reason": "窗口外旧样本",
+                    "judge_usage": None,
+                    "source": "runtime_sample",
                 },
             ]
         )
         oldest_day = datetime.now(UTC).date() - timedelta(days=6)
-        edge_ts = datetime(oldest_day.year, oldest_day.month, oldest_day.day, tzinfo=UTC) - timedelta(minutes=1)
+        edge_ts = datetime(
+            oldest_day.year, oldest_day.month, oldest_day.day, tzinfo=UTC
+        ) - timedelta(minutes=1)
         uow.session.execute(
-            text("UPDATE eval_result SET created_at = :ts WHERE run_id = :rid "
-                 "AND source = 'runtime_sample'"),
+            text(
+                "UPDATE eval_result SET created_at = :ts WHERE run_id = :rid "
+                "AND source = 'runtime_sample'"
+            ),
             {"ts": edge_ts, "rid": run_edge},
         )
         uow.commit()
     finally:
         uow.close()
 
-    body = client.get(
-        f"/api/v1/admin/apps/{app_id}/quality/summary?days=7", headers=headers
-    ).json()
+    body = client.get(f"/api/v1/admin/apps/{app_id}/quality/summary?days=7", headers=headers).json()
     assert body["runtime_samples"] == {"count": 2, "avg_score": 6.0, "low_score_count": 1}
     trend = body["trend"]
     assert len(trend) == 7
@@ -549,9 +613,7 @@ def test_diff_requires_same_dataset(
     assert resp.status_code == 422, resp.text
 
 
-def test_capture_case_validates_source_run(
-    client: TestClient, headers: dict, app_id: UUID
-) -> None:
+def test_capture_case_validates_source_run(client: TestClient, headers: dict, app_id: UUID) -> None:
     """捕获口径：非本应用 run→404；未正常结束→422；空问句→422（批末 review#2/#7）。"""
     ds_id = _mk_dataset(client, headers, app_id)
     other_app = uuid4()
@@ -571,22 +633,28 @@ def test_capture_case_validates_source_run(
         )
         for rid, wf in ((run_foreign, other_app), (run_unfinished, app_id), (run_empty, app_id)):
             RunRepository(uow.session).insert_run(
-                run_id=rid, tenant_id=PLATFORM_TENANT_ID, workflow_id=wf,
-                graph_snapshot={}, input_data={"input": "问句"}, thread_id=f"cap-{rid}",
+                run_id=rid,
+                tenant_id=PLATFORM_TENANT_ID,
+                workflow_id=wf,
+                graph_snapshot={},
+                input_data={"input": "问句"},
+                thread_id=f"cap-{rid}",
             )
         uow.session.execute(
             text("UPDATE run SET execute_status='success' WHERE id IN (:a, :c)"),
             {"a": run_foreign, "c": run_empty},
         )
         uow.session.execute(
-            text("UPDATE run SET input = '{\"input\": \"\"}'::jsonb WHERE id = :c"),
+            text('UPDATE run SET input = \'{"input": ""}\'::jsonb WHERE id = :c'),
             {"c": run_empty},
         )
         uow.commit()
     finally:
         uow.close()
     foreign = client.post(
-        f"{BASE}/datasets/{ds_id}/cases/from-run", json={"run_id": str(run_foreign)}, headers=headers
+        f"{BASE}/datasets/{ds_id}/cases/from-run",
+        json={"run_id": str(run_foreign)},
+        headers=headers,
     )
     assert foreign.status_code == 404, foreign.text
     unfinished = client.post(

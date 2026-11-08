@@ -26,15 +26,20 @@ class _FakeRunner:
     有外键，报告跳转详情依赖该链路）；error 行按 T-d3 约定 run_id 置 NULL。
     """
 
-    def __init__(self, uow, scope, output: dict[str, Any] | None = None, *, error: bool = False) -> None:
+    def __init__(
+        self, uow, scope, output: dict[str, Any] | None = None, *, error: bool = False
+    ) -> None:
         self.run_id = uuid4()
         self._output = output or {}
         self._error = error
         if not error:
             tenant_id, app_id = scope
             RunRepository(uow.session).insert_run(
-                run_id=self.run_id, tenant_id=tenant_id, workflow_id=app_id,
-                graph_snapshot={"nodes": []}, input_data={"message": "fake"},
+                run_id=self.run_id,
+                tenant_id=tenant_id,
+                workflow_id=app_id,
+                graph_snapshot={"nodes": []},
+                input_data={"message": "fake"},
                 thread_id=f"fake-{self.run_id}",
             )
 
@@ -95,6 +100,7 @@ def _service(
 ) -> EvalRunService:
     eval_repo = EvalRepository(uow.session)
     if progress_log is not None:
+
         class _RecordingEvalRepo(EvalRepository):
             def update_eval_run(self, run_id, **kwargs):  # noqa: ANN001, ANN101
                 if kwargs.get("progress") is not None:
@@ -260,7 +266,10 @@ def test_tool_trace_assertions(uow, scope) -> None:
         [
             {
                 "input": {"message": "a"},
-                "expected_tool_calls": {"must_call": ["lookup_city"], "must_not_call": ["send_email"]},
+                "expected_tool_calls": {
+                    "must_call": ["lookup_city"],
+                    "must_not_call": ["send_email"],
+                },
             }
         ],
         [{"name": "恒过", "type": "rule", "config": {}}],
@@ -287,7 +296,9 @@ def test_tool_trace_assertions(uow, scope) -> None:
         ],
         [{"name": "恒过", "type": "rule", "config": {}}],
     )
-    runners2 = {str(cases2[0]["id"]): _FakeRunner(uow, scope, {"output": "结果", "tool_traces": []})}
+    runners2 = {
+        str(cases2[0]["id"]): _FakeRunner(uow, scope, {"output": "结果", "tool_traces": []})
+    }
     service2 = _service(uow, runners2)
     asyncio.run(service2.run_batch(scope[0], run_id2))
     uow.commit()
@@ -298,15 +309,20 @@ def test_tool_trace_assertions(uow, scope) -> None:
 def test_regex_and_json_schema_and_not_contains(uow, scope) -> None:
     # 每个评估器各起一批（F18.4：所选评估器跑全部 case，混在一起无法分别断言）
     _, run_a, cases_a = _seed(
-        uow, scope, [{"input": {"message": "a"}}],
+        uow,
+        scope,
+        [{"input": {"message": "a"}}],
         [{"name": "正则", "type": "rule", "config": {"regex": r"多云\d+℃"}}],
     )
     _, run_b, cases_b = _seed(
-        uow, scope, [{"input": {"message": "b"}}],
+        uow,
+        scope,
+        [{"input": {"message": "b"}}],
         [{"name": "不含", "type": "rule", "config": {"notContains": "抱歉"}}],
     )
     _, run_c, cases_c = _seed(
-        uow, scope,
+        uow,
+        scope,
         [{"input": {"message": "c"}}, {"input": {"message": "d"}}],
         [{"name": "JSON", "type": "rule", "config": {"jsonSchema": True}}],
     )
@@ -478,7 +494,11 @@ def test_evaluator_level_judge_model_resolution(uow, scope) -> None:
         [{"input": {"message": "a"}}],
         [
             {"name": "默认裁判", "type": "llm_judge", "config": {"passScore": 7}},
-            {"name": "严格裁判", "type": "llm_judge", "config": {"passScore": 7, "model": "judge-g"}},
+            {
+                "name": "严格裁判",
+                "type": "llm_judge",
+                "config": {"passScore": 7, "model": "judge-g"},
+            },
         ],
     )
     default_llm = _FakeJudgeLLM('{"score": 8, "passed": true, "critique": ""}')

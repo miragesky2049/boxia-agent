@@ -21,7 +21,9 @@ class _FakeLLM:
         self._contents = list(contents)
         self.calls: list[dict[str, Any]] = []
 
-    async def chat(self, *, messages: list[dict[str, Any]], tools: Any = None, **kwargs: Any) -> LLMResponse:
+    async def chat(
+        self, *, messages: list[dict[str, Any]], tools: Any = None, **kwargs: Any
+    ) -> LLMResponse:
         self.calls.append({"messages": messages, **kwargs})
         content = self._contents.pop(0) if self._contents else "not-a-json"
         return LLMResponse(
@@ -148,9 +150,7 @@ def test_resolve_judge_client_unknown_model_warns_and_falls_back(monkeypatch: An
     from internal.application.apps import model_service as ms_module
 
     warnings: list[str] = []
-    monkeypatch.setattr(
-        ms_module.logger, "warning", lambda msg, *args: warnings.append(msg % args)
-    )
+    monkeypatch.setattr(ms_module.logger, "warning", lambda msg, *args: warnings.append(msg % args))
     default = _FakeLLM([])
     service = ModelService(_FakeModelRepo(None))  # type: ignore[arg-type]
     client = service.resolve_judge_client("judge-model-unknown-xyz", default)  # type: ignore[arg-type]

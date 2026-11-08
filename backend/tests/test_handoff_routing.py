@@ -886,15 +886,42 @@ def test_list_messages_replays_handoff_notice_and_app_attribution() -> None:
     conv = _make_conv()
     service, cap = _make_service(conv)
     cap["msg_repo"].rows = [
-        {"id": uuid4(), "role": "user", "content": "帮我查天气", "application_id": _OWNER,
-         "tool_calls": None, "created_at": None, "metadata": None},
-        {"id": uuid4(), "role": "system", "content": "会话已移交给专家「天气专家」，后续对话由其应答。",
-         "application_id": _OWNER, "tool_calls": None, "created_at": None,
-         "metadata": {"kind": "handoff_notice"}},
-        {"id": uuid4(), "role": "assistant", "content": "明天晴，20 度。", "application_id": _TARGET,
-         "tool_calls": None, "created_at": None, "metadata": None},
-        {"id": uuid4(), "role": "system", "content": "非接管类系统行不透出", "application_id": _OWNER,
-         "tool_calls": None, "created_at": None, "metadata": None},
+        {
+            "id": uuid4(),
+            "role": "user",
+            "content": "帮我查天气",
+            "application_id": _OWNER,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": None,
+        },
+        {
+            "id": uuid4(),
+            "role": "system",
+            "content": "会话已移交给专家「天气专家」，后续对话由其应答。",
+            "application_id": _OWNER,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": {"kind": "handoff_notice"},
+        },
+        {
+            "id": uuid4(),
+            "role": "assistant",
+            "content": "明天晴，20 度。",
+            "application_id": _TARGET,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": None,
+        },
+        {
+            "id": uuid4(),
+            "role": "system",
+            "content": "非接管类系统行不透出",
+            "application_id": _OWNER,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": None,
+        },
     ]
     rows = asyncio.run(service.list_messages(_OWNER, conv["id"]))
     assert [r["role"] for r in rows] == ["user", "system", "assistant"]
@@ -910,16 +937,35 @@ def test_list_messages_baseline_rows_unchanged_when_no_handoff() -> None:
     conv = _make_conv()
     service, cap = _make_service(conv)
     cap["msg_repo"].rows = [
-        {"id": uuid4(), "role": "user", "content": "你好", "application_id": _OWNER,
-         "tool_calls": None, "created_at": None, "metadata": None},
-        {"id": uuid4(), "role": "assistant", "content": "你好，有什么可以帮你", "application_id": _OWNER,
-         "tool_calls": None, "created_at": None, "metadata": None},
+        {
+            "id": uuid4(),
+            "role": "user",
+            "content": "你好",
+            "application_id": _OWNER,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": None,
+        },
+        {
+            "id": uuid4(),
+            "role": "assistant",
+            "content": "你好，有什么可以帮你",
+            "application_id": _OWNER,
+            "tool_calls": None,
+            "created_at": None,
+            "metadata": None,
+        },
     ]
     rows = asyncio.run(service.list_messages(_OWNER, conv["id"]))
     assert len(rows) == 2
     assert rows[0]["application_id"] == str(_OWNER)
     assert set(rows[0]) == {
-        "message_id", "role", "content", "tool_calls", "created_at", "application_id"
+        "message_id",
+        "role",
+        "content",
+        "tool_calls",
+        "created_at",
+        "application_id",
     }
 
 

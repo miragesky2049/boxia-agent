@@ -36,8 +36,12 @@ def main() -> int:
         ds = repo.create_dataset(
             tenant_id=TENANT, application_id=APP, name="T-d3冒烟集", description="M4-d smoke"
         )
-        repo.add_case(tenant_id=TENANT, dataset_id=ds["id"], input_data={"message": "只回复：好的收到"})
-        repo.add_case(tenant_id=TENANT, dataset_id=ds["id"], input_data={"message": "1+1等于几？只回复数字"})
+        repo.add_case(
+            tenant_id=TENANT, dataset_id=ds["id"], input_data={"message": "只回复：好的收到"}
+        )
+        repo.add_case(
+            tenant_id=TENANT, dataset_id=ds["id"], input_data={"message": "1+1等于几？只回复数字"}
+        )
         ev = repo.create_evaluator(tenant_id=TENANT, name="恒过", type_="rule", config={})
         service = EvalRunService(
             eval_repo=repo,
@@ -47,13 +51,13 @@ def main() -> int:
             commit_hook=uow.commit,
         )
         run_id = service.start_batch(
-                tenant_id=TENANT,
-                application_id=APP,
-                dataset_id=ds["id"],
-                graph_version=GRAPH_VERSION,
-                evaluator_ids=[str(ev["id"])],
-                concurrency=2,
-            )
+            tenant_id=TENANT,
+            application_id=APP,
+            dataset_id=ds["id"],
+            graph_version=GRAPH_VERSION,
+            evaluator_ids=[str(ev["id"])],
+            concurrency=2,
+        )
         print("eval_run:", run_id, flush=True)
 
         row = repo.get_eval_run(TENANT, run_id)

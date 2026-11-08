@@ -506,7 +506,13 @@ class TestSubAgentsConfig:
 class TestQualityGateConfig:
     """M4-d T-d7 F19.2：qualityGate 键组校验与表单⇄config⇄API 四处同构。"""
 
-    _DEFAULT_GATE = {"enabled": False, "judgeModel": "", "rubric": "", "passScore": 7, "maxRegen": 1}
+    _DEFAULT_GATE = {
+        "enabled": False,
+        "judgeModel": "",
+        "rubric": "",
+        "passScore": 7,
+        "maxRegen": 1,
+    }
 
     def test_valid_quality_gate_accepted(self) -> None:
         form = _base_form()
@@ -586,7 +592,13 @@ class TestQualityGateConfig:
         # 与生产读路径一致：先经转换层脱 literal，再表单化（直接喂 wrapper 会键名错位）
         runtime_cfg = find_agent_loop_config({"nodes": [weird], "edges": []})[1]
         normalized = node_config_to_form(runtime_cfg)["qualityGate"]
-        assert normalized == {"enabled": True, "judgeModel": "", "rubric": "", "passScore": 7, "maxRegen": 1}
+        assert normalized == {
+            "enabled": True,
+            "judgeModel": "",
+            "rubric": "",
+            "passScore": 7,
+            "maxRegen": 1,
+        }
 
     def test_apply_normalizes_missing_gate_to_closed_defaults(self) -> None:
         node = _agent_node()
@@ -667,7 +679,9 @@ class TestJudgeSamplingConfig:
 
     def test_legacy_graph_defaults_to_closed_sampling(self) -> None:
         legacy = _agent_node({"systemPrompt": _literal("S")})
-        assert node_config_to_form(legacy["data"]["inputs"])["judgeSampling"] == self._DEFAULT_SAMPLING
+        assert (
+            node_config_to_form(legacy["data"]["inputs"])["judgeSampling"] == self._DEFAULT_SAMPLING
+        )
         weird = _agent_node({"judgeSampling": _literal({"enabled": True, "rate": 9.9})})
         runtime_cfg = find_agent_loop_config({"nodes": [weird], "edges": []})[1]
         normalized = node_config_to_form(runtime_cfg)["judgeSampling"]

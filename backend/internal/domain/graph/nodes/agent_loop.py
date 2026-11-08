@@ -1166,7 +1166,9 @@ class AgentLoopNodeHandler(NodeHandler):
                 )
             except Exception as exc:  # noqa: BLE001
                 # 批末 review：带堆栈，judge 传输层异常与解析异常需可区分排查
-                logger.warning("质量门 judge 调用失败，fail-open 放行原答案: %s", exc, exc_info=True)
+                logger.warning(
+                    "质量门 judge 调用失败，fail-open 放行原答案: %s", exc, exc_info=True
+                )
                 await gc.emit(
                     "judge",
                     {
@@ -1182,9 +1184,18 @@ class AgentLoopNodeHandler(NodeHandler):
             passed = verdict.score >= gate["passScore"]
             await gc.emit(
                 "judge",
-                {"score": verdict.score, "passed": passed, "attempts": attempts, "model": judge_model_id},
+                {
+                    "score": verdict.score,
+                    "passed": passed,
+                    "attempts": attempts,
+                    "model": judge_model_id,
+                },
             )
-            outcome: dict[str, Any] = {"score": verdict.score, "passed": passed, "attempts": attempts}
+            outcome: dict[str, Any] = {
+                "score": verdict.score,
+                "passed": passed,
+                "attempts": attempts,
+            }
             if passed or attempts > max_regen:
                 return outcome
             if gc.token_budget and gc.usage_total["total_tokens"] >= gc.token_budget:

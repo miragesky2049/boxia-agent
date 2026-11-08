@@ -299,9 +299,7 @@ class EvalRepository:
         if not sets:
             return
         sets.append("updated_at = now()")
-        self._session.execute(
-            text(f"UPDATE eval_run SET {', '.join(sets)} WHERE id = :id"), params
-        )
+        self._session.execute(text(f"UPDATE eval_run SET {', '.join(sets)} WHERE id = :id"), params)
 
     def get_eval_run(self, tenant_id: UUID, run_id: UUID) -> dict | None:
         row = self._session.execute(
@@ -346,7 +344,9 @@ class EvalRepository:
                     "status": row["status"],
                     "score": row.get("score"),
                     "reason": row.get("reason") or "",
-                    "judge_usage": json.dumps(row["judge_usage"]) if row.get("judge_usage") else None,
+                    "judge_usage": json.dumps(row["judge_usage"])
+                    if row.get("judge_usage")
+                    else None,
                     "source": row["source"],
                 },
             )

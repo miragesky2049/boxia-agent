@@ -197,11 +197,15 @@ class EvalRunService:
             # 幂等守卫（批末 review#1）：task_acks_late 下已终态批可能被 broker
             # 重投，重放会重复计数与重复计费，直接跳过
             logger.warning(
-                "评测批任务非 running 态，跳过重投 eval_run=%s status=%s", eval_run_id, run["status"]
+                "评测批任务非 running 态，跳过重投 eval_run=%s status=%s",
+                eval_run_id,
+                run["status"],
             )
             return
         if self._runtime_factory is None:
-            self._eval_repo.update_eval_run(eval_run_id, status="error", error_message="未注入 runtime_factory")
+            self._eval_repo.update_eval_run(
+                eval_run_id, status="error", error_message="未注入 runtime_factory"
+            )
             self._flush()
             return
         # 中途被杀的重投（状态仍 running）清理上次部分落库的结果行，从头重放
@@ -211,7 +215,9 @@ class EvalRunService:
             await self._execute(tenant_id, run)
         except Exception as exc:  # noqa: BLE001 - 批任务必须落终态，未预期异常统一置 error 供页面可见
             logger.exception("评测批任务异常终止 eval_run=%s", eval_run_id)
-            self._eval_repo.update_eval_run(eval_run_id, status="error", error_message=str(exc)[:500])
+            self._eval_repo.update_eval_run(
+                eval_run_id, status="error", error_message=str(exc)[:500]
+            )
             self._flush()
 
     async def _execute(self, tenant_id: UUID, run: dict[str, Any]) -> None:
@@ -222,13 +228,15 @@ class EvalRunService:
             ev for ev in self._eval_repo.list_evaluators(tenant_id) if str(ev["id"]) in selected
         ]
         progress: dict[str, int] = {
-            "total": len(cases), "done": 0, "passed": 0, "failed": 0, "errored": 0,
+            "total": len(cases),
+            "done": 0,
+            "passed": 0,
+            "failed": 0,
+            "errored": 0,
         }
         usage_total = _zero_usage()
         for case in cases:
-            row, case_status, case_usage = await self._run_case(
-                tenant_id, run, case, evaluators
-            )
+            row, case_status, case_usage = await self._run_case(tenant_id, run, case, evaluators)
             self._eval_repo.insert_results([row])
             progress["done"] += 1
             if case_status == "pass":
@@ -269,8 +277,14 @@ class EvalRunService:
             logger.warning("评测 case 执行失败 case=%s：%s", case["id"], exc)
             # error 行 run_id 置 NULL：图构建阶段异常时 run 行可能尚未落库，写入反而违反外键
             row = self._build_row(
-                tenant_id=tenant_id, eval_run_id=run["id"], run_id=None, case=case,
-                status="error", score=None, reason=str(exc), judge_usage=None,
+                tenant_id=tenant_id,
+                eval_run_id=run["id"],
+                run_id=None,
+                case=case,
+                status="error",
+                score=None,
+                reason=str(exc),
+                judge_usage=None,
             )
             return row, "error", _zero_usage()
 
@@ -299,9 +313,13 @@ class EvalRunService:
         # 得分口径：各评估器同尺（0~10）取均值四舍五入；无评估器时不落分
         score_value = round(sum(scores) / len(scores)) if scores else None
         row = self._build_row(
-            tenant_id=tenant_id, eval_run_id=run["id"],
-            run_id=getattr(runner, "run_id", None), case=case,
-            status=status, score=score_value, reason="; ".join(verdict_lines),
+            tenant_id=tenant_id,
+            eval_run_id=run["id"],
+            run_id=getattr(runner, "run_id", None),
+            case=case,
+            status=status,
+            score=score_value,
+            reason="; ".join(verdict_lines),
             judge_usage=case_usage if case_usage["total_tokens"] else None,
         )
         return row, status, case_usage
@@ -328,7 +346,9 @@ class EvalRunService:
             except Exception as exc:  # noqa: BLE001
                 # 批末 review P2-4：judge 模型传输层异常不得炸整批——记该 case 的
                 # fail 行并附异常摘要（与运行时质量门 fail-open 同容错口径）
-                logger.warning("eval judge 调用异常 evaluator=%s: %s", evaluator["name"], exc, exc_info=True)
+                logger.warning(
+                    "eval judge 调用异常 evaluator=%s: %s", evaluator["name"], exc, exc_info=True
+                )
                 return False, 0, f"评估器「{evaluator['name']}」judge 调用失败：{exc}"[:200], {}
             # 批末 review：判定线与运行时质量门同源——本消费方按 passScore 自判，
             # 不信内核默认 7 兜底或模型拼写的 passed（passScore 脏值回内核常量）

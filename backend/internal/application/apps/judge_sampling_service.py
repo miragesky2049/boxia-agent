@@ -72,9 +72,15 @@ class JudgeSamplingService:
             return None
 
         rows = self._msg_repo.list_messages_by_run(run_id)
-        question = next((r["content"] for r in rows if r.get("role") == "user" and r.get("content")), "")
+        question = next(
+            (r["content"] for r in rows if r.get("role") == "user" and r.get("content")), ""
+        )
         answer = next(
-            (r["content"] for r in reversed(rows) if r.get("role") == "assistant" and r.get("content")),
+            (
+                r["content"]
+                for r in reversed(rows)
+                if r.get("role") == "assistant" and r.get("content")
+            ),
             "",
         )
         if not question or not answer:
@@ -86,7 +92,9 @@ class JudgeSamplingService:
         # 模型回退链：judgeModel → 答题模型（画布 modleName）→ settings 默认（抽取先例同构）。
         # 批末 review P2-2：judgeModel 配置了但目录解析失败同样沿链回退（F19.5：模型错配
         # 是配置质量问题，仅 warning，不能让该应用全部采样在重试用尽后静默归零）
-        candidates = [m for m in (str(sampling["judgeModel"]), app_model_id, self._default_model_id) if m]
+        candidates = [
+            m for m in (str(sampling["judgeModel"]), app_model_id, self._default_model_id) if m
+        ]
         client: Any = None
         model_id = ""
         for candidate in candidates:
@@ -142,13 +150,15 @@ class JudgeSamplingService:
             ]
         )
         logger.info(
-            "judge 采样完成 run_id=%s status=%s score=%s model=%s", run_id, status, verdict.score, model_id
+            "judge 采样完成 run_id=%s status=%s score=%s model=%s",
+            run_id,
+            status,
+            verdict.score,
+            model_id,
         )
         return {"status": status, "score": verdict.score}
 
-    def _config_from_run_snapshot(
-        self, run: dict[str, Any]
-    ) -> tuple[dict[str, Any], str] | None:
+    def _config_from_run_snapshot(self, run: dict[str, Any]) -> tuple[dict[str, Any], str] | None:
         """从 run 画布快照读 judgeSampling 配置与答题模型（与记忆抽取同口径，快照缺失
         /无 agent_loop 返回 None 按未启用处理）。"""
         graph = run.get("graph_snapshot")

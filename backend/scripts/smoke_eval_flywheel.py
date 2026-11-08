@@ -95,7 +95,9 @@ def _wait_low_item(admin: httpx.Client, run_id: str, seconds: int) -> dict:
         if hit:
             return hit
         time.sleep(3)
-    raise SystemExit(f"{seconds}s 内低分清单未出现 run={run_id}，看板：{json.dumps(body, ensure_ascii=False)[:400]}")
+    raise SystemExit(
+        f"{seconds}s 内低分清单未出现 run={run_id}，看板：{json.dumps(body, ensure_ascii=False)[:400]}"
+    )
 
 
 def main() -> None:
@@ -120,7 +122,9 @@ def main() -> None:
         assert summary["window_days"] == 7 and len(summary["trend"]) == 7, summary["window_days"]
         assert sum(p["count"] for p in summary["trend"]) >= 1, summary["trend"]
         assert summary["runtime_samples"]["count"] >= 1, summary["runtime_samples"]
-        print(f"[看板] run={run_id} 低分={low['score']} 窗口采样数={summary['runtime_samples']['count']}")
+        print(
+            f"[看板] run={run_id} 低分={low['score']} 窗口采样数={summary['runtime_samples']['count']}"
+        )
 
         # 3. 飞轮：低分清单 run_id 一键 from-run 转评测集
         ts = time.strftime("%m%d%H%M%S")
@@ -138,14 +142,21 @@ def main() -> None:
         print(f"[转评测集] case={body['id']} 问句回填OK expected={body['expected'][:20]}…")
 
         # 4. 评测批消费该用例（恒过规则评估器；worker 真跑图，终态 completed）
-        ev = admin.post("/eval/evaluators", json={"name": f"飞轮冒烟恒过-{ts}", "type": "rule", "config": {}})
+        ev = admin.post(
+            "/eval/evaluators", json={"name": f"飞轮冒烟恒过-{ts}", "type": "rule", "config": {}}
+        )
         assert ev.status_code == 201, ev.text
         ev_id = ev.json()["id"]
         versions = admin.get(f"/apps/{APP}/graph-versions").json()
         latest = max(v["version"] for v in versions)
         started = admin.post(
             "/eval/eval-runs",
-            json={"dataset_id": ds_id, "graph_version": latest, "evaluator_ids": [ev_id], "concurrency": 2},
+            json={
+                "dataset_id": ds_id,
+                "graph_version": latest,
+                "evaluator_ids": [ev_id],
+                "concurrency": 2,
+            },
         )
         assert started.status_code == 201, started.text
         eval_run_id = started.json()["eval_run_id"]
@@ -161,7 +172,9 @@ def main() -> None:
         assert detail["run"]["status"] == "completed", f"评测批未终态/失败：{detail['run']}"
         assert detail["summary"]["total"] == 1, detail["summary"]
         assert detail["results"][0]["case_id"] == body["id"], detail["results"]
-        print(f"[评测批] eval_run={eval_run_id} completed 消费用例={detail['summary']['total']} 通过={detail['summary']['passed']}")
+        print(
+            f"[评测批] eval_run={eval_run_id} completed 消费用例={detail['summary']['total']} 通过={detail['summary']['passed']}"
+        )
     finally:
         # 5. 恢复采样关闭默认组优先（防半途失败残留持续计费配置），
         #    再清理冒烟数据（CASCADE 连带评测行）——删除失败显式报错不静默
@@ -171,7 +184,9 @@ def main() -> None:
         if ds_id:
             assert admin.delete(f"/eval/datasets/{ds_id}").status_code == 204, f"数据集残留 {ds_id}"
         if ev_id:
-            assert admin.delete(f"/eval/evaluators/{ev_id}").status_code == 204, f"评估器残留 {ev_id}"
+            assert admin.delete(f"/eval/evaluators/{ev_id}").status_code == 204, (
+                f"评估器残留 {ev_id}"
+            )
     print("SMOKE PASS T-d9 飞轮：低分入看板→一键转评测集→评测批消费→清理恢复")
 
 

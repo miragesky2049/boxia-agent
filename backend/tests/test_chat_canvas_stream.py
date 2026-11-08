@@ -188,9 +188,7 @@ def _canvas_graph(node_inputs: dict | None = None) -> dict:
         inputs[key] = literal(value)
 
     return {
-        "nodes": [
-            {"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}
-        ],
+        "nodes": [{"id": "loop_x", "type": "100", "data": {"inputs": inputs, "outputs": []}}],
         "edges": [],
     }
 
@@ -1407,7 +1405,9 @@ def test_chat_judge_sampling_pure_chat_agent_switches_to_canvas() -> None:
     """批末 review P2-5①：无 tools/datasets/longTerm 的纯聊天 agent 开启采样必须转
     画布通道（longTerm F16.1 同款缺陷钉子：进程内通道无 run 行，投递恒静默落空）。"""
     enqueued: list = []
-    graph = _canvas_graph(node_inputs={"tools": [], "judgeSampling": {"enabled": True, "rate": 1.0}})
+    graph = _canvas_graph(
+        node_inputs={"tools": [], "judgeSampling": {"enabled": True, "rate": 1.0}}
+    )
     service, cap = _make_service(graph, judge_sampling_enqueuer=enqueued.append)
     frames = asyncio.run(_collect(service, cap["application_id"], "北京天气", cap["cid"]))
 

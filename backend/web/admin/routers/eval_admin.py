@@ -234,7 +234,9 @@ def capture_case_from_run(
     # 无终答可预填时 expected 置 NULL（捕获后可人工补参考应答）
     expected = extract_answer_text(run.get("output")) or None
     created = repo.add_case(
-        tenant_id=PLATFORM_TENANT_ID, dataset_id=dataset_id, input_data=case_input,
+        tenant_id=PLATFORM_TENANT_ID,
+        dataset_id=dataset_id,
+        input_data=case_input,
         expected=expected,
     )
     uow.commit()
@@ -246,7 +248,8 @@ def update_case(case_id: UUID, payload: CasePayload, repo: EvalRepoDep, uow: Uow
     if not str(payload.input.get("message") or "").strip() and not payload.input.get("images"):
         raise ValidationError("用例 input 至少包含 message 或 images 之一")
     if not repo.update_case(
-        PLATFORM_TENANT_ID, case_id,
+        PLATFORM_TENANT_ID,
+        case_id,
         input_data=payload.input,
         expected=payload.expected,
         expected_tool_calls=payload.expected_tool_calls,
@@ -293,8 +296,11 @@ def update_evaluator(
     evaluator_id: UUID, payload: EvaluatorUpdatePayload, repo: EvalRepoDep, uow: UowDep
 ) -> dict:
     if not repo.update_evaluator(
-        PLATFORM_TENANT_ID, evaluator_id,
-        name=payload.name, type_=payload.type, config=payload.config,
+        PLATFORM_TENANT_ID,
+        evaluator_id,
+        name=payload.name,
+        type_=payload.type,
+        config=payload.config,
     ):
         raise NotFoundError("评估器不存在")
     uow.commit()
@@ -313,9 +319,7 @@ def delete_evaluator(evaluator_id: UUID, repo: EvalRepoDep, uow: UowDep) -> None
 
 # ========== eval_run ==========
 @router.post("/eval-runs", status_code=status.HTTP_201_CREATED)
-def start_eval_run(
-    payload: StartEvalRunPayload, repo: EvalRepoDep, uow: UowDep
-) -> dict:
+def start_eval_run(payload: StartEvalRunPayload, repo: EvalRepoDep, uow: UowDep) -> dict:
     """发起评测批：校验数据集/发布版本/评估器存在后落行并投递 worker。
 
     broker 不可达时批落 error 态可见、接口不炸（投递降级在 EvalRunService 内）。
@@ -409,7 +413,9 @@ def get_eval_run_detail(eval_run_id: UUID, repo: EvalRepoDep) -> dict:
 
 # ========== 质量摘要（挂在应用路径下，供应用详情"质量"页签消费） ==========
 # 独立 router 而非嵌套进 /eval：路由聚合前缀会叠加，嵌套后路径会变成 /eval/apps/...
-quality_router = APIRouter(prefix="/apps", tags=["eval-admin"], dependencies=[Depends(require_platform_admin)])
+quality_router = APIRouter(
+    prefix="/apps", tags=["eval-admin"], dependencies=[Depends(require_platform_admin)]
+)
 
 
 @quality_router.get("/{application_id}/quality/summary")
@@ -424,7 +430,8 @@ def quality_summary(
     有限，计数与最近通过率取全量。低分清单行带 run_id，前端一键 from-run 转评测集。
     """
     completed_runs = [
-        row for row in repo.list_eval_runs(PLATFORM_TENANT_ID, application_id)
+        row
+        for row in repo.list_eval_runs(PLATFORM_TENANT_ID, application_id)
         if row["status"] == "completed"
     ]
     latest_pass_rate: float | None = None
@@ -469,8 +476,7 @@ def _sample_trend(samples: list[dict[str, Any]], days: int) -> list[dict[str, An
     """
     today = datetime.now(UTC).date()
     buckets: dict[str, list[dict[str, Any]]] = {
-        (today - timedelta(days=offset)).isoformat(): []
-        for offset in range(days)
+        (today - timedelta(days=offset)).isoformat(): [] for offset in range(days)
     }
     for row in samples:
         created = row["created_at"]

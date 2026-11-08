@@ -131,7 +131,12 @@ async def judge(
             payload = _extract_json_object(response.content)
         except (ValueError, json.JSONDecodeError):
             if attempt == 0:
-                messages.append({"role": "user", "content": "上一条输出无法解析为 JSON 对象，请只输出规定的 JSON。"})
+                messages.append(
+                    {
+                        "role": "user",
+                        "content": "上一条输出无法解析为 JSON 对象，请只输出规定的 JSON。",
+                    }
+                )
                 continue
             logger.warning("judge 输出连续两次解析失败，model=%s", model)
             return JudgeVerdict(
@@ -146,7 +151,9 @@ async def judge(
         except (TypeError, ValueError, PydanticValidationError):
             # 字段类型异常与非法 JSON 同路径处理（重试→兜底）
             if attempt == 0:
-                messages.append({"role": "user", "content": "上一条输出字段不符合要求，请只输出规定的 JSON。"})
+                messages.append(
+                    {"role": "user", "content": "上一条输出字段不符合要求，请只输出规定的 JSON。"}
+                )
                 continue
             # 批末 review P3-3：payload 可能引用问答正文，日志截断防用户数据入日志
             logger.warning("judge 输出字段非法，model=%s payload=%s", model, str(payload)[:200])

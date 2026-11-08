@@ -103,7 +103,12 @@ class _ScriptedModel:
         self.calls.append({"kind": kind, "model": model, "messages": messages})
         if kind == "judge" and self.raise_on_judge:
             raise ConnectionError("judge 服务暂不可用")
-        queue = {"judge": self._judge, "plan": self._plan, "reflect": self._reflect, "exec": self._exec}[kind]
+        queue = {
+            "judge": self._judge,
+            "plan": self._plan,
+            "reflect": self._reflect,
+            "exec": self._exec,
+        }[kind]
         assert queue, f"{kind} 脚本队列已空：门不应再发该阶段调用"
         item = queue.pop(0)
         if isinstance(item, Exception):
@@ -123,7 +128,7 @@ class _ScriptedModel:
         return [c for c in self.calls if c["kind"] == "exec"]
 
 
-def _judge_resp(score: int, critique: str = "", *, passed: Any = ... ) -> _Resp:
+def _judge_resp(score: int, critique: str = "", *, passed: Any = ...) -> _Resp:
     """judge 结构化输出：passed 键默认缺省（走内核 score>=7 兜底），显式传入可覆盖。
 
     门的判定始终按消费方 passScore（F19.2），与 payload.passed 的关系由用例锁定。
@@ -180,7 +185,9 @@ def _make_ctx(
         env=env,
         services=services,
         eval_context=EvalContext(
-            input=runtime_input if runtime_input is not None else {"react_only": True, "input": "问题"},
+            input=runtime_input
+            if runtime_input is not None
+            else {"react_only": True, "input": "问题"},
             node_outputs={},
             globals={},
             env={},
@@ -294,7 +301,9 @@ def test_gate_fail_then_regen_pass() -> None:
     assert result.outputs["output"] == "修正回答"
     assert result.outputs["judge"] == {"score": 9, "passed": True, "attempts": 2}
     regen_messages = llm.exec_calls()[1]["messages"]
-    critiqued = [m for m in regen_messages if m.get("role") == "user" and "质量门" in str(m.get("content"))]
+    critiqued = [
+        m for m in regen_messages if m.get("role") == "user" and "质量门" in str(m.get("content"))
+    ]
     assert critiqued and "未引用知识库出处" in critiqued[0]["content"]
 
 
@@ -364,7 +373,11 @@ def test_gate_context_refs_from_tool_observations() -> None:
     config = _gate_config(
         {"enabled": True, "rubric": "事实性以参考资料为准"},
         tools=[
-            {"name": "get_weather", "description": "天气", "parameters": {"type": "object", "properties": {}}}
+            {
+                "name": "get_weather",
+                "description": "天气",
+                "parameters": {"type": "object", "properties": {}},
+            }
         ],
     )
     _run(
@@ -385,15 +398,26 @@ def test_gate_skipped_when_awaiting_approval() -> None:
         raise AssertionError("挂起轮不得执行工具")
 
     llm = _ScriptedModel(
-        [_Resp(content="", tool_calls=[_ToolCall("c1", "send_email", '{}')])],
+        [_Resp(content="", tool_calls=[_ToolCall("c1", "send_email", "{}")])],
         [_judge_resp(1)],
     )
     config = _gate_config(
         {"enabled": True},
-        tools=[{"name": "send_email", "description": "发信", "parameters": {"type": "object", "properties": {}}}],
+        tools=[
+            {
+                "name": "send_email",
+                "description": "发信",
+                "parameters": {"type": "object", "properties": {}},
+            }
+        ],
         sensitiveTools=[{"name": "send_email"}],
     )
-    result = _run(llm, config, {"react_only": True, "input": "发邮件"}, services_extra={"tool_executor": executor})
+    result = _run(
+        llm,
+        config,
+        {"react_only": True, "input": "发邮件"},
+        services_extra={"tool_executor": executor},
+    )
     assert result.outputs["awaiting_approval"] is True
     assert llm.judge_calls() == []
 
@@ -406,10 +430,19 @@ def test_gate_skipped_on_handoff_round() -> None:
     config = _gate_config(
         {"enabled": True},
         subAgents=[
-            {"applicationId": "7b2e3d4c-0000-0000-0000-000000000002", "mode": "handoff", "description": "票务"}
+            {
+                "applicationId": "7b2e3d4c-0000-0000-0000-000000000002",
+                "mode": "handoff",
+                "description": "票务",
+            }
         ],
     )
-    result = _run(llm, config, {"react_only": True, "input": "订票"}, services_extra={"agent_tool": _FakeAgentTool()})
+    result = _run(
+        llm,
+        config,
+        {"react_only": True, "input": "订票"},
+        services_extra={"agent_tool": _FakeAgentTool()},
+    )
     assert result.outputs["finish_reason"] == "handed_off"
     assert llm.judge_calls() == []
 
@@ -420,12 +453,24 @@ def test_gate_skipped_on_budget_exceeded() -> None:
 
     # 首轮 usage 已超预算且还有工具待答：内核以固定文案收尾（budget_hit），门不再追评
     llm = _ScriptedModel(
-        [_Resp(content="", tool_calls=[_ToolCall("c1", "get_weather", '{}')], usage=_Usage(30, 20))],
+        [
+            _Resp(
+                content="", tool_calls=[_ToolCall("c1", "get_weather", "{}")], usage=_Usage(30, 20)
+            )
+        ],
         [_judge_resp(1)],
     )
     config = _gate_config({"enabled": True}, tokenBudget=1)
-    config["tools"] = [{"name": "get_weather", "description": "天气", "parameters": {"type": "object", "properties": {}}}]
-    result = _run(llm, config, {"react_only": True, "input": "q"}, services_extra={"tool_executor": executor})
+    config["tools"] = [
+        {
+            "name": "get_weather",
+            "description": "天气",
+            "parameters": {"type": "object", "properties": {}},
+        }
+    ]
+    result = _run(
+        llm, config, {"react_only": True, "input": "q"}, services_extra={"tool_executor": executor}
+    )
     assert result.outputs.get("finish_reason") == "budget_exceeded"
     assert "judge" not in result.outputs
     assert llm.judge_calls() == []
@@ -450,10 +495,12 @@ def test_gate_budget_exhausted_stops_regen() -> None:
     """judge 自身 usage 计入 tokenBudget：预算耗尽即不再重生（终判留档 attempts=1）。"""
     llm = _ScriptedModel(
         [_Resp(content="初稿", usage=_Usage(30, 20))],
-        [_Resp(
-            content=json.dumps({"score": 2, "critique": "差"}),
-            usage=_Usage(25, 25),
-        )],
+        [
+            _Resp(
+                content=json.dumps({"score": 2, "critique": "差"}),
+                usage=_Usage(25, 25),
+            )
+        ],
     )
     config = _gate_config({"enabled": True, "maxRegen": 1}, tokenBudget=100)
     result = _run(llm, config)
@@ -488,18 +535,27 @@ def test_gate_regen_awaiting_advances_snapshot_round() -> None:
             _Resp(content="", tool_calls=[_ToolCall("c1", "send_email", "{}")]),
         ],
         [_judge_resp(3, "仍需补充")],
-        plan_script=[_Resp(content='{"tasks": [{"id": "t1", "goal": "答一问", "acceptance": "ok"}]}')],
+        plan_script=[
+            _Resp(content='{"tasks": [{"id": "t1", "goal": "答一问", "acceptance": "ok"}]}')
+        ],
         reflect_script=[_Resp(content='{"done": true, "critique": "", "suggestion": ""}')],
     )
     config = _gate_config(
         {"enabled": True, "passScore": 7, "maxRegen": 1},
         tools=[
-            {"name": "send_email", "description": "发信", "parameters": {"type": "object", "properties": {}}}
+            {
+                "name": "send_email",
+                "description": "发信",
+                "parameters": {"type": "object", "properties": {}},
+            }
         ],
         sensitiveTools=[{"name": "send_email"}],
     )
     result = _run(
-        llm, config, {"react_only": False, "input": "发邮件"}, services_extra={"tool_executor": executor}
+        llm,
+        config,
+        {"react_only": False, "input": "发邮件"},
+        services_extra={"tool_executor": executor},
     )
 
     assert result.outputs["awaiting_approval"] is True
