@@ -3,15 +3,24 @@
 import os
 import sys
 import time
+from pathlib import Path
 
 from sqlalchemy import create_engine, text
 
-DEFAULT_TIMEOUT = 60
+BACKEND_DIR = Path(__file__).resolve().parents[1]
+if str(BACKEND_DIR) not in sys.path:
+    sys.path.insert(0, str(BACKEND_DIR))
+
+# Docker 重启后 PostgreSQL 要先做一遍 data directory fsync + WAL 崩溃恢复，
+# 本机实测约 190 秒，60 秒会误判超时，故默认放宽到 300 秒
+DEFAULT_TIMEOUT = 300
 
 
 def main() -> int:
     """轮询 SELECT 1，直到成功或超时。"""
-    url = os.environ.get("DATABASE_URL", "")
+    from internal.infrastructure.config.settings import get_settings
+
+    url = os.environ.get("DATABASE_URL") or get_settings().database_url
     if not url:
         print("DATABASE_URL is required", file=sys.stderr)
         return 2
