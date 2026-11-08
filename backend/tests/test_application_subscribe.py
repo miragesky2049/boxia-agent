@@ -11,8 +11,12 @@ from tests.helpers import create_tenant, tenant_admin_client
 
 _GRAPH = {
     "nodes": [
-        {"id": "n1", "type": "1", "data": {"nodeMeta": {"title": "开始"}},
-         "config": {"inputs": [{"name": "q", "type": "string"}]}},
+        {
+            "id": "n1",
+            "type": "1",
+            "data": {"nodeMeta": {"title": "开始"}},
+            "config": {"inputs": [{"name": "q", "type": "string"}]},
+        },
         {"id": "n2", "type": "2", "data": {"nodeMeta": {"title": "结束"}}},
     ],
     "edges": [{"sourceNodeID": "n1", "targetNodeID": "n2"}],
@@ -98,9 +102,7 @@ def test_subscribe_requires_listed_and_enabled(
     assert "禁用" in response.json()["detail"]
 
 
-def test_subscribe_success_and_duplicate(
-    client: TestClient, tenant_client, auth_headers
-) -> None:
+def test_subscribe_success_and_duplicate(client: TestClient, tenant_client, auth_headers) -> None:
     app_id = _listed_app(client, auth_headers, "市场开通用例", sale_mode=2)
     site, headers = _tenant_site(tenant_client, client, auth_headers, "sub-c")
 
@@ -150,15 +152,11 @@ def test_run_blocked_after_instance_invalid(
     assert run.status_code == 403, run.text
     assert "失效" in run.json()["detail"]
 
-    inputs = site.get(
-        f"/api/v1/admin/marketplace/applications/{app_id}/inputs", headers=headers
-    )
+    inputs = site.get(f"/api/v1/admin/marketplace/applications/{app_id}/inputs", headers=headers)
     assert inputs.status_code == 403, inputs.text
 
 
-def test_run_requires_subscription(
-    client: TestClient, tenant_client, auth_headers
-) -> None:
+def test_run_requires_subscription(client: TestClient, tenant_client, auth_headers) -> None:
     """未开通运行仍 404（保持原语义）。"""
     app_id = _listed_app(client, auth_headers, "未开通应用", sale_mode=2)
     site, headers = _tenant_site(tenant_client, client, auth_headers, "sub-e")

@@ -20,7 +20,6 @@ from uuid import UUID
 from internal.domain.canvas.expression import EvalContext, ExpressionEvaluator
 from internal.domain.canvas.model import CanvasGraph
 
-
 # 节点内 emit 事件的回调签名：(event_type, payload) -> None
 # 例如 LLM 节点在收到流式 token 时调用 emit_event("llm_token", {"node_id": ..., "delta": "你"})
 NodeEventEmitter = Callable[[str, dict[str, Any]], Awaitable[None]]
@@ -62,7 +61,7 @@ class NodeContext:
     inputs: dict[str, Any]
     config: dict[str, Any]
     env: RuntimeEnv
-    services: "ServiceRegistry"
+    services: ServiceRegistry
     subgraph: CanvasGraph | None = None
     eval_context: EvalContext | None = None
     evaluator: ExpressionEvaluator | None = None

@@ -25,7 +25,9 @@ class HrDictionaryModel(Base):
 
     __tablename__ = "hr_dictionaries"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "category", "code", name="uq_hr_dictionaries_tenant_category_code"),
+        UniqueConstraint(
+            "tenant_id", "category", "code", name="uq_hr_dictionaries_tenant_category_code"
+        ),
         CheckConstraint(
             "category IN ('employment_type', 'job_level', 'job_family')",
             name="ck_hr_dictionaries_category",
@@ -45,9 +47,7 @@ class HrDictionaryModel(Base):
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     remark: Mapped[str] = mapped_column(String(255), nullable=False, default="")
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

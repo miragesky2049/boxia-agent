@@ -12,12 +12,15 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import StreamingResponse
 
+from internal.application.apps.agent_config_service import AgentConfigService
 from internal.application.apps.application_service import ApplicationService
 from internal.application.apps.canvas_debug_service import CanvasDebugService
 from internal.application.errors import ValidationError
 from internal.domain.graph.node_base import ServiceRegistry
 from internal.domain.graph.runtime import GraphRuntime
+from internal.infrastructure.config.settings import get_settings
 from web.admin.schemas.apps import (
+    AgentConfigPayload,
     AppBatchDeleteOut,
     AppBatchDeleteRequest,
     AppCopyOut,
@@ -39,7 +42,12 @@ from web.admin.schemas.apps import (
     VariablesPayload,
 )
 from web.deps.apps_services import make_application_service, make_conversation_admin_service
-from web.deps.auth import AdminAuthDep, PlatformAdminDep, require_permission, require_platform_admin
+from web.deps.auth import (
+    AdminAuthDep,
+    PlatformAdminDep,
+    require_permission,
+    require_platform_admin,
+)
 from web.deps.db import UowDep
 from web.deps.graph import (
     make_canvas_debug_runtime,
@@ -70,6 +78,17 @@ def get_app_service(uow: UowDep) -> ApplicationService:
 AppServiceDep = Depends(get_app_service)
 
 
+def get_agent_config_service(service: ApplicationService = AppServiceDep) -> AgentConfigService:
+    # M4 PRD F16.6：管理面部署开关经 settings 注入校验链（未部署实例拒绝开启长期记忆）
+    return AgentConfigService(
+        service,
+        long_term_admin_available=get_settings().agent_memory_admin_enabled,
+    )
+
+
+AgentConfigServiceDep = Depends(get_agent_config_service)
+
+
 def _client_meta(request: Request) -> tuple[str | None, str | None]:
     ip = request.client.host if request.client else None
     user_agent = request.headers.get("user-agent", "")[:255] or None
@@ -80,12 +99,20 @@ def _client_meta(request: Request) -> tuple[str | None, str | None]:
 def list_apps(
     owner_type: str | None = None,
     marketplace_only: bool = False,
+    flow_type: str | None = None,
+    published_only: bool = False,
     service: ApplicationService = AppServiceDep,
 ) -> list[dict]:
-    """平台应用列表。"""
+    """平台应用列表。
+
+    M4-c F14.1（additive）：flow_type / published_only 过滤——协作区应用选择器
+    需要"已发布的智能体应用"清单；不带参数时行为与既往逐字段一致。
+    """
     return service.list_applications(
         owner_type=owner_type,
         include_marketplace_only=marketplace_only,
+        flow_type=flow_type,
+        published_only=published_only,
     )
 
 
@@ -120,9 +147,7 @@ def validate_graph_endpoint(
     variable_names: set[str] | None = None
     system_names: set[str] | None = None
     if payload.application_id is not None:
-        variable_names, system_names = service.validation_variable_scope(
-            payload.application_id
-        )
+        variable_names, system_names = service.validation_variable_scope(payload.application_id)
 
     issues = validate_raw_graph(
         payload.graph,
@@ -177,11 +202,13 @@ def update_app(
     return {"ok": True}
 
 
-@router.post("/{application_id}/copy", response_model=AppCopyOut, status_code=status.HTTP_201_CREATED)
+@router.post(
+    "/{application_id}/copy", response_model=AppCopyOut, status_code=status.HTTP_201_CREATED
+)
 def copy_app(
     application_id: UUID,
+    principal: PlatformAdminDep,
     service: ApplicationService = AppServiceDep,
-    principal: PlatformAdminDep = None,
 ) -> AppCopyOut:
     """复制产品级应用：复制主行、当前 graph、最新版本、可见范围。
 
@@ -272,8 +299,8 @@ def save_app_variables(
 @router.get("/{application_id}/user-variables")
 def get_current_user_variables(
     application_id: UUID,
+    principal: PlatformAdminDep,
     service: ApplicationService = AppServiceDep,
-    principal: PlatformAdminDep = None,
 ) -> dict:
     """读取当前登录用户在该应用下的变量取值（缺失回退默认值）。"""
     user_id = getattr(principal, "user_id", None)
@@ -286,8 +313,8 @@ def get_current_user_variables(
 def save_current_user_variables(
     application_id: UUID,
     payload: UserVariablesPayload,
+    principal: PlatformAdminDep,
     service: ApplicationService = AppServiceDep,
-    principal: PlatformAdminDep = None,
 ) -> dict:
     """写入当前登录用户的用户变量取值（用于调试/测试数据）。"""
     user_id = getattr(principal, "user_id", None)
@@ -314,8 +341,8 @@ def get_app_graph(
 def save_app_graph(
     application_id: UUID,
     payload: GraphPayload,
+    principal: PlatformAdminDep,
     service: ApplicationService = AppServiceDep,
-    principal: PlatformAdminDep = None,
 ) -> dict:
     """保存 graph 定义：写整图版本快照 + 审计 + 缓存失效。"""
     actor_id = getattr(principal, "user_id", None) if principal else None
@@ -324,6 +351,33 @@ def save_app_graph(
         application_id,
         payload.graph,
         changelog=payload.changelog,
+        actor_id=actor_id,
+        actor_username=actor_username,
+    )
+
+
+@router.get("/{application_id}/agent-config")
+def get_agent_config(
+    application_id: UUID,
+    service: AgentConfigService = AgentConfigServiceDep,
+) -> dict:
+    """读取智能体配置表单（0074 PRD F2：表单是画布 agent_loop 节点的视图）。"""
+    return service.get_config(application_id)
+
+
+@router.put("/{application_id}/agent-config")
+def save_agent_config(
+    application_id: UUID,
+    payload: AgentConfigPayload,
+    principal: PlatformAdminDep,
+    service: AgentConfigService = AgentConfigServiceDep,
+) -> dict:
+    """保存智能体配置：校验表单后写回画布产生新版本，返回归一化回读结果。"""
+    actor_id = getattr(principal, "user_id", None) if principal else None
+    actor_username = getattr(principal, "username", "") if principal else ""
+    return service.save_config(
+        application_id,
+        payload.model_dump(),
         actor_id=actor_id,
         actor_username=actor_username,
     )
@@ -351,8 +405,8 @@ def rollback_graph(
 @router.post("/{application_id}/publish")
 def publish_app_graph(
     application_id: UUID,
+    principal: PlatformAdminDep,
     service: ApplicationService = AppServiceDep,
-    principal: PlatformAdminDep = None,
 ) -> dict:
     """发布动作：把当前 draft（latest）整图版本快照为 live。
 
@@ -500,7 +554,8 @@ async def debug_run_node(
 
     run_id = uuid.uuid4()
     register_conversation_services(
-        services, uow,
+        services,
+        uow,
         tenant_id=_principal.tenant_id,
         user_id=_principal.user_id,
         application_id=DEBUG_APPLICATION_ID,

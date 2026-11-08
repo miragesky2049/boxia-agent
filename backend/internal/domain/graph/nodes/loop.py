@@ -18,6 +18,7 @@ import asyncio
 import logging
 from typing import Any
 
+from internal.domain.canvas.model import CanvasGraph
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult, RuntimeEnv
 from internal.domain.graph.nodes import register_node_handler
@@ -55,11 +56,13 @@ class LoopNodeHandler(NodeHandler):
         else:
             accumulated = await self._run_serial(ctx, compiled, items, max_iterations)
 
-        return NodeResult(outputs={
-            "output": accumulated,
-            "count": max_iterations,
-            "index": len(accumulated) - 1,
-        })
+        return NodeResult(
+            outputs={
+                "output": accumulated,
+                "count": max_iterations,
+                "index": len(accumulated) - 1,
+            }
+        )
 
     def _resolve_items(self, ctx: NodeContext, loop_type: str) -> list[Any]:
         loop_input = ctx.inputs.get("input")
@@ -70,7 +73,7 @@ class LoopNodeHandler(NodeHandler):
         max_count = int(ctx.config.get("loopCount", 10) or 10)
         return list(range(max_count))
 
-    def _compile_subgraph(self, ctx: NodeContext, subgraph):
+    def _compile_subgraph(self, ctx: NodeContext, subgraph: CanvasGraph) -> Any:
         """编译子图一次，所有迭代复用。"""
         from internal.domain.graph.compiler import Compiler
 
@@ -87,7 +90,7 @@ class LoopNodeHandler(NodeHandler):
     async def _run_serial(
         self,
         ctx: NodeContext,
-        compiled,
+        compiled: Any,
         items: list[Any],
         total: int,
     ) -> list[Any]:
@@ -108,7 +111,7 @@ class LoopNodeHandler(NodeHandler):
     async def _run_parallel(
         self,
         ctx: NodeContext,
-        compiled,
+        compiled: Any,
         items: list[Any],
         total: int,
     ) -> list[Any]:
@@ -145,13 +148,17 @@ class LoopNodeHandler(NodeHandler):
                     continue
                 if is_break:
                     break_received = True
+                    # 与串行语义一致：break 只保留该迭代之前的结果。事件循环繁忙时
+                    # 靠后下标的迭代可能先于 break 帧被 as_completed 处理/完成，
+                    # 此处按触发下标截断，避免 break 想停止的输出泄漏进结果。
+                    results = {i: v for i, v in results.items() if i < index}
                     for t in tasks:
                         if not t.done():
                             t.cancel()
                     continue
                 if is_continue:
                     continue
-                if output is not None:
+                if output is not None and not break_received:
                     results[index] = output
         finally:
             for t in tasks:
@@ -164,7 +171,7 @@ class LoopNodeHandler(NodeHandler):
     async def _invoke_once(
         self,
         ctx: NodeContext,
-        compiled,
+        compiled: Any,
         item: Any,
         index: int,
         total: int,
@@ -195,16 +202,10 @@ class LoopNodeHandler(NodeHandler):
         )
 
     def _has_break(self, node_outputs: dict[str, dict[str, Any]]) -> bool:
-        for out in node_outputs.values():
-            if out.get("__break__"):
-                return True
-        return False
+        return any(out.get("__break__") for out in node_outputs.values())
 
     def _has_continue(self, node_outputs: dict[str, dict[str, Any]]) -> bool:
-        for out in node_outputs.values():
-            if out.get("__continue__"):
-                return True
-        return False
+        return any(out.get("__continue__") for out in node_outputs.values())
 
 
 register_node_handler(LoopNodeHandler())

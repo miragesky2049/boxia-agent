@@ -160,13 +160,23 @@ export default function MgmtUnitsPage() {
       render: (text: string, unit) => (
         <span>
           {'　'.repeat(unit.level - 1)}
-          <Button type="link" style={{ padding: 0 }} onClick={() => navigate(`/mgmt-units/${unit.id}`)}>
+          <Button
+            type="link"
+            style={{ padding: 0 }}
+            onClick={() => navigate(`/mgmt-units/${unit.id}`)}
+          >
             {text}
           </Button>
         </span>
       ),
     },
-    { title: '编码', dataIndex: 'code', key: 'code', width: 140, render: (code: string | null) => code || '-' },
+    {
+      title: '编码',
+      dataIndex: 'code',
+      key: 'code',
+      width: 140,
+      render: (code: string | null) => code || '-',
+    },
     { title: '排序', dataIndex: 'sort_order', key: 'sort_order', width: 80 },
     {
       title: '状态',

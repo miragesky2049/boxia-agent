@@ -256,9 +256,13 @@ class AdminUserService:
             return
         tenant_id = self._require_tenant()
         self._reset_tenant_admin_password(
-            tenant_id, user_id, new_password=new_password,
-            actor_id=actor_id, actor_username=actor_username,
-            ip=ip, user_agent=user_agent,
+            tenant_id,
+            user_id,
+            new_password=new_password,
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def reset_password_for_tenant(
@@ -276,9 +280,13 @@ class AdminUserService:
         self._require_platform()
         self._get_tenant_or_404(tenant_id)
         self._reset_tenant_admin_password(
-            tenant_id, user_id, new_password=new_password,
-            actor_id=actor_id, actor_username=actor_username,
-            ip=ip, user_agent=user_agent,
+            tenant_id,
+            user_id,
+            new_password=new_password,
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def _reset_tenant_admin_password(
@@ -347,9 +355,12 @@ class AdminUserService:
             return
         tenant_id = self._require_tenant()
         self._delete_tenant_admin(
-            tenant_id, user_id,
-            actor_id=actor_id, actor_username=actor_username,
-            ip=ip, user_agent=user_agent,
+            tenant_id,
+            user_id,
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def delete_for_tenant(
@@ -366,9 +377,12 @@ class AdminUserService:
         self._require_platform()
         self._get_tenant_or_404(tenant_id)
         self._delete_tenant_admin(
-            tenant_id, user_id,
-            actor_id=actor_id, actor_username=actor_username,
-            ip=ip, user_agent=user_agent,
+            tenant_id,
+            user_id,
+            actor_id=actor_id,
+            actor_username=actor_username,
+            ip=ip,
+            user_agent=user_agent,
         )
 
     def _delete_tenant_admin(

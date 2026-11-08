@@ -70,9 +70,7 @@ class PostgresDepartmentRepository:
         self._session.flush()
         return True
 
-    def code_exists(
-        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
-    ) -> bool:
+    def code_exists(self, tenant_id: UUID, code: str, exclude_id: UUID | None = None) -> bool:
         """租户内部门编码是否已存在（忽略大小写）。"""
         stmt = select(DepartmentModel.id).where(
             DepartmentModel.tenant_id == tenant_id,

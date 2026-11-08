@@ -55,10 +55,13 @@ def _llm_node(node_id: str, model: str = "gpt-4o", prompt: str = "hi") -> dict:
 
 
 def test_expression_syntax_error_reported():
-    raw = _make_raw_graph([
-        _start_node(),
-        _end_node(content="结果是 {{start.output.xxx + }}"),
-    ], edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}])
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            _end_node(content="结果是 {{start.output.xxx + }}"),
+        ],
+        edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}],
+    )
 
     issues = validate_raw_graph(raw)
     expr_errs = [i for i in issues if i.code == "expression_syntax"]
@@ -68,10 +71,13 @@ def test_expression_syntax_error_reported():
 
 
 def test_expression_syntax_ok_for_valid_template():
-    raw = _make_raw_graph([
-        _start_node(),
-        _end_node(content="你好 {{start.output.USER_INPUT}}"),
-    ], edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}])
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            _end_node(content="你好 {{start.output.USER_INPUT}}"),
+        ],
+        edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}],
+    )
 
     issues = validate_raw_graph(raw)
     assert not any(i.code == "expression_syntax" for i in issues)
@@ -79,14 +85,17 @@ def test_expression_syntax_ok_for_valid_template():
 
 def test_required_config_missing_reported():
     # LLM 节点 modleName 是 required；留空 → error
-    raw = _make_raw_graph([
-        _start_node(),
-        _llm_node("llm_1", model="", prompt="hi"),
-        _end_node(),
-    ], edges=[
-        {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
-        {"sourceNodeID": "llm_1", "targetNodeID": "end_1"},
-    ])
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            _llm_node("llm_1", model="", prompt="hi"),
+            _end_node(),
+        ],
+        edges=[
+            {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
+            {"sourceNodeID": "llm_1", "targetNodeID": "end_1"},
+        ],
+    )
 
     issues = validate_raw_graph(raw)
     required_errs = [i for i in issues if i.code == "required_config_empty"]
@@ -94,14 +103,17 @@ def test_required_config_missing_reported():
 
 
 def test_required_config_ok_when_filled():
-    raw = _make_raw_graph([
-        _start_node(),
-        _llm_node("llm_1", model="gpt-4o", prompt="hi"),
-        _end_node(),
-    ], edges=[
-        {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
-        {"sourceNodeID": "llm_1", "targetNodeID": "end_1"},
-    ])
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            _llm_node("llm_1", model="gpt-4o", prompt="hi"),
+            _end_node(),
+        ],
+        edges=[
+            {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
+            {"sourceNodeID": "llm_1", "targetNodeID": "end_1"},
+        ],
+    )
 
     issues = validate_raw_graph(raw)
     assert not any(i.code == "required_config_empty" for i in issues)
@@ -110,43 +122,45 @@ def test_required_config_ok_when_filled():
 def test_port_type_number_to_boolean_warns():
     # LLM 输出是 string（默认）；这里我们用 outputs 显式声明 number，连到 if_else(boolean)
     # if_else 的入口端口类型是 any（meta.inputs[0].type 默认 "any"），要靠 LLM outputs 提供具体类型
-    raw = _make_raw_graph([
-        _start_node(),
-        {
-            "id": "llm_1",
-            "type": "3",
-            "data": {
-                "nodeMeta": {"title": "LLM"},
-                "outputs": [{"name": "output", "type": "number"}],
-                "inputs": {
-                    "modleName": {"value": {"type": "literal", "content": "gpt-4o"}},
-                    "prompt": {"value": {"type": "literal", "content": "hi"}},
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            {
+                "id": "llm_1",
+                "type": "3",
+                "data": {
+                    "nodeMeta": {"title": "LLM"},
+                    "outputs": [{"name": "output", "type": "number"}],
+                    "inputs": {
+                        "modleName": {"value": {"type": "literal", "content": "gpt-4o"}},
+                        "prompt": {"value": {"type": "literal", "content": "hi"}},
+                    },
                 },
             },
-        },
-        {
-            "id": "if_1",
-            "type": "8",
-            "data": {
-                "nodeMeta": {"title": "IF"},
-                "outputs": [
-                    {"name": "true", "type": "boolean"},
-                    {"name": "false", "type": "boolean"},
-                ],
-                "inputs": {"cases": [{"case_id": "true", "expression": "1 == 1"}]},
+            {
+                "id": "if_1",
+                "type": "8",
+                "data": {
+                    "nodeMeta": {"title": "IF"},
+                    "outputs": [
+                        {"name": "true", "type": "boolean"},
+                        {"name": "false", "type": "boolean"},
+                    ],
+                    "inputs": {"cases": [{"case_id": "true", "expression": "1 == 1"}]},
+                },
             },
-        },
-        _end_node("end_true"),
-        _end_node("end_false"),
-    ], edges=[
-        {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
-        {"sourceNodeID": "llm_1", "targetNodeID": "if_1"},
-        {"sourceNodeID": "if_1", "targetNodeID": "end_true", "sourcePortID": "true"},
-        {"sourceNodeID": "if_1", "targetNodeID": "end_false", "sourcePortID": "false"},
-    ])
+            _end_node("end_true"),
+            _end_node("end_false"),
+        ],
+        edges=[
+            {"sourceNodeID": "start_1", "targetNodeID": "llm_1"},
+            {"sourceNodeID": "llm_1", "targetNodeID": "if_1"},
+            {"sourceNodeID": "if_1", "targetNodeID": "end_true", "sourcePortID": "true"},
+            {"sourceNodeID": "if_1", "targetNodeID": "end_false", "sourcePortID": "false"},
+        ],
+    )
 
     issues = validate_raw_graph(raw)
-    mismatches = [i for i in issues if i.code == "port_type_mismatch"]
     # llm_1(number) → if_1(any) 因为 if_1 没有 input 静态类型，会退化为 any，不报警
     # 我们要测的是：source=number → target=boolean 的具体场景
     # 但 if_else 的 target inputs 是 any，所以这里不强制。改测 if_1.true(boolean) → end_1
@@ -159,23 +173,25 @@ def test_port_type_explicit_mismatch_warns():
     # 显式构造两个 outputs 类型不兼容的节点，target 节点的 inputs 也显式声明类型
     # 我们通过给 end 节点 outputs 加上 number，再连到 if 的 true 出口(boolean)
     # 注意：end 的 input 端口是 default（meta 里 type=any）；这里改测 source=boolean → target=number
-    raw = _make_raw_graph([
-        _start_node(),
-        {
-            "id": "if_1",
-            "type": "8",
-            "data": {
-                "nodeMeta": {"title": "IF"},
-                "outputs": [
-                    {"name": "true", "type": "boolean"},
-                    {"name": "false", "type": "boolean"},
-                ],
-                "inputs": {"cases": [{"case_id": "true", "expression": "1 == 1"}]},
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            {
+                "id": "if_1",
+                "type": "8",
+                "data": {
+                    "nodeMeta": {"title": "IF"},
+                    "outputs": [
+                        {"name": "true", "type": "boolean"},
+                        {"name": "false", "type": "boolean"},
+                    ],
+                    "inputs": {"cases": [{"case_id": "true", "expression": "1 == 1"}]},
+                },
             },
-        },
-        # 用 json_parser 当目标节点，input 类型默认 any；为了测类型匹配，
-        # 我们直接构造一个自定义 outputs/inputs 都显式的节点图
-    ])
+            # 用 json_parser 当目标节点，input 类型默认 any；为了测类型匹配，
+            # 我们直接构造一个自定义 outputs/inputs 都显式的节点图
+        ]
+    )
     # 这个用例的目的只是确认 lint 函数对合法图不抛错
     issues = validate_raw_graph(raw)
     # 缺少 end，会报 warning；但不应该有 port_type_mismatch error
@@ -184,20 +200,22 @@ def test_port_type_explicit_mismatch_warns():
 
 def test_lint_combined_with_structural_validation():
     # 表达式错误 + 必填为空 + 结构错误，应一起返回
-    raw = _make_raw_graph([
-        _start_node(),
-        {
-            "id": "llm_bad",
-            "type": "3",
-            "data": {
-                "nodeMeta": {"title": "LLM"},
-                "inputs": {
-                    "modleName": {"value": {"type": "literal", "content": ""}},
-                    "prompt": {"value": {"type": "literal", "content": "bad {{ 1 + }}"}},
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            {
+                "id": "llm_bad",
+                "type": "3",
+                "data": {
+                    "nodeMeta": {"title": "LLM"},
+                    "inputs": {
+                        "modleName": {"value": {"type": "literal", "content": ""}},
+                        "prompt": {"value": {"type": "literal", "content": "bad {{ 1 + }}"}},
+                    },
                 },
             },
-        },
-    ])
+        ]
+    )
 
     issues = validate_raw_graph(raw)
     codes = [i.code for i in issues]
@@ -211,7 +229,7 @@ def test_undeclared_variable_refs_are_warnings():
         type=NodeType.END,
         config={
             "content": "{{variables.missing}} {{variables.declared}} "
-                       "{{system.USER_INPUT}} {{system.UNKNOWN}}"
+            "{{system.USER_INPUT}} {{system.UNKNOWN}}"
         },
     )
     graph = CanvasGraph(nodes=[node], edges=[])
@@ -257,10 +275,13 @@ def test_variable_refs_support_index_syntax():
 
 
 def test_validate_raw_graph_passes_declared_variables():
-    raw = _make_raw_graph([
-        _start_node(),
-        _end_node(content="{{variables.app_1}} {{variables.unknown_var}}"),
-    ], edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}])
+    raw = _make_raw_graph(
+        [
+            _start_node(),
+            _end_node(content="{{variables.app_1}} {{variables.unknown_var}}"),
+        ],
+        edges=[{"sourceNodeID": "start_1", "targetNodeID": "end_1"}],
+    )
 
     issues = validate_raw_graph(
         raw,

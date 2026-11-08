@@ -1,10 +1,5 @@
 import { request } from './client'
-import type {
-  AdminUser,
-  AdminUserCreatePayload,
-  AdminUserUpdatePayload,
-  PageResult,
-} from './types'
+import type { AdminUser, AdminUserCreatePayload, AdminUserUpdatePayload, PageResult } from './types'
 
 export interface TenantAdminListParams {
   page?: number
@@ -31,7 +26,11 @@ export const tenantAdminsApi = {
       body: JSON.stringify(payload),
     })
   },
-  async update(tenantId: string, userId: string, payload: AdminUserUpdatePayload): Promise<AdminUser> {
+  async update(
+    tenantId: string,
+    userId: string,
+    payload: AdminUserUpdatePayload,
+  ): Promise<AdminUser> {
     return request<AdminUser>(`/admin/tenants/${tenantId}/admins/${userId}`, {
       method: 'PATCH',
       body: JSON.stringify(payload),

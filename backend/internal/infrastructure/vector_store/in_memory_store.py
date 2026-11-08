@@ -76,7 +76,7 @@ class InMemoryVectorStore(VectorStore):
 def _cosine(a: list[float], b: list[float]) -> float:
     if len(a) != len(b):
         return 0.0
-    dot = sum(x * y for x, y in zip(a, b))
+    dot = sum(x * y for x, y in zip(a, b, strict=True))
     norm_a = math.sqrt(sum(x * x for x in a))
     norm_b = math.sqrt(sum(y * y for y in b))
     if norm_a == 0 or norm_b == 0:
@@ -85,7 +85,4 @@ def _cosine(a: list[float], b: list[float]) -> float:
 
 
 def _match_filter(metadata: dict[str, Any], filter_expr: dict[str, Any]) -> bool:
-    for k, v in filter_expr.items():
-        if metadata.get(k) != v:
-            return False
-    return True
+    return all(metadata.get(k) == v for k, v in filter_expr.items())

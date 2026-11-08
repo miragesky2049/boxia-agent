@@ -267,9 +267,7 @@ def persistent_user_tenant_client():
                 previous_policy = asyncio.get_event_loop_policy()
                 asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
             try:
-                managed = TestClient(
-                    USER_APP, base_url=f"http://{tenant_code}.example.com"
-                )
+                managed = TestClient(USER_APP, base_url=f"http://{tenant_code}.example.com")
                 managed.__enter__()
             finally:
                 if sys.platform == "win32":
@@ -311,3 +309,125 @@ def user_login_headers(user_tenant_client):
         return {"Authorization": f"Bearer {response.json()['access_token']}"}
 
     return _login
+
+
+# ---------- M4-b F17.7：进程内 fastmcp server fixture（真协议栈、不出网） ----------
+
+
+class _McpHandshakeCounter:
+    """ASGI 中间件：统计 POST body 含 server/discover 或 initialize 的握手次数。
+
+    移植自 T-b0 spike（scripts/spike_mcp_session.py）验证过的实现：缓冲 body 后
+    首次回放聚合内容，之后必须透传原始 receive()——伪造 http.disconnect 会让
+    server 提前掐掉 SSE 响应流（spike 实测教训）。
+    """
+
+    def __init__(self, app) -> None:
+        self.app = app
+        self.handshakes = 0
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http" or scope.get("method") != "POST":
+            await self.app(scope, receive, send)
+            return
+        body = bytearray()
+        more = True
+        while more:
+            msg = await receive()
+            body += msg.get("body", b"")
+            more = msg.get("more_body", False)
+        if b'"server/discover"' in body or b'"initialize"' in body:
+            self.handshakes += 1
+        sent = {"n": 0}
+
+        async def replay():
+            if sent["n"] == 0:
+                sent["n"] += 1
+                return {"type": "http.request", "body": bytes(body), "more_body": False}
+            return await receive()
+
+        await self.app(scope, replay, send)
+
+
+class InProcessMcpServer:
+    """fixture 返回值：真实 streamable-HTTP MCP server（uvicorn 独立线程）+ 握手表。"""
+
+    def __init__(self, url: str, counter: _McpHandshakeCounter, state: dict) -> None:
+        self.url = url
+        self._counter = counter
+        self._state = state
+
+    @property
+    def handshakes(self) -> int:
+        return self._counter.handshakes
+
+    @property
+    def call_count(self) -> int:
+        return self._state["calls"]
+
+    def reset(self) -> None:
+        """用例间复位计数，module 级 server 复用避免每例重启。"""
+        self._counter.handshakes = 0
+        self._state["calls"] = 0
+        self._state["last_header"] = None
+
+
+@pytest.fixture(scope="module")
+def in_process_mcp_server():
+    """启动进程内 fastmcp server；工具集覆盖 echo/结构化/isError/慢调用/头回读。"""
+    import socket
+    import threading
+    import time
+
+    import uvicorn
+    from fastmcp import FastMCP
+    from fastmcp.server.dependencies import get_context
+
+    mcp = FastMCP("boxia-test")
+    state = {"calls": 0, "last_header": None}
+
+    @mcp.tool
+    def echo(text: str) -> str:
+        state["calls"] += 1
+        return f"echo:{text}"
+
+    @mcp.tool
+    def add(a: int, b: int) -> dict:
+        state["calls"] += 1
+        return {"sum": a + b}
+
+    @mcp.tool
+    def fail() -> str:
+        raise RuntimeError("boom-xyz")
+
+    @mcp.tool
+    async def slow(seconds: float) -> str:
+        await asyncio.sleep(seconds)
+        state["calls"] += 1
+        return "done"
+
+    @mcp.tool
+    def show_header() -> str:
+        request = get_context().request_context.request
+        return (request.headers.get("x-mcp-test") or "-") if request else "no-request"
+
+    app = mcp.http_app(transport="streamable-http")
+    counter = _McpHandshakeCounter(app)
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        port = probe.getsockname()[1]
+    config = uvicorn.Config(counter, host="127.0.0.1", port=port, log_level="error")
+    server = uvicorn.Server(config)
+    thread = threading.Thread(target=server.run, daemon=True)
+    thread.start()
+    deadline = time.monotonic() + 30
+    while not server.started:
+        if time.monotonic() > deadline:
+            raise RuntimeError("in-process mcp server 启动超时")
+        time.sleep(0.05)
+    holder = InProcessMcpServer(f"http://127.0.0.1:{port}/mcp", counter, state)
+    try:
+        yield holder
+    finally:
+        server.should_exit = True
+        thread.join(timeout=15)

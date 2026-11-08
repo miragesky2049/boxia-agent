@@ -61,9 +61,7 @@ def _parse_resource(path: str) -> tuple[str | None, str]:
             if not parts or not parts[0] or parts[0] in {"auth", "users"}:
                 return None, ""
             resource_type = parts[0]
-            resource_id = (
-                parts[1] if len(parts) > 1 and _UUID_SEGMENT.fullmatch(parts[1]) else ""
-            )
+            resource_id = parts[1] if len(parts) > 1 and _UUID_SEGMENT.fullmatch(parts[1]) else ""
             return resource_type, resource_id
     return None, ""
 

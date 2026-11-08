@@ -56,6 +56,14 @@ const FLOW_TYPE_OPTIONS: Array<{
   color: string
 }> = [
   {
+    value: 'agent',
+    label: '智能体',
+    desc: '模型自主规划与工具/知识库调用，配置面为表单、画布为事实源',
+    nodes: '开始 → Agent 循环 → 结束',
+    trial: '聊天试运行',
+    color: '#fa541c',
+  },
+  {
     value: 'workflow',
     label: '工作流',
     desc: '一次输入、一次输出，适合批处理与固定流程自动化',
@@ -73,6 +81,22 @@ const FLOW_TYPE_OPTIONS: Array<{
   },
 ]
 
+// 0074：智能体应用编辑入口为配置页，工作流/对话流仍是画布编辑器
+const editPathFor = (id: string, flowType?: FlowType) =>
+  flowType === 'agent' ? `/apps/${id}/agent` : `/apps/${id}/edit`
+
+const FLOW_TYPE_LABELS: Record<FlowType, string> = {
+  workflow: '工作流',
+  chatflow: '对话流',
+  agent: '智能体',
+}
+
+const FLOW_TYPE_TAG_COLORS: Record<FlowType, string> = {
+  workflow: 'blue',
+  chatflow: 'purple',
+  agent: 'orange',
+}
+
 export default function AppListPage() {
   const navigate = useNavigate()
   const { message, modal } = App.useApp()
@@ -81,7 +105,7 @@ export default function AppListPage() {
   const [loading, setLoading] = useState(true)
   const [data, setData] = useState<Application[]>([])
   const [keyword, setKeyword] = useState('')
-  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all')
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('agent')
   const [createOpen, setCreateOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   const [detailApp, setDetailApp] = useState<Application | null>(null)
@@ -91,17 +115,16 @@ export default function AppListPage() {
 
   const [newName, setNewName] = useState('')
   const [newDesc, setNewDesc] = useState('')
-  const [newFlowType, setNewFlowType] = useState<FlowType>('workflow')
+  const [newFlowType, setNewFlowType] = useState<FlowType>('agent')
 
   // 编辑应用基本信息（名称/描述）与平台侧可见范围默认值（0068 v2）
-  const [editForm] =
-    Form.useForm<{
-      name: string
-      description: string
-      visibility_template: 'all' | 'whitelist'
-      visibility_lock: boolean
-      admin_scope_mode: 'creator_only' | 'mgmt_unit' | 'all_admin'
-    }>()
+  const [editForm] = Form.useForm<{
+    name: string
+    description: string
+    visibility_template: 'all' | 'whitelist'
+    visibility_lock: boolean
+    admin_scope_mode: 'creator_only' | 'mgmt_unit' | 'all_admin'
+  }>()
   const [editTarget, setEditTarget] = useState<Application | null>(null)
   const [editSaving, setEditSaving] = useState(false)
   const [copyingId, setCopyingId] = useState<string | null>(null)
@@ -133,7 +156,7 @@ export default function AppListPage() {
   const resetCreateForm = () => {
     setNewName('')
     setNewDesc('')
-    setNewFlowType('workflow')
+    setNewFlowType('agent')
   }
 
   const handleCreate = async (enterCanvas: boolean) => {
@@ -152,7 +175,7 @@ export default function AppListPage() {
       resetCreateForm()
       setCreateOpen(false)
       if (enterCanvas) {
-        navigate(`/apps/${result.application_id}/edit`)
+        navigate(editPathFor(result.application_id, newFlowType))
       } else {
         void load()
       }
@@ -338,9 +361,10 @@ export default function AppListPage() {
               setSelectedKeys([])
             }}
             options={[
-              { label: '全部', value: 'all' },
+              { label: '智能体', value: 'agent' },
               { label: '工作流', value: 'workflow' },
               { label: '对话流', value: 'chatflow' },
+              { label: '全部', value: 'all' },
             ]}
           />
         </Col>
@@ -378,7 +402,10 @@ export default function AppListPage() {
               title: '名称',
               dataIndex: 'name',
               render: (name: string, record) => (
-                <a onClick={() => navigate(`/apps/${record.id}/edit`)} style={{ fontWeight: 500 }}>
+                <a
+                  onClick={() => navigate(editPathFor(record.id, record.flow_type))}
+                  style={{ fontWeight: 500 }}
+                >
                   {name}
                 </a>
               ),
@@ -388,8 +415,8 @@ export default function AppListPage() {
               dataIndex: 'flow_type',
               width: 110,
               render: (flowType: FlowType) => (
-                <Tag color={flowType === 'chatflow' ? 'purple' : 'blue'}>
-                  {flowType === 'chatflow' ? '对话流' : '工作流'}
+                <Tag color={FLOW_TYPE_TAG_COLORS[flowType] ?? 'blue'}>
+                  {FLOW_TYPE_LABELS[flowType] ?? flowType}
                 </Tag>
               ),
             },
@@ -434,7 +461,7 @@ export default function AppListPage() {
             {
               title: '操作',
               key: 'actions',
-              width: 300,
+              width: 340,
               onCell: () => ({ style: { whiteSpace: 'nowrap' } }),
               render: (_, record) => (
                 <Space size={4} style={{ whiteSpace: 'nowrap' }}>
@@ -455,6 +482,13 @@ export default function AppListPage() {
                     onClick={() => navigate(`/apps/${record.id}/edit`)}
                   >
                     编辑画布
+                  </Button>
+                  <Button
+                    type="link"
+                    size="small"
+                    onClick={() => navigate(`/apps/${record.id}/eval`)}
+                  >
+                    评测
                   </Button>
                   <Button
                     type="link"
@@ -483,12 +517,7 @@ export default function AppListPage() {
                       cancelText="取消"
                       onConfirm={() => handleDelete(record)}
                     >
-                      <Button
-                        type="link"
-                        size="small"
-                        danger
-                        icon={<DeleteOutlined />}
-                      >
+                      <Button type="link" size="small" danger icon={<DeleteOutlined />}>
                         删除
                       </Button>
                     </Popconfirm>
@@ -609,7 +638,7 @@ export default function AppListPage() {
                       {
                         key: 'flow',
                         label: '类型',
-                        children: detailApp.flow_type === 'chatflow' ? '对话流' : '工作流',
+                        children: FLOW_TYPE_LABELS[detailApp.flow_type] ?? detailApp.flow_type,
                       },
                       { key: 'desc', label: '描述', children: detailApp.description || '-' },
                       {

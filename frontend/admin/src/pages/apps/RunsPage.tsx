@@ -4,6 +4,7 @@ import {
   CheckCircleOutlined,
   PauseCircleOutlined,
   ReloadOutlined,
+  StopOutlined,
 } from '@ant-design/icons'
 import {
   App,
@@ -35,14 +36,31 @@ import {
   type RunItem,
 } from '../../api/apps'
 
+// 0074 PRD F13：cancelled 为客户端断连被取消的 run（R6 断连幽灵处置落地后会出现）
 const STATUS_META: Record<
-  RunItem['status'],
+  RunItem['execute_status'],
   { color: string; label: string; icon: React.ReactNode }
 > = {
   running: { color: 'processing', label: '运行中', icon: <ClockCircleOutlined /> },
   success: { color: 'success', label: '成功', icon: <CheckCircleOutlined /> },
   error: { color: 'error', label: '失败', icon: <CloseCircleOutlined /> },
   interrupted: { color: 'warning', label: '待人审', icon: <PauseCircleOutlined /> },
+  cancelled: { color: 'default', label: '已取消', icon: <StopOutlined /> },
+}
+
+function durationText(startedAt: string | null, finishedAt: string | null): string {
+  if (!startedAt || !finishedAt) return '—'
+  const ms = dayjs(finishedAt).diff(dayjs(startedAt))
+  return `${(ms / 1000).toFixed(2)} s`
+}
+
+function StatusTag({ status }: { status: RunItem['execute_status'] }) {
+  const meta = STATUS_META[status] ?? STATUS_META.running
+  return (
+    <Tag icon={meta.icon} color={meta.color}>
+      {meta.label}
+    </Tag>
+  )
 }
 
 function JsonBlock({ value }: { value: unknown }) {
@@ -76,13 +94,13 @@ function JsonBlock({ value }: { value: unknown }) {
 
 function NodeExecutionRow({ node }: { node: NodeExecution }) {
   const [expanded, setExpanded] = useState(false)
-  const status = node.error ? 'error' : 'success'
+  const status = node.error_message ? 'error' : 'success'
   const duration = node.duration_ms != null ? `${node.duration_ms} ms` : '—'
-  const tokens = node.token_usage?.total_tokens
+  const tokens = node.usage?.total_tokens
   return (
     <div
       style={{
-        borderLeft: `3px solid ${node.error ? '#ff4d4f' : '#52c41a'}`,
+        borderLeft: `3px solid ${node.error_message ? '#ff4d4f' : '#52c41a'}`,
         padding: '8px 12px',
         marginBottom: 8,
         background: '#fafafa',
@@ -94,9 +112,7 @@ function NodeExecutionRow({ node }: { node: NodeExecution }) {
           <Typography.Text strong>{node.node_id}</Typography.Text>
           <Tag color={status === 'error' ? 'error' : 'success'}>{status}</Tag>
           <Typography.Text type="secondary">{duration}</Typography.Text>
-          {tokens != null && (
-            <Tag color="blue">tokens: {tokens}</Tag>
-          )}
+          {tokens != null && <Tag color="blue">tokens: {tokens}</Tag>}
         </Space>
         <Button type="link" size="small" onClick={() => setExpanded((v) => !v)}>
           {expanded ? '收起' : '详情'}
@@ -116,18 +132,24 @@ function NodeExecutionRow({ node }: { node: NodeExecution }) {
             </Typography.Text>
             <JsonBlock value={node.output} />
           </div>
-          {node.error && (
+          {node.error_message && (
             <div>
               <Typography.Text type="danger" style={{ fontSize: 12 }}>
                 错误：
               </Typography.Text>
-              <JsonBlock value={node.error} />
+              <JsonBlock value={node.error_message} />
             </div>
           )}
         </div>
       )}
     </div>
   )
+}
+
+/** 0074 PRD F10：agent 工具审批是"应用层快照挂起"，只能由用户在对话端裁决，
+ *  运行历史列表据此隐藏管理端审批入口（后端 resume 通道同样拒绝此类中断）。 */
+function isToolApprovalRun(record: RunItem): boolean {
+  return record.interrupt_payload?.type === 'tool_approval'
 }
 
 export default function RunsPage() {
@@ -223,7 +245,7 @@ export default function RunsPage() {
     if (!approvingRun || !appId) return
     setSubmitting(true)
     try {
-      await resumeRun(appId, approvingRun.langgraph_thread_id, {
+      await resumeRun(appId, approvingRun.thread_id, {
         approved,
         comment: approveComment,
       })
@@ -258,16 +280,9 @@ export default function RunsPage() {
   const columns: ColumnsType<RunItem> = [
     {
       title: '状态',
-      dataIndex: 'status',
+      dataIndex: 'execute_status',
       width: 110,
-      render: (status: RunItem['status']) => {
-        const meta = STATUS_META[status] ?? STATUS_META.running
-        return (
-          <Tag icon={meta.icon} color={meta.color}>
-            {meta.label}
-          </Tag>
-        )
-      },
+      render: (status: RunItem['execute_status']) => <StatusTag status={status} />,
     },
     {
       title: '开始时间',
@@ -279,11 +294,7 @@ export default function RunsPage() {
       title: '耗时',
       key: 'duration',
       width: 120,
-      render: (_, record) => {
-        if (!record.finished_at) return <Typography.Text type="secondary">—</Typography.Text>
-        const ms = dayjs(record.finished_at).diff(dayjs(record.started_at))
-        return `${(ms / 1000).toFixed(2)} s`
-      },
+      render: (_, record) => durationText(record.started_at, record.finished_at),
     },
     {
       title: '输入摘要',
@@ -301,7 +312,7 @@ export default function RunsPage() {
     },
     {
       title: '错误',
-      dataIndex: 'error',
+      dataIndex: 'error_message',
       width: 200,
       ellipsis: true,
       render: (v: string | null) =>
@@ -328,7 +339,7 @@ export default function RunsPage() {
           >
             重跑
           </Button>
-          {record.status === 'interrupted' && (
+          {record.execute_status === 'interrupted' && !isToolApprovalRun(record) && (
             <Button type="link" size="small" onClick={() => openApprove(record)}>
               审批
             </Button>
@@ -378,17 +389,10 @@ export default function RunsPage() {
                 <Typography.Text code>{detail.run.id}</Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="状态">
-                {(() => {
-                  const meta = STATUS_META[detail.run.status] ?? STATUS_META.running
-                  return (
-                    <Tag icon={meta.icon} color={meta.color}>
-                      {meta.label}
-                    </Tag>
-                  )
-                })()}
+                <StatusTag status={detail.run.execute_status} />
               </Descriptions.Item>
               <Descriptions.Item label="Thread ID">
-                <Typography.Text code>{detail.run.langgraph_thread_id}</Typography.Text>
+                <Typography.Text code>{detail.run.thread_id}</Typography.Text>
               </Descriptions.Item>
               <Descriptions.Item label="开始时间">
                 {dayjs(detail.run.started_at).format('YYYY-MM-DD HH:mm:ss')}
@@ -398,6 +402,24 @@ export default function RunsPage() {
                   ? dayjs(detail.run.finished_at).format('YYYY-MM-DD HH:mm:ss')
                   : '—'}
               </Descriptions.Item>
+              {/* 0074 PRD F7.2/F13：工作流即工具的子 run 归因，可回溯父 run */}
+              {detail.run.parent_run_id && (
+                <Descriptions.Item label="父 Run" span={2}>
+                  <Space>
+                    <Typography.Text code>{detail.run.parent_run_id}</Typography.Text>
+                    <Button
+                      type="link"
+                      size="small"
+                      onClick={() => {
+                        const pid = detail.run.parent_run_id
+                        if (pid) void openDetail(pid)
+                      }}
+                    >
+                      查看
+                    </Button>
+                  </Space>
+                </Descriptions.Item>
+              )}
             </Descriptions>
 
             <div>
@@ -412,19 +434,21 @@ export default function RunsPage() {
                 <JsonBlock value={detail.run.output} />
               </div>
             </div>
-            {detail.run.error && (
+            {detail.run.error_message && (
               <div>
                 <Typography.Text strong type="danger">
                   错误
                 </Typography.Text>
                 <div style={{ marginTop: 4 }}>
-                  <JsonBlock value={detail.run.error} />
+                  <JsonBlock value={detail.run.error_message} />
                 </div>
               </div>
             )}
 
             <div>
-              <Typography.Text strong>节点执行轨迹（{detail.node_executions.length}）</Typography.Text>
+              <Typography.Text strong>
+                节点执行轨迹（{detail.node_executions.length}）
+              </Typography.Text>
               <div style={{ marginTop: 8 }}>
                 {detail.node_executions.length === 0 ? (
                   <Empty description="无节点执行记录" />
@@ -436,10 +460,53 @@ export default function RunsPage() {
               </div>
             </div>
 
+            {detail.children.length > 0 && (
+              <div>
+                <Typography.Text strong>
+                  子 Run（工作流即工具，{detail.children.length}）
+                </Typography.Text>
+                <div style={{ marginTop: 8 }}>
+                  {detail.children.map((child) => (
+                    <div
+                      key={child.id}
+                      style={{
+                        borderLeft: '3px solid #d9d9d9',
+                        padding: '8px 12px',
+                        marginBottom: 8,
+                        background: '#fafafa',
+                      }}
+                    >
+                      <Space
+                        size="middle"
+                        style={{ width: '100%', justifyContent: 'space-between' }}
+                      >
+                        <Space>
+                          <StatusTag status={child.execute_status} />
+                          <Typography.Text code style={{ fontSize: 11 }}>
+                            {child.id.slice(0, 8)}
+                          </Typography.Text>
+                          <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                            {dayjs(child.started_at).format('HH:mm:ss')} ·{' '}
+                            {durationText(child.started_at, child.finished_at)}
+                          </Typography.Text>
+                          {child.error_message && (
+                            <Typography.Text type="danger" style={{ fontSize: 12 }}>
+                              {child.error_message}
+                            </Typography.Text>
+                          )}
+                        </Space>
+                        <Button type="link" size="small" onClick={() => void openDetail(child.id)}>
+                          详情
+                        </Button>
+                      </Space>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             <div>
-              <Typography.Text strong>
-                Time-travel 历史（{checkpoints.length}）
-              </Typography.Text>
+              <Typography.Text strong>Time-travel 历史（{checkpoints.length}）</Typography.Text>
               <Typography.Paragraph type="secondary" style={{ marginTop: 4, fontSize: 12 }}>
                 从任一历史状态分叉：复制该状态到新 thread，从该节点继续跑。
               </Typography.Paragraph>
@@ -459,7 +526,10 @@ export default function RunsPage() {
                         background: '#f0f5ff',
                       }}
                     >
-                      <Space size="middle" style={{ width: '100%', justifyContent: 'space-between' }}>
+                      <Space
+                        size="middle"
+                        style={{ width: '100%', justifyContent: 'space-between' }}
+                      >
                         <Space>
                           <Tag color="blue">#{idx + 1}</Tag>
                           <Typography.Text code style={{ fontSize: 11 }}>

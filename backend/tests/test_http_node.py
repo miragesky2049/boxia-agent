@@ -36,7 +36,7 @@ class _CapturingHttp:
         self._status = status
         self._body = body
 
-    async def request(self, **kwargs) -> "_CapturingHttp":
+    async def request(self, **kwargs) -> _CapturingHttp:
         self.calls.append(kwargs)
         return self
 
@@ -49,8 +49,9 @@ class _CapturingHttp:
         return self._body
 
 
-def _make_ctx(config: dict, *, inputs: dict | None = None,
-              http: _CapturingHttp | None = None) -> NodeContext:
+def _make_ctx(
+    config: dict, *, inputs: dict | None = None, http: _CapturingHttp | None = None
+) -> NodeContext:
     env = RuntimeEnv(
         tenant_id=uuid4(),
         user_id=uuid4(),
@@ -72,7 +73,10 @@ def _make_ctx(config: dict, *, inputs: dict | None = None,
 
 
 def test_to_kv_dict_handles_list_and_dict() -> None:
-    assert _to_kv_dict([{"key": "a", "value": "1"}, {"key": "b", "value": "2"}]) == {"a": "1", "b": "2"}
+    assert _to_kv_dict([{"key": "a", "value": "1"}, {"key": "b", "value": "2"}]) == {
+        "a": "1",
+        "b": "2",
+    }
     assert _to_kv_dict({"x": 1, "y": "2"}) == {"x": "1", "y": "2"}
     assert _to_kv_dict(None) == {}
     assert _to_kv_dict("not-a-list") == {}
@@ -121,7 +125,7 @@ def test_http_post_json_body_with_bearer_auth() -> None:
         "bodyJson": '{"name": "boxia"}',
     }
     ctx = _make_ctx(cfg, http=http)
-    result = asyncio.run(HttpNodeHandler().run(ctx))
+    asyncio.run(HttpNodeHandler().run(ctx))
     call = http.calls[0]
     assert call["json_body"] == {"name": "boxia"}
     assert call["headers"]["Authorization"] == "Bearer secret-token"

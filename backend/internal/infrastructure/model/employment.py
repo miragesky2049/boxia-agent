@@ -9,7 +9,6 @@ from sqlalchemy import (
     CheckConstraint,
     Date,
     DateTime,
-    ForeignKey,
     ForeignKeyConstraint,
     Index,
     Numeric,
@@ -29,6 +28,13 @@ class EmploymentModel(Base):
 
     __tablename__ = "user_employments"
     __table_args__ = (
+        # 迁移建表时带单列租户外键，模型补齐保持与库一致（alembic check 不再报 remove_fk）
+        ForeignKeyConstraint(
+            ["tenant_id"],
+            ["tenants.id"],
+            name="fk_user_employments_tenant",
+            ondelete="CASCADE",
+        ),
         ForeignKeyConstraint(
             ["tenant_id", "user_id"],
             ["users.tenant_id", "users.id"],
@@ -48,8 +54,7 @@ class EmploymentModel(Base):
             ondelete="RESTRICT",
         ),
         CheckConstraint(
-            "(is_current AND ended_at IS NULL) "
-            "OR (NOT is_current AND ended_at IS NOT NULL)",
+            "(is_current AND ended_at IS NULL) OR (NOT is_current AND ended_at IS NOT NULL)",
             name="ck_emp_current_ended",
         ),
         CheckConstraint(

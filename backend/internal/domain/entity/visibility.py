@@ -8,15 +8,15 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import StrEnum
 
 
-class Visibility(str, Enum):
+class Visibility(StrEnum):
     PRIVATE = "private"
     TENANT = "tenant"
     TENANT_GROUP = "tenant_group"
     WHITELIST = "whitelist"
 
     @classmethod
-    def default(cls) -> "Visibility":
+    def default(cls) -> Visibility:
         return cls.PRIVATE

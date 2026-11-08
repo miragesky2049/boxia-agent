@@ -105,7 +105,8 @@ class QuestionNodeHandler(NodeHandler):
             raw_options = ctx.evaluator.resolve_config(raw_options, ctx.eval_context)
             if isinstance(raw_options, str) and "{{" in raw_options:
                 raw_options = ctx.evaluator.template.eval_template(
-                    raw_options, ctx.eval_context,
+                    raw_options,
+                    ctx.eval_context,
                 )
         options = _normalize_options(raw_options)
         answer_type = _resolve_answer_type(config, options)
@@ -151,7 +152,9 @@ class QuestionNodeHandler(NodeHandler):
         fields: list[str],
     ) -> tuple[dict[str, Any], str]:
         """用模型把自由文本回答抽取成结构化字段。"""
-        model = str((ctx.config or {}).get("modleName") or (ctx.config or {}).get("modelName") or "")
+        model = str(
+            (ctx.config or {}).get("modleName") or (ctx.config or {}).get("modelName") or ""
+        )
         if not model or not ctx.services.has("llm"):
             return {}, "未配置模型，无法从回复中提取字段"
 

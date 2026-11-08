@@ -95,7 +95,9 @@ def replace_visibility(
 def list_subscribed_apps(
     principal: TenantAdminDep,
     scope_service: AdminScopeService = AdminScopeServiceDep,
-    scope: Annotated[Literal["all", "managed"], Query(description="all=全部订阅；managed=我管理的")] = "all",
+    scope: Annotated[
+        Literal["all", "managed"], Query(description="all=全部订阅；managed=我管理的")
+    ] = "all",
 ) -> list[dict]:
     """列出当前租户已订阅的产品级应用（管理列表数据源）。
 
@@ -134,7 +136,9 @@ def add_admin_scope(
     """新增应用与管理单元关联：需 app:admin_scope:write 且通过管理范围鉴权。"""
     if not principal.can("app:admin_scope:write"):
         raise ForbiddenError("缺少管理范围编辑权限")
-    service.add_scope(application_id, _tenant_of(principal), principal.user_id, payload.mgmt_unit_id)
+    service.add_scope(
+        application_id, _tenant_of(principal), principal.user_id, payload.mgmt_unit_id
+    )
     return {"application_id": str(application_id), "mgmt_unit_id": str(payload.mgmt_unit_id)}
 
 
@@ -148,7 +152,5 @@ def remove_admin_scope(
     """解除应用与管理单元关联：需 app:admin_scope:write 且通过管理范围鉴权。"""
     if not principal.can("app:admin_scope:write"):
         raise ForbiddenError("缺少管理范围编辑权限")
-    service.remove_scope(
-        application_id, _tenant_of(principal), principal.user_id, mgmt_unit_id
-    )
+    service.remove_scope(application_id, _tenant_of(principal), principal.user_id, mgmt_unit_id)
     return {"application_id": str(application_id), "mgmt_unit_id": str(mgmt_unit_id)}

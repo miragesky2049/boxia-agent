@@ -1,5 +1,19 @@
 import { PlusOutlined } from '@ant-design/icons'
-import { App, Button, DatePicker, Form, Input, Modal, Popconfirm, Select, Space, Switch, Table, Tag, TreeSelect } from 'antd'
+import {
+  App,
+  Button,
+  DatePicker,
+  Form,
+  Input,
+  Modal,
+  Popconfirm,
+  Select,
+  Space,
+  Switch,
+  Table,
+  Tag,
+  TreeSelect,
+} from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useMemo, useState } from 'react'
@@ -321,7 +335,12 @@ export default function UsersPage() {
                     disabled={record.id === currentUser?.id}
                     onConfirm={() => handleDelete(record)}
                   >
-                    <Button type="link" size="small" danger disabled={record.id === currentUser?.id}>
+                    <Button
+                      type="link"
+                      size="small"
+                      danger
+                      disabled={record.id === currentUser?.id}
+                    >
                       删除
                     </Button>
                   </Popconfirm>

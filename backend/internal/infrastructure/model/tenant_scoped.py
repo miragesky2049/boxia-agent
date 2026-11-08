@@ -14,7 +14,6 @@ from sqlalchemy.orm import mapped_column
 
 from internal.domain.entity.visibility import Visibility
 
-
 # 可见性字段长度：枚举值短，32 足够
 VisibilityColumn = Annotated[
     str,

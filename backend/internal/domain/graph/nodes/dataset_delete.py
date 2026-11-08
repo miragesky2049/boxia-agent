@@ -34,13 +34,17 @@ class DatasetDeleteNodeHandler(NodeHandler):
         if not dataset_id:
             return NodeResult(outputs={"isSuccess": False, "error": "知识库删除节点缺少 datasetId"})
         if not document_id:
-            return NodeResult(outputs={"isSuccess": False, "error": "知识库删除节点缺少 documentID"})
+            return NodeResult(
+                outputs={"isSuccess": False, "error": "知识库删除节点缺少 documentID"}
+            )
 
         if not ctx.services.has("vector_store"):
-            return NodeResult(outputs={
-                "isSuccess": True,
-                "stub": f"[DatasetDelete stub] dataset={dataset_id} document={document_id}",
-            })
+            return NodeResult(
+                outputs={
+                    "isSuccess": True,
+                    "stub": f"[DatasetDelete stub] dataset={dataset_id} document={document_id}",
+                }
+            )
 
         try:
             await ctx.services.get("vector_store").delete_by_document(

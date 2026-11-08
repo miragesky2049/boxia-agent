@@ -21,7 +21,10 @@ class RunService:
         self._repo = run_repo
 
     def get_running_for_thread(
-        self, tenant_id: UUID, application_id: UUID, thread_id: str,
+        self,
+        tenant_id: UUID,
+        application_id: UUID,
+        thread_id: str,
     ) -> dict[str, Any]:
         """取该 thread 等待审批的运行记录；无则按业务错误抛出。"""
         run = self._repo.get_running_by_thread(tenant_id, application_id, thread_id)
@@ -30,7 +33,11 @@ class RunService:
         return run
 
     def list_runs(
-        self, tenant_id: UUID, *, workflow_id: UUID | None = None, limit: int = 50,
+        self,
+        tenant_id: UUID,
+        *,
+        workflow_id: UUID | None = None,
+        limit: int = 50,
     ) -> list[dict]:
         """租户查看某应用的运行历史。"""
         return self._repo.list_runs(tenant_id, workflow_id=workflow_id, limit=limit)
@@ -43,9 +50,13 @@ class RunService:
         return run
 
     def get_run_detail(self, run_id: UUID, tenant_id: UUID) -> dict[str, Any]:
-        """run 元信息 + 节点执行列表。"""
+        """run 元信息 + 节点执行列表 + 子 run（0074 PRD F7.2/F13 工作流即工具归因）。"""
         run = self.get_run_owned(run_id, tenant_id)
-        return {"run": run, "node_executions": self._repo.list_node_executions(run_id)}
+        return {
+            "run": run,
+            "node_executions": self._repo.list_node_executions(run_id),
+            "children": self._repo.list_child_runs(tenant_id, run_id),
+        }
 
     def insert_run(
         self,

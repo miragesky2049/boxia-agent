@@ -8,9 +8,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from internal.application.errors import ValidationError
 from internal.application.apps.model_service import ModelService
 from internal.application.apps.prompt_optimize_service import PromptOptimizeService
+from internal.application.errors import ValidationError
 from web.deps.apps_services import make_model_service
 from web.deps.auth import require_platform_admin
 from web.deps.db import UowDep

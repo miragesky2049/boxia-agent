@@ -9,13 +9,12 @@ from pathlib import Path
 # 把 backend 目录加入 sys.path，便于直接运行
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.infrastructure.config.settings import get_settings
-from internal.domain.entity.request_context import RequestContext
-from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.application.document_service import DocumentService
 from internal.application.ingestion_service import IngestionService
 from internal.application.retrieval_service import RetrievalService
-
+from internal.domain.entity.request_context import RequestContext
+from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 
 # ── 多主题测试文档 ──────────────────────────────────────────────
 DOCUMENTS = [
@@ -215,7 +214,7 @@ async def main() -> None:
             )
             for i, c in enumerate(result.chunks[:3]):
                 preview = c.content[:80].replace("\n", " ")
-                print(f"  [{i+1}] score={c.score:.4f}  {preview}...")
+                print(f"  [{i + 1}] score={c.score:.4f}  {preview}...")
     finally:
         uow.close()
 

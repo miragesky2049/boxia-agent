@@ -10,7 +10,8 @@ domain/graph/nodes/llm.py 期望：
 
 from __future__ import annotations
 
-from typing import Any, AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable
+from typing import Any
 from uuid import UUID
 
 from internal.domain.llm.client import LLMClient, LLMResponse, LLMToolSpec
@@ -31,8 +32,14 @@ class LLMServiceAdapter:
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
         tools: list[LLMToolSpec] | None = None,
+        **extra: Any,
     ) -> Any:
-        """返回 LLMResponse（domain llm 节点已按 .content / .usage / .tool_calls 解构）。"""
+        """返回 LLMResponse（domain llm 节点已按 .content / .usage / .tool_calls 解构）。
+
+        extra 透传给底层 LLMClient.chat（20261106 P3：chat 兼容通道需要 context=AgentRunContext
+        携带租户 header）。注意：内核的签名过滤看到的是本方法的 **extra，恒会放行，
+        因此底层 client 的签名必须自行接受这些扩展键，否则会抛 TypeError。
+        """
         client = self._resolver(model)
         return await client.chat(
             messages=messages,
@@ -40,6 +47,7 @@ class LLMServiceAdapter:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            **extra,
         )
 
     async def chat_stream(
@@ -50,6 +58,7 @@ class LLMServiceAdapter:
         temperature: float | None = None,
         max_tokens: int | None = None,
         response_format: dict[str, Any] | None = None,
+        **extra: Any,
     ) -> AsyncIterator[LLMResponse]:
         """流式 chat：逐 chunk yield LLMResponse（content 为增量 delta）。
 
@@ -61,6 +70,7 @@ class LLMServiceAdapter:
             temperature=temperature,
             max_tokens=max_tokens,
             response_format=response_format,
+            **extra,
         ):
             yield chunk
 

@@ -71,9 +71,7 @@ class UserAdminService:
     def list_options(self, keyword: str | None = None) -> UserList:
         """下拉选项用：返回本租户启用用户的精简列表，不回填部门信息。"""
         tenant_id = self._require_tenant()
-        items, _ = self._uow.users.list_page(
-            1, OPTIONS_LIMIT, keyword, tenant_id
-        )
+        items, _ = self._uow.users.list_page(1, OPTIONS_LIMIT, keyword, tenant_id)
         return [item for item in items if item.is_active]
 
     def create(
@@ -331,12 +329,8 @@ class UserAdminService:
         grant_map = self._uow.user_mgmt_unit_grants.list_for_users(
             tenant_id, [user.id for user in items]
         )
-        all_unit_ids = list(
-            {grant.unit_id for grants in grant_map.values() for grant in grants}
-        )
-        unit_name_map = self._uow.user_mgmt_unit_grants.list_unit_names(
-            tenant_id, all_unit_ids
-        )
+        all_unit_ids = list({grant.unit_id for grants in grant_map.values() for grant in grants})
+        unit_name_map = self._uow.user_mgmt_unit_grants.list_unit_names(tenant_id, all_unit_ids)
         result: UserList = []
         for user in items:
             grants = grant_map.get(user.id, [])

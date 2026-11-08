@@ -104,13 +104,9 @@ export default function TenantDetailPage() {
               <Typography.Text code>{tenant.code}</Typography.Text>
             </Descriptions.Item>
             <Descriptions.Item label="访问域名">
-              {context?.root_domain
-                ? `${tenant.code}.${context.root_domain}`
-                : tenant.code}
+              {context?.root_domain ? `${tenant.code}.${context.root_domain}` : tenant.code}
             </Descriptions.Item>
-            <Descriptions.Item label="状态">
-              {tenant.is_active ? '启用' : '停用'}
-            </Descriptions.Item>
+            <Descriptions.Item label="状态">{tenant.is_active ? '启用' : '停用'}</Descriptions.Item>
             <Descriptions.Item label="创建时间">
               {dayjs(tenant.created_at).format('YYYY-MM-DD HH:mm')}
             </Descriptions.Item>

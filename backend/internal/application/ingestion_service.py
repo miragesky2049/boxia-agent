@@ -122,12 +122,8 @@ class IngestionService:
         """按来源类型选择切分器：markdown 走标题感知切分，其他走段落滑窗。"""
         st = (source_type or "").lower()
         if st in {"markdown", "md"}:
-            return split_markdown(
-                text, chunk_size=chunk_size, chunk_overlap=chunk_overlap
-            )
-        plain_chunks = split_text(
-            text, chunk_size=chunk_size, chunk_overlap=chunk_overlap
-        )
+            return split_markdown(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
+        plain_chunks = split_text(text, chunk_size=chunk_size, chunk_overlap=chunk_overlap)
         return [Chunk(content=c, heading_path=[]) for c in plain_chunks]
 
     def _resolve_client(self) -> EmbeddingClient:

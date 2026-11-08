@@ -70,7 +70,15 @@ export function ChatSidebar({
             <span className="lc-conversation__dot" aria-hidden />
             {!collapsed && (
               <span className="lc-conversation__body">
-                <span className="lc-conversation__title">{item.title}</span>
+                <span className="lc-conversation__title">
+                  {item.title}
+                  {/* M4 PRD F14.10：接管中会话标记应答专家 */}
+                  {item.handoffAgent && (
+                    <span className="lc-conversation__handoff" title={`由「${item.handoffAgent}」应答中`}>
+                      接管中
+                    </span>
+                  )}
+                </span>
                 <span className="lc-conversation__time">{item.updatedAt}</span>
               </span>
             )}

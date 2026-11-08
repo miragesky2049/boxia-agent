@@ -113,11 +113,18 @@ class CanvasDebugService:
             on_node_event=emitter,
         )
         # 与用户端对话流一致：先发 run_start，前端据此拿到 thread/run/conversation
-        await queue.put(("run_start", {
-            "conversation_id": str(runtime.conversation_id) if runtime.conversation_id else None,
-            "thread_id": runtime.thread_id,
-            "run_id": str(runtime.run_id),
-        }))
+        await queue.put(
+            (
+                "run_start",
+                {
+                    "conversation_id": str(runtime.conversation_id)
+                    if runtime.conversation_id
+                    else None,
+                    "thread_id": runtime.thread_id,
+                    "run_id": str(runtime.run_id),
+                },
+            )
+        )
 
         async def runner_task() -> None:
             try:
@@ -157,13 +164,18 @@ class CanvasDebugService:
             "conversation_id": str(runtime.conversation_id) if runtime.conversation_id else None,
         }
         if payload.get("type") == "question":
-            await queue.put(("question", {
-                **common,
-                "node_id": payload.get("node_id"),
-                "node_title": payload.get("node_title"),
-                "question": payload.get("question") or "",
-                "options": payload.get("options") or [],
-            }))
+            await queue.put(
+                (
+                    "question",
+                    {
+                        **common,
+                        "node_id": payload.get("node_id"),
+                        "node_title": payload.get("node_title"),
+                        "question": payload.get("question") or "",
+                        "options": payload.get("options") or [],
+                    },
+                )
+            )
         else:
             await queue.put(("interrupted", {**common, "approval": payload}))
 

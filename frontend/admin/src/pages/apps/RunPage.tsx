@@ -4,18 +4,7 @@ import {
   PauseCircleOutlined,
   PlayCircleOutlined,
 } from '@ant-design/icons'
-import {
-  App,
-  Button,
-  Card,
-  Empty,
-  Input,
-  InputNumber,
-  Space,
-  Switch,
-  Tag,
-  Typography,
-} from 'antd'
+import { App, Button, Card, Empty, Input, InputNumber, Space, Switch, Tag, Typography } from 'antd'
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
@@ -72,11 +61,7 @@ function defaultValueFor(input: ApplicationInput): unknown {
   }
 }
 
-function renderField(
-  input: ApplicationInput,
-  value: unknown,
-  onChange: (v: unknown) => void,
-) {
+function renderField(input: ApplicationInput, value: unknown, onChange: (v: unknown) => void) {
   switch (input.type) {
     case 'number':
       return (
@@ -87,9 +72,7 @@ function renderField(
         />
       )
     case 'boolean':
-      return (
-        <Switch checked={Boolean(value)} onChange={(v) => onChange(v)} />
-      )
+      return <Switch checked={Boolean(value)} onChange={(v) => onChange(v)} />
     case 'json':
       return (
         <Input.TextArea
@@ -251,9 +234,7 @@ export default function RunPage() {
               {advancedMode ? '切换到表单模式' : '高级模式（JSON）'}
             </Button>
           )}
-          <Button onClick={() => navigate(`/marketplace/apps/${appId}/runs`)}>
-            查看运行历史
-          </Button>
+          <Button onClick={() => navigate(`/marketplace/apps/${appId}/runs`)}>查看运行历史</Button>
         </Space>
       </Space>
       <Typography.Paragraph type="secondary" style={{ marginTop: 8 }}>
@@ -348,10 +329,7 @@ export default function RunPage() {
                     <JsonBlock value={result.approval} />
                   </div>
                 </div>
-                <Button
-                  type="primary"
-                  onClick={() => navigate(`/marketplace/apps/${appId}/runs`)}
-                >
+                <Button type="primary" onClick={() => navigate(`/marketplace/apps/${appId}/runs`)}>
                   去审批
                 </Button>
               </>

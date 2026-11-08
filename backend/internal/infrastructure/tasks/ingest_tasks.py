@@ -67,9 +67,7 @@ async def _run_ingest(document_id: UUID, tenant_id: UUID | None) -> int:
             chunk_overlap=settings.rag_chunk_overlap,
             source_type=document.source_type,
         )
-        logger.info(
-            "ingest task done id=%s chunks=%d", document_id, chunk_count
-        )
+        logger.info("ingest task done id=%s chunks=%d", document_id, chunk_count)
         return chunk_count
     finally:
         uow.close()

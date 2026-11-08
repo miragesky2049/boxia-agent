@@ -15,10 +15,10 @@ from typing import Any
 from uuid import uuid4
 
 from internal.domain.agent.run_context import AgentRunContext
-from internal.domain.llm.client import LLMToolSpec
-from internal.domain.agent.tool_gateway import ToolExecutionError
 from internal.domain.agent.tool_executor import ToolExecutorService
+from internal.domain.agent.tool_gateway import ToolExecutionError
 from internal.domain.agent.tools import Tool
+from internal.domain.llm.client import LLMToolSpec
 
 
 class FakeTool(Tool):
@@ -127,4 +127,67 @@ def test_echo_tool_available_by_default():
 
     observation = asyncio.run(executor("echo", {"text": "hi"}))
 
-    assert "echo: hi" == observation
+    assert observation == "echo: hi"
+
+
+class _CountingCatalog:
+    """记录 list_page 调用次数的目录桩，用于验证 TTL 缓存命中。"""
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def list_page(self, **_kwargs):  # noqa: ANN003
+        self.calls += 1
+        return [], 0
+
+
+def _make_executor_for_tenant(catalog: _CountingCatalog, tenant_id) -> ToolExecutorService:
+    return ToolExecutorService(
+        catalog,
+        tenant_id=tenant_id,
+        user_id=uuid4(),
+        application_id=uuid4(),
+        run_id=uuid4(),
+    )
+
+
+def test_catalog_ttl_cache_hits_within_window():
+    """同租户 TTL 窗口内第二个 executor 不再查库；echo 仍各自注入。"""
+    from internal.domain.agent import tool_executor as te
+
+    te.clear_catalog_cache()
+    try:
+        tenant = uuid4()
+        catalog = _CountingCatalog()
+
+        first = _make_executor_for_tenant(catalog, tenant)
+        assert asyncio.run(first("echo", {"text": "a"})) == "echo: a"
+        assert catalog.calls == 1
+
+        second = _make_executor_for_tenant(catalog, tenant)
+        assert asyncio.run(second("echo", {"text": "b"})) == "echo: b"
+        assert catalog.calls == 1  # 命中 TTL 缓存，未再查库
+    finally:
+        te.clear_catalog_cache()
+
+
+def test_catalog_ttl_cache_expires(monkeypatch):
+    """超过 TTL 后重新查库。"""
+    from internal.domain.agent import tool_executor as te
+
+    te.clear_catalog_cache()
+    try:
+        base = 1000.0
+        clock = {"now": base}
+        monkeypatch.setattr(te.time, "monotonic", lambda: clock["now"])
+
+        tenant = uuid4()
+        catalog = _CountingCatalog()
+        asyncio.run(_make_executor_for_tenant(catalog, tenant)("echo", {"text": "x"}))
+        assert catalog.calls == 1
+
+        clock["now"] = base + te.CATALOG_CACHE_TTL_SECONDS + 1
+        asyncio.run(_make_executor_for_tenant(catalog, tenant)("echo", {"text": "y"}))
+        assert catalog.calls == 2
+    finally:
+        te.clear_catalog_cache()

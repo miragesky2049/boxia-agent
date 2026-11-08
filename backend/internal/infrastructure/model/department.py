@@ -36,8 +36,7 @@ class DepartmentModel(Base):
         CheckConstraint("(parent_id IS NULL) = (level = 1)", name="ck_departments_root"),
         CheckConstraint("length(btrim(name)) > 0", name="ck_departments_name"),
         CheckConstraint(
-            "code IS NULL OR (code = lower(code) "
-            "AND code ~ '^[a-z0-9_-]{1,64}$')",
+            "code IS NULL OR (code = lower(code) AND code ~ '^[a-z0-9_-]{1,64}$')",
             name="ck_departments_code",
         ),
         CheckConstraint(

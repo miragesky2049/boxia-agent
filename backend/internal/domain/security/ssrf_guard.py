@@ -69,7 +69,7 @@ def _validate_host_safe(host: str) -> None:
             )
 
 
-def _is_dangerous(ip: ipaddress._BaseAddress) -> bool:
+def _is_dangerous(ip: ipaddress.IPv4Address | ipaddress.IPv6Address) -> bool:
     """判断 IP 是否为高风险目标。"""
     return (
         ip.is_loopback

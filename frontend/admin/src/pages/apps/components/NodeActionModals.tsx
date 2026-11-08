@@ -1,4 +1,4 @@
-import { Input, Modal, Tag } from 'antd';
+import { Input, Modal, Tag } from 'antd'
 
 // 卡片「⋯」重命名弹窗（N9-07）
 export function RenameNodeModal({
@@ -7,10 +7,10 @@ export function RenameNodeModal({
   onConfirm,
   onCancel,
 }: {
-  target: { nodeId: string; value: string } | null;
-  onChange: (value: string) => void;
-  onConfirm: () => void;
-  onCancel: () => void;
+  target: { nodeId: string; value: string } | null
+  onChange: (value: string) => void
+  onConfirm: () => void
+  onCancel: () => void
 }) {
   return (
     <Modal
@@ -30,7 +30,7 @@ export function RenameNodeModal({
         onPressEnter={onConfirm}
       />
     </Modal>
-  );
+  )
 }
 
 // 删除节点确认弹窗（U-S3）：单节点与批量共用
@@ -42,12 +42,12 @@ export function DeleteNodeModal({
   onConfirm,
   onCancel,
 }: {
-  open: boolean;
-  targetIds: string[];
-  selectedNodeId: string | null;
-  selectedNodeTitle?: string;
-  onConfirm: () => void;
-  onCancel: () => void;
+  open: boolean
+  targetIds: string[]
+  selectedNodeId: string | null
+  selectedNodeTitle?: string
+  onConfirm: () => void
+  onCancel: () => void
 }) {
   return (
     <Modal
@@ -66,7 +66,8 @@ export function DeleteNodeModal({
           </span>
         ) : (
           <span>
-            确定要删除节点 <Tag color="blue">{selectedNodeTitle || targetIds[0] || selectedNodeId}</Tag> 吗？
+            确定要删除节点{' '}
+            <Tag color="blue">{selectedNodeTitle || targetIds[0] || selectedNodeId}</Tag> 吗？
           </span>
         )}
         <div style={{ marginTop: 8, color: '#999', fontSize: 12 }}>
@@ -74,5 +75,5 @@ export function DeleteNodeModal({
         </div>
       </div>
     </Modal>
-  );
+  )
 }

@@ -15,9 +15,7 @@ def _role_id(client: TestClient, headers: dict[str, str], code: str) -> str:
     return next(item["id"] for item in roles if item["code"] == code)
 
 
-def _create_operator(
-    client: TestClient, headers: dict[str, str], role_code: str = "admin"
-) -> dict:
+def _create_operator(client: TestClient, headers: dict[str, str], role_code: str = "admin") -> dict:
     response = client.post(
         USERS_URL,
         json={

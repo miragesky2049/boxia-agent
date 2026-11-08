@@ -87,9 +87,7 @@ export default function UserGrantsPage() {
 
   const roleOptions = useMemo(
     () =>
-      roles
-        .filter((role) => role.is_active)
-        .map((role) => ({ label: role.name, value: role.id })),
+      roles.filter((role) => role.is_active).map((role) => ({ label: role.name, value: role.id })),
     [roles],
   )
 
@@ -228,8 +226,7 @@ export default function UserGrantsPage() {
       dataIndex: 'is_active',
       key: 'is_active',
       width: 90,
-      render: (enabled: boolean) =>
-        enabled ? <Tag color="success">启用</Tag> : <Tag>禁用</Tag>,
+      render: (enabled: boolean) => (enabled ? <Tag color="success">启用</Tag> : <Tag>禁用</Tag>),
     },
     {
       title: '最近登录',
@@ -261,15 +258,12 @@ export default function UserGrantsPage() {
         <div>
           <h2 className="page-header__title">用户授权</h2>
           <p className="page-header__desc">
-            为用户分配角色（功能权限）+ 管理单元（数据权限）；角色决定菜单与按钮，管理单元决定可见的智能体范围。
+            为用户分配角色（功能权限）+
+            管理单元（数据权限）；角色决定菜单与按钮，管理单元决定可见的智能体范围。
           </p>
         </div>
         {canManage && (
-          <Button
-            type="primary"
-            icon={<SafetyCertificateOutlined />}
-            onClick={openBatch}
-          >
+          <Button type="primary" icon={<SafetyCertificateOutlined />} onClick={openBatch}>
             批量授权
           </Button>
         )}
@@ -340,12 +334,7 @@ export default function UserGrantsPage() {
             label="角色（功能权限）"
             rules={[{ required: true, message: '请至少选择一个角色' }]}
           >
-            <Select
-              mode="multiple"
-              allowClear
-              placeholder="选择角色"
-              options={roleOptions}
-            />
+            <Select mode="multiple" allowClear placeholder="选择角色" options={roleOptions} />
           </Form.Item>
           <Form.Item
             name="mgmt_unit_ids"
@@ -395,7 +384,9 @@ export default function UserGrantsPage() {
                 loading={userSearching}
                 placeholder="输入用户名或显示名搜索"
                 options={userOptions.map((user) => ({
-                  label: user.display_name ? `${user.display_name}（${user.username}）` : user.username,
+                  label: user.display_name
+                    ? `${user.display_name}（${user.username}）`
+                    : user.username,
                   value: user.id,
                 }))}
               />
@@ -408,12 +399,7 @@ export default function UserGrantsPage() {
               label="角色（功能权限）"
               rules={[{ required: true, message: '请至少选择一个角色' }]}
             >
-              <Select
-                mode="multiple"
-                allowClear
-                placeholder="选择角色"
-                options={roleOptions}
-              />
+              <Select mode="multiple" allowClear placeholder="选择角色" options={roleOptions} />
             </Form.Item>
             <Form.Item
               name="mgmt_unit_ids"

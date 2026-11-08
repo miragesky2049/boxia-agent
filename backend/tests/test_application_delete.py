@@ -129,10 +129,7 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
         # 权益套餐项（多态 object_type='app'）
         plan_id = uuid4()
         uow.session.execute(
-            text(
-                "INSERT INTO entitlement_plan (id, code, name) "
-                "VALUES (:id, :code, '测试套餐')"
-            ),
+            text("INSERT INTO entitlement_plan (id, code, name) VALUES (:id, :code, '测试套餐')"),
             {"id": plan_id, "code": f"plan-{plan_id.hex[:8]}"},
         )
         uow.session.execute(
@@ -209,8 +206,13 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
                 "INSERT INTO message (id, conversation_id, tenant_id, user_id, application_id, role) "
                 "VALUES (:id, :cid, :tid, :uid, :aid, 'user')"
             ),
-            {"id": uuid4(), "cid": conversation_id, "tid": tenant_id,
-             "uid": user_id, "aid": app_id},
+            {
+                "id": uuid4(),
+                "cid": conversation_id,
+                "tid": tenant_id,
+                "uid": user_id,
+                "aid": app_id,
+            },
         )
 
         uow.commit()
@@ -221,9 +223,7 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
 
 def _app_related_counts(app_id: str) -> dict[str, int]:
     return {
-        "application": _scalar(
-            "SELECT count(*) FROM application WHERE id = :aid", aid=app_id
-        ),
+        "application": _scalar("SELECT count(*) FROM application WHERE id = :aid", aid=app_id),
         "graphs": _scalar(
             "SELECT count(*) FROM application_graph WHERE application_id = :aid", aid=app_id
         ),
@@ -252,12 +252,8 @@ def _app_related_counts(app_id: str) -> dict[str, int]:
         "conversations": _scalar(
             "SELECT count(*) FROM conversation WHERE application_id = :aid", aid=app_id
         ),
-        "messages": _scalar(
-            "SELECT count(*) FROM message WHERE application_id = :aid", aid=app_id
-        ),
-        "runs": _scalar(
-            "SELECT count(*) FROM run WHERE workflow_id = :aid", aid=app_id
-        ),
+        "messages": _scalar("SELECT count(*) FROM message WHERE application_id = :aid", aid=app_id),
+        "runs": _scalar("SELECT count(*) FROM run WHERE workflow_id = :aid", aid=app_id),
         "node_executions": _scalar(
             "SELECT count(*) FROM run_node_execution ne JOIN run r ON r.id = ne.execute_id "
             "WHERE r.workflow_id = :aid",
@@ -302,9 +298,7 @@ def test_delete_requires_confirm(client: TestClient, auth_headers: dict[str, str
     assert rejected.status_code == 422, rejected.text
 
 
-def test_delete_requires_permission_code(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_requires_permission_code(client: TestClient, auth_headers: dict[str, str]) -> None:
     app_id = _create_app(client, auth_headers, "权限应用")
     # 0071：viewer 出厂已无「管理端访问」，无法再绑定为管理员，仅以 admin 验证权限码门槛
     headers = _create_operator(client, auth_headers, "admin", "op-admin-delete")
@@ -330,16 +324,12 @@ def test_delete_forbidden_in_tenant_scope(
     assert _scalar("SELECT count(*) FROM tenants WHERE id = :tid", tid=tenant["id"]) == 1
 
 
-def test_delete_unknown_app_returns_404(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_unknown_app_returns_404(client: TestClient, auth_headers: dict[str, str]) -> None:
     response = client.delete(f"{APPS_URL}/{uuid4()}?confirm=true", headers=auth_headers)
     assert response.status_code == 404, response.text
 
 
-def test_delete_tenant_owned_app_rejected(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_delete_tenant_owned_app_rejected(client: TestClient, auth_headers: dict[str, str]) -> None:
     tenant = create_tenant(client, auth_headers, code="owned-acme", name="租户应用租户")
     uow = _new_uow()
     owned_app = uuid4()
@@ -356,9 +346,7 @@ def test_delete_tenant_owned_app_rejected(
     finally:
         uow.close()
 
-    response = client.delete(
-        f"{APPS_URL}/{owned_app}?confirm=true", headers=auth_headers
-    )
+    response = client.delete(f"{APPS_URL}/{owned_app}?confirm=true", headers=auth_headers)
     assert response.status_code == 422, response.text
     assert _scalar("SELECT count(*) FROM application WHERE id = :aid", aid=owned_app) == 1
 
@@ -394,15 +382,10 @@ def test_delete_cascades_all_related_data(
         == 0
     )
     # 套餐本体保留，仅关联项被清
-    assert (
-        _scalar("SELECT count(*) FROM entitlement_plan WHERE id = :id", id=ids["plan"])
-        == 1
-    )
+    assert _scalar("SELECT count(*) FROM entitlement_plan WHERE id = :id", id=ids["plan"]) == 1
     # 租户与租户用户不受影响
     assert _scalar("SELECT count(*) FROM tenants WHERE id = :tid", tid=tenant["id"]) == 1
-    assert (
-        _scalar("SELECT count(*) FROM users WHERE id = :uid", uid=ids["user"]) == 1
-    )
+    assert _scalar("SELECT count(*) FROM users WHERE id = :uid", uid=ids["user"]) == 1
 
 
 def test_delete_writes_platform_side_audit(
@@ -418,13 +401,17 @@ def test_delete_writes_platform_side_audit(
     assert response.status_code == 200, response.text
     audit_id = response.json()["audit_id"]
 
-    row = _new_uow().session.execute(
-        text(
-            "SELECT tenant_id, action, resource_type, resource_id, actor_username "
-            "FROM audit_logs WHERE id = :id"
-        ),
-        {"id": audit_id},
-    ).one()
+    row = (
+        _new_uow()
+        .session.execute(
+            text(
+                "SELECT tenant_id, action, resource_type, resource_id, actor_username "
+                "FROM audit_logs WHERE id = :id"
+            ),
+            {"id": audit_id},
+        )
+        .one()
+    )
     assert str(row[0]) == str(PLATFORM_TENANT_ID)
     assert row[1] == "app.deleted"
     assert row[2] == "app"
@@ -433,9 +420,7 @@ def test_delete_writes_platform_side_audit(
 
 
 # ========== 批量 ==========
-def test_batch_delete_partial_success(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_partial_success(client: TestClient, auth_headers: dict[str, str]) -> None:
     app_id = _create_app(client, auth_headers, "批量待删应用")
     missing_id = str(uuid4())
 
@@ -460,17 +445,14 @@ def test_batch_delete_partial_success(
     assert _scalar("SELECT count(*) FROM application WHERE id = :aid", aid=app_id) == 0
     assert (
         _scalar(
-            "SELECT count(*) FROM audit_logs WHERE action = 'app.deleted' "
-            "AND resource_id = :rid",
+            "SELECT count(*) FROM audit_logs WHERE action = 'app.deleted' AND resource_id = :rid",
             rid=app_id,
         )
         == 1
     )
 
 
-def test_batch_delete_deduplicates_ids(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_deduplicates_ids(client: TestClient, auth_headers: dict[str, str]) -> None:
     app_id = _create_app(client, auth_headers, "去重应用")
     response = client.post(
         f"{APPS_URL}/batch",
@@ -484,9 +466,7 @@ def test_batch_delete_deduplicates_ids(
     assert body["failed"] == 0
 
 
-def test_batch_delete_validation(
-    client: TestClient, auth_headers: dict[str, str]
-) -> None:
+def test_batch_delete_validation(client: TestClient, auth_headers: dict[str, str]) -> None:
     app_id = _create_app(client, auth_headers, "校验应用")
 
     without_confirm = client.post(

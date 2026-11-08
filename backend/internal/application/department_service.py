@@ -54,13 +54,9 @@ class DepartmentService:
         normalized_code = _normalize_code(code)
         parent = self._lock_parent(parent_id, tenant_id)
 
-        if normalized_code and self._uow.departments.code_exists(
-            tenant_id, normalized_code
-        ):
+        if normalized_code and self._uow.departments.code_exists(tenant_id, normalized_code):
             raise ConflictError("部门编码已存在")
-        if self._uow.departments.name_exists_under_parent(
-            tenant_id, parent_id, normalized_name
-        ):
+        if self._uow.departments.name_exists_under_parent(tenant_id, parent_id, normalized_name):
             raise ConflictError("同一上级下已存在同名部门")
 
         department_id = new_uuid()
@@ -220,9 +216,7 @@ class DepartmentService:
             raise NotFoundError("部门不存在")
         new_parent = None
         if new_parent_id is not None:
-            new_parent = next(
-                (item for item in locked if item.id == new_parent_id), None
-            )
+            new_parent = next((item for item in locked if item.id == new_parent_id), None)
             if new_parent is None:
                 raise NotFoundError("目标上级部门不存在")
             if not new_parent.is_active:

@@ -174,7 +174,7 @@ class RetrievalService:
         # 按 (document_id, chunk_index) 去重，保留最高分
         merged: dict[tuple[UUID, int], DocumentChunk] = {}
         for item in results:
-            if isinstance(item, Exception):
+            if isinstance(item, BaseException):
                 logger.warning("recall for one query failed: %s", item)
                 continue
             for chunk in item:
@@ -219,9 +219,7 @@ class RetrievalService:
             chunk = candidates[result.index]
             if result.score < rerank_threshold:
                 continue
-            reranked_chunks.append(
-                dc_replace(chunk, rerank_score=result.score, score=result.score)
-            )
+            reranked_chunks.append(dc_replace(chunk, rerank_score=result.score, score=result.score))
         return reranked_chunks[:top_k]
 
     @staticmethod

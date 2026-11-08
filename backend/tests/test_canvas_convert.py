@@ -10,8 +10,12 @@ from pathlib import Path
 
 import pytest
 
-from internal.domain.canvas.convert import convert_canvas
-from internal.domain.canvas.expression import Literal, Ref
+from internal.domain.canvas.convert import (
+    CanvasConvertError,
+    convert_canvas,
+    find_agent_loop_config,
+)
+from internal.domain.canvas.expression import Ref
 from internal.domain.canvas.model import CanvasGraph
 from internal.domain.canvas.node_type import NodeType
 
@@ -119,17 +123,82 @@ def test_llm_node_outputs():
 
 
 def test_unknown_node_type_raises():
-    with pytest.raises(Exception):
+    with pytest.raises(CanvasConvertError):
         convert_canvas({"nodes": [{"id": "x", "type": "99999"}], "edges": []})
 
 
 def test_unsupported_database_node_raises():
     """决策已砍：数据库节点 convert 阶段应显式报错。"""
-    with pytest.raises(Exception):
-        convert_canvas({
+    with pytest.raises(CanvasConvertError):
+        convert_canvas(
+            {
+                "nodes": [
+                    {"id": "1", "type": "1", "data": {}},
+                    {"id": "2", "type": "12", "data": {}},  # DATABASE
+                ],
+                "edges": [{"sourceNodeID": "1", "targetNodeID": "2", "sourcePortID": ""}],
+            }
+        )
+
+
+def test_find_agent_loop_config_literal_inputs_shape():
+    """前端简化格式：data.inputs.<field> 直接挂 ValueExpressionDTO 字面量。"""
+    node_cfg = find_agent_loop_config(
+        {
             "nodes": [
-                {"id": "1", "type": "1", "data": {}},
-                {"id": "2", "type": "12", "data": {}},  # DATABASE
+                {
+                    "id": "loop_1",
+                    "type": "100",
+                    "data": {
+                        "inputs": {
+                            "modleName": {"value": {"type": "literal", "content": "m1"}},
+                            "tools": {"value": {"type": "literal", "content": [{"name": "t1"}]}},
+                        }
+                    },
+                }
             ],
-            "edges": [{"sourceNodeID": "1", "targetNodeID": "2", "sourcePortID": ""}],
-        })
+            "edges": [],
+        }
+    )
+    assert node_cfg is not None
+    assert node_cfg[0] == "loop_1"
+    assert node_cfg[1]["modleName"] == "m1"
+
+
+def test_find_agent_loop_config_llm_param_array_shape():
+    """coze 真实格式：data.inputs.llmParam 为 [{name, input: ValueExpressionDTO}] 数组。"""
+    node_cfg = find_agent_loop_config(
+        {
+            "nodes": [
+                {
+                    "id": "loop_1",
+                    "type": "100",
+                    "data": {
+                        "inputs": {
+                            "llmParam": [
+                                {
+                                    "name": "modleName",
+                                    "input": {
+                                        "type": "string",
+                                        "value": {"type": "literal", "content": "m2"},
+                                    },
+                                },
+                            ]
+                        }
+                    },
+                }
+            ],
+            "edges": [],
+        }
+    )
+    assert node_cfg is not None
+    assert node_cfg[1]["llmParam"]["modleName"] == "m2"
+
+
+def test_find_agent_loop_config_absent_or_unconvertible_returns_none():
+    assert (
+        find_agent_loop_config({"nodes": [{"id": "s", "type": "1", "data": {}}], "edges": []})
+        is None
+    )
+    # 整图含不支持节点 → 转换失败兜底 None，调用方走各自降级
+    assert find_agent_loop_config({"nodes": [{"id": "x", "type": "99999"}], "edges": []}) is None

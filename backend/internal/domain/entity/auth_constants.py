@@ -11,33 +11,33 @@
 
 from __future__ import annotations
 
-from enum import Enum
+from enum import Enum, StrEnum
 
 
-class AuthSource(str, Enum):
+class AuthSource(StrEnum):
     OPS = "OPS"
     MARKET_APPLY = "MARKET_APPLY"
 
 
-class AuthType(str, Enum):
+class AuthType(StrEnum):
     FORMAL = "FORMAL"
     TRIAL = "TRIAL"
     GIFT = "GIFT"
 
 
-class AuthStatus(str, Enum):
+class AuthStatus(StrEnum):
     WAIT_EFFECT = "WAIT_EFFECT"
     ACTIVE = "ACTIVE"
     EXPIRED = "EXPIRED"
     RECYCLED = "RECYCLED"
 
 
-class ApplyType(str, Enum):
+class ApplyType(StrEnum):
     TRIAL = "TRIAL"
     BUY = "BUY"
 
 
-class ApplyStatus(str, Enum):
+class ApplyStatus(StrEnum):
     SUBMITTED = "SUBMITTED"
     HANDLING = "HANDLING"
     PASS = "PASS"
@@ -50,8 +50,9 @@ class SaleMode(int, Enum):
     MARKET = 2
 
 
-class AuthOperation(str, Enum):
+class AuthOperation(StrEnum):
     """auth_operation_log 操作类型。"""
+
     CREATE = "CREATE"
     RECYCLE = "RECYCLE"
     RENEW = "RENEW"

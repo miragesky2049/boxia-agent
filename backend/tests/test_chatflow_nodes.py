@@ -158,9 +158,7 @@ def test_question_node_defaults_to_direct_without_options(monkeypatch):
     assert captured["answer_type"] == "direct"
     assert captured["options"] == []
     assert result.outputs["USER_RESPONSE"] == "自由文本"
-    assert result.outputs["QUESTION_DATA"] == [
-        {"content_type": "text", "content": "自由文本"}
-    ]
+    assert result.outputs["QUESTION_DATA"] == [{"content_type": "text", "content": "自由文本"}]
 
 
 def test_question_node_options_mode_exposes_choices(monkeypatch):
@@ -326,11 +324,16 @@ def test_end_node_returns_rendered_text_and_streams():
     result = asyncio.run(EndNodeHandler().run(ctx))
 
     assert result.outputs == {"output": "回答：你好"}
-    assert events == [("output_message", {
-        "content": "回答：你好",
-        "role": "assistant",
-        "stream": True,
-    })]
+    assert events == [
+        (
+            "output_message",
+            {
+                "content": "回答：你好",
+                "role": "assistant",
+                "stream": True,
+            },
+        )
+    ]
 
 
 def test_end_node_stream_persists_assistant_message():

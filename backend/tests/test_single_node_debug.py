@@ -42,9 +42,7 @@ def test_execute_node_only_start_node() -> None:
     node = graph.node_by_id("100001")
     compiler = Compiler(services=ServiceRegistry())
 
-    result = _run(
-        compiler.execute_node_only(node, _make_env(), {"USER_INPUT": "单节点"})
-    )
+    result = _run(compiler.execute_node_only(node, _make_env(), {"USER_INPUT": "单节点"}))
 
     assert result["error"] is None
     assert result["outputs"]["USER_INPUT"] == "单节点"
@@ -56,9 +54,7 @@ def test_execute_node_only_override_wins_over_ref() -> None:
     node = graph.node_by_id("900001")
     compiler = Compiler(services=ServiceRegistry())
 
-    result = _run(
-        compiler.execute_node_only(node, _make_env(), {"output": "手动覆盖"})
-    )
+    result = _run(compiler.execute_node_only(node, _make_env(), {"output": "手动覆盖"}))
 
     assert result["error"] is None
     assert result["outputs"]["output"] == "手动覆盖"

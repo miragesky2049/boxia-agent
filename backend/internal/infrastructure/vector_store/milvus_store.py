@@ -34,7 +34,7 @@ class MilvusVectorStore(VectorStore):
         """延迟连接 Milvus，避免 import 时硬依赖 pymilvus。"""
         if self._connected:
             return self._collections
-        from pymilvus import connections  # type: ignore[import-untyped]
+        from pymilvus import connections
 
         connections.connect(alias="default", uri=self._uri, token=self._token or None)
         self._connected = True
@@ -45,7 +45,7 @@ class MilvusVectorStore(VectorStore):
         return f"{tenant}_{dataset_id}".replace("-", "_")
 
     async def create_dataset(self, config: DatasetConfig) -> None:
-        from pymilvus import Collection, DataType, CollectionSchema, utility  # type: ignore[import-untyped]
+        from pymilvus import Collection, CollectionSchema, DataType, utility
 
         self._ensure_connected()
         name = self._collection_name(config.dataset_id, config.tenant_id)
@@ -72,7 +72,7 @@ class MilvusVectorStore(VectorStore):
         logger.info("Milvus 集合已创建: %s dim=%d", name, config.dimension)
 
     async def drop_dataset(self, dataset_id: str) -> None:
-        from pymilvus import utility  # type: ignore[import-untyped]
+        from pymilvus import utility
 
         self._ensure_connected()
         name = self._collection_name(dataset_id)
@@ -104,7 +104,7 @@ class MilvusVectorStore(VectorStore):
         self._ensure_connected()
         name = self._collection_name(dataset_id)
         collection = self._collections.get(name) or await self._load_collection(name)
-        expr = f'chunk_id in {chunk_ids!r}'
+        expr = f"chunk_id in {chunk_ids!r}"
         collection.delete(expr)
 
     async def delete_by_document(
@@ -171,7 +171,7 @@ class MilvusVectorStore(VectorStore):
             return False
 
     async def _load_collection(self, name: str) -> Any:
-        from pymilvus import Collection  # type: ignore[import-untyped]
+        from pymilvus import Collection
 
         collection = Collection(name, using="default")
         self._collections[name] = collection

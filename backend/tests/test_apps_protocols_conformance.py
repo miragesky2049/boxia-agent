@@ -9,6 +9,7 @@ from __future__ import annotations
 from unittest.mock import MagicMock
 
 from internal.domain.repository.apps_protocols import (
+    AgentMemoryRepositoryProtocol,
     ApplicationRepositoryProtocol,
     AppResourceRepositoryProtocol,
     AuthRepositoryProtocol,
@@ -20,6 +21,7 @@ from internal.domain.repository.apps_protocols import (
     UsageRepositoryProtocol,
     WebhookRepositoryProtocol,
 )
+from internal.infrastructure.repository.apps.agent_memory_repository import AgentMemoryRepository
 from internal.infrastructure.repository.apps.application_repository import ApplicationRepository
 from internal.infrastructure.repository.apps.auth_repository import AuthRepository
 from internal.infrastructure.repository.apps.conversation_repository import ConversationRepository
@@ -47,6 +49,7 @@ def test_infra_repositories_structurally_satisfy_protocols() -> None:
     resource_repo: AppResourceRepositoryProtocol = AppResourceRepository(session)
     auth_repo: AuthRepositoryProtocol = AuthRepository(session)
     tenant_settings_repo: TenantSettingsRepositoryProtocol = TenantSettingsRepository(session)
+    agent_memory_repo: AgentMemoryRepositoryProtocol = AgentMemoryRepository(session)
 
     assert all(
         r is not None
@@ -61,6 +64,7 @@ def test_infra_repositories_structurally_satisfy_protocols() -> None:
             resource_repo,
             auth_repo,
             tenant_settings_repo,
+            agent_memory_repo,
         )
     )
 

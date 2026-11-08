@@ -6,8 +6,8 @@ import json
 import logging
 import re
 
-from internal.application.errors import ValidationError
 from internal.application.apps.model_service import ModelService
+from internal.application.errors import ValidationError
 
 logger = logging.getLogger(__name__)
 

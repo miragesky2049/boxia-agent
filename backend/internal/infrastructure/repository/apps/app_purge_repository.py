@@ -20,9 +20,11 @@
 
 from __future__ import annotations
 
+from typing import Any, cast
 from uuid import UUID
 
 from sqlalchemy import text
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.orm import Session
 
 # 删前快照计数：键为审计 detail 中的逻辑名，值为计数 SQL（谓词已含 :aid）
@@ -108,7 +110,7 @@ class PostgresAppPurgeRepository:
         counts: dict[str, int] = {}
         for table, sql in _PURGE_STEPS:
             result = self._session.execute(text(sql), {"aid": application_id})
-            counts[table] = int(result.rowcount)
+            counts[table] = int(cast(CursorResult[Any], result).rowcount)
         return counts
 
     def delete_application_row(self, application_id: UUID) -> int:
@@ -117,4 +119,4 @@ class PostgresAppPurgeRepository:
             text("DELETE FROM application WHERE id = :aid"),
             {"aid": application_id},
         )
-        return int(result.rowcount)
+        return int(cast(CursorResult[Any], result).rowcount)

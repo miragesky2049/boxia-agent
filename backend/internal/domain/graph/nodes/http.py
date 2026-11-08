@@ -53,11 +53,13 @@ def _to_kv_dict(raw: Any) -> dict[str, str]:
 
 def _apply_path_params(url: str, path_params: dict[str, str]) -> str:
     """把 URL 中的 :param 替换为 path_params 里对应的值（URL 编码）。"""
+
     def _replace(match: re.Match[str]) -> str:
         name = match.group(1)
         if name not in path_params:
             return match.group(0)
         return quote(path_params[name], safe="")
+
     return _PATH_PARAM_RE.sub(_replace, url)
 
 
@@ -66,7 +68,7 @@ def _build_auth_headers(auth_type: str, token: str, secret: str) -> dict[str, st
     if auth_type == "bearer" and token:
         return {"Authorization": f"Bearer {token}"}
     if auth_type == "basic" and token:
-        raw = f"{token}:{secret or ''}".encode("utf-8")
+        raw = f"{token}:{secret or ''}".encode()
         return {"Authorization": f"Basic {b64encode(raw).decode('ascii')}"}
     return {}
 
@@ -133,10 +135,12 @@ class HttpNodeHandler(NodeHandler):
                     json_body = ctx.inputs
 
         if not ctx.services.has("http"):
-            return NodeResult(outputs={
-                "status": 0,
-                "body": f"[HTTP stub] {method} {url}",
-            })
+            return NodeResult(
+                outputs={
+                    "status": 0,
+                    "body": f"[HTTP stub] {method} {url}",
+                }
+            )
 
         http_service = ctx.services.get("http")
         try:
@@ -159,10 +163,12 @@ class HttpNodeHandler(NodeHandler):
         if status_code >= 400:
             raise RuntimeError(f"HTTP {status_code}: {resp_body[:200]}")
 
-        return NodeResult(outputs={
-            "status": status_code,
-            "body": resp_body[:8192],
-        })
+        return NodeResult(
+            outputs={
+                "status": status_code,
+                "body": resp_body[:8192],
+            }
+        )
 
 
 register_node_handler(HttpNodeHandler())

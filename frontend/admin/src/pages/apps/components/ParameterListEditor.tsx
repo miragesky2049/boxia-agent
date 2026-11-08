@@ -1,11 +1,11 @@
-import { Input, Select, Checkbox, Button } from 'antd';
-import { PlusOutlined, DeleteOutlined, LockOutlined } from '@ant-design/icons';
+import { Input, Select, Checkbox, Button } from 'antd'
+import { PlusOutlined, DeleteOutlined, LockOutlined } from '@ant-design/icons'
 
 export interface ParameterItem {
-  name: string;
-  type: string;
-  required: boolean;
-  description?: string;
+  name: string
+  type: string
+  required: boolean
+  description?: string
 }
 
 const TYPE_OPTIONS = [
@@ -17,7 +17,7 @@ const TYPE_OPTIONS = [
   { value: 'array[string]', label: 'Array[String]' },
   { value: 'array[number]', label: 'Array[Number]' },
   { value: 'array[object]', label: 'Array[Object]' },
-];
+]
 
 function parseValue(raw: any): ParameterItem[] {
   if (Array.isArray(raw)) {
@@ -26,38 +26,43 @@ function parseValue(raw: any): ParameterItem[] {
       type: String(item?.type ?? item?.variableType ?? 'string'),
       required: Boolean(item?.required),
       description: item?.description ? String(item.description) : undefined,
-    }));
+    }))
   }
-  return [];
+  return []
 }
 
 interface ParameterListEditorProps {
-  value: any;
-  onChange: (next: ParameterItem[]) => void;
+  value: any
+  onChange: (next: ParameterItem[]) => void
   // 内置锁定行（如对话流开始节点的 USER_INPUT/CONVERSATION_NAME）：只读展示，不写入 value
-  lockedItems?: ParameterItem[];
+  lockedItems?: ParameterItem[]
   // 为 false 时隐藏「添加参数」按钮（对话流形态禁止自定义启动参数）
-  allowAdd?: boolean;
+  allowAdd?: boolean
 }
 
 // 对齐 Coze START 节点入参表格编辑器：变量名 + 类型下拉 + 必填 + 引用 + 删除
-export function ParameterListEditor({ value, onChange, lockedItems, allowAdd = true }: ParameterListEditorProps) {
+export function ParameterListEditor({
+  value,
+  onChange,
+  lockedItems,
+  allowAdd = true,
+}: ParameterListEditorProps) {
   // 导入图里可能存有与内置参数同名的手动行，剔除后以锁定行为准，避免重复
-  const lockedNames = new Set((lockedItems || []).map((it) => it.name));
-  const items = parseValue(value).filter((it) => !lockedNames.has(it.name));
+  const lockedNames = new Set((lockedItems || []).map((it) => it.name))
+  const items = parseValue(value).filter((it) => !lockedNames.has(it.name))
 
   const updateItem = (idx: number, patch: Partial<ParameterItem>) => {
-    const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it));
-    onChange(next);
-  };
+    const next = items.map((it, i) => (i === idx ? { ...it, ...patch } : it))
+    onChange(next)
+  }
 
   const removeItem = (idx: number) => {
-    onChange(items.filter((_, i) => i !== idx));
-  };
+    onChange(items.filter((_, i) => i !== idx))
+  }
 
   const addItem = () => {
-    onChange([...items, { name: `param_${items.length + 1}`, type: 'string', required: false }]);
-  };
+    onChange([...items, { name: `param_${items.length + 1}`, type: 'string', required: false }])
+  }
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -158,5 +163,5 @@ export function ParameterListEditor({ value, onChange, lockedItems, allowAdd = t
         </Button>
       )}
     </div>
-  );
+  )
 }

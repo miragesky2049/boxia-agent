@@ -24,7 +24,6 @@ from internal.domain.graph.node_base import (
 )
 from internal.domain.graph.nodes.set_variable import SetVariableNodeHandler
 
-
 # ---------- 1. variable_types.coerce ----------
 
 
@@ -138,7 +137,7 @@ def _make_graph_with_variables() -> Any:
             {"name": "age", "type": "number", "default": "18"},
             {"name": "is_vip", "type": "boolean", "default": "true"},
             {"name": "profile", "type": "object", "default": '{"level": 1}'},
-            {"name": "tags", "type": "array", "default": "[\"a\",\"b\"]"},
+            {"name": "tags", "type": "array", "default": '["a","b"]'},
         ],
     }
     return convert_canvas(raw)

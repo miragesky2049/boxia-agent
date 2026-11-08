@@ -19,13 +19,7 @@ import type { PermissionCategory, PermissionResource, Role } from '../../api/typ
 import { useAuth } from '../../auth/AuthContext'
 import RoleGrantMatrix from './RoleGrantMatrix'
 
-const CATEGORY_ORDER: PermissionCategory[] = [
-  'system',
-  'menu',
-  'page',
-  'button',
-  'tool',
-]
+const CATEGORY_ORDER: PermissionCategory[] = ['system', 'menu', 'page', 'button', 'tool']
 
 const CATEGORY_LABELS: Record<PermissionCategory, string> = {
   system: '系统权限',

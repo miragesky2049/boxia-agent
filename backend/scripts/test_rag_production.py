@@ -8,16 +8,15 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from internal.infrastructure.config.settings import get_settings
-from internal.domain.entity.request_context import RequestContext
-from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 from internal.application.document_service import DocumentService
 from internal.application.ingestion_service import IngestionService
 from internal.application.retrieval_service import RetrievalService
+from internal.domain.entity.request_context import RequestContext
 from internal.domain.llm.client import OpenAICompatLLMClient
 from internal.domain.retrieval.query_rewrite import LLMQueryRewriter
 from internal.domain.retrieval.rerank import SiliconFlowRerankClient
-
+from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.model.uow import SqlAlchemyUnitOfWork
 
 # 4 份 markdown 格式测试文档（带 # 标题）
 DOCUMENTS = [
@@ -127,7 +126,10 @@ QUERIES = [
     (
         "那婚假呢",
         "请假(指代)",
-        [{"role": "user", "content": "年假有多少天"}, {"role": "assistant", "content": "年假根据工龄5-15天不等。"}],
+        [
+            {"role": "user", "content": "年假有多少天"},
+            {"role": "assistant", "content": "年假根据工龄5-15天不等。"},
+        ],
     ),
 ]
 
@@ -218,13 +220,11 @@ async def main() -> None:
             print(f"  standalone: {result.standalone_query}")
             print(f"  recalled_queries: {result.recalled_queries}")
             if not result.chunks:
-                print(f"  ❌ 无命中")
+                print("  ❌ 无命中")
                 continue
             for i, c in enumerate(result.chunks[:3]):
                 heading = " > ".join(c.metadata.get("heading_path") or [])
-                print(
-                    f"  [{i+1}] rerank_score={c.rerank_score} heading={heading}"
-                )
+                print(f"  [{i + 1}] rerank_score={c.rerank_score} heading={heading}")
                 print(f"      {c.content[:100].replace(chr(10), ' ')}...")
     finally:
         uow.close()

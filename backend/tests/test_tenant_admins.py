@@ -60,9 +60,7 @@ def test_create_update_reset_password_delete_tenant_admin(
     tenant = create_tenant(client, auth_headers, code="acme-crud", name="Acme CRUD")
     created = _create_operator(client, auth_headers, tenant["id"])
 
-    listed = client.get(
-        f"{_admins_url(tenant['id'])}?keyword=tenant-op", headers=auth_headers
-    )
+    listed = client.get(f"{_admins_url(tenant['id'])}?keyword=tenant-op", headers=auth_headers)
     assert listed.status_code == 200
     assert listed.json()["total"] == 1
 
@@ -86,9 +84,7 @@ def test_create_update_reset_password_delete_tenant_admin(
     me = acme.get("/api/v1/admin/auth/me", headers=operator_headers)
     assert me.status_code == 200, me.text
 
-    deleted = client.delete(
-        f"{_admins_url(tenant['id'])}/{created['id']}", headers=auth_headers
-    )
+    deleted = client.delete(f"{_admins_url(tenant['id'])}/{created['id']}", headers=auth_headers)
     assert deleted.status_code == 204, deleted.text
     listed_after_delete = client.get(_admins_url(tenant["id"]), headers=auth_headers)
     assert listed_after_delete.json()["total"] == 1

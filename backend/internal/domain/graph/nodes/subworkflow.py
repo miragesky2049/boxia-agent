@@ -12,7 +12,6 @@ config 约定（来自 coze inputDefs / workflowId）：
 from __future__ import annotations
 
 import logging
-from typing import Any
 
 from internal.domain.canvas.convert import convert_canvas
 from internal.domain.canvas.node_type import NodeType
@@ -36,10 +35,12 @@ class SubworkflowNodeHandler(NodeHandler):
             return NodeResult(outputs={"error": "subworkflow 节点缺少 workflowId"})
 
         if not ctx.services.has("subgraph_loader"):
-            return NodeResult(outputs={
-                "input": f"[SUBWORKFLOW stub] workflowId={workflow_id}",
-                "inputArr": [],
-            })
+            return NodeResult(
+                outputs={
+                    "input": f"[SUBWORKFLOW stub] workflowId={workflow_id}",
+                    "inputArr": [],
+                }
+            )
 
         # 加载子图画布 JSON（loader 可能是 sync 或 async，统一 await 处理）
         loader = ctx.services.get("subgraph_loader")
@@ -54,6 +55,7 @@ class SubworkflowNodeHandler(NodeHandler):
 
         # 构造子图的运行时环境（复用父图的 env，但 run_id 用新的）
         import uuid
+
         sub_env = RuntimeEnv(
             tenant_id=ctx.env.tenant_id,
             user_id=ctx.env.user_id,

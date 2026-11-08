@@ -26,9 +26,7 @@ def _create_resource(client: TestClient, headers: dict[str, str], payload: dict[
 
 def test_requires_authentication(client: TestClient) -> None:
     assert client.get("/api/v1/admin/resources").status_code == 401
-    assert (
-        client.post("/api/v1/admin/resources", json=_tool_payload()).status_code == 401
-    )
+    assert client.post("/api/v1/admin/resources", json=_tool_payload()).status_code == 401
 
 
 def test_create_and_get(client: TestClient, auth_headers) -> None:
@@ -61,16 +59,12 @@ def test_list_resources_with_filters(client: TestClient, auth_headers) -> None:
     assert all_items.status_code == 200, all_items.text
     assert {item["name"] for item in all_items.json()} == {"工具一", "提示词一"}
 
-    tools = client.get(
-        "/api/v1/admin/resources", params={"type": "tool"}, headers=auth_headers
-    )
+    tools = client.get("/api/v1/admin/resources", params={"type": "tool"}, headers=auth_headers)
     assert [item["name"] for item in tools.json()] == ["工具一"]
 
 
 def test_admin_list_includes_disabled(client: TestClient, auth_headers) -> None:
-    _create_resource(
-        client, auth_headers, _tool_payload("停用工具", is_enabled=False)
-    )
+    _create_resource(client, auth_headers, _tool_payload("停用工具", is_enabled=False))
 
     items = client.get("/api/v1/admin/resources", headers=auth_headers).json()
     assert [item["name"] for item in items] == ["停用工具"]
@@ -92,9 +86,7 @@ def test_update_resource(client: TestClient, auth_headers) -> None:
     assert updated.status_code == 200, updated.text
     assert updated.json() == {"ok": True}
 
-    body = client.get(
-        f"/api/v1/admin/resources/{resource_id}", headers=auth_headers
-    ).json()
+    body = client.get(f"/api/v1/admin/resources/{resource_id}", headers=auth_headers).json()
     assert body["name"] == "新名称"
     assert body["config"] == {"method": "POST"}
     assert body["is_enabled"] is False
@@ -104,23 +96,17 @@ def test_update_resource(client: TestClient, auth_headers) -> None:
 def test_delete_resource(client: TestClient, auth_headers) -> None:
     resource_id = _create_resource(client, auth_headers, _tool_payload())
 
-    deleted = client.delete(
-        f"/api/v1/admin/resources/{resource_id}", headers=auth_headers
-    )
+    deleted = client.delete(f"/api/v1/admin/resources/{resource_id}", headers=auth_headers)
     assert deleted.status_code == 200, deleted.text
     assert deleted.json() == {"ok": True}
     assert (
-        client.get(
-            f"/api/v1/admin/resources/{resource_id}", headers=auth_headers
-        ).status_code
+        client.get(f"/api/v1/admin/resources/{resource_id}", headers=auth_headers).status_code
         == 404
     )
 
 
 def test_get_not_found(client: TestClient, auth_headers) -> None:
-    response = client.get(
-        f"/api/v1/admin/resources/{uuid4()}", headers=auth_headers
-    )
+    response = client.get(f"/api/v1/admin/resources/{uuid4()}", headers=auth_headers)
     assert response.status_code == 404
     assert response.json()["code"] == "NOT_FOUND"
 
@@ -158,10 +144,7 @@ def test_update_not_found(client: TestClient, auth_headers) -> None:
         == 404
     )
     assert (
-        client.delete(
-            f"/api/v1/admin/resources/{uuid4()}", headers=auth_headers
-        ).status_code
-        == 404
+        client.delete(f"/api/v1/admin/resources/{uuid4()}", headers=auth_headers).status_code == 404
     )
 
 
@@ -172,9 +155,7 @@ def test_tenant_admin_cannot_manage_resources(
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
     assert (
-        site.post(
-            "/api/v1/admin/resources", json=_tool_payload(), headers=headers
-        ).status_code
+        site.post("/api/v1/admin/resources", json=_tool_payload(), headers=headers).status_code
         == 403
     )
 
@@ -200,9 +181,7 @@ def test_platform_grant_and_tenant_visibility(
     )
     assert granted.status_code == 201, granted.text
 
-    grants = client.get(
-        f"/api/v1/admin/resources/{resource_id}/grants", headers=auth_headers
-    )
+    grants = client.get(f"/api/v1/admin/resources/{resource_id}/grants", headers=auth_headers)
     assert grants.status_code == 200, grants.text
     assert [item["tenant_id"] for item in grants.json()] == [tenant["id"]]
 
@@ -216,9 +195,7 @@ def test_platform_grant_and_tenant_visibility(
     assert resource_id not in _visible_ids()
 
 
-def test_grant_only_platform_resource(
-    client: TestClient, auth_headers
-) -> None:
+def test_grant_only_platform_resource(client: TestClient, auth_headers) -> None:
     tenant_id = uuid4()
     resource_id = _create_resource(
         client,

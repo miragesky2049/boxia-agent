@@ -10,15 +10,15 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-import time
 from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
 
-from internal.domain.errors import ValidationError
-from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.agent.governance import CircuitBreaker, RateLimiter
 from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.errors import ValidationError
 from internal.domain.security.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,7 @@ class ToolExecutionError(Exception):
     def __init__(self, message: str) -> None:
         super().__init__(message)
         self.message = message
+
 
 # ---------- 全局默认配置（可被 ToolEntity.config.gateway 覆盖） ----------
 DEFAULT_CONNECT_TIMEOUT = 5.0
@@ -83,72 +84,6 @@ class ToolClientError(ToolError):
         super().__init__(message, is_retriable=False)
 
 
-# ---------- 熔断器 ----------
-@dataclass
-class _CircuitState:
-    failure_count: int = 0
-    opened_at: float = 0.0
-    state: str = "closed"  # closed / open / half_open
-
-
-class _CircuitBreaker:
-    """按 (tenant, tool) 维度的简易熔断器：连续失败 N 次打开 30s。"""
-
-    def __init__(self, threshold: int, open_seconds: float) -> None:
-        self._threshold = threshold
-        self._open_seconds = open_seconds
-        self._states: dict[str, _CircuitState] = {}
-        self._lock = asyncio.Lock()
-
-    async def allow(self, key: str) -> bool:
-        async with self._lock:
-            state = self._states.setdefault(key, _CircuitState())
-            if state.state == "closed":
-                return True
-            if state.state == "open":
-                if time.monotonic() - state.opened_at >= self._open_seconds:
-                    state.state = "half_open"
-                    return True
-                return False
-            # half_open：放行一次试探
-            return True
-
-    async def record_success(self, key: str) -> None:
-        async with self._lock:
-            state = self._states.setdefault(key, _CircuitState())
-            state.failure_count = 0
-            state.state = "closed"
-
-    async def record_failure(self, key: str) -> None:
-        async with self._lock:
-            state = self._states.setdefault(key, _CircuitState())
-            state.failure_count += 1
-            if state.state == "half_open" or state.failure_count >= self._threshold:
-                state.state = "open"
-                state.opened_at = time.monotonic()
-
-
-# ---------- 限流器（按 tenant 维度的简单滑动窗口） ----------
-class _RateLimiter:
-    """按 tenant 维度的每秒固定窗口计数；超出返回 False。"""
-
-    def __init__(self, per_second: int) -> None:
-        self._limit = per_second
-        self._window_start: dict[str, float] = {}
-        self._counts: dict[str, int] = {}
-        self._lock = asyncio.Lock()
-
-    async def allow(self, key: str) -> bool:
-        now = time.monotonic()
-        async with self._lock:
-            start = self._window_start.get(key, 0.0)
-            if now - start >= 1.0:
-                self._window_start[key] = now
-                self._counts[key] = 0
-            self._counts[key] = self._counts.get(key, 0) + 1
-            return self._counts[key] <= self._limit
-
-
 # ---------- 共享 httpx 客户端 ----------
 @dataclass
 class _ClientPool:
@@ -191,7 +126,7 @@ class GatewayConfig:
     rate_limit_per_second: int = DEFAULT_RATE_LIMIT_PER_SECOND
 
     @classmethod
-    def from_config(cls, raw: dict[str, Any] | None) -> "GatewayConfig":
+    def from_config(cls, raw: dict[str, Any] | None) -> GatewayConfig:
         raw = raw or {}
         return cls(
             timeout_seconds=float(raw.get("timeout_seconds") or DEFAULT_OVERALL_TIMEOUT),
@@ -213,22 +148,22 @@ class ToolGateway:
 
     def __init__(self) -> None:
         self._pool = _ClientPool()
-        self._breakers: dict[int, _CircuitBreaker] = {}
-        self._limiters: dict[int, _RateLimiter] = {}
+        self._breakers: dict[int, CircuitBreaker] = {}
+        self._limiters: dict[int, RateLimiter] = {}
 
-    def _get_breaker(self, cfg: GatewayConfig) -> _CircuitBreaker:
+    def _get_breaker(self, cfg: GatewayConfig) -> CircuitBreaker:
         key = hash((cfg.circuit_failure_threshold, cfg.circuit_open_seconds))
         if key not in self._breakers:
-            self._breakers[key] = _CircuitBreaker(
+            self._breakers[key] = CircuitBreaker(
                 threshold=cfg.circuit_failure_threshold,
                 open_seconds=cfg.circuit_open_seconds,
             )
         return self._breakers[key]
 
-    def _get_limiter(self, cfg: GatewayConfig) -> _RateLimiter:
+    def _get_limiter(self, cfg: GatewayConfig) -> RateLimiter:
         key = hash(cfg.rate_limit_per_second)
         if key not in self._limiters:
-            self._limiters[key] = _RateLimiter(cfg.rate_limit_per_second)
+            self._limiters[key] = RateLimiter(cfg.rate_limit_per_second)
         return self._limiters[key]
 
     @staticmethod
@@ -329,9 +264,7 @@ class ToolGateway:
         raise ToolExecutionError(last_error.message)
 
 
-def _classify_http_response(
-    response: httpx.Response, tool_name: str
-) -> ToolError | None:
+def _classify_http_response(response: httpx.Response, tool_name: str) -> ToolError | None:
     """按状态码分类；返回 None 表示成功。"""
     code = response.status_code
     if 200 <= code < 400:
@@ -339,7 +272,7 @@ def _classify_http_response(
     if code in (401, 403):
         return ToolAuthError(f"工具鉴权失败 HTTP {code}")
     if code == 429:
-        return ToolRateLimitError(f"工具被限流 HTTP 429")
+        return ToolRateLimitError("工具被限流 HTTP 429")
     if 500 <= code < 600:
         return ToolServerError(f"工具服务端错误 HTTP {code}")
     return ToolClientError(f"工具调用参数错误 HTTP {code}: {response.text[:200]}")

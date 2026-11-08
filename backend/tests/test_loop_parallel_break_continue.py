@@ -43,8 +43,8 @@ def test_parallel_break_cancels_remaining_iterations() -> None:
     async def fake_invoke(_ctx, _compiled, item: Any, index: int, total: int) -> dict[str, Any]:
         started.append(index)
         try:
-            # 越靠后的索引耗时越长，确保 break 触发时 2/3/4 仍在跑
-            await asyncio.sleep(0.02 * (index + 1))
+            # 2/3/4 挂起直到被取消：与真实 CPU 调度耗时解耦，全量套件负载抖动不影响断言
+            await asyncio.sleep(0.02 if index < 2 else 30)
         except asyncio.CancelledError:
             cancelled.append(index)
             raise

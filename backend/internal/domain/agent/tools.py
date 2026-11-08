@@ -7,14 +7,14 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Any
 
-from internal.domain.entity.resource import Tool as ToolEntity
 from internal.domain.agent.run_context import AgentRunContext
-from internal.domain.llm.client import LLMToolSpec
 from internal.domain.agent.tool_gateway import (
     GatewayConfig,
     ToolExecutionError,
     get_tool_gateway,
 )
+from internal.domain.entity.resource import Tool as ToolEntity
+from internal.domain.llm.client import LLMToolSpec
 
 logger = logging.getLogger(__name__)
 
@@ -96,15 +96,15 @@ class HttpTool(Tool):
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 url")
         from internal.domain.agent.prompt import render_template
 
-        url = render_template(self._url_template, {**arguments, "tenant_id": str(context.tenant_id or "")})
+        url = render_template(
+            self._url_template, {**arguments, "tenant_id": str(context.tenant_id or "")}
+        )
         method = self._method
         request_headers: dict[str, str] = {
             "Content-Type": "application/json",
             **{k: str(v) for k, v in self._headers.items()},
         }
-        gateway_cfg = GatewayConfig.from_config(
-            (self._entity.config or {}).get("gateway")
-        )
+        gateway_cfg = GatewayConfig.from_config((self._entity.config or {}).get("gateway"))
         gateway = get_tool_gateway()
         return await gateway.invoke_http(
             method=method,
@@ -146,9 +146,9 @@ class McpTool(Tool):
         if not self._server_url:
             raise ToolExecutionError(f"工具 {self._entity.name} 未配置 server_url")
         # SSRF 防护：与 HttpTool 一致，拒绝 loopback / 云元数据 / link-local 等
+        from internal.domain.agent.mcp_client import call_tool
         from internal.domain.errors import ValidationError
         from internal.domain.security.ssrf_guard import validate_outbound_url
-        from internal.domain.agent.mcp_client import call_tool
 
         try:
             validate_outbound_url(self._server_url)
@@ -228,9 +228,7 @@ class LoadSkillTool(Tool):
         skill = self._skills.get(skill_name)
         if skill is None:
             available = "、".join(self._skills.keys()) or "（无可用技能）"
-            raise ToolExecutionError(
-                f"未找到技能 `{skill_name}`。可用技能：{available}"
-            )
+            raise ToolExecutionError(f"未找到技能 `{skill_name}`。可用技能：{available}")
         return (
             f"# 技能：{skill.name}\n"
             f"## 简介\n{skill.description}\n\n"

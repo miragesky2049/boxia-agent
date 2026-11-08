@@ -104,3 +104,31 @@ def test_clear_context_uses_runtime_conversation():
     asyncio.run(ClearContextNodeHandler().run(ctx))
 
     assert repo.cleared == [conv_id]
+
+
+class _FakeConvRepo:
+    def __init__(self) -> None:
+        self.summary_cleared = []
+
+    async def clear_summary(self, conversation_id):
+        self.summary_cleared.append(conversation_id)
+
+
+def test_clear_context_also_invalidates_summary():
+    """M4 PRD F15.7：清空上下文联动清摘要与水位线，防"清完还带着旧摘要对话"。"""
+    conv_id = uuid4()
+    msg_repo = _FakeMessageRepo()
+    conv_repo = _FakeConvRepo()
+    ctx = NodeContext(
+        node_id="clear_1",
+        node_type="38",
+        inputs={},
+        config={},
+        env=_make_env(conversation_id=conv_id),
+        services=ServiceRegistry({"message_repo": msg_repo, "conversation_repo": conv_repo}),
+    )
+
+    asyncio.run(ClearContextNodeHandler().run(ctx))
+
+    assert msg_repo.cleared == [conv_id]
+    assert conv_repo.summary_cleared == [conv_id]

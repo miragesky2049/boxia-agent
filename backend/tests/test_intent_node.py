@@ -37,7 +37,9 @@ class _FakeMessageRepo:
         return self.messages[:limit]
 
 
-def _make_ctx(config: dict, services: ServiceRegistry | None = None, conversation_id=None) -> NodeContext:
+def _make_ctx(
+    config: dict, services: ServiceRegistry | None = None, conversation_id=None
+) -> NodeContext:
     env = RuntimeEnv(
         tenant_id=uuid4(),
         user_id=uuid4(),
@@ -64,13 +66,15 @@ INTENTS = [
 
 
 def test_parse_intents_normalizes_ids_and_dedupes() -> None:
-    parsed = _parse_intents([
-        {"name": "A"},
-        {"id": 1, "name": "B"},
-        "C",
-        {"id": 0, "name": "D"},
-        {"name": ""},
-    ])
+    parsed = _parse_intents(
+        [
+            {"name": "A"},
+            {"id": 1, "name": "B"},
+            "C",
+            {"id": 0, "name": "D"},
+            {"name": ""},
+        ]
+    )
     assert [item["id"] for item in parsed] == [1, 2, 3, 4]
     assert [item["name"] for item in parsed] == ["A", "B", "C", "D"]
 

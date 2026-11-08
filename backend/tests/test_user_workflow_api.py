@@ -91,9 +91,9 @@ def _parse_sse(text: str) -> list[tuple[str, dict | None]]:
         data: dict | None = None
         for line in block.splitlines():
             if line.startswith("event:"):
-                name = line[len("event:"):].strip()
+                name = line[len("event:") :].strip()
             elif line.startswith("data:"):
-                data = json.loads(line[len("data:"):].strip())
+                data = json.loads(line[len("data:") :].strip())
         if name:
             events.append((name, data))
     return events
@@ -104,11 +104,17 @@ def _setup_world(client: TestClient, tenant_client, persistent_user_tenant_clien
     platform = _platform_headers(client)
     app_direct = _create_market_app(client, platform, "直出工作流", build_start_end_canvas())
     app_human = _create_market_app(
-        client, platform, "人审工作流",
+        client,
+        platform,
+        "人审工作流",
         build_start_human_end_canvas(assignee_role="leader", instructions="请审批"),
     )
     app_chatflow = _create_market_app(
-        client, platform, "对话流应用", build_start_end_canvas(), flow_type="chatflow",
+        client,
+        platform,
+        "对话流应用",
+        build_start_end_canvas(),
+        flow_type="chatflow",
     )
 
     create_tenant(client, platform, code="wfco", name="Workflow 公司")
@@ -126,13 +132,22 @@ def _setup_world(client: TestClient, tenant_client, persistent_user_tenant_clien
     viewer_role_id = list_roles(admin_site, admin_headers)["viewer"]["id"]
 
     create_user(
-        admin_site, admin_headers, username="wf-owner", role_id=viewer_role_id,
+        admin_site,
+        admin_headers,
+        username="wf-owner",
+        role_id=viewer_role_id,
     )
     create_user(
-        admin_site, admin_headers, username="wf-other", role_id=viewer_role_id,
+        admin_site,
+        admin_headers,
+        username="wf-other",
+        role_id=viewer_role_id,
     )
     create_user(
-        admin_site, admin_headers, username="wf-leader", role_id=leader_role_id,
+        admin_site,
+        admin_headers,
+        username="wf-leader",
+        role_id=leader_role_id,
     )
 
     user_site = persistent_user_tenant_client("wfco")
@@ -157,7 +172,9 @@ def _setup_world(client: TestClient, tenant_client, persistent_user_tenant_clien
 
 
 def test_schema_returns_start_inputs(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     site = world["site"]
@@ -182,7 +199,9 @@ def test_schema_returns_start_inputs(
 
 
 def test_schema_rejects_chatflow(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     resp = world["site"].get(
@@ -193,7 +212,9 @@ def test_schema_rejects_chatflow(
 
 
 def test_run_stream_success(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     resp = world["site"].post(
@@ -216,7 +237,9 @@ def test_run_stream_success(
 
 
 def test_run_stream_rejects_missing_required(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     resp = world["site"].post(
@@ -229,7 +252,9 @@ def test_run_stream_rejects_missing_required(
 
 
 def test_human_flow_interrupt_role_gated_resume(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     site = world["site"]
@@ -299,7 +324,9 @@ def test_human_flow_interrupt_role_gated_resume(
 
 
 def test_human_rejection_marks_run_error(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     site = world["site"]
@@ -324,7 +351,9 @@ def test_human_rejection_marks_run_error(
 
 
 def test_run_history_and_detail_ownership(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     site = world["site"]
@@ -360,7 +389,9 @@ def test_run_history_and_detail_ownership(
 
 
 def test_approver_can_read_interrupted_run_detail(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     site = world["site"]
@@ -378,7 +409,9 @@ def test_approver_can_read_interrupted_run_detail(
 
 
 def test_resume_unknown_thread_404(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)
     resp = world["site"].post(
@@ -390,7 +423,9 @@ def test_resume_unknown_thread_404(
 
 
 def test_non_stream_workflow_run_still_works(
-    client: TestClient, tenant_client, persistent_user_tenant_client,
+    client: TestClient,
+    tenant_client,
+    persistent_user_tenant_client,
 ) -> None:
     """旧的非流式 /workflow/run 不回归。"""
     world = _setup_world(client, tenant_client, persistent_user_tenant_client)

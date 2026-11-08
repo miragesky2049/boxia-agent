@@ -54,9 +54,11 @@ class CodeNodeHandler(NodeHandler):
         args.update(ctx.inputs or {})
 
         if not ctx.services.has("sandbox"):
-            return NodeResult(outputs={
-                "stub": f"[Code stub] input={str(args)[:80]}",
-            })
+            return NodeResult(
+                outputs={
+                    "stub": f"[Code stub] input={str(args)[:80]}",
+                }
+            )
 
         sandbox = ctx.services.get("sandbox")
         # 用 config 级 timeout 覆盖默认值

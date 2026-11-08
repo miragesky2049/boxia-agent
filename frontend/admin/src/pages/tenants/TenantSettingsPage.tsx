@@ -1,17 +1,5 @@
 import { ArrowLeftOutlined, SaveOutlined } from '@ant-design/icons'
-import {
-  App,
-  Button,
-  Card,
-  Form,
-  Input,
-  Select,
-  Space,
-  Spin,
-  Switch,
-  Tag,
-  Typography,
-} from 'antd'
+import { App, Button, Card, Form, Input, Select, Space, Spin, Switch, Tag, Typography } from 'antd'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { listAvailableModels, type ModelCatalogItem } from '../../api/models'
@@ -147,12 +135,12 @@ export default function TenantSettingsPage() {
               <Space>
                 <Switch
                   checked={form.use_whitelist}
-                  onChange={(checked) =>
-                    setForm({ ...form, use_whitelist: checked })
-                  }
+                  onChange={(checked) => setForm({ ...form, use_whitelist: checked })}
                 />
                 <Typography.Text>
-                  {form.use_whitelist ? '已启用白名单（仅下列模型对租户可见）' : '未启用（平台全量可见）'}
+                  {form.use_whitelist
+                    ? '已启用白名单（仅下列模型对租户可见）'
+                    : '未启用（平台全量可见）'}
                 </Typography.Text>
               </Space>
               {form.use_whitelist && (
@@ -207,12 +195,7 @@ export default function TenantSettingsPage() {
           </Card>
 
           <Space>
-            <Button
-              type="primary"
-              icon={<SaveOutlined />}
-              loading={saving}
-              onClick={handleSave}
-            >
+            <Button type="primary" icon={<SaveOutlined />} loading={saving} onClick={handleSave}>
               保存配置
             </Button>
             <Button onClick={() => navigate(`/tenants/${tenantId}`)}>返回</Button>

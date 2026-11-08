@@ -10,8 +10,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.application.apps.application_service import ApplicationService
+from internal.application.errors import ForbiddenError, NotFoundError, ValidationError
 from internal.domain.graph.runtime import GraphInterrupted, GraphRuntime
 from web.deps.apps_services import (
     make_application_service,
@@ -57,6 +57,7 @@ def list_marketplace(
 ) -> dict:
     """浏览应用市场（cursor 分页）。"""
     from datetime import datetime
+
     cursor_dt = datetime.fromisoformat(cursor) if cursor else None
     return service.list_marketplace(cursor_updated_at=cursor_dt, limit=limit)
 
@@ -172,14 +173,23 @@ async def run_application(
     service.require_runtime_instance(tenant_id, application_id)
 
     runner = await _build_runner(
-        service, uow, context, tenant_id, application_id,
+        service,
+        uow,
+        context,
+        tenant_id,
+        application_id,
         current_user_id=principal.user_id,
         actor_username=principal.username,
     )
     try:
         output = await runner.invoke(payload.inputs)
         uow.commit()
-        return {"status": "success", "output": output, "thread_id": runner.thread_id, "run_id": runner.run_id}
+        return {
+            "status": "success",
+            "output": output,
+            "thread_id": runner.thread_id,
+            "run_id": runner.run_id,
+        }
     except GraphInterrupted as exc:
         uow.commit()
         return {
@@ -219,9 +229,21 @@ async def resume_application(
 
     pending = make_run_service(uow).get_running_for_thread(tenant_id, application_id, thread_id)
 
+    # 0074 PRD F10（M3）：agent 工具审批是"应用层快照挂起"，不是 langgraph 人审节点，
+    # 只能由发起用户在对话端裁决；管理端 resume 通道显式拒绝，防止越权代答
+    # （正常路径下 get_interrupt_state 也取不到挂起态会 403，这里给出更明确的 422）。
+    pending_payload = pending.get("interrupt_payload")
+    if isinstance(pending_payload, dict) and pending_payload.get("type") == "tool_approval":
+        raise ValidationError("工具审批需由用户在对话端裁决，管理端不支持恢复此类中断")
+
     runner = await _build_runner(
-        service, uow, context, tenant_id, application_id,
-        thread_id=thread_id, run_id=pending["id"],
+        service,
+        uow,
+        context,
+        tenant_id,
+        application_id,
+        thread_id=thread_id,
+        run_id=pending["id"],
         current_user_id=principal.user_id,
         actor_username=principal.username,
     )
@@ -244,7 +266,12 @@ async def resume_application(
     try:
         output = await runner.resume({"approved": payload.approved, "comment": payload.comment})
         uow.commit()
-        return {"status": "success", "output": output, "thread_id": thread_id, "run_id": pending["id"]}
+        return {
+            "status": "success",
+            "output": output,
+            "thread_id": thread_id,
+            "run_id": pending["id"],
+        }
     except GraphInterrupted as exc:
         uow.commit()
         return {
@@ -270,9 +297,7 @@ def list_runs(
     tenant_id = context.tenant_id
     if tenant_id is None:
         raise ValidationError("无法识别租户")
-    return make_run_service(uow).list_runs(
-        tenant_id, workflow_id=application_id, limit=limit
-    )
+    return make_run_service(uow).list_runs(tenant_id, workflow_id=application_id, limit=limit)
 
 
 @router.get("/applications/{application_id}/inputs")
@@ -327,8 +352,13 @@ async def list_run_checkpoints(
     run = make_run_service(uow).get_run_owned(run_id, tenant_id)
 
     runner = await _build_runner(
-        service, uow, context, tenant_id, run["workflow_id"],
-        thread_id=run["thread_id"], run_id=run_id,
+        service,
+        uow,
+        context,
+        tenant_id,
+        run["workflow_id"],
+        thread_id=run["thread_id"],
+        run_id=run_id,
     )
     history = await runner.list_checkpoint_history(limit=20)
     return {"checkpoints": history}
@@ -359,14 +389,22 @@ async def fork_run(
     # 新 run_id，新 thread 由 runner 内部生成
     new_run_id = uuid.uuid4()
     runner = await _build_runner(
-        service, uow, context, tenant_id, run["workflow_id"],
+        service,
+        uow,
+        context,
+        tenant_id,
+        run["workflow_id"],
         run_id=new_run_id,
         current_user_id=principal.user_id,
         actor_username=principal.username,
     )
 
     # 先落一条新 run 记录（fork 用的 graph 直接复用 runner 加载的 graph）
-    graph = runner.graph_snapshot if hasattr(runner, "graph_snapshot") else service.build_effective_graph_sync(run["workflow_id"], tenant_id)
+    graph = (
+        runner.graph_snapshot
+        if hasattr(runner, "graph_snapshot")
+        else service.build_effective_graph_sync(run["workflow_id"], tenant_id)
+    )
     run_service.insert_run(
         run_id=new_run_id,
         tenant_id=tenant_id,

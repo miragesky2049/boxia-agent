@@ -19,9 +19,7 @@ def _login_user(user_tenant_client, username: str, password: str = USER_PASSWORD
     )
 
 
-def test_user_crud_and_duplicate_username(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_user_crud_and_duplicate_username(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -93,9 +91,7 @@ def test_user_can_be_created_without_role(
     assert _login_user(user_tenant_client, "norole").status_code == 403
 
 
-def test_user_role_must_belong_to_tenant(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_user_role_must_belong_to_tenant(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers, "acme", "Acme 公司")
     create_tenant(client, auth_headers, "globex", "Globex 公司")
     acme_site, acme_headers, _ = tenant_admin_client(tenant_client, "acme")
@@ -232,14 +228,14 @@ def test_password_reset_invalidates_session(
     assert _login_user(user_tenant_client, "alice").status_code == 401
 
 
-def test_user_options_returns_active_users(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_user_options_returns_active_users(client: TestClient, auth_headers, tenant_client) -> None:
     """下拉选项接口：只返回启用用户，字段精简，且不放宽分页上限。"""
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
-    create_user(site, headers, username="alice", role_id=roles["viewer"]["id"], display_name="Alice")
+    create_user(
+        site, headers, username="alice", role_id=roles["viewer"]["id"], display_name="Alice"
+    )
     create_user(
         site,
         headers,
@@ -250,7 +246,9 @@ def test_user_options_returns_active_users(
     )
 
     # 分页接口仍然拒绝超过 100 的 page_size
-    bad_page = site.get("/api/v1/admin/users", params={"page": 1, "page_size": 500}, headers=headers)
+    bad_page = site.get(
+        "/api/v1/admin/users", params={"page": 1, "page_size": 500}, headers=headers
+    )
     assert bad_page.status_code == 422
 
     options = site.get("/api/v1/admin/users/options", headers=headers)

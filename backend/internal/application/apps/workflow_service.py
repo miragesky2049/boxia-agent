@@ -109,14 +109,16 @@ def extract_start_inputs(canvas_json: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         seen.add(name)
         param_type = str(item.get("type") or item.get("variableType") or "string").strip()
-        result.append({
-            "name": name,
-            "type": param_type if param_type in _TYPE_LABELS else "string",
-            "required": bool(item.get("required", False)),
-            "description": str(item.get("description") or ""),
-            "default_value": item.get("defaultValue"),
-            "order": idx,
-        })
+        result.append(
+            {
+                "name": name,
+                "type": param_type if param_type in _TYPE_LABELS else "string",
+                "required": bool(item.get("required", False)),
+                "description": str(item.get("description") or ""),
+                "default_value": item.get("defaultValue"),
+                "order": idx,
+            }
+        )
     result.sort(key=lambda p: p["order"])
     for p in result:
         p.pop("order")
@@ -167,7 +169,7 @@ def _validate_type(name: str, param_type: str, value: Any) -> None:
     if param_type.startswith("array["):
         if not isinstance(value, list):
             raise ValidationError(f"入参 {name} 必须是数组")
-        element_type = param_type[len("array["):-1]
+        element_type = param_type[len("array[") : -1]
         checker = {
             "string": lambda v: isinstance(v, str),
             "number": lambda v: isinstance(v, (int, float)) and not isinstance(v, bool),
@@ -227,8 +229,12 @@ class WorkflowService:
         self._assert_workflow_application(application_id)
         canvas_json = await self._app_service.get_runtime_graph(application_id, self._tenant_id)
 
-        if any(str(node.get("type")) == QUESTION_NODE_TYPE for node in canvas_json.get("nodes") or []):
-            raise ValidationError("工作流中暂不支持问答节点：该节点会中断且没有恢复通道，请改用对话流")
+        if any(
+            str(node.get("type")) == QUESTION_NODE_TYPE for node in canvas_json.get("nodes") or []
+        ):
+            raise ValidationError(
+                "工作流中暂不支持问答节点：该节点会中断且没有恢复通道，请改用对话流"
+            )
 
         schema_inputs = extract_start_inputs(canvas_json)
         merged_inputs = self._apply_defaults(schema_inputs, inputs)
@@ -237,7 +243,9 @@ class WorkflowService:
         bound_thread_id = (thread_id or "").strip() or None
         if bound_thread_id is not None:
             active = self._run_repo.get_running_by_thread(
-                self._tenant_id, application_id, bound_thread_id,
+                self._tenant_id,
+                application_id,
+                bound_thread_id,
             )
             if active is not None:
                 raise ConflictError("该线程已有运行中或等待审批的运行，请等待结束或改用新的运行")
@@ -283,7 +291,9 @@ class WorkflowService:
         """续跑流外预检：运行存在且处于 interrupted，审批角色 fail-closed。"""
         self._assert_workflow_application(application_id)
         run = self._run_repo.get_running_by_thread(
-            self._tenant_id, application_id, thread_id,
+            self._tenant_id,
+            application_id,
+            thread_id,
         )
         if run is None or run.get("execute_status") != "interrupted":
             raise NotFoundError("没有等待审批的运行记录")
@@ -384,11 +394,14 @@ class WorkflowService:
                 queue.put_nowait(("done", None))
 
         task = asyncio.create_task(run_task())
-        yield "run_start", {
-            "thread_id": runner.thread_id,
-            "run_id": str(runner.run_id),
-            **run_start_extra,
-        }
+        yield (
+            "run_start",
+            {
+                "thread_id": runner.thread_id,
+                "run_id": str(runner.run_id),
+                **run_start_extra,
+            },
+        )
 
         try:
             output: Any = None
@@ -414,20 +427,26 @@ class WorkflowService:
 
         if interrupted is not None:
             self._uow.commit()
-            yield "interrupted", {
-                "approval": interrupted.interrupt_payload,
-                "thread_id": interrupted.thread_id,
-                "run_id": str(runner.run_id),
-            }
+            yield (
+                "interrupted",
+                {
+                    "approval": interrupted.interrupt_payload,
+                    "thread_id": interrupted.thread_id,
+                    "run_id": str(runner.run_id),
+                },
+            )
             yield "final", {}
             return
 
         self._uow.commit()
-        yield "result", {
-            "output": output,
-            "thread_id": runner.thread_id,
-            "run_id": str(runner.run_id),
-        }
+        yield (
+            "result",
+            {
+                "output": output,
+                "thread_id": runner.thread_id,
+                "run_id": str(runner.run_id),
+            },
+        )
         yield "final", {}
 
     # ========== 历史 / 详情 / 待审批 ==========
@@ -472,12 +491,12 @@ class WorkflowService:
 
     # ========== 内部 ==========
     def _assert_workflow_application(self, application_id: UUID) -> dict[str, Any]:
-        """可见性闸门 + 形态校验：用户端 workflow 接口拒绝 chatflow。"""
+        """可见性闸门 + 形态校验：用户端 workflow 接口拒绝 chatflow / agent（0074）。"""
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )
-        if app_card.get("flow_type") == "chatflow":
-            raise ValidationError("对话流应用请使用对话流运行接口")
+        if app_card.get("flow_type") in ("chatflow", "agent"):
+            raise ValidationError("对话流/智能体应用请使用对应的对话运行接口")
         return app_card
 
     @staticmethod
@@ -518,9 +537,17 @@ class WorkflowService:
 def _serialize_run(row: dict[str, Any]) -> dict[str, Any]:
     """run 行转 API 响应：datetime 转 isoformat，JSONB 原样透传。"""
     keys = (
-        "id", "workflow_id", "user_id", "thread_id", "execute_status",
-        "input", "output", "error_message", "interrupt_payload",
-        "started_at", "finished_at",
+        "id",
+        "workflow_id",
+        "user_id",
+        "thread_id",
+        "execute_status",
+        "input",
+        "output",
+        "error_message",
+        "interrupt_payload",
+        "started_at",
+        "finished_at",
     )
     result: dict[str, Any] = {}
     for key in keys:
@@ -533,8 +560,16 @@ def _serialize_run(row: dict[str, Any]) -> dict[str, Any]:
 
 def _serialize_node_execution(row: dict[str, Any]) -> dict[str, Any]:
     keys = (
-        "id", "node_id", "node_type", "input", "output", "error_message",
-        "started_at", "finished_at", "duration_ms", "usage",
+        "id",
+        "node_id",
+        "node_type",
+        "input",
+        "output",
+        "error_message",
+        "started_at",
+        "finished_at",
+        "duration_ms",
+        "usage",
     )
     result: dict[str, Any] = {}
     for key in keys:

@@ -49,9 +49,7 @@ def _replace_permissions(
     role_id: UUID,
     codes: list[str],
 ):
-    return client.put(
-        f"{ROLES_URL}/{role_id}/permissions", json={"codes": codes}, headers=headers
-    )
+    return client.put(f"{ROLES_URL}/{role_id}/permissions", json={"codes": codes}, headers=headers)
 
 
 def test_permission_catalog_covers_functional_resources(
@@ -99,9 +97,7 @@ def test_role_permission_replace_add_and_remove(
 ) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
-    role = site.post(
-        ROLES_URL, json={"code": "audit", "name": "审计"}, headers=headers
-    ).json()
+    role = site.post(ROLES_URL, json={"code": "audit", "name": "审计"}, headers=headers).json()
 
     replaced = _replace_permissions(
         site, headers, role["id"], ["system:console:access", "page:resources"]
@@ -121,18 +117,14 @@ def test_role_permission_replace_add_and_remove(
         "menu:resources",
     }
 
-    removed = site.delete(
-        f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers
-    )
+    removed = site.delete(f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers)
     assert removed.status_code == 204
     assert _role_codes(site, headers, role["id"]) == {
         "system:console:access",
         "menu:resources",
     }
 
-    missing = site.delete(
-        f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers
-    )
+    missing = site.delete(f"{ROLES_URL}/{role['id']}/permissions/page:resources", headers=headers)
     assert missing.status_code == 404
 
     unknown = _replace_permissions(site, headers, role["id"], ["unknown:code"])
@@ -216,9 +208,7 @@ def test_permission_changes_take_effect_immediately(
         ).status_code
         == 200
     )
-    operator_headers = _create_platform_account(
-        client, auth_headers, "user-reader", role["id"]
-    )
+    operator_headers = _create_platform_account(client, auth_headers, "user-reader", role["id"])
     assert client.get(ADMIN_USERS_URL, headers=operator_headers).status_code == 200
 
     # 撤销权限后无需重新登录，下一次请求立即生效

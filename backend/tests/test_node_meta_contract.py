@@ -32,9 +32,23 @@ LEGACY_HANDLER_WITHOUT_META: frozenset[str] = frozenset()
 
 ALLOWED_CATEGORIES: frozenset[str] = frozenset(
     {
-        "basic", "ai", "plugin", "workflow", "logic", "io", "control",
-        "knowledge", "component", "conversation", "history", "message", "misc",
-        "database", "memory", "image", "media",
+        "basic",
+        "ai",
+        "plugin",
+        "workflow",
+        "logic",
+        "io",
+        "control",
+        "knowledge",
+        "component",
+        "conversation",
+        "history",
+        "message",
+        "misc",
+        "database",
+        "memory",
+        "image",
+        "media",
     }
 )
 
@@ -160,7 +174,13 @@ def test_api_payload_shape_matches_frontend_types() -> None:
 
     for meta in _metas():
         payload = asdict(meta)
-        assert {"type_code", "type_key", "icon", "subtitle_hint", "next_recommendations"} <= payload.keys()
+        assert {
+            "type_code",
+            "type_key",
+            "icon",
+            "subtitle_hint",
+            "next_recommendations",
+        } <= payload.keys()
         assert set(payload["capabilities"]) == {
             "runnable",
             "copyable",

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
-from typing import Any
 
 from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.config.settings import get_settings

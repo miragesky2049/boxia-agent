@@ -275,12 +275,7 @@ export function AdminUsersBlock({
                     disabled={record.id === currentUserId}
                     onConfirm={() => handleDelete(record)}
                   >
-                    <Button
-                      type="link"
-                      size="small"
-                      danger
-                      disabled={record.id === currentUserId}
-                    >
+                    <Button type="link" size="small" danger disabled={record.id === currentUserId}>
                       删除
                     </Button>
                   </Popconfirm>
@@ -365,10 +360,7 @@ export function AdminUsersBlock({
             <Form.Item
               name="password"
               label="初始密码"
-              rules={[
-                { required: true, message: '请输入初始密码' },
-                passwordRule(passwordPolicy),
-              ]}
+              rules={[{ required: true, message: '请输入初始密码' }, passwordRule(passwordPolicy)]}
               extra="管理员首次登录后必须修改密码。"
             >
               <Input.Password autoComplete="new-password" />
@@ -434,10 +426,7 @@ export function AdminUsersBlock({
           <Form.Item
             name="new_password"
             label="新密码"
-            rules={[
-              { required: true, message: '请输入新密码' },
-              passwordRule(passwordPolicy),
-            ]}
+            rules={[{ required: true, message: '请输入新密码' }, passwordRule(passwordPolicy)]}
             extra="重置后该账号需在下次登录时再次修改密码。"
           >
             <Input.Password autoComplete="new-password" />

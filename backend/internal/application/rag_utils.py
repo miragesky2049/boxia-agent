@@ -39,9 +39,7 @@ async def apply_rag_to_prompt(
     threshold = float(
         retrieval_cfg.get("similarity_threshold") or settings.rag_similarity_threshold
     )
-    rerank_enabled = bool(
-        retrieval_cfg.get("rerank_enabled", settings.rag_rerank_enabled)
-    )
+    rerank_enabled = bool(retrieval_cfg.get("rerank_enabled", settings.rag_rerank_enabled))
     query_rewrite_enabled = bool(
         retrieval_cfg.get("query_rewrite_enabled", settings.rag_query_rewrite_enabled)
     )

@@ -4,8 +4,7 @@ from typing import Any
 from uuid import UUID
 
 from sqlalchemy import and_, func, or_, select
-from sqlalchemy.orm import Session
-from sqlalchemy.orm import aliased
+from sqlalchemy.orm import Session, aliased
 
 from internal.domain.entity.employment import Employment
 from internal.infrastructure.model.access import UserModel

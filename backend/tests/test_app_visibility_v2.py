@@ -40,9 +40,7 @@ def _create_enabled_platform_app(
     response = client.post(APPS_URL, json={"name": name, **create_fields}, headers=headers)
     assert response.status_code == 201, response.text
     app_id = response.json()["application_id"]
-    enabled = client.post(
-        f"{APPS_URL}/{app_id}/enabled", json={"enabled": True}, headers=headers
-    )
+    enabled = client.post(f"{APPS_URL}/{app_id}/enabled", json={"enabled": True}, headers=headers)
     assert enabled.status_code == 200, enabled.text
     return app_id
 
@@ -100,7 +98,9 @@ def _now() -> datetime:
 def test_scope_all_visible_for_all_users(
     client, auth_headers, tenant_client, user_tenant_client, user_login_headers
 ) -> None:
-    site, site_headers, roles, tenant_id = _setup_tenant(client, auth_headers, tenant_client, "vis-all")
+    site, site_headers, roles, tenant_id = _setup_tenant(
+        client, auth_headers, tenant_client, "vis-all"
+    )
     app_id = _create_enabled_platform_app(client, auth_headers, "全员应用")
     _subscribe(tenant_id, app_id)
     for username in ("member1", "member2"):
@@ -136,7 +136,9 @@ def test_whitelist_department_with_subtree(
     outside = create_department(site, site_headers, "局外部门")
 
     inside_user = create_user(site, site_headers, username="in-sub", role_id=roles["viewer"]["id"])
-    outside_user = create_user(site, site_headers, username="out-dept", role_id=roles["viewer"]["id"])
+    outside_user = create_user(
+        site, site_headers, username="out-dept", role_id=roles["viewer"]["id"]
+    )
     for user, dept in ((inside_user, child_dept), (outside_user, outside)):
         emp = site.post(
             "/api/v1/admin/employments",
@@ -159,9 +161,7 @@ def test_whitelist_department_with_subtree(
     assert put.status_code == 200, put.text
 
     # 子部门用户命中 include_subtree
-    assert app_id in _visible_app_ids(
-        user_tenant_client, user_login_headers, "vis-dept", "in-sub"
-    )
+    assert app_id in _visible_app_ids(user_tenant_client, user_login_headers, "vis-dept", "in-sub")
     # 部门外用户不可见
     assert app_id not in _visible_app_ids(
         user_tenant_client, user_login_headers, "vis-dept", "out-dept"
@@ -185,9 +185,16 @@ def test_whitelist_role(
         site,
         site_headers,
         app_id,
-        {"visibility": "whitelist", "whitelist": [
-            {"subject_type": "ROLE", "subject_id": roles["admin"]["id"], "include_subtree": False}
-        ]},
+        {
+            "visibility": "whitelist",
+            "whitelist": [
+                {
+                    "subject_type": "ROLE",
+                    "subject_id": roles["admin"]["id"],
+                    "include_subtree": False,
+                }
+            ],
+        },
     )
     assert put.status_code == 200, put.text
 
@@ -215,15 +222,16 @@ def test_whitelist_user(
         site,
         site_headers,
         app_id,
-        {"visibility": "whitelist", "whitelist": [
-            {"subject_type": "USER", "subject_id": picked["id"], "include_subtree": False}
-        ]},
+        {
+            "visibility": "whitelist",
+            "whitelist": [
+                {"subject_type": "USER", "subject_id": picked["id"], "include_subtree": False}
+            ],
+        },
     )
     assert put.status_code == 200, put.text
 
-    assert app_id in _visible_app_ids(
-        user_tenant_client, user_login_headers, "vis-user", "picked"
-    )
+    assert app_id in _visible_app_ids(user_tenant_client, user_login_headers, "vis-user", "picked")
     assert app_id not in _visible_app_ids(
         user_tenant_client, user_login_headers, "vis-user", "not-picked"
     )
@@ -354,9 +362,12 @@ def test_orphan_whitelist_subject_filtered(client, auth_headers, tenant_client) 
         site,
         site_headers,
         app_id,
-        {"visibility": "whitelist", "whitelist": [
-            {"subject_type": "DEPARTMENT", "subject_id": ghost_dept, "include_subtree": True}
-        ]},
+        {
+            "visibility": "whitelist",
+            "whitelist": [
+                {"subject_type": "DEPARTMENT", "subject_id": ghost_dept, "include_subtree": True}
+            ],
+        },
     )
     assert put.status_code == 200, put.text
 
@@ -378,9 +389,7 @@ def test_orphan_whitelist_subject_filtered(client, auth_headers, tenant_client) 
 
 # ========== 用例 14：configured 标记 ==========
 def test_configured_flag(client, auth_headers, tenant_client) -> None:
-    site, site_headers, _, tenant_id = _setup_tenant(
-        client, auth_headers, tenant_client, "vis-cfg"
-    )
+    site, site_headers, _, tenant_id = _setup_tenant(client, auth_headers, tenant_client, "vis-cfg")
     app_id = _create_enabled_platform_app(client, auth_headers, "标记应用")
     _subscribe(tenant_id, app_id)
 
@@ -388,9 +397,12 @@ def test_configured_flag(client, auth_headers, tenant_client) -> None:
     assert before["configured"] is False
     assert before["visibility"] == "all"
 
-    assert _put_visibility(
-        site, site_headers, app_id, {"visibility": "all", "whitelist": []}
-    ).status_code == 200
+    assert (
+        _put_visibility(
+            site, site_headers, app_id, {"visibility": "all", "whitelist": []}
+        ).status_code
+        == 200
+    )
 
     after = site.get(f"{TENANT_APPS_URL}/{app_id}/visibility", headers=site_headers).json()
     assert after["configured"] is True

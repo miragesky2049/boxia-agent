@@ -1,4 +1,4 @@
-import { CANVAS_TOKENS } from '../canvas/tokens';
+import { CANVAS_TOKENS } from '../canvas/tokens'
 
 // 画布全局样式：覆盖 FlowGram 内部类名（端口、连线、运行态高亮等）
 export function CanvasStyles() {
@@ -132,5 +132,5 @@ export function CanvasStyles() {
               box-shadow: 0 0 0 2px ${CANVAS_TOKENS.portRingSoft};
             }
     `}</style>
-  );
+  )
 }

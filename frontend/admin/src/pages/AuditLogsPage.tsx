@@ -61,7 +61,11 @@ export default function AuditLogsPage() {
       dataIndex: 'actor_username',
       width: 140,
       render: (value: string | null, record) =>
-        value ? value : <Typography.Text type="secondary">{record.actor_id || '系统'}</Typography.Text>,
+        value ? (
+          value
+        ) : (
+          <Typography.Text type="secondary">{record.actor_id || '系统'}</Typography.Text>
+        ),
     },
     {
       title: '动作',
@@ -76,7 +80,9 @@ export default function AuditLogsPage() {
         record.resource_type ? (
           <Typography.Text style={{ fontSize: 12 }}>
             {record.resource_type}
-            {record.resource_id ? <span style={{ color: '#999' }}> · {record.resource_id}</span> : null}
+            {record.resource_id ? (
+              <span style={{ color: '#999' }}> · {record.resource_id}</span>
+            ) : null}
           </Typography.Text>
         ) : (
           <Typography.Text type="secondary">—</Typography.Text>
@@ -86,7 +92,8 @@ export default function AuditLogsPage() {
       title: 'IP',
       dataIndex: 'ip',
       width: 130,
-      render: (value: string | null) => value ?? <Typography.Text type="secondary">—</Typography.Text>,
+      render: (value: string | null) =>
+        value ?? <Typography.Text type="secondary">—</Typography.Text>,
     },
     {
       title: '操作',
@@ -223,7 +230,9 @@ export default function AuditLogsPage() {
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>
                 request_id
               </Typography.Text>
-              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>{detail.request_id ?? '—'}</div>
+              <div style={{ fontSize: 12, fontFamily: 'monospace' }}>
+                {detail.request_id ?? '—'}
+              </div>
             </div>
             <div>
               <Typography.Text type="secondary" style={{ fontSize: 12 }}>

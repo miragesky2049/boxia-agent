@@ -10,8 +10,8 @@ from uuid import uuid4
 
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, RuntimeEnv, ServiceRegistry
-from internal.domain.graph.nodes.comment import CommentNodeHandler
 from internal.domain.graph.nodes import get_node_handler, list_registered_types
+from internal.domain.graph.nodes.comment import CommentNodeHandler
 
 
 def test_comment_handler_registered() -> None:

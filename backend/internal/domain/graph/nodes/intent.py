@@ -20,7 +20,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from typing import Any
@@ -57,7 +56,7 @@ def _parse_intents(raw: Any) -> list[dict[str, Any]]:
             continue
         raw_id = item.get("id") if isinstance(item, dict) else None
         try:
-            intent_id = int(raw_id)
+            intent_id = int(raw_id or 0)
         except (TypeError, ValueError):
             intent_id = 0
         if intent_id <= 0 or intent_id in used:
@@ -66,11 +65,13 @@ def _parse_intents(raw: Any) -> list[dict[str, Any]]:
             intent_id = next_id
         used.add(intent_id)
         next_id = max(next_id, intent_id + 1)
-        intents.append({
-            "id": intent_id,
-            "name": name,
-            "description": description,
-        })
+        intents.append(
+            {
+                "id": intent_id,
+                "name": name,
+                "description": description,
+            }
+        )
     return intents
 
 
@@ -83,8 +84,7 @@ def _build_system_prompt(intents: list[dict[str, Any]]) -> str:
         suffix = f"：{item['description']}" if item["description"] else ""
         lines.append(f"- {item['id']}. {item['name']}{suffix}")
     lines.append(
-        "如果没有匹配项，返回 0（其他）。"
-        '只输出 JSON，不要解释：{"classification_id": <整数>}'
+        '如果没有匹配项，返回 0（其他）。只输出 JSON，不要解释：{"classification_id": <整数>}'
     )
     return "\n".join(lines)
 
@@ -218,7 +218,8 @@ class IntentNodeHandler(NodeHandler):
             return []
         try:
             messages = await ctx.services.get("message_repo").list_by_conversation(
-                conversation_id, limit=limit,
+                conversation_id,
+                limit=limit,
             )
         except Exception:  # noqa: BLE001
             logger.exception("意图识别读取会话历史失败: node=%s", ctx.node_id)
