@@ -3,17 +3,20 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import time
+import weakref
 from abc import ABC, abstractmethod
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 
 import httpx
 from pydantic import BaseModel, Field
 
-from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.agent.run_context import AgentRunContext
+from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.llm.messages import AssistantMessage, ToolCall, ToolCallFunction
 from internal.domain.llm.observer import LlmCallRecord, llm_call_observer
 
@@ -28,9 +31,15 @@ def _tenant_label(context: AgentRunContext | None) -> str:
         return "platform"
     return context.tenant_id.hex[:8]
 
+
 # 共享 httpx.AsyncClient 池：按 base_url 缓存，避免每次调用新建连接。
+# 条目绑定创建时的事件循环（weakref）：AsyncClient 的连接池与 loop 同生命周期，
+# Celery worker 在同一进程内多次 asyncio.run（如 memory.extract_memories 连续
+# 任务）时旧 loop 已关闭，复用会抛 "Event loop is closed"（20261107 真机冒烟发现）。
 # 进程关闭时由 lifespan 统一关闭。
-_client_pool: dict[str, httpx.AsyncClient] = {}
+_client_pool: dict[
+    str, tuple[weakref.ReferenceType[asyncio.AbstractEventLoop], httpx.AsyncClient]
+] = {}
 
 # 可重试的 HTTP 状态码：429（限流）+ 5xx（网关/上游错误）
 _RETRYABLE_STATUSES = {429, 502, 503, 504}
@@ -41,7 +50,7 @@ _RETRY_BACKOFF_SECONDS = (0.5, 1.0)
 async def shutdown_llm_clients() -> None:
     """关闭所有共享 httpx client，应在应用 shutdown 钩子中调用。"""
     global _client_pool
-    for client in _client_pool.values():
+    for _, client in _client_pool.values():
         try:
             await client.aclose()
         except Exception:  # noqa: BLE001
@@ -50,34 +59,40 @@ async def shutdown_llm_clients() -> None:
 
 
 def _get_shared_client(base_url: str, timeout: httpx.Timeout) -> httpx.AsyncClient:
-    """按 base_url 取共享 client；不存在则创建。
+    """按 base_url 取当前事件循环下的共享 client；不存在或循环已切换则重建。
 
     不同 timeout 视为同一 client（timeout 在每次请求时可覆盖）。
     http2 依赖 h2 包，未安装时自动降级为 http/1.1。
     """
     key = base_url
-    client = _client_pool.get(key)
-    if client is None or client.is_closed:
-        try:
-            client = httpx.AsyncClient(
-                timeout=timeout,
-                http2=True,
-                limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20,
-                    keepalive_expiry=30.0,
-                ),
-            )
-        except ImportError:
-            client = httpx.AsyncClient(
-                timeout=timeout,
-                limits=httpx.Limits(
-                    max_connections=100,
-                    max_keepalive_connections=20,
-                    keepalive_expiry=30.0,
-                ),
-            )
-        _client_pool[key] = client
+    loop = asyncio.get_running_loop()
+    entry = _client_pool.get(key)
+    if entry is not None:
+        ref, client = entry
+        if ref() is loop and not client.is_closed:
+            return client
+        # 旧 loop 已关闭/被回收或 client 已关闭：丢弃并重建（见池注释）
+        _client_pool.pop(key, None)
+    try:
+        client = httpx.AsyncClient(
+            timeout=timeout,
+            http2=True,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=30.0,
+            ),
+        )
+    except ImportError:
+        client = httpx.AsyncClient(
+            timeout=timeout,
+            limits=httpx.Limits(
+                max_connections=100,
+                max_keepalive_connections=20,
+                keepalive_expiry=30.0,
+            ),
+        )
+    _client_pool[key] = (weakref.ref(loop), client)
     return client
 
 
@@ -276,12 +291,14 @@ class OpenAICompatLLMClient(LLMClient):
                     status = "success"
                     if response.status_code in _RETRYABLE_STATUSES and attempt < _MAX_RETRIES:
                         retry_after = response.headers.get("Retry-After")
-                        backoff = _RETRY_BACKOFF_SECONDS[attempt] if attempt < len(_RETRY_BACKOFF_SECONDS) else 1.0
+                        backoff = (
+                            _RETRY_BACKOFF_SECONDS[attempt]
+                            if attempt < len(_RETRY_BACKOFF_SECONDS)
+                            else 1.0
+                        )
                         if retry_after:
-                            try:
+                            with contextlib.suppress(ValueError):
                                 backoff = max(backoff, float(retry_after))
-                            except ValueError:
-                                pass
                         logger.warning(
                             "llm retry attempt=%d status=%d backoff=%.1fs",
                             attempt + 1,
@@ -314,14 +331,18 @@ class OpenAICompatLLMClient(LLMClient):
                     raise
         finally:
             duration = time.perf_counter() - started
-            llm_call_observer().observe(LlmCallRecord(
-                tenant=tenant,
-                model=self._model,
-                status=status,
-                duration_seconds=duration,
-                prompt_tokens=result.usage.prompt_tokens if result is not None else None,
-                completion_tokens=result.usage.completion_tokens if result is not None else None,
-            ))
+            llm_call_observer().observe(
+                LlmCallRecord(
+                    tenant=tenant,
+                    model=self._model,
+                    status=status,
+                    duration_seconds=duration,
+                    prompt_tokens=result.usage.prompt_tokens if result is not None else None,
+                    completion_tokens=result.usage.completion_tokens
+                    if result is not None
+                    else None,
+                )
+            )
 
         # 理论上不会走到这里（要么 return 要么 raise）
         if last_exc is not None:
@@ -434,7 +455,7 @@ class OpenAICompatLLMClient(LLMClient):
                         continue
                     if not line.startswith("data:"):
                         continue
-                    raw = line[len("data:"):].strip()
+                    raw = line[len("data:") :].strip()
                     if raw == "[DONE]":
                         break
                     try:
@@ -476,14 +497,16 @@ class OpenAICompatLLMClient(LLMClient):
             raise
         finally:
             duration = time.perf_counter() - started
-            llm_call_observer().observe(LlmCallRecord(
-                tenant=tenant,
-                model=self._model,
-                status=status,
-                duration_seconds=duration,
-                prompt_tokens=usage.prompt_tokens or None,
-                completion_tokens=usage.completion_tokens or None,
-            ))
+            llm_call_observer().observe(
+                LlmCallRecord(
+                    tenant=tenant,
+                    model=self._model,
+                    status=status,
+                    duration_seconds=duration,
+                    prompt_tokens=usage.prompt_tokens or None,
+                    completion_tokens=usage.completion_tokens or None,
+                )
+            )
 
 
 def assistant_message_from_response(response: LLMResponse) -> AssistantMessage:

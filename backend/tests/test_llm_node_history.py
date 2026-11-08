@@ -136,7 +136,11 @@ def test_need_history_true_prepends_user_assistant_messages() -> None:
     msgs = llm.seen_messages[0]
     # 应该是：4 条历史 user/assistant + 当前 user
     assert [m["role"] for m in msgs] == [
-        "user", "assistant", "user", "assistant", "user",
+        "user",
+        "assistant",
+        "user",
+        "assistant",
+        "user",
     ]
     assert msgs[0]["content"] == "你好"
     assert msgs[1]["content"] == "你好，有什么可以帮你"
@@ -170,7 +174,8 @@ def test_need_history_invalid_conversation_id_skips_silently() -> None:
     cfg["needHistory"] = True
 
     ctx = _make_ctx(
-        services, cfg,
+        services,
+        cfg,
         inputs={"input": "当前问题", "conversation_id": "not-a-uuid"},
     )
     asyncio.run(LLMNodeHandler().run(ctx))

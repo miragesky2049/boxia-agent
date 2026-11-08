@@ -45,6 +45,4 @@ class UserMgmtUnitGrantModel(Base):
     unit_id: Mapped[UUID] = mapped_column(Uuid(as_uuid=True), nullable=False)
     # 授权人可能是平台管理员（admin_users）或租户账号（users），无法用单一外键约束
     granted_by: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

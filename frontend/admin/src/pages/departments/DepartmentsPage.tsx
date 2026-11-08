@@ -67,10 +67,7 @@ export default function DepartmentsPage() {
     () => flatDepartments.filter((item) => !collapsedKeys.has(item.id)).map((item) => item.id),
     [flatDepartments, collapsedKeys],
   )
-  const parentTreeData = useMemo(
-    () => buildDepartmentTreeData(tree, MAX_LEVEL - 1, true),
-    [tree],
-  )
+  const parentTreeData = useMemo(() => buildDepartmentTreeData(tree, MAX_LEVEL - 1, true), [tree])
 
   const openCreate = (parentId: string | null) => {
     setEditing(null)
@@ -276,7 +273,9 @@ export default function DepartmentsPage() {
           onExpandedRowsChange: (keys) => {
             const expanded = new Set(keys as string[])
             setCollapsedKeys(
-              new Set(flatDepartments.filter((item) => !expanded.has(item.id)).map((item) => item.id)),
+              new Set(
+                flatDepartments.filter((item) => !expanded.has(item.id)).map((item) => item.id),
+              ),
             )
           },
         }}

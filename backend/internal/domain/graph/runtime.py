@@ -71,10 +71,16 @@ class GraphRuntime:
         variables: dict[str, Any] | None = None,
         user_variable_keys: set[str] | None = None,
         on_user_variables_changed: Any = None,
+        parent_run_id: UUID | None = None,
+        is_eval: bool = False,
     ):
         self.canvas_json = canvas_json
         self.services = services or ServiceRegistry()
         self.run_repo = run_repo
+        # 0074 PRD F7.2：工作流即工具时子 run 关联父 run（顶层 run 为 None）
+        self.parent_run_id = parent_run_id
+        # 0080 PRD F18.3：评测批直调的 run 落表打 is_eval 标记（运行日志默认隐身）
+        self.is_eval = is_eval
         self.usage_repo = usage_repo
         self.audit_repo = audit_repo
         self.webhook_repo = webhook_repo
@@ -97,9 +103,7 @@ class GraphRuntime:
         self._user_variable_keys = set(user_variable_keys or ())
         self._on_user_variables_changed = on_user_variables_changed
         self._initial_user_variables: dict[str, Any] = {
-            key: value
-            for key, value in self.variables.items()
-            if key in self._user_variable_keys
+            key: value for key, value in self.variables.items() if key in self._user_variable_keys
         }
 
         self._canvas: CanvasGraph | None = None
@@ -139,7 +143,9 @@ class GraphRuntime:
         # checkpointer=None 时不传 thread_id，否则 langgraph 报 "No checkpointer set"
         if self._checkpointer_override is None:
             return {}
-        return {"configurable": {"thread_id": make_checkpoint_thread_id(self.tenant_id, self.thread_id)}}
+        return {
+            "configurable": {"thread_id": make_checkpoint_thread_id(self.tenant_id, self.thread_id)}
+        }
 
     def _build_system_vars(self, input_data: dict[str, Any] | None = None) -> dict[str, Any]:
         """只读系统变量：工作流仅 USER_ID/RUN_ID；对话流额外注入会话上下文。"""
@@ -149,11 +155,13 @@ class GraphRuntime:
             "RUN_ID": str(self.run_id),
         }
         if self.conversation_id is not None:
-            system.update({
-                "CONVERSATION_ID": str(self.conversation_id),
-                "USER_INPUT": data.get("USER_INPUT", ""),
-                "CONVERSATION_NAME": data.get("CONVERSATION_NAME", ""),
-            })
+            system.update(
+                {
+                    "CONVERSATION_ID": str(self.conversation_id),
+                    "USER_INPUT": data.get("USER_INPUT", ""),
+                    "CONVERSATION_NAME": data.get("CONVERSATION_NAME", ""),
+                }
+            )
         else:
             # 画布试运行 / 工作流也可能直接传 USER_INPUT，保持可见
             if "USER_INPUT" in data:
@@ -170,8 +178,7 @@ class GraphRuntime:
         changed = {
             key: globals_pool[key]
             for key in self._user_variable_keys
-            if key in globals_pool
-            and globals_pool[key] != self._initial_user_variables.get(key)
+            if key in globals_pool and globals_pool[key] != self._initial_user_variables.get(key)
         }
         if not changed:
             return
@@ -210,17 +217,101 @@ class GraphRuntime:
             get_run = getattr(self.run_repo, "get_run", None)
             if get_run is not None and get_run(self.run_id) is not None:
                 return
-            self.run_repo.insert_run(
-                run_id=self.run_id,
-                tenant_id=self.tenant_id,
-                workflow_id=self.application_id,
-                graph_snapshot=self.canvas_json,
-                input_data=input_data,
-                thread_id=self.thread_id,
-                user_id=self.user_id,
-            )
+            kwargs: dict[str, Any] = {
+                "run_id": self.run_id,
+                "tenant_id": self.tenant_id,
+                "workflow_id": self.application_id,
+                "graph_snapshot": self.canvas_json,
+                "input_data": input_data,
+                "thread_id": self.thread_id,
+                "user_id": self.user_id,
+            }
+            if self.parent_run_id is not None:
+                # 仅在子 run 时传：存量 insert_run 桩签名不带该键（0074 PRD F7.2）
+                kwargs["parent_run_id"] = self.parent_run_id
+            if self.is_eval:
+                # 仅在评测直调时传：存量 insert_run 桩签名不带该键（0080 PRD F18.3）
+                kwargs["is_eval"] = True
+            self.run_repo.insert_run(**kwargs)
         except Exception:  # noqa: BLE001
             logger.exception("写 run 记录失败")
+
+    async def purge_thread_checkpoints(self) -> None:
+        """删除本 thread 的 checkpoints（0074 PRD R6：画布任务取消后的幽灵状态清理）。
+
+        客户端断连时 langgraph 的逐超步自提交 checkpointer 会留下中断时刻的
+        部分 state；同一 thread_id 下一轮继续在其上追加。仅当业务确认"下一轮
+        不依赖 checkpoint 续跑"（agent 对话通道：多轮上下文由 history 入参
+        显式携带、画布 agent 图无 human_task 中断点）时才允许调用本方法。
+        清理失败只告警——残留 checkpoint 不影响下一轮正确性，只影响存储。
+        """
+        if self._checkpointer_override is None:
+            return
+        try:
+            checkpointer = (
+                await get_checkpointer()
+                if self._checkpointer_override is _UNSET
+                else self._checkpointer_override
+            )
+            delete_thread = getattr(checkpointer, "adelete_thread", None)
+            if delete_thread is None:
+                return
+            await delete_thread(make_checkpoint_thread_id(self.tenant_id, self.thread_id))
+        except Exception:  # noqa: BLE001 - 兜底清理失败不掩盖断连主流程
+            logger.warning("checkpoint 清理失败 thread=%s run=%s", self.thread_id, self.run_id)
+
+    async def list_checkpoint_history(self, limit: int = 20) -> list[dict[str, Any]]:
+        """列出当前 thread 的 checkpoint 历史（time-travel / fork 入口）。
+
+        迁移自 v4 P5（旧 engine runner），DDD 重构换 runtime 实现时随旧类删除，此处按新架构复原。
+        每条含 checkpoint_id / 待执行节点 / input/output 摘要。
+        """
+        await self._ensure_compiled()
+        result: list[dict[str, Any]] = []
+        async for state in self._compiled.aget_state_history(self._config(), limit=limit):
+            values: dict[str, Any] = dict(state.values or {})
+            result.append(
+                {
+                    "checkpoint_id": state.config["configurable"].get("checkpoint_id"),
+                    "next_nodes": list(state.next or []),
+                    "input": values.get("input"),
+                    "output": values.get("output"),
+                    "node_count": len([k for k in values if k not in ("input", "output")]),
+                    "created_at": getattr(state.metadata, "created_at", None),
+                }
+            )
+        return result
+
+    async def fork_from_checkpoint(
+        self,
+        source_thread_id: str,
+        checkpoint_id: str,
+        new_input: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """从历史 checkpoint 分叉重跑：state 复制到新 thread，再从该状态继续执行。
+
+        Returns:
+            {"new_thread_id": 新业务 thread_id, "output": 最终输出}
+        """
+        await self._ensure_compiled()
+        if self._checkpointer_override is None:
+            raise RuntimeError("fork 需要 checkpointer 开启")
+        source_config = {
+            "configurable": {
+                "thread_id": make_checkpoint_thread_id(self.tenant_id, source_thread_id),
+                "checkpoint_id": checkpoint_id,
+            }
+        }
+        source_state = await self._compiled.aget_state(source_config)
+        values: dict[str, Any] = dict(source_state.values or {})
+        if new_input is not None:
+            values["input"] = new_input
+
+        # 新 thread：先换 thread_id，把源 state 落成新 thread 的 checkpoint，再走正常管线续跑
+        self.thread_id = str(uuid.uuid4())
+        await self._compiled.aupdate_state(self._config(), values=values)
+        output = await self.invoke(values.get("input") or {})
+        return {"new_thread_id": self.thread_id, "output": output}
 
     async def invoke(self, input_data: dict[str, Any]) -> dict[str, Any]:
         """执行工作流，返回最终 output。人审中断本次不触发。"""
@@ -248,9 +339,7 @@ class GraphRuntime:
                 "user_id": str(self.user_id) if self.user_id else None,
                 "run_id": str(self.run_id),
                 "thread_id": self.thread_id,
-                "conversation_id": (
-                    str(self.conversation_id) if self.conversation_id else None
-                ),
+                "conversation_id": (str(self.conversation_id) if self.conversation_id else None),
             },
             "output": {},
             "errors": {},
@@ -298,15 +387,18 @@ class GraphRuntime:
                 except Exception:  # noqa: BLE001
                     logger.exception("更新 run 状态失败")
 
-            await self._notify_webhooks("run_finished", {
-                "run_id": str(self.run_id),
-                "tenant_id": str(self.tenant_id),
-                "application_id": str(self.application_id),
-                "thread_id": self.thread_id,
-                "status": "success",
-                "output": output,
-                "duration_ms": duration_ms,
-            })
+            await self._notify_webhooks(
+                "run_finished",
+                {
+                    "run_id": str(self.run_id),
+                    "tenant_id": str(self.tenant_id),
+                    "application_id": str(self.application_id),
+                    "thread_id": self.thread_id,
+                    "status": "success",
+                    "output": output,
+                    "duration_ms": duration_ms,
+                },
+            )
 
             logger.info("运行完成: run=%s duration=%sms", self.run_id, duration_ms)
             return output
@@ -326,32 +418,37 @@ class GraphRuntime:
 
             if self.audit_repo is not None:
                 try:
-                    self.audit_repo.record({
-                        "action": "run_error",
-                        "resource_type": "run",
-                        "resource_id": str(self.run_id),
-                        "tenant_id": self.tenant_id,
-                        "actor_id": self.user_id,
-                        "actor_username": self.actor_username,
-                        "detail": {
-                            "application_id": str(self.application_id),
-                            "thread_id": self.thread_id,
-                            "error": str(e),
-                            "duration_ms": duration_ms,
-                        },
-                    })
+                    self.audit_repo.record(
+                        {
+                            "action": "run_error",
+                            "resource_type": "run",
+                            "resource_id": str(self.run_id),
+                            "tenant_id": self.tenant_id,
+                            "actor_id": self.user_id,
+                            "actor_username": self.actor_username,
+                            "detail": {
+                                "application_id": str(self.application_id),
+                                "thread_id": self.thread_id,
+                                "error": str(e),
+                                "duration_ms": duration_ms,
+                            },
+                        }
+                    )
                 except Exception:  # noqa: BLE001
                     logger.exception("写 audit_logs 失败")
 
-            await self._notify_webhooks("run_error", {
-                "run_id": str(self.run_id),
-                "tenant_id": str(self.tenant_id),
-                "application_id": str(self.application_id),
-                "thread_id": self.thread_id,
-                "status": "error",
-                "error": str(e),
-                "duration_ms": duration_ms,
-            })
+            await self._notify_webhooks(
+                "run_error",
+                {
+                    "run_id": str(self.run_id),
+                    "tenant_id": str(self.tenant_id),
+                    "application_id": str(self.application_id),
+                    "thread_id": self.thread_id,
+                    "status": "error",
+                    "error": str(e),
+                    "duration_ms": duration_ms,
+                },
+            )
 
             logger.error("运行失败: run=%s error=%s", self.run_id, e)
             raise
@@ -435,7 +532,7 @@ class GraphRuntime:
             raise RuntimeError("resume 需要 checkpointer 开启（人审状态持久化）")
 
         # 用 Command(resume=...) 让 langgraph 从 interrupt 点继续
-        command = Command(resume=resume_payload)
+        command: Command[Any] = Command(resume=resume_payload)
 
         try:
             await self._stream_and_record(command)
@@ -468,15 +565,18 @@ class GraphRuntime:
                 except Exception:  # noqa: BLE001
                     logger.exception("更新 run 状态失败")
 
-            await self._notify_webhooks("run_finished", {
-                "run_id": str(self.run_id),
-                "tenant_id": str(self.tenant_id),
-                "application_id": str(self.application_id),
-                "thread_id": self.thread_id,
-                "status": "success",
-                "output": output,
-                "duration_ms": duration_ms,
-            })
+            await self._notify_webhooks(
+                "run_finished",
+                {
+                    "run_id": str(self.run_id),
+                    "tenant_id": str(self.tenant_id),
+                    "application_id": str(self.application_id),
+                    "thread_id": self.thread_id,
+                    "status": "success",
+                    "output": output,
+                    "duration_ms": duration_ms,
+                },
+            )
             return output
 
         except GraphInterrupted:
@@ -523,13 +623,17 @@ class GraphRuntime:
                 for it in getattr(task, "interrupts", []) or []:
                     interrupts.append({"value": getattr(it, "value", None)})
             values = getattr(snapshot, "values", {}) or {}
-            result.append({
-                "checkpoint_id": str(getattr(snapshot.config, "configurable", {}).get("checkpoint_id", "")),
-                "next": list(getattr(snapshot, "next", []) or []),
-                "interrupts": interrupts,
-                "output": values.get("output", {}),
-                "node_outputs_keys": list((values.get("node_outputs") or {}).keys()),
-            })
+            result.append(
+                {
+                    "checkpoint_id": str(
+                        getattr(snapshot.config, "configurable", {}).get("checkpoint_id", "")
+                    ),
+                    "next": list(getattr(snapshot, "next", []) or []),
+                    "interrupts": interrupts,
+                    "output": values.get("output", {}),
+                    "node_outputs_keys": list((values.get("node_outputs") or {}).keys()),
+                }
+            )
         return result
 
     async def _stream_and_record(self, initial_state: dict[str, Any] | Command) -> dict[str, Any]:
@@ -561,10 +665,14 @@ class GraphRuntime:
                 if self._on_node_event:
                     node_type = self._node_types.get(name, "")
                     data = event.get("data") or {}
-                    await self._on_node_event("node_start", {
-                        "node_id": name, "node_type": node_type,
-                        "inputs": data.get("input"),
-                    })
+                    await self._on_node_event(
+                        "node_start",
+                        {
+                            "node_id": name,
+                            "node_type": node_type,
+                            "inputs": data.get("input"),
+                        },
+                    )
             elif kind == "on_chain_end":
                 started = node_started_at.pop(name, time.perf_counter())
                 duration_ms = int((time.perf_counter() - started) * 1000)
@@ -587,10 +695,15 @@ class GraphRuntime:
                         error=None,
                     )
                 if self._on_node_event:
-                    await self._on_node_event("node_end", {
-                        "node_id": name, "status": "success",
-                        "outputs": node_out, "duration_ms": duration_ms,
-                    })
+                    await self._on_node_event(
+                        "node_end",
+                        {
+                            "node_id": name,
+                            "status": "success",
+                            "outputs": node_out,
+                            "duration_ms": duration_ms,
+                        },
+                    )
             elif kind == "on_chain_error":
                 started = node_started_at.pop(name, time.perf_counter())
                 duration_ms = int((time.perf_counter() - started) * 1000)
@@ -602,10 +715,15 @@ class GraphRuntime:
                     error=str(err),
                 )
                 if self._on_node_event:
-                    await self._on_node_event("node_end", {
-                        "node_id": name, "status": "error",
-                        "error": str(err), "duration_ms": duration_ms,
-                    })
+                    await self._on_node_event(
+                        "node_end",
+                        {
+                            "node_id": name,
+                            "status": "error",
+                            "error": str(err),
+                            "duration_ms": duration_ms,
+                        },
+                    )
 
         return final_state or {}
 
@@ -676,7 +794,9 @@ class GraphRuntime:
             return
         try:
             webhooks = self.webhook_repo.list_for_event(
-                self.tenant_id, event_type, self.application_id,
+                self.tenant_id,
+                event_type,
+                self.application_id,
             )
         except Exception:  # noqa: BLE001
             logger.exception("查 webhook 列表失败")

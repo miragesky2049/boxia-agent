@@ -43,16 +43,22 @@ class DatasetWriteNodeHandler(NodeHandler):
         )
 
         if not dataset_id:
-            return NodeResult(outputs={"isSuccess": False, "error": "dataset_write 节点缺少 datasetId"})
+            return NodeResult(
+                outputs={"isSuccess": False, "error": "dataset_write 节点缺少 datasetId"}
+            )
         if content is None:
-            return NodeResult(outputs={"isSuccess": False, "error": "dataset_write 节点缺少 content"})
+            return NodeResult(
+                outputs={"isSuccess": False, "error": "dataset_write 节点缺少 content"}
+            )
 
         if not ctx.services.has("vector_store") or not ctx.services.has("embedding"):
-            return NodeResult(outputs={
-                "chunkId": chunk_id,
-                "isSuccess": True,
-                "stub": f"[DatasetWrite stub] dataset={dataset_id}",
-            })
+            return NodeResult(
+                outputs={
+                    "chunkId": chunk_id,
+                    "isSuccess": True,
+                    "stub": f"[DatasetWrite stub] dataset={dataset_id}",
+                }
+            )
 
         vector_store = ctx.services.get("vector_store")
         embedding_service = ctx.services.get("embedding")

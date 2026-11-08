@@ -55,8 +55,11 @@ class _ScriptedLLM:
 
 def _make_ctx(services: ServiceRegistry, config: dict, user_input: str, emit) -> NodeContext:
     env = RuntimeEnv(
-        tenant_id=uuid4(), user_id=None, run_id=uuid4(),
-        thread_id="test", application_id=uuid4(),
+        tenant_id=uuid4(),
+        user_id=None,
+        run_id=uuid4(),
+        thread_id="test",
+        application_id=uuid4(),
     )
     return NodeContext(
         node_id="agent_1",
@@ -92,7 +95,10 @@ def test_agent_loop_emits_prompt_and_tool_trace_events() -> None:
 
     ctx = _make_ctx(
         services,
-        {"modleName": "m", "tools": [{"name": "get_weather", "parameters": {"type": "object", "properties": {}}}]},
+        {
+            "modleName": "m",
+            "tools": [{"name": "get_weather", "parameters": {"type": "object", "properties": {}}}],
+        },
         "北京天气",
         _emit,
     )
@@ -109,7 +115,9 @@ def test_agent_loop_emits_prompt_and_tool_trace_events() -> None:
     # 校验 plan 阶段的 prompt_text 带 phase=plan 和 messages
     plan_events = [p for t, p in events if t == "prompt_text" and p.get("phase") == "plan"]
     assert any("messages" in p for p in plan_events)
-    assert any(p.get("role") == "assistant" and "tasks" in p.get("content", "") for p in plan_events)
+    assert any(
+        p.get("role") == "assistant" and "tasks" in p.get("content", "") for p in plan_events
+    )
 
     # tool_call_start 带 name/arguments，tool_call_end 多 observation
     start = next(p for t, p in events if t == "tool_call_start")

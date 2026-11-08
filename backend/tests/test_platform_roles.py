@@ -71,9 +71,7 @@ def test_platform_roles_initialized_and_created_role_is_system(
     assert "ops" in _platform_roles(client, auth_headers)
 
 
-def test_platform_system_roles_are_protected(
-    client: TestClient, auth_headers
-) -> None:
+def test_platform_system_roles_are_protected(client: TestClient, auth_headers) -> None:
     roles = _platform_roles(client, auth_headers)
     viewer = roles["viewer"]
     superadmin = roles["superadmin"]
@@ -94,9 +92,7 @@ def test_platform_system_roles_are_protected(
     assert changed.status_code == 422
 
 
-def test_platform_role_bound_to_account_cannot_delete(
-    client: TestClient, auth_headers
-) -> None:
+def test_platform_role_bound_to_account_cannot_delete(client: TestClient, auth_headers) -> None:
     custom = client.post(
         ROLES_URL,
         json={"code": "support", "name": "平台客服"},
@@ -148,9 +144,6 @@ def test_platform_and_tenant_roles_are_isolated(
     assert "sales" not in platform_codes
     assert "ops" in platform_codes
 
-    tenant_codes = {
-        item["code"]
-        for item in site.get(ROLES_URL, headers=tenant_headers).json()
-    }
+    tenant_codes = {item["code"] for item in site.get(ROLES_URL, headers=tenant_headers).json()}
     assert "ops" not in tenant_codes
     assert "sales" in tenant_codes

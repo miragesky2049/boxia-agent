@@ -13,6 +13,7 @@ import json
 import logging
 import re
 from datetime import UTC, datetime
+from itertools import pairwise
 from typing import Any
 from uuid import UUID
 
@@ -22,7 +23,10 @@ from internal.domain.cache.base import KvCache
 from internal.domain.canvas.validate import validate_raw_graph
 from internal.domain.canvas.variable_types import coerce as coerce_variable
 from internal.domain.constants import PLATFORM_TENANT_ID
-from internal.domain.repository.apps_protocols import ApplicationRepositoryProtocol
+from internal.domain.repository.apps_protocols import (
+    ApplicationRepositoryProtocol,
+    ModelRepositoryProtocol,
+)
 from internal.domain.repository.protocols import UnitOfWork
 from internal.domain.storage.object_storage import ObjectStorage
 from internal.infrastructure.repository.apps.app_purge_repository import (
@@ -43,9 +47,15 @@ def _infer_runtime_mode(graph: dict[str, Any]) -> str:
             return "agent_loop"
     return "dag"
 
+
 FLOW_TYPE_WORKFLOW = "workflow"
 FLOW_TYPE_CHATFLOW = "chatflow"
-SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW})
+# 0074 智能体应用（PRD F1）：对话形态，运行载体为 start→agent_loop→end 标准画布
+FLOW_TYPE_AGENT = "agent"
+SUPPORTED_FLOW_TYPES = frozenset({FLOW_TYPE_WORKFLOW, FLOW_TYPE_CHATFLOW, FLOW_TYPE_AGENT})
+
+# 切换到 agent 时画布允许保留的节点类型：开始(1)/结束(2)/Agent 循环(100)
+_AGENT_ALLOWED_NODE_TYPES = frozenset({"1", "2", "100"})
 
 _BATCH_DELETE_LIMIT = 100
 
@@ -61,6 +71,14 @@ SYSTEM_VARIABLE_DEFS: dict[str, list[dict[str, str]]] = {
         {"name": "RUN_ID", "label": "本次运行 ID"},
     ],
     FLOW_TYPE_CHATFLOW: [
+        {"name": "USER_INPUT", "label": "本轮用户输入"},
+        {"name": "CONVERSATION_NAME", "label": "会话名称"},
+        {"name": "CONVERSATION_ID", "label": "会话 ID"},
+        {"name": "USER_ID", "label": "当前用户 ID"},
+        {"name": "RUN_ID", "label": "本次运行 ID"},
+    ],
+    # 智能体与对话流同为对话形态，系统变量一致（PRD F1.2）
+    FLOW_TYPE_AGENT: [
         {"name": "USER_INPUT", "label": "本轮用户输入"},
         {"name": "CONVERSATION_NAME", "label": "会话名称"},
         {"name": "CONVERSATION_ID", "label": "会话 ID"},
@@ -89,7 +107,9 @@ def _normalize_variables(raw: Any) -> list[dict[str, Any]]:
         if not name:
             raise ValidationError("变量名不能为空")
         if not _VARIABLE_NAME_RE.match(name):
-            raise ValidationError(f"变量名不合法：{name}（仅支持字母、数字、下划线，且不能以数字开头）")
+            raise ValidationError(
+                f"变量名不合法：{name}（仅支持字母、数字、下划线，且不能以数字开头）"
+            )
         if name in _RESERVED_VARIABLE_NAMES:
             raise ValidationError(f"变量名 {name} 与系统变量冲突")
         if name in seen:
@@ -103,19 +123,22 @@ def _normalize_variables(raw: Any) -> list[dict[str, Any]]:
         if scope not in VARIABLE_SCOPES:
             raise ValidationError(f"变量 {name} 作用域不合法：{scope}")
 
-        normalized.append({
-            "name": name,
-            "type": type_name,
-            "default": coerce_variable(item.get("default"), type_name),
-            "description": str(item.get("description") or ""),
-            "scope": scope,
-        })
+        normalized.append(
+            {
+                "name": name,
+                "type": type_name,
+                "default": coerce_variable(item.get("default"), type_name),
+                "description": str(item.get("description") or ""),
+                "scope": scope,
+            }
+        )
     return normalized
 
 
 def system_variables_for(flow_type: str) -> list[dict[str, str]]:
     """返回当前流程类型可见的系统变量（只读）。"""
     return list(SYSTEM_VARIABLE_DEFS.get(flow_type or FLOW_TYPE_WORKFLOW, []))
+
 
 def _assert_flow_type(flow_type: str) -> None:
     """校验流程类型取值，避免脏值写入 CHECK 约束。"""
@@ -127,6 +150,8 @@ def _assert_flow_type(flow_type: str) -> None:
 
 GRAPH_CACHE_TTL_SECONDS = 300
 GRAPH_INVALIDATE_CHANNEL = "graph:invalidate"
+
+
 # 草稿保存只拦截会破坏图结构的致命错误。必填项为空、表达式语法错、新节点未连线等
 # 都是编辑中间态，允许保存；发布时再用全量校验拦截。
 def _literal(value: Any) -> dict[str, Any]:
@@ -144,70 +169,114 @@ def _default_graph(flow_type: str, llm_model_id: str) -> dict[str, Any]:
         {"id": "start_1", "type": "1", "data": {"inputs": {}, "outputs": []}},
     ]
     if flow_type == FLOW_TYPE_CHATFLOW:
-        nodes.extend([
-            {
-                "id": "llm_1",
-                "type": "3",
-                "data": {
-                    "inputs": {
-                        "modleName": _literal(llm_model_id),
-                        "systemPrompt": _literal("你是一个乐于助人的助手。"),
-                        "prompt": _literal("{{start_1.output.USER_INPUT}}"),
+        nodes.extend(
+            [
+                {
+                    "id": "llm_1",
+                    "type": "3",
+                    "data": {
+                        "inputs": {
+                            "modleName": _literal(llm_model_id),
+                            "systemPrompt": _literal("你是一个乐于助人的助手。"),
+                            "prompt": _literal("{{start_1.output.USER_INPUT}}"),
+                        },
+                        "outputs": [],
                     },
-                    "outputs": [],
                 },
-            },
-            {
-                "id": "output_1",
-                "type": "13",
-                "data": {
-                    "inputs": {"content": _literal("{{llm_1.output.output}}")},
-                    "outputs": [],
+                {
+                    "id": "output_1",
+                    "type": "13",
+                    "data": {
+                        "inputs": {"content": _literal("{{llm_1.output.output}}")},
+                        "outputs": [],
+                    },
                 },
-            },
+                {
+                    "id": "end_1",
+                    "type": "2",
+                    "data": {
+                        "inputs": {
+                            "returnType": _literal("text"),
+                            "content": _literal("{{llm_1.output.output}}"),
+                            # 输出节点已推送聊天气泡，结束节点不再重复输出
+                            "stream": _literal(False),
+                        },
+                        "outputs": [],
+                    },
+                },
+            ]
+        )
+        node_ids = ["start_1", "llm_1", "output_1", "end_1"]
+    elif flow_type == FLOW_TYPE_AGENT:
+        # 智能体应用（PRD F1.3）：start→agent_loop→end 标准三节点画布。
+        # agent_loop 配置写显式 camelCase 键，与 chat 通道判定（use_canvas）、
+        # AgentLoopNodeHandler、应用详情卡片同一口径；tools 显式空列表时
+        # 纯聊天走打字机通道，配置面填入工具/知识库后自动切画布通道。
+        nodes.extend(
+            [
+                {
+                    "id": "agent_1",
+                    "type": "100",
+                    "data": {
+                        "inputs": {
+                            "modleName": _literal(llm_model_id),
+                            "systemPrompt": _literal("你是一个能干的助手。"),
+                            "tools": _literal([]),
+                            "maxToolRounds": _literal(10),
+                        },
+                        "outputs": [],
+                    },
+                },
+                {
+                    "id": "end_1",
+                    "type": "2",
+                    "data": {
+                        "inputs": {
+                            "returnType": _literal("text"),
+                            "content": _literal("{{agent_1.output.output}}"),
+                            # 回答由 agent 通道逐轮产出，结束节点不再重复输出
+                            "stream": _literal(False),
+                        },
+                        "outputs": [],
+                    },
+                },
+            ]
+        )
+        node_ids = ["start_1", "agent_1", "end_1"]
+    else:
+        nodes.append(
             {
                 "id": "end_1",
                 "type": "2",
                 "data": {
                     "inputs": {
                         "returnType": _literal("text"),
-                        "content": _literal("{{llm_1.output.output}}"),
-                        # 输出节点已推送聊天气泡，结束节点不再重复输出
-                        "stream": _literal(False),
+                        "content": _literal("运行完成"),
                     },
                     "outputs": [],
                 },
-            },
-        ])
-        node_ids = ["start_1", "llm_1", "output_1", "end_1"]
-    else:
-        nodes.append({
-            "id": "end_1",
-            "type": "2",
-            "data": {
-                "inputs": {
-                    "returnType": _literal("text"),
-                    "content": _literal("运行完成"),
-                },
-                "outputs": [],
-            },
-        })
+            }
+        )
         node_ids = ["start_1", "end_1"]
 
+    # 20261107：zip(..., strict=True) 会因两序列长度天然差 1 恒抛 ValueError（B905
+    # 误修引入的运行时缺陷），改 itertools.pairwise 等价且消除 lint 告警
     edges = [
         {"sourceNodeID": source, "targetNodeID": target, "sourcePortID": ""}
-        for source, target in zip(node_ids, node_ids[1:])
+        for source, target in pairwise(node_ids)
     ]
     return {"nodes": nodes, "edges": edges}
 
 
-DRAFT_BLOCKING_CODES = frozenset({
-    "missing_start",
-    "multiple_start",
-    "dangling_edge_source",
-    "dangling_edge_target",
-    "convert_failed",
-})
+DRAFT_BLOCKING_CODES = frozenset(
+    {
+        "missing_start",
+        "multiple_start",
+        "dangling_edge_source",
+        "dangling_edge_target",
+        "convert_failed",
+    }
+)
 # graph JSONB 超过该阈值时只存 URI（对象存储留给后续接入）
 GRAPH_INLINE_SIZE_THRESHOLD = 1024 * 1024  # 1MB
 
@@ -262,7 +331,7 @@ def asyncio_run(coro: Any) -> Any:
     import asyncio as _asyncio
 
     try:
-        loop = _asyncio.get_running_loop()
+        _asyncio.get_running_loop()
     except RuntimeError:
         return _asyncio.run(coro)
     # 已有 running loop（如 async router 里）：用 nest_asyncio 或直接在新线程跑
@@ -281,14 +350,20 @@ class ApplicationService:
         object_storage: ObjectStorage | None = None,
         *,
         default_llm_model_id: str,
+        model_repo: ModelRepositoryProtocol | None = None,
     ):
-        """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。"""
+        """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。
+
+        model_repo（可选）：发布闸门读取启用中的模型目录，用于拦截画布引用不存在
+        模型的发布；轻量 fake/测试未注入时跳过该项检查。
+        """
         self._uow = uow
         self._repo: ApplicationRepositoryProtocol = app_repo
         self._cache = cache
         # A12：对象存储（可选）；未配置时为 None，大画布降级内联存 DB
         self._storage = object_storage
         self._default_llm_model_id = default_llm_model_id
+        self._model_repo = model_repo
 
     # ========== 缓存 key ==========
     @staticmethod
@@ -361,10 +436,15 @@ class ApplicationService:
         self,
         owner_type: str | None = None,
         include_marketplace_only: bool = False,
+        flow_type: str | None = None,
+        published_only: bool = False,
     ) -> list[dict]:
+        # M4-c F14.1：flow_type/published_only 供协作区选择器过滤（默认不过滤，行为不变）
         return self._repo.list_applications(
             owner_type=owner_type,
             include_marketplace_only=include_marketplace_only,
+            flow_type=flow_type,
+            published_only=published_only,
         )
 
     # ========== 平台管理端 ==========
@@ -481,9 +561,7 @@ class ApplicationService:
         app = self._repo.get_application(application_id)
         return {
             "variables": normalized,
-            "system": system_variables_for(
-                (app or {}).get("flow_type", FLOW_TYPE_WORKFLOW)
-            ),
+            "system": system_variables_for((app or {}).get("flow_type", FLOW_TYPE_WORKFLOW)),
         }
 
     def get_user_variables(
@@ -502,16 +580,13 @@ class ApplicationService:
         values: dict[str, Any],
     ) -> dict[str, Any]:
         """写入用户变量实际取值；仅允许已声明为 user 作用域的变量。"""
-        definitions = _normalize_variables(
-            self._repo.get_application_variables(application_id)
-        )
+        definitions = _normalize_variables(self._repo.get_application_variables(application_id))
         user_defs = {item["name"]: item for item in definitions if item["scope"] == "user"}
         unknown = sorted(set(values) - set(user_defs))
         if unknown:
             raise ValidationError("未声明的用户变量：" + "、".join(unknown))
         coerced = {
-            name: coerce_variable(value, user_defs[name]["type"])
-            for name, value in values.items()
+            name: coerce_variable(value, user_defs[name]["type"]) for name, value in values.items()
         }
         self._repo.set_user_variables(application_id, user_id, coerced)
         self._uow.commit()
@@ -528,9 +603,7 @@ class ApplicationService:
         缺失时回退定义默认值。运行期写入统一落在 state.globals，由 Runtime
         在成功后把用户变量键的变化写回（见 GraphRuntime._flush_user_variables）。
         """
-        definitions = _normalize_variables(
-            self._repo.get_application_variables(application_id)
-        )
+        definitions = _normalize_variables(self._repo.get_application_variables(application_id))
         stored_values: dict[str, Any] = {}
         if user_id is not None:
             try:
@@ -570,14 +643,10 @@ class ApplicationService:
             return set(), set()
 
         variable_names = {
-            str(item.get("name"))
-            for item in info.get("variables", [])
-            if item.get("name")
+            str(item.get("name")) for item in info.get("variables", []) if item.get("name")
         }
         system_names = {
-            str(item.get("name"))
-            for item in info.get("system", [])
-            if item.get("name")
+            str(item.get("name")) for item in info.get("system", []) if item.get("name")
         }
         return variable_names, system_names
 
@@ -590,7 +659,12 @@ class ApplicationService:
 
         两种形态共用同一套节点库，因此对话流 -> 工作流不因存在输出/问答/会话节点而拒绝；
         工作流 -> 对话流仍要求图中已有开始和结束节点。
+        切换到智能体（0074）要求画布不含会被配置面"编辑不到"的编排节点，见
+        _assert_switch_to_agent_allowed。
         """
+        if next_flow_type == FLOW_TYPE_AGENT:
+            self._assert_switch_to_agent_allowed(application_id)
+            return
         if next_flow_type != FLOW_TYPE_CHATFLOW:
             return
         latest = self._repo.get_latest_graph_version(application_id)
@@ -605,8 +679,31 @@ class ApplicationService:
         if "2" not in type_codes:
             missing.append("结束")
         if missing:
+            raise ValidationError("当前画布缺少节点，无法切换为对话流：" + "、".join(missing))
+
+    def _assert_switch_to_agent_allowed(self, application_id: UUID) -> None:
+        """切换到智能体仅允许"不丢编排内容"的画布：节点类型 ⊆ {开始, 结束, Agent 循环}。
+
+        对话流画布上的 LLM/输出/问答等节点切到 agent 后不会被配置面表单读写、
+        却仍留在画布里，会造成"编辑对象与运行对象不一致"的错觉；要求先清理或复制应用。
+        """
+        latest = self._repo.get_latest_graph_version(application_id)
+        if latest is None:
+            return
+        graph = _parse_graph(latest["graph"], self._storage)
+        nodes = graph.get("nodes") or []
+        extra = sorted(
+            {
+                str(node.get("type"))
+                for node in nodes
+                if str(node.get("type")) not in _AGENT_ALLOWED_NODE_TYPES
+            }
+        )
+        if extra:
             raise ValidationError(
-                "当前画布缺少节点，无法切换为对话流：" + "、".join(missing)
+                "画布包含非智能体结构的节点（类型 "
+                + "、".join(extra)
+                + "），切换为智能体前请先清理画布或复制该应用"
             )
 
     def set_listed_in_market(self, application_id: UUID, listed: bool) -> None:
@@ -691,9 +788,7 @@ class ApplicationService:
                 }
             )
 
-        result = self._repo.upsert_tenant_scope(
-            application_id, tenant_id, visibility, normalized
-        )
+        result = self._repo.upsert_tenant_scope(application_id, tenant_id, visibility, normalized)
         self._uow.commit()
         return result
 
@@ -720,10 +815,7 @@ class ApplicationService:
             variable_names=variable_names,
             system_names=system_names,
         )
-        blocking = [
-            i for i in issues
-            if i.severity == "error" and i.code in DRAFT_BLOCKING_CODES
-        ]
+        blocking = [i for i in issues if i.severity == "error" and i.code in DRAFT_BLOCKING_CODES]
         if blocking:
             detail = "; ".join(i.message for i in blocking)
             raise ValidationError(f"画布结构不合法：{detail}")
@@ -739,15 +831,19 @@ class ApplicationService:
         if graph_size > GRAPH_INLINE_SIZE_THRESHOLD and self._storage is not None:
             key = f"graphs/{application_id}/v{next_version}.json"
             try:
-                uri = asyncio_run(self._storage.put(
-                    key,
-                    json.dumps(graph, ensure_ascii=False).encode("utf-8"),
-                    content_type="application/json",
-                ))
+                uri = asyncio_run(
+                    self._storage.put(
+                        key,
+                        json.dumps(graph, ensure_ascii=False).encode("utf-8"),
+                        content_type="application/json",
+                    )
+                )
                 graph_to_persist = {"__graph_ref__": uri}
                 logger.info(
                     "graph 超过内联阈值，已写入对象存储: app=%s size=%d uri=%s",
-                    application_id, graph_size, uri,
+                    application_id,
+                    graph_size,
+                    uri,
                 )
             except Exception as exc:  # noqa: BLE001
                 logger.exception("写入对象存储失败，降级为内联写 DB: %s", exc)
@@ -755,7 +851,9 @@ class ApplicationService:
         elif graph_size > GRAPH_INLINE_SIZE_THRESHOLD:
             logger.warning(
                 "graph 超过内联阈值 %d bytes 但对象存储未配置，降级为内联: app=%s size=%d",
-                GRAPH_INLINE_SIZE_THRESHOLD, application_id, graph_size,
+                GRAPH_INLINE_SIZE_THRESHOLD,
+                application_id,
+                graph_size,
             )
 
         self._repo.insert_graph_version(
@@ -770,22 +868,24 @@ class ApplicationService:
         self._repo.update_graph(application_id, graph_to_persist, runtime_mode)
 
         # P2-7: 写审计日志（平台级操作使用 PLATFORM_TENANT_ID，audit_logs.tenant_id 不允许 NULL）
-        self._uow.audit_logs.record({
-            "actor_id": actor_id,
-            "actor_username": actor_username,
-            "action": "GRAPH_SAVE",
-            "resource_type": "application",
-            "resource_id": str(application_id),
-            "tenant_id": PLATFORM_TENANT_ID,
-            "detail": {
-                "previous_version": previous_version,
-                "new_version": next_version,
-                "runtime_mode": runtime_mode,
-                "changelog": changelog,
-                "node_count": len(graph.get("nodes", [])),
-                "size_bytes": graph_size,
-            },
-        })
+        self._uow.audit_logs.record(
+            {
+                "actor_id": actor_id,
+                "actor_username": actor_username,
+                "action": "GRAPH_SAVE",
+                "resource_type": "application",
+                "resource_id": str(application_id),
+                "tenant_id": PLATFORM_TENANT_ID,
+                "detail": {
+                    "previous_version": previous_version,
+                    "new_version": next_version,
+                    "runtime_mode": runtime_mode,
+                    "changelog": changelog,
+                    "node_count": len(graph.get("nodes", [])),
+                    "size_bytes": graph_size,
+                },
+            }
+        )
 
         self._uow.commit()
 
@@ -807,6 +907,18 @@ class ApplicationService:
             "published_graph_version": app.get("published_graph_version") if app else None,
             "flow_type": app.get("flow_type", "workflow") if app else "workflow",
         }
+
+    def get_published_graph_version(self, application_id: UUID) -> int | None:
+        """应用当前已发布的 graph 版本号；应用不存在或未发布返回 None。
+
+        M4-c F14.1：智能体委派的目标须"已发布"——get_runtime_graph 对未发布
+        应用会回退 latest（历史兼容），不能作为发布判据，故单独提供本查询。
+        """
+        app = self._repo.get_application(application_id)
+        if app is None:
+            return None
+        published = app.get("published_graph_version")
+        return int(published) if published is not None else None
 
     def list_graph_versions(self, application_id: UUID, limit: int = 50) -> list[dict]:
         if self._repo.get_application(application_id) is None:
@@ -878,6 +990,18 @@ class ApplicationService:
         return graph
 
     # ========== 发布动作（draft → live 快照） ==========
+    def _known_model_ids(self) -> set[str] | None:
+        """发布闸门的可用模型集合：目录中已启用模型 + settings 默认模型兜底。
+
+        组合根未注入 model_repo（fake/测试装配）时返回 None，调用方跳过模型检查，
+        避免测试环境因目录为空而误拦截所有发布。
+        """
+        if self._model_repo is None:
+            return None
+        models = {str(row["model_id"]) for row in self._model_repo.list_catalog()}
+        models.add(self._default_llm_model_id)
+        return models
+
     def publish_graph(
         self,
         application_id: UUID,
@@ -904,6 +1028,7 @@ class ApplicationService:
             latest_graph if isinstance(latest_graph, dict) else {},
             variable_names=variable_names,
             system_names=system_names,
+            known_models=self._known_model_ids(),
         )
         errors = [i for i in issues if i.severity == "error"]
         if errors:
@@ -915,19 +1040,21 @@ class ApplicationService:
 
         self._repo.set_published_graph_version(application_id, target_version)
 
-        self._uow.audit_logs.record({
-            "actor_id": actor_id,
-            "actor_username": actor_username,
-            "action": "GRAPH_PUBLISH",
-            "resource_type": "application",
-            "resource_id": str(application_id),
-            "tenant_id": PLATFORM_TENANT_ID,
-            "detail": {
-                "previous_published_version": previous_version,
-                "new_published_version": target_version,
-                "runtime_mode": latest.get("runtime_mode", "dag"),
-            },
-        })
+        self._uow.audit_logs.record(
+            {
+                "actor_id": actor_id,
+                "actor_username": actor_username,
+                "action": "GRAPH_PUBLISH",
+                "resource_type": "application",
+                "resource_id": str(application_id),
+                "tenant_id": PLATFORM_TENANT_ID,
+                "detail": {
+                    "previous_published_version": previous_version,
+                    "new_published_version": target_version,
+                    "runtime_mode": latest.get("runtime_mode", "dag"),
+                },
+            }
+        )
         self._uow.commit()
         self._invalidate_graph_cache(application_id)
 
@@ -968,7 +1095,9 @@ class ApplicationService:
         return graph
 
     @staticmethod
-    def _apply_config_overrides(graph: dict[str, Any], tenant_config: dict[str, Any]) -> dict[str, Any]:
+    def _apply_config_overrides(
+        graph: dict[str, Any], tenant_config: dict[str, Any]
+    ) -> dict[str, Any]:
         """把 tenant_config 里的 key 形如 graph.nodes.{node_id}.config.{field} 覆盖到 graph 上。"""
         if not tenant_config:
             return graph
@@ -1277,26 +1406,28 @@ class ApplicationService:
             new_name = new_name[:197] + "..."
 
         try:
-            new_app_id = self._repo.insert_application_row({
-                "owner_type": "platform",
-                "owner_id": None,
-                "name": new_name,
-                "avatar_url": source.get("avatar_url"),
-                "description": source.get("description", ""),
-                "is_enabled": False,
-                "is_listed_in_market": False,
-                "sale_mode": source.get("sale_mode", 1),
-                "support_trial": source.get("support_trial", False),
-                "doc_url": source.get("doc_url", ""),
-                "ext_json": source.get("ext_json") or {},
-                "visibility_lock": source.get("visibility_lock", False),
-                "visibility_template": source.get("visibility_template", "all"),
-                "admin_scope_mode": source.get("admin_scope_mode", "all_admin"),
-                "published_graph_version": None,
-                "flow_type": source.get("flow_type", "workflow"),
-                "variables": source.get("variables") or [],
-                "created_by": actor_id,
-            })
+            new_app_id = self._repo.insert_application_row(
+                {
+                    "owner_type": "platform",
+                    "owner_id": None,
+                    "name": new_name,
+                    "avatar_url": source.get("avatar_url"),
+                    "description": source.get("description", ""),
+                    "is_enabled": False,
+                    "is_listed_in_market": False,
+                    "sale_mode": source.get("sale_mode", 1),
+                    "support_trial": source.get("support_trial", False),
+                    "doc_url": source.get("doc_url", ""),
+                    "ext_json": source.get("ext_json") or {},
+                    "visibility_lock": source.get("visibility_lock", False),
+                    "visibility_template": source.get("visibility_template", "all"),
+                    "admin_scope_mode": source.get("admin_scope_mode", "all_admin"),
+                    "published_graph_version": None,
+                    "flow_type": source.get("flow_type", "workflow"),
+                    "variables": source.get("variables") or [],
+                    "created_by": actor_id,
+                }
+            )
 
             # 复制当前 graph（application_graph 行）
             graph_row = self._repo.get_graph_row(application_id)
@@ -1323,21 +1454,23 @@ class ApplicationService:
             # v2 可见范围（app_visibility_scope）属租户侧配置，随副本新租户订阅按模板兜底，不复制
 
             # 写审计日志
-            self._uow.audit_logs.record({
-                "actor_id": actor_id,
-                "actor_username": actor_username,
-                "action": "APP_COPY",
-                "resource_type": "application",
-                "resource_id": str(new_app_id),
-                "tenant_id": PLATFORM_TENANT_ID,
-                "detail": {
-                    "source_application_id": str(application_id),
-                    "source_name": source_name,
-                    "new_application_id": str(new_app_id),
-                    "new_name": new_name,
-                    "flow_type": source.get("flow_type"),
-                },
-            })
+            self._uow.audit_logs.record(
+                {
+                    "actor_id": actor_id,
+                    "actor_username": actor_username,
+                    "action": "APP_COPY",
+                    "resource_type": "application",
+                    "resource_id": str(new_app_id),
+                    "tenant_id": PLATFORM_TENANT_ID,
+                    "detail": {
+                        "source_application_id": str(application_id),
+                        "source_name": source_name,
+                        "new_application_id": str(new_app_id),
+                        "new_name": new_name,
+                        "flow_type": source.get("flow_type"),
+                    },
+                }
+            )
 
             self._uow.commit()
         except Exception:

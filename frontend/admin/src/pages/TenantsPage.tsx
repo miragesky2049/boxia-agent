@@ -16,7 +16,13 @@ import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useCallback, useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { batchDeleteTenants, createTenant, deleteTenant, listTenants, updateTenant } from '../api/tenant'
+import {
+  batchDeleteTenants,
+  createTenant,
+  deleteTenant,
+  listTenants,
+  updateTenant,
+} from '../api/tenant'
 import type { Tenant, TenantBatchDeleteItem } from '../api/types'
 import { useAuth } from '../auth/AuthContext'
 import { FormSection } from '../components/common/FormSection'
@@ -170,7 +176,7 @@ export default function TenantsPage() {
   const handleBatchDelete = () => {
     const targets = items.filter(
       (item) =>
-        selectedKeys.includes(item.id) && !(item.is_platform ?? item.code === PLATFORM_TENANT_CODE)
+        selectedKeys.includes(item.id) && !(item.is_platform ?? item.code === PLATFORM_TENANT_CODE),
     )
     if (targets.length === 0) return
     modal.confirm({
@@ -340,12 +346,7 @@ export default function TenantsPage() {
           共 {total} 个租户
         </Tag>
         {canDelete && selectedKeys.length > 0 && (
-          <Button
-            danger
-            icon={<DeleteOutlined />}
-            loading={batchBusy}
-            onClick={handleBatchDelete}
-          >
+          <Button danger icon={<DeleteOutlined />} loading={batchBusy} onClick={handleBatchDelete}>
             批量删除（{selectedKeys.length}）
           </Button>
         )}
@@ -393,7 +394,12 @@ export default function TenantsPage() {
         forceRender
         width={560}
       >
-        <Form<CreateFormValues> form={createForm} name="tenant-create" layout="vertical" requiredMark={false}>
+        <Form<CreateFormValues>
+          form={createForm}
+          name="tenant-create"
+          layout="vertical"
+          requiredMark={false}
+        >
           <FormSection title="租户信息">
             <Form.Item
               name="code"
@@ -457,7 +463,12 @@ export default function TenantsPage() {
         cancelText="取消"
         forceRender
       >
-        <Form<EditFormValues> form={editForm} name="tenant-edit" layout="vertical" requiredMark={false}>
+        <Form<EditFormValues>
+          form={editForm}
+          name="tenant-edit"
+          layout="vertical"
+          requiredMark={false}
+        >
           <Form.Item label="租户编码">
             <Input value={editing?.code} disabled />
           </Form.Item>

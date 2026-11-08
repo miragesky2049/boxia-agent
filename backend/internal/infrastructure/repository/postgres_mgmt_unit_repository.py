@@ -31,9 +31,7 @@ class PostgresMgmtUnitRepository:
         row = self._session.get(MgmtUnitModel, unit_id)
         return self._to_entity(row) if row else None
 
-    def get_for_update(
-        self, unit_id: UUID, tenant_id: UUID | None = None
-    ) -> ManagementUnit | None:
+    def get_for_update(self, unit_id: UUID, tenant_id: UUID | None = None) -> ManagementUnit | None:
         """按主键加行锁查询管理单元；传入租户时同时限定租户。"""
         stmt = select(MgmtUnitModel).where(MgmtUnitModel.id == unit_id)
         if tenant_id is not None:
@@ -41,9 +39,7 @@ class PostgresMgmtUnitRepository:
         row = self._session.scalar(stmt.with_for_update())
         return self._to_entity(row) if row else None
 
-    def list_all(
-        self, tenant_id: UUID, include_inactive: bool = True
-    ) -> list[ManagementUnit]:
+    def list_all(self, tenant_id: UUID, include_inactive: bool = True) -> list[ManagementUnit]:
         """按物化路径顺序返回租户全部管理单元。"""
         stmt = select(MgmtUnitModel).where(MgmtUnitModel.tenant_id == tenant_id)
         if not include_inactive:
@@ -83,9 +79,7 @@ class PostgresMgmtUnitRepository:
         self._session.flush()
         return True
 
-    def code_exists(
-        self, tenant_id: UUID, code: str, exclude_id: UUID | None = None
-    ) -> bool:
+    def code_exists(self, tenant_id: UUID, code: str, exclude_id: UUID | None = None) -> bool:
         """租户内管理单元编码是否已存在（忽略大小写）。"""
         stmt = select(MgmtUnitModel.id).where(
             MgmtUnitModel.tenant_id == tenant_id,
@@ -147,14 +141,10 @@ class PostgresMgmtUnitRepository:
         ).all()
         return [MgmtUnitUser(unit_id=row.unit_id, user_id=row.user_id) for row in rows]
 
-    def replace_departments(
-        self, unit_id: UUID, bindings: list[tuple[UUID, bool]]
-    ) -> None:
+    def replace_departments(self, unit_id: UUID, bindings: list[tuple[UUID, bool]]) -> None:
         """整体替换管理单元的部门关联。"""
         self._session.execute(
-            delete(MgmtUnitDepartmentModel).where(
-                MgmtUnitDepartmentModel.unit_id == unit_id
-            )
+            delete(MgmtUnitDepartmentModel).where(MgmtUnitDepartmentModel.unit_id == unit_id)
         )
         if bindings:
             self._session.execute(
@@ -168,9 +158,7 @@ class PostgresMgmtUnitRepository:
 
     def replace_users(self, unit_id: UUID, user_ids: list[UUID]) -> None:
         """整体替换管理单元的人员关联。"""
-        self._session.execute(
-            delete(MgmtUnitUserModel).where(MgmtUnitUserModel.unit_id == unit_id)
-        )
+        self._session.execute(delete(MgmtUnitUserModel).where(MgmtUnitUserModel.unit_id == unit_id))
         if user_ids:
             self._session.execute(
                 insert(MgmtUnitUserModel),
@@ -178,9 +166,7 @@ class PostgresMgmtUnitRepository:
             )
         self._session.flush()
 
-    def list_departments_for_units(
-        self, unit_ids: list[UUID]
-    ) -> list[MgmtUnitDepartment]:
+    def list_departments_for_units(self, unit_ids: list[UUID]) -> list[MgmtUnitDepartment]:
         """批量读取多个单元的部门关联，避免 N+1。"""
         if not unit_ids:
             return []

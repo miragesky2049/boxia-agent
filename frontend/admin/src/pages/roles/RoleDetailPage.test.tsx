@@ -174,7 +174,12 @@ function mockApi(captured: Captured, onSave?: (codes: string[]) => void) {
     }
     if (pathname.endsWith('/admin/roles/5/grants') && method === 'GET') {
       if (u.searchParams.get('resource_type') === 'tool') {
-        return jsonResponse({ items: [rowWide, rowRole, rowCandidate], total: 3, page: 1, page_size: 20 })
+        return jsonResponse({
+          items: [rowWide, rowRole, rowCandidate],
+          total: 3,
+          page: 1,
+          page_size: 20,
+        })
       }
       return jsonResponse(emptyPage())
     }

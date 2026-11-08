@@ -6,25 +6,22 @@ import asyncio
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
-import httpx
 import pytest
 
-from internal.domain.constants import PLATFORM_TENANT_ID
+from internal.domain.agent.governance import CircuitBreaker as _CircuitBreaker
+from internal.domain.agent.governance import RateLimiter as _RateLimiter
 from internal.domain.agent.run_context import AgentRunContext
 from internal.domain.agent.tool_gateway import (
     DEFAULT_RESPONSE_CLIP_BYTES,
     GatewayConfig,
     ToolClientError,
-    ToolConnectionError,
     ToolGateway,
     ToolServerError,
-    ToolTimeoutError,
-    _CircuitBreaker,
-    _RateLimiter,
     _classify_http_response,
     _clip_response,
 )
 from internal.domain.agent.tools import ToolExecutionError
+from internal.domain.constants import PLATFORM_TENANT_ID
 
 
 def _run(coro: Any) -> Any:

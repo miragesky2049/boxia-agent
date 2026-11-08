@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any, AsyncIterator
+from collections.abc import AsyncIterator
+from typing import Any
 from uuid import uuid4
 
 from internal.domain.canvas.node_type import NodeType
@@ -53,12 +54,14 @@ class _StreamingLLM:
         max_tokens: int | None = None,
         response_format: dict | None = None,
     ) -> AsyncIterator[LLMResponse]:
-        self.stream_calls.append({
-            "messages": messages,
-            "model": model,
-            "temperature": temperature,
-            "max_tokens": max_tokens,
-        })
+        self.stream_calls.append(
+            {
+                "messages": messages,
+                "model": model,
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+            }
+        )
         for delta in ["你", "好", "，", "boxia"]:
             yield LLMResponse(content=delta, finish_reason="stop", model=model)
         yield LLMResponse(

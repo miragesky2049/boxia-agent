@@ -59,12 +59,16 @@ def _make_ctx(
 
 def test_structured_case_eq_matches() -> None:
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "age_adult",
-            "left": "{{start.output.age}}",
-            "operator": "eq",
-            "right": "18",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "age_adult",
+                    "left": "{{start.output.age}}",
+                    "operator": "eq",
+                    "right": "18",
+                }
+            ]
+        },
         start_output={"age": 18},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -73,13 +77,17 @@ def test_structured_case_eq_matches() -> None:
 
 def test_structured_case_ne_falls_to_else() -> None:
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "is_child",
-            "left": "{{start.output.age}}",
-            "operator": "ne",
-            "right": "18",
-        }],
-        "else_port": "else"},
+        {
+            "cases": [
+                {
+                    "case_id": "is_child",
+                    "left": "{{start.output.age}}",
+                    "operator": "ne",
+                    "right": "18",
+                }
+            ],
+            "else_port": "else",
+        },
         start_output={"age": 18},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -88,12 +96,16 @@ def test_structured_case_ne_falls_to_else() -> None:
 
 def test_structured_case_gt() -> None:
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "gt_18",
-            "left": "{{start.output.age}}",
-            "operator": "gt",
-            "right": "18",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "gt_18",
+                    "left": "{{start.output.age}}",
+                    "operator": "gt",
+                    "right": "18",
+                }
+            ]
+        },
         start_output={"age": 20},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -104,12 +116,16 @@ def test_structured_case_contains_swaps_sides() -> None:
     # coze contains 语义：left 包含 right；Python `in` 是 needle in haystack
     # 拼接后应该是 `'bar' in ('foo bar baz')`
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "has_bar",
-            "left": "{{start.output.text}}",
-            "operator": "contains",
-            "right": "bar",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "has_bar",
+                    "left": "{{start.output.text}}",
+                    "operator": "contains",
+                    "right": "bar",
+                }
+            ]
+        },
         start_output={"text": "foo bar baz"},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -118,11 +134,15 @@ def test_structured_case_contains_swaps_sides() -> None:
 
 def test_structured_case_is_empty() -> None:
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "empty",
-            "left": "{{start.output.note}}",
-            "operator": "is_empty",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "empty",
+                    "left": "{{start.output.note}}",
+                    "operator": "is_empty",
+                }
+            ]
+        },
         start_output={"note": ""},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -131,11 +151,15 @@ def test_structured_case_is_empty() -> None:
 
 def test_structured_case_is_not_empty() -> None:
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "non_empty",
-            "left": "{{start.output.note}}",
-            "operator": "is_not_empty",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "non_empty",
+                    "left": "{{start.output.note}}",
+                    "operator": "is_not_empty",
+                }
+            ]
+        },
         start_output={"note": "hello"},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -145,10 +169,14 @@ def test_structured_case_is_not_empty() -> None:
 def test_existing_expression_field_is_used_directly() -> None:
     # 已经有 expression 字段时，不应该再走 left/operator/right 拼接
     ctx = _make_ctx(
-        {"cases": [{
-            "case_id": "custom",
-            "expression": "{{start.output.age}} >= 60",
-        }]},
+        {
+            "cases": [
+                {
+                    "case_id": "custom",
+                    "expression": "{{start.output.age}} >= 60",
+                }
+            ]
+        },
         start_output={"age": 65},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -157,21 +185,23 @@ def test_existing_expression_field_is_used_directly() -> None:
 
 def test_multi_case_first_truthy_wins() -> None:
     ctx = _make_ctx(
-        {"cases": [
-            {
-                "case_id": "child",
-                "left": "{{start.output.age}}",
-                "operator": "lt",
-                "right": "18",
-            },
-            {
-                "case_id": "adult",
-                "left": "{{start.output.age}}",
-                "operator": "gte",
-                "right": "18",
-            },
-        ],
-        "else_port": "else"},
+        {
+            "cases": [
+                {
+                    "case_id": "child",
+                    "left": "{{start.output.age}}",
+                    "operator": "lt",
+                    "right": "18",
+                },
+                {
+                    "case_id": "adult",
+                    "left": "{{start.output.age}}",
+                    "operator": "gte",
+                    "right": "18",
+                },
+            ],
+            "else_port": "else",
+        },
         start_output={"age": 30},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -182,8 +212,10 @@ def test_multi_case_first_truthy_wins() -> None:
 def test_unconfigured_default_case_falls_to_else() -> None:
     # 新建条件节点默认带一个空「如果」，不能按 ("" == "") 恒真误判
     ctx = _make_ctx(
-        {"cases": [{"case_id": "case_1", "left": "", "operator": "eq", "right": ""}],
-         "else_port": "else"},
+        {
+            "cases": [{"case_id": "case_1", "left": "", "operator": "eq", "right": ""}],
+            "else_port": "else",
+        },
         start_output={},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -192,16 +224,18 @@ def test_unconfigured_default_case_falls_to_else() -> None:
 
 def test_unconfigured_case_does_not_block_later_case() -> None:
     ctx = _make_ctx(
-        {"cases": [
-            {"case_id": "case_1", "left": "", "operator": "eq", "right": ""},
-            {
-                "case_id": "case_2",
-                "left": "{{start.output.age}}",
-                "operator": "eq",
-                "right": "18",
-            },
-        ],
-        "else_port": "else"},
+        {
+            "cases": [
+                {"case_id": "case_1", "left": "", "operator": "eq", "right": ""},
+                {
+                    "case_id": "case_2",
+                    "left": "{{start.output.age}}",
+                    "operator": "eq",
+                    "right": "18",
+                },
+            ],
+            "else_port": "else",
+        },
         start_output={"age": 18},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))
@@ -210,21 +244,23 @@ def test_unconfigured_case_does_not_block_later_case() -> None:
 
 def test_all_cases_false_falls_to_else_port() -> None:
     ctx = _make_ctx(
-        {"cases": [
-            {
-                "case_id": "child",
-                "left": "{{start.output.age}}",
-                "operator": "lt",
-                "right": "18",
-            },
-            {
-                "case_id": "senior",
-                "left": "{{start.output.age}}",
-                "operator": "gte",
-                "right": "65",
-            },
-        ],
-        "else_port": "middle"},
+        {
+            "cases": [
+                {
+                    "case_id": "child",
+                    "left": "{{start.output.age}}",
+                    "operator": "lt",
+                    "right": "18",
+                },
+                {
+                    "case_id": "senior",
+                    "left": "{{start.output.age}}",
+                    "operator": "gte",
+                    "right": "65",
+                },
+            ],
+            "else_port": "middle",
+        },
         start_output={"age": 30},
     )
     result = asyncio.run(IfElseNodeHandler().run(ctx))

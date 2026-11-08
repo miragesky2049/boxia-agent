@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from uuid import UUID, uuid4
 
-from sqlalchemy import Uuid, String
+from sqlalchemy import String, Uuid
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 from internal.domain.entity.access import AccessScope

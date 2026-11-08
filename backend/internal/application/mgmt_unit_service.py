@@ -73,9 +73,7 @@ class MgmtUnitService:
 
         if normalized_code and self._uow.mgmt_units.code_exists(tenant_id, normalized_code):
             raise ConflictError("管理单元编码已存在")
-        if self._uow.mgmt_units.name_exists_under_parent(
-            tenant_id, parent_id, normalized_name
-        ):
+        if self._uow.mgmt_units.name_exists_under_parent(tenant_id, parent_id, normalized_name):
             raise ConflictError("同一上级下已存在同名管理单元")
 
         unit_id = new_uuid()
@@ -284,16 +282,12 @@ class MgmtUnitService:
     def _move(self, unit: ManagementUnit, new_parent_id: UUID | None) -> ManagementUnit:
         """单事务移动子树：统一加锁、防环、层级校验、path/level 平移。"""
         tenant_id = unit.tenant_id
-        locked = self._uow.mgmt_units.lock_subtree_and_parent(
-            tenant_id, unit.path, new_parent_id
-        )
+        locked = self._uow.mgmt_units.lock_subtree_and_parent(tenant_id, unit.path, new_parent_id)
         if not any(item.id == unit.id for item in locked):
             raise NotFoundError("管理单元不存在")
         new_parent = None
         if new_parent_id is not None:
-            new_parent = next(
-                (item for item in locked if item.id == new_parent_id), None
-            )
+            new_parent = next((item for item in locked if item.id == new_parent_id), None)
             if new_parent is None:
                 raise NotFoundError("目标上级管理单元不存在")
             if not new_parent.is_active:
@@ -304,9 +298,7 @@ class MgmtUnitService:
         target_level = 1 if new_parent is None else new_parent.level + 1
         level_delta = target_level - unit.level
         if level_delta > 0:
-            subtree_levels = (
-                item.level for item in locked if item.path.startswith(unit.path)
-            )
+            subtree_levels = (item.level for item in locked if item.path.startswith(unit.path))
             if max(subtree_levels) + level_delta > _MAX_LEVEL:
                 raise ValidationError("移动后管理单元层级超过 10 级上限")
 
@@ -324,9 +316,7 @@ class MgmtUnitService:
             raise NotFoundError("管理单元不存在")
         return moved
 
-    def _lock_parent(
-        self, parent_id: UUID | None, tenant_id: UUID
-    ) -> ManagementUnit | None:
+    def _lock_parent(self, parent_id: UUID | None, tenant_id: UUID) -> ManagementUnit | None:
         """创建子单元前锁定父行并校验层级与启用状态。"""
         if parent_id is None:
             return None

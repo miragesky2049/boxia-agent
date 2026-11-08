@@ -38,6 +38,10 @@ class ConversationRepository(ABC):
         """删除会话（级联删除消息）。"""
 
     @abstractmethod
+    async def clear_summary(self, conversation_id: UUID) -> None:
+        """清空摘要式记忆的摘要正文与水位线（M4 PRD F15.7：清空上下文时联动调用）。"""
+
+    @abstractmethod
     async def update_title(self, conversation_id: UUID, title: str) -> None:
         """更新会话标题。"""
 

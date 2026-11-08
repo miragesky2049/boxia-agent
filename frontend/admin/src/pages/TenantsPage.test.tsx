@@ -137,10 +137,7 @@ function mockApi(captured: Captured, options: MockApiOptions) {
           deleted: { application: 1 },
         })
       }
-      return jsonResponse(
-        { detail: '该操作仅产品级运营管理平台可用', code: 'FORBIDDEN' },
-        status,
-      )
+      return jsonResponse({ detail: '该操作仅产品级运营管理平台可用', code: 'FORBIDDEN' }, status)
     }
     if (method === 'POST' && pathname.endsWith('/admin/tenants/batch')) {
       record()
@@ -219,9 +216,7 @@ describe('TenantsPage 删除能力', () => {
     expect(platformCheckbox?.disabled).toBe(true)
     const deleteButtons = screen.getAllByRole('button', { name: /删\s*除/ })
     expect(deleteButtons.length).toBe(3)
-    const platformDeleteButton = deleteButtons.find(
-      (btn) => btn.closest('tr') === platformRow
-    )
+    const platformDeleteButton = deleteButtons.find((btn) => btn.closest('tr') === platformRow)
     expect(platformDeleteButton).toBeDefined()
     expect(platformDeleteButton?.hasAttribute('disabled')).toBe(true)
   })
@@ -250,7 +245,9 @@ describe('TenantsPage 删除能力', () => {
       expect(
         captured.requests.some(
           (r) =>
-            r.method === 'DELETE' && r.pathname.endsWith('/admin/tenants/9') && r.search.includes('confirm=true'),
+            r.method === 'DELETE' &&
+            r.pathname.endsWith('/admin/tenants/9') &&
+            r.search.includes('confirm=true'),
         ),
       ).toBe(true),
     )
@@ -259,10 +256,7 @@ describe('TenantsPage 删除能力', () => {
 
   it('单删接口 403 时展示后端错误信息', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal(
-      'fetch',
-      mockApi(captured, { permissions: FULL_DELETE_PERMS, deleteStatus: 403 }),
-    )
+    vi.stubGlobal('fetch', mockApi(captured, { permissions: FULL_DELETE_PERMS, deleteStatus: 403 }))
     renderPage()
     await waitForTableLoaded()
 
@@ -318,36 +312,43 @@ describe('TenantsPage 删除能力', () => {
 
   it('批量删除部分失败时展示 warning 与失败明细', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal('fetch', mockApi(captured, {
-      permissions: FULL_DELETE_PERMS,
-      batchResponse: {
-        total: 2,
-        succeeded: 1,
-        failed: 1,
-        items: [
-          { tenant_id: '9', code: 'acme', success: true, audit_id: 'a1' },
-          {
-            tenant_id: '10',
-            code: 'beta',
-            success: false,
-            audit_id: null,
-            error_code: 'FORBIDDEN',
-            error: '平台租户为系统内置租户，禁止删除',
-          },
-        ],
-      },
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(captured, {
+        permissions: FULL_DELETE_PERMS,
+        batchResponse: {
+          total: 2,
+          succeeded: 1,
+          failed: 1,
+          items: [
+            { tenant_id: '9', code: 'acme', success: true, audit_id: 'a1' },
+            {
+              tenant_id: '10',
+              code: 'beta',
+              success: false,
+              audit_id: null,
+              error_code: 'FORBIDDEN',
+              error: '平台租户为系统内置租户，禁止删除',
+            },
+          ],
+        },
+      }),
+    )
     renderPage()
     await waitForTableLoaded()
 
     for (const name of ['Acme 公司', 'Beta 科技']) {
       const row = screen.getByText(name).closest('tr')
-      fireEvent.click(row?.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement)
+      fireEvent.click(
+        row?.querySelector<HTMLInputElement>('input[type="checkbox"]') as HTMLInputElement,
+      )
     }
     fireEvent.click(await screen.findByRole('button', { name: /批量删除（2）/ }))
     fireEvent.click(await screen.findByRole('button', { name: /永\s*久\s*删\s*除/ }))
 
-    expect(await screen.findByText(/成功 1 个，失败 1 个/, {}, { timeout: 3000 })).toBeInTheDocument()
+    expect(
+      await screen.findByText(/成功 1 个，失败 1 个/, {}, { timeout: 3000 }),
+    ).toBeInTheDocument()
     expect(
       await screen.findByText(/平台租户为系统内置租户，禁止删除/, {}, { timeout: 3000 }),
     ).toBeInTheDocument()
@@ -358,7 +359,10 @@ describe('TenantsPage 删除能力', () => {
     renderPage()
     await waitForTableLoaded()
 
-    const checkbox = screen.getByText('Acme 公司').closest('tr')?.querySelector<HTMLInputElement>('input[type="checkbox"]')
+    const checkbox = screen
+      .getByText('Acme 公司')
+      .closest('tr')
+      ?.querySelector<HTMLInputElement>('input[type="checkbox"]')
     fireEvent.click(checkbox as HTMLInputElement)
     expect(await screen.findByRole('button', { name: /批量删除（1）/ })).toBeInTheDocument()
 

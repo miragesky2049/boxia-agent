@@ -17,12 +17,13 @@ function headerLabel(trace: ToolTrace): string {
   if (trace.status === 'running') return `正在调用 ${trace.name}…`
   if (trace.status === 'error') return `${trace.name} 调用失败`
   const seconds = trace.durationMs ? (trace.durationMs / 1000).toFixed(1) : null
-  return seconds ? `${trace.name} · ${seconds}s` : `${trace.name} 已完成`
+  const sources = trace.chunks?.length ? ` · ${trace.chunks.length} 个来源` : ''
+  return seconds ? `${trace.name} · ${seconds}s${sources}` : `${trace.name} 已完成${sources}`
 }
 
 export function ToolTraceCard({ trace }: { trace: ToolTrace }) {
   const [expanded, setExpanded] = useState(false)
-  const hasDetail = Boolean(trace.args || trace.result || trace.error)
+  const hasDetail = Boolean(trace.args || trace.result || trace.error || trace.chunks?.length)
 
   return (
     <div className={`lc-trace is-${trace.status}`}>
@@ -55,6 +56,22 @@ export function ToolTraceCard({ trace }: { trace: ToolTrace }) {
               <pre>{trace.result}</pre>
             </div>
           )}
+          {trace.chunks?.length ? (
+            <div className="lc-trace__block">
+              <span className="lc-trace__block-label">引用来源</span>
+              <ul className="lc-sources">
+                {trace.chunks.map((chunk, index) => (
+                  <li key={`${chunk.chunkId || 'src'}_${index}`}>
+                    <span className="lc-sources__name">{chunk.datasetName}</span>
+                    {chunk.score != null ? (
+                      <span className="lc-sources__score">{(chunk.score * 100).toFixed(0)}%</span>
+                    ) : null}
+                    {chunk.excerpt ? <div className="lc-sources__excerpt">{chunk.excerpt}</div> : null}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
           {trace.error && (
             <div className="lc-trace__block is-error">
               <span className="lc-trace__block-label">错误</span>

@@ -157,9 +157,7 @@ class HrDictionaryService:
     @staticmethod
     def _require_category(category: str) -> None:
         if category not in HR_DICTIONARY_CATEGORIES:
-            raise ValidationError(
-                f"字典类别必须为：{', '.join(HR_DICTIONARY_CATEGORIES)}"
-            )
+            raise ValidationError(f"字典类别必须为：{', '.join(HR_DICTIONARY_CATEGORIES)}")
 
     @staticmethod
     def _normalize_code(code: str) -> str:

@@ -556,9 +556,7 @@ class AuthService:
             self._uow.refresh_tokens.rotate(rotated_from, new_row.id)
 
         # 平台账号的 tid 写空，与老逻辑（tenant_id=None）保持一致，便于 authenticate 分支识别
-        token_tenant_id = (
-            None if user.tenant_id == PLATFORM_TENANT_ID else user.tenant_id
-        )
+        token_tenant_id = None if user.tenant_id == PLATFORM_TENANT_ID else user.tenant_id
         access_token, expires_in = create_access_token(
             user.id, user.username, role.code, family, user.token_version, token_tenant_id
         )

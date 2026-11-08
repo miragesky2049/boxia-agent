@@ -8,7 +8,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import false, select
 from sqlalchemy.sql import Select
 
 from internal.domain.entity.access import AccessScope
@@ -30,7 +30,7 @@ class TenantScopedRepository:
             return stmt
         if self._scope.tenant_id is None:
             # 无租户上下文：返回空结果集
-            return stmt.where(False)
+            return stmt.where(false())
         return stmt.where(model.tenant_id == self._scope.tenant_id)
 
     def _tenant_id(self) -> UUID | None:

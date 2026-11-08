@@ -1,6 +1,6 @@
 import { ArrowDownOutlined } from '@ant-design/icons'
 import { useEffect, useRef, useState, type RefObject } from 'react'
-import type { ChatAgent, ChatMessage } from '../types'
+import type { ApprovalSpec, ChatAgent, ChatMessage } from '../types'
 import { MessageBubble } from './MessageBubble'
 
 interface MessageListProps {
@@ -10,6 +10,8 @@ interface MessageListProps {
   scrollRef?: RefObject<HTMLDivElement>
   onRetry?: () => void
   onAnswer?: (answer: string) => void
+  /** 0074 PRD F10：审批卡裁决回调 */
+  onApprove?: (approved: boolean, comment: string, approval: ApprovalSpec) => void
 }
 
 const STICKY_THRESHOLD = 160
@@ -22,6 +24,7 @@ export function MessageList({
   scrollRef,
   onRetry,
   onAnswer,
+  onApprove,
 }: MessageListProps) {
   const endRef = useRef<HTMLDivElement>(null)
   const prevCountRef = useRef(0)
@@ -73,6 +76,7 @@ export function MessageList({
           agent={agent}
           onRetry={onRetry}
           onAnswer={onAnswer}
+          onApprove={onApprove}
         />
       ))}
       {waiting && (

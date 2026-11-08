@@ -169,8 +169,7 @@ export default function RolesPage() {
       dataIndex: 'is_active',
       key: 'is_active',
       width: 100,
-      render: (active: boolean) =>
-        active ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>,
+      render: (active: boolean) => (active ? <Tag color="success">启用</Tag> : <Tag>停用</Tag>),
     },
     {
       title: '更新时间',

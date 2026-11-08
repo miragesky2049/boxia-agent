@@ -1,60 +1,60 @@
-import { useMemo } from 'react';
-import { Input } from 'antd';
+import { useMemo } from 'react'
+import { Input } from 'antd'
 
 interface RefChipInputProps {
-  value: string;
-  onChange: (next: string) => void;
-  placeholder?: string;
-  picker?: React.ReactNode;
+  value: string
+  onChange: (next: string) => void
+  placeholder?: string
+  picker?: React.ReactNode
   // URL 字段启用：把 :param 形式的路径参数渲染为橙色 chip
-  highlightPathParams?: boolean;
+  highlightPathParams?: boolean
 }
 
-type SegmentType = 'text' | 'ref' | 'pathparam';
+type SegmentType = 'text' | 'ref' | 'pathparam'
 interface Segment {
-  type: SegmentType;
-  value: string;
+  type: SegmentType
+  value: string
 }
 
 // 切分文本为普通片段 / {{ref}} 引用片段 / :param 路径参数片段
 function splitSegments(text: string, highlightPathParams?: boolean): Segment[] {
-  if (!text) return [];
-  const segments: Segment[] = [];
+  if (!text) return []
+  const segments: Segment[] = []
   const patterns: Array<{ type: SegmentType; regex: RegExp }> = [
     { type: 'ref', regex: /\{\{[^}]+\}\}/g },
-  ];
+  ]
   if (highlightPathParams) {
-    patterns.push({ type: 'pathparam', regex: /:[A-Za-z_][A-Za-z0-9_]*/g });
+    patterns.push({ type: 'pathparam', regex: /:[A-Za-z_][A-Za-z0-9_]*/g })
   }
 
   // 收集所有匹配并按位置排序
-  const matches: Array<{ type: SegmentType; index: number; value: string }> = [];
+  const matches: Array<{ type: SegmentType; index: number; value: string }> = []
   for (const { type, regex } of patterns) {
-    let m: RegExpExecArray | null;
-    regex.lastIndex = 0;
+    let m: RegExpExecArray | null
+    regex.lastIndex = 0
     while ((m = regex.exec(text)) !== null) {
-      matches.push({ type, index: m.index, value: m[0] });
+      matches.push({ type, index: m.index, value: m[0] })
     }
   }
-  matches.sort((a, b) => a.index - b.index || b.value.length - a.value.length);
+  matches.sort((a, b) => a.index - b.index || b.value.length - a.value.length)
 
-  let lastIndex = 0;
+  let lastIndex = 0
   for (const match of matches) {
-    if (match.index < lastIndex) continue; // 重叠匹配，跳过
+    if (match.index < lastIndex) continue // 重叠匹配，跳过
     if (match.index > lastIndex) {
-      segments.push({ type: 'text', value: text.slice(lastIndex, match.index) });
+      segments.push({ type: 'text', value: text.slice(lastIndex, match.index) })
     }
-    segments.push({ type: match.type, value: match.value });
-    lastIndex = match.index + match.value.length;
+    segments.push({ type: match.type, value: match.value })
+    lastIndex = match.index + match.value.length
   }
   if (lastIndex < text.length) {
-    segments.push({ type: 'text', value: text.slice(lastIndex) });
+    segments.push({ type: 'text', value: text.slice(lastIndex) })
   }
-  return segments;
+  return segments
 }
 
 function removeRef(text: string, ref: string): string {
-  return text.split(ref).join('');
+  return text.split(ref).join('')
 }
 
 // RefChipInput（U-I1）：单行输入 + 内联引用胶囊预览
@@ -70,9 +70,9 @@ export function RefChipInput({
 }: RefChipInputProps) {
   const segments = useMemo(
     () => splitSegments(value || '', highlightPathParams),
-    [value, highlightPathParams]
-  );
-  const hasChip = segments.some((s) => s.type !== 'text');
+    [value, highlightPathParams],
+  )
+  const hasChip = segments.some((s) => s.type !== 'text')
 
   return (
     <div
@@ -113,7 +113,7 @@ export function RefChipInput({
                 <span key={idx} style={{ color: '#111827', whiteSpace: 'pre-wrap' }}>
                   {seg.value}
                 </span>
-              );
+              )
             }
             if (seg.type === 'pathparam') {
               // :param 路径参数：橙色胶囊，仅高亮不可删
@@ -134,9 +134,9 @@ export function RefChipInput({
                 >
                   {seg.value}
                 </span>
-              );
+              )
             }
-            const inner = seg.value.slice(2, -2);
+            const inner = seg.value.slice(2, -2)
             return (
               <span
                 key={idx}
@@ -171,10 +171,10 @@ export function RefChipInput({
                   ×
                 </button>
               </span>
-            );
+            )
           })}
         </div>
       )}
     </div>
-  );
+  )
 }

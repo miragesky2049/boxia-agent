@@ -16,6 +16,7 @@ from internal.domain.entity.access import (
 from internal.domain.entity.admin_user import AdminUser
 from internal.domain.entity.audit_log import AuditLog
 from internal.domain.entity.department import Department
+from internal.domain.entity.document import Document, DocumentChunk
 from internal.domain.entity.employment import Employment
 from internal.domain.entity.hr_dictionary import HrDictionary
 from internal.domain.entity.mgmt_unit import (
@@ -163,6 +164,9 @@ class AuditLogRepository(Protocol):
         detail: dict[str, Any],
     ) -> bool:
         """按 (action, tenant, resource, detail 包含) 判断是否已有记录（到期提醒去重，P3-2）。"""
+
+    def delete_all(self, tenant_id: UUID | None = None) -> int:
+        """删除审计记录（tenant_id 为 None 时删全部，删除租户场景）；返回删除条数。"""
 
 
 class ResourceRepository(Protocol[TResource]):
@@ -828,6 +832,52 @@ class UserMgmtUnitGrantRepository(Protocol):
         """批量读取单元 id -> 名称映射（前端展示用）。"""
 
 
+class DocumentRepository(Protocol):
+    """知识库文档仓储。"""
+
+    def list_page(
+        self,
+        page: int,
+        page_size: int,
+        keyword: str | None,
+        ingest_status: str | None = None,
+    ) -> tuple[list[Document], int]:
+        """分页查询文档元数据；按创建时间倒序。"""
+
+    def get(self, document_id: UUID) -> Document | None:
+        """按 id 读取文档；不可见时返回 None。"""
+
+    def create(self, values: dict[str, Any]) -> Document:
+        """创建文档。"""
+
+    def update(self, document_id: UUID, values: dict[str, Any]) -> Document | None:
+        """更新文档；不存在时返回 None。"""
+
+    def delete(self, document_id: UUID) -> bool:
+        """删除文档；返回是否命中。"""
+
+
+class DocumentChunkRepository(Protocol):
+    """知识库文档分块仓储。"""
+
+    def replace_for_document(
+        self,
+        document_id: UUID,
+        tenant_id: UUID | None,
+        chunks: list[dict[str, Any]],
+    ) -> int:
+        """全量替换某文档的分块；返回插入条数。"""
+
+    def search_similar(
+        self,
+        query_embedding: list[float],
+        *,
+        top_k: int,
+        document_ids: list[UUID] | None = None,
+    ) -> list[DocumentChunk]:
+        """向量检索 top_k 分块；返回实体附带 score。"""
+
+
 class UnitOfWork(Protocol):
     """请求级工作单元，负责事务提交与仓储访问。"""
 
@@ -857,6 +907,16 @@ class UnitOfWork(Protocol):
     mgmt_units: MgmtUnitRepository
     user_mgmt_unit_grants: UserMgmtUnitGrantRepository
     tools: ResourceRepository[Tool]
+
+    @property
+    def documents(self) -> DocumentRepository:
+        """知识库文档仓储（只读成员，实现可返回其子类型）。"""
+        ...
+
+    @property
+    def document_chunks(self) -> DocumentChunkRepository:
+        """知识库文档分块仓储（只读成员，实现可返回其子类型）。"""
+        ...
 
     def resource_repo(self, resource_type: str) -> ResourceRepository[Tool]:
         """按资源类型返回当前作用域仓储；tools 等价于 resource_repo('tool')。"""

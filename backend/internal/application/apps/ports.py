@@ -32,8 +32,12 @@ class RunnerFactory(Protocol):
         actor_username: str | None = None,
         conversation_id: UUID | None = None,
         on_node_event: Callable[[str, dict[str, Any]], Awaitable[None]] | None = None,
+        parent_run_id: UUID | None = None,
     ) -> GraphRuntime:
-        """加载 runtime graph 并组装服务注册表，返回可执行的 GraphRuntime。"""
+        """加载 runtime graph 并组装服务注册表，返回可执行的 GraphRuntime。
+
+        parent_run_id：工作流即工具（0074 PRD F7.2）子 run 归因，顶层调用不传。
+        """
 
 
 class CanvasDebugRuntimeFactory(Protocol):

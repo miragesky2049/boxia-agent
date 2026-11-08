@@ -57,6 +57,9 @@ if [ ! -f .env ]; then
   echo "已生成 backend/.env，请确认 DATABASE_URL / JWT_SECRET / LLM_API_KEY / EMBEDDING_API_KEY"
 fi
 uv sync
+# 容器 up -d 后 PostgreSQL 可能仍在崩溃恢复（the database system is starting up），
+# 直接跑 alembic 会连不上，必须先等数据库真正可连
+uv run python scripts/wait_for_db.py
 uv run alembic upgrade head
 
 # ---------- 4. 后台启动后端 ----------

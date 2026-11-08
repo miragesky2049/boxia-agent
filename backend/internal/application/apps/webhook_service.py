@@ -19,7 +19,9 @@ class WebhookService:
     """租户 webhook 订阅管理。"""
 
     def __init__(
-        self, commit: Callable[[], None], webhook_repo: WebhookRepositoryProtocol,
+        self,
+        commit: Callable[[], None],
+        webhook_repo: WebhookRepositoryProtocol,
     ) -> None:
         self._commit = commit
         self._repo = webhook_repo

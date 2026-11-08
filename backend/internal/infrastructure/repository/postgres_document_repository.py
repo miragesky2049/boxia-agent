@@ -6,7 +6,7 @@ import hashlib
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from internal.domain.constants import PLATFORM_TENANT_ID
@@ -31,9 +31,7 @@ class PostgresDocumentRepository:
         """读可见范围：产品级视角仅产品级文档；租户视角含自有 + 产品级。"""
         if self._tenant_id == PLATFORM_TENANT_ID:
             return stmt.where(DocumentModel.tenant_id == PLATFORM_TENANT_ID)
-        return stmt.where(
-            DocumentModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID])
-        )
+        return stmt.where(DocumentModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID]))
 
     def _owned(self, stmt):
         """写归属范围：只能维护当前作用域自有的文档。"""
@@ -178,9 +176,7 @@ class PostgresDocumentChunkRepository:
             .order_by(distance_column)
             .limit(top_k)
         )
-        stmt = stmt.where(
-            DocumentChunkModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID])
-        )
+        stmt = stmt.where(DocumentChunkModel.tenant_id.in_([self._tenant_id, PLATFORM_TENANT_ID]))
         if document_ids:
             stmt = stmt.where(DocumentChunkModel.document_id.in_(document_ids))
 

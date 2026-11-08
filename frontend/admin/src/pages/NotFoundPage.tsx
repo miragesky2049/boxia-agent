@@ -1,8 +1,8 @@
-import { Button, Typography } from '@douyinfe/semi-ui';
-import { useNavigate } from 'react-router-dom';
+import { Button, Typography } from '@douyinfe/semi-ui'
+import { useNavigate } from 'react-router-dom'
 
 export default function NotFoundPage() {
-  const navigate = useNavigate();
+  const navigate = useNavigate()
 
   return (
     <div style={{ padding: 48, textAlign: 'center' }}>
@@ -12,5 +12,5 @@ export default function NotFoundPage() {
         返回智能体管理
       </Button>
     </div>
-  );
+  )
 }

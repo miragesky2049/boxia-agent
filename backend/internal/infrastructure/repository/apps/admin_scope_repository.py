@@ -60,9 +60,7 @@ class AdminScopeRepository:
     def unit_exists(self, tenant_id: UUID, mgmt_unit_id: UUID) -> bool:
         """校验管理单元存在且属于本租户（跨租户关联防御）。"""
         row = self._session.execute(
-            text(
-                "SELECT 1 FROM mgmt_units WHERE id = :uid AND tenant_id = :tid LIMIT 1"
-            ),
+            text("SELECT 1 FROM mgmt_units WHERE id = :uid AND tenant_id = :tid LIMIT 1"),
             {"uid": mgmt_unit_id, "tid": tenant_id},
         ).first()
         return row is not None

@@ -43,7 +43,10 @@ TENANT_CODE = "wfco"
 _APPS = (
     ("演示-直出工作流", build_start_end_canvas()),
     ("演示-LLM工作流", build_start_llm_end_canvas()),
-    ("演示-人审工作流", build_start_human_end_canvas(assignee_role="leader", instructions="请核对发布内容后批准。")),
+    (
+        "演示-人审工作流",
+        build_start_human_end_canvas(assignee_role="leader", instructions="请核对发布内容后批准。"),
+    ),
 )
 
 
@@ -65,7 +68,9 @@ def _platform_login(site: TestClient) -> dict[str, str]:
             "password": settings.admin_initial_password.get_secret_value(),
         },
     )
-    assert resp.status_code == 200, f"平台管理员登录失败（检查 .env ADMIN_INITIAL_PASSWORD）：{resp.text}"
+    assert resp.status_code == 200, (
+        f"平台管理员登录失败（检查 .env ADMIN_INITIAL_PASSWORD）：{resp.text}"
+    )
     return {"Authorization": f"Bearer {resp.json()['access_token']}"}
 
 
@@ -81,7 +86,11 @@ def _seed_platform_apps(admin_app) -> list[str]:
                 continue
             resp = site.post(
                 "/api/v1/admin/apps",
-                json={"name": name, "description": "用户端 Workflow 演示应用", "flow_type": "workflow"},
+                json={
+                    "name": name,
+                    "description": "用户端 Workflow 演示应用",
+                    "flow_type": "workflow",
+                },
                 headers=headers,
             )
             assert resp.status_code == 201, resp.text
@@ -92,18 +101,25 @@ def _seed_platform_apps(admin_app) -> list[str]:
                 headers=headers,
             )
             assert saved.status_code == 200, saved.text
-            listed = site.post(f"/api/v1/admin/apps/{app_id}/listing", json={"listed": True}, headers=headers)
+            listed = site.post(
+                f"/api/v1/admin/apps/{app_id}/listing", json={"listed": True}, headers=headers
+            )
             assert listed.status_code == 200, listed.text
             with get_engine().begin() as conn:
-                conn.execute(text("UPDATE application SET sale_mode = 2 WHERE id = :aid"), {"aid": app_id})
+                conn.execute(
+                    text("UPDATE application SET sale_mode = 2 WHERE id = :aid"), {"aid": app_id}
+                )
             print(f"[ok] 平台应用已上架：{name} ({app_id})")
             app_ids.append(app_id)
 
         tenant_exists = False
         with get_engine().connect() as conn:
-            tenant_exists = conn.execute(
-                text("SELECT 1 FROM tenants WHERE code = :c"), {"c": TENANT_CODE}
-            ).first() is not None
+            tenant_exists = (
+                conn.execute(
+                    text("SELECT 1 FROM tenants WHERE code = :c"), {"c": TENANT_CODE}
+                ).first()
+                is not None
+            )
         if not tenant_exists:
             create_tenant(site, headers, code=TENANT_CODE, name="Workflow 演示公司")
             print(f"[ok] 演示租户已创建：{TENANT_CODE}")
@@ -147,7 +163,9 @@ def _seed_tenant_side(admin_app, app_ids: list[str]) -> None:
             if username in existing_users:
                 print(f"[skip] 用户已存在：{username}")
                 continue
-            create_user(site, headers, username=username, role_id=role_id, display_name=display_name)
+            create_user(
+                site, headers, username=username, role_id=role_id, display_name=display_name
+            )
             print(f"[ok] 用户已创建：{username}")
 
 

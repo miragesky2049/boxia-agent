@@ -21,7 +21,8 @@ const acmeApp = {
   visibility_lock: false,
   visibility_template: 'all',
   admin_scope_mode: 'all_admin',
-  flow_type: 'chatflow',
+  // 页面默认按「智能体」过滤（c41fd5a），fixture 类型需与默认过滤一致才会出现在表格里
+  flow_type: 'agent',
   created_by: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -38,7 +39,7 @@ const betaApp = {
   visibility_lock: false,
   visibility_template: 'all',
   admin_scope_mode: 'all_admin',
-  flow_type: 'workflow',
+  flow_type: 'agent',
   created_by: null,
   created_at: '2026-01-01T00:00:00Z',
   updated_at: '2026-01-01T00:00:00Z',
@@ -147,10 +148,7 @@ function mockApi(captured: Captured, options: MockApiOptions) {
           deleted: { run: 1 },
         })
       }
-      return jsonResponse(
-        { detail: '应用删除仅限平台 superadmin', code: 'FORBIDDEN' },
-        status,
-      )
+      return jsonResponse({ detail: '应用删除仅限平台 superadmin', code: 'FORBIDDEN' }, status)
     }
     if (method === 'POST' && pathname.endsWith('/admin/apps/batch')) {
       record()
@@ -257,10 +255,7 @@ describe('AppListPage 删除能力', () => {
 
   it('单删接口 403 时展示后端错误信息', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal(
-      'fetch',
-      mockApi(captured, { permissions: FULL_DELETE_PERMS, deleteStatus: 403 }),
-    )
+    vi.stubGlobal('fetch', mockApi(captured, { permissions: FULL_DELETE_PERMS, deleteStatus: 403 }))
     renderPage()
     await waitForTableLoaded()
 
@@ -315,25 +310,28 @@ describe('AppListPage 删除能力', () => {
 
   it('批量删除部分失败时展示 warning 与失败明细', async () => {
     const captured: Captured = { requests: [] }
-    vi.stubGlobal('fetch', mockApi(captured, {
-      permissions: FULL_DELETE_PERMS,
-      batchResponse: {
-        total: 2,
-        succeeded: 1,
-        failed: 1,
-        items: [
-          { application_id: '101', name: '客服助手', success: true, audit_id: 'a1' },
-          {
-            application_id: '102',
-            name: '报表工作流',
-            success: false,
-            audit_id: null,
-            error_code: 'NOT_FOUND',
-            error: '应用不存在',
-          },
-        ],
-      },
-    }))
+    vi.stubGlobal(
+      'fetch',
+      mockApi(captured, {
+        permissions: FULL_DELETE_PERMS,
+        batchResponse: {
+          total: 2,
+          succeeded: 1,
+          failed: 1,
+          items: [
+            { application_id: '101', name: '客服助手', success: true, audit_id: 'a1' },
+            {
+              application_id: '102',
+              name: '报表工作流',
+              success: false,
+              audit_id: null,
+              error_code: 'NOT_FOUND',
+              error: '应用不存在',
+            },
+          ],
+        },
+      }),
+    )
     renderPage()
     await waitForTableLoaded()
 

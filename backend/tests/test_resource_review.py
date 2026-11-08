@@ -199,7 +199,9 @@ def test_tenant_rejected_tool_resubmit_sets_pending(
     assert mine[tool_id]["review_status"] == "pending"
 
     platform_tool = _create_platform_tool(client, auth_headers, "平台资源不可重提")
-    foreign = site.post(f"/api/v1/admin/my-resources/{platform_tool}/submit-review", headers=headers)
+    foreign = site.post(
+        f"/api/v1/admin/my-resources/{platform_tool}/submit-review", headers=headers
+    )
     assert foreign.status_code == 422, foreign.text
 
 
@@ -212,12 +214,8 @@ def test_resubmit_requires_create_permission(
     tool_id = _create_my_tool(site, headers, "权重提交拦截")
     _review(client, auth_headers, tool_id, "reject", "需整改")
 
-    operator = _create_restricted_account(
-        site, headers, "rrb-operator", ["system:console:access"]
-    )
-    response = site.post(
-        f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=operator
-    )
+    operator = _create_restricted_account(site, headers, "rrb-operator", ["system:console:access"])
+    response = site.post(f"/api/v1/admin/my-resources/{tool_id}/submit-review", headers=operator)
     assert response.status_code == 403, response.text
 
 

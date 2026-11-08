@@ -44,7 +44,8 @@ class PGVectorStore(VectorStore):
         dimension = config.dimension
         with self._session_factory() as session:
             session.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
-            session.execute(text(f"""
+            session.execute(
+                text(f"""
                 CREATE TABLE IF NOT EXISTS {table} (
                     chunk_id VARCHAR(128) PRIMARY KEY,
                     tenant_id VARCHAR(64) NOT NULL,
@@ -53,12 +54,15 @@ class PGVectorStore(VectorStore):
                     metadata JSONB DEFAULT '{{}}'::jsonb,
                     vector vector({int(dimension)}) NOT NULL
                 )
-            """))
+            """)
+            )
             # 索引：HNSW + cosine ops，适合中等规模
-            session.execute(text(f"""
+            session.execute(
+                text(f"""
                 CREATE INDEX IF NOT EXISTS {table}_vector_idx
                 ON {table} USING hnsw (vector vector_cosine_ops)
-            """))
+            """)
+            )
             session.commit()
         logger.info("PGVector 表已就绪: %s dim=%d", table, dimension)
 
@@ -157,8 +161,9 @@ class PGVectorStore(VectorStore):
         where_sql = ("WHERE " + " AND ".join(where_clauses)) if where_clauses else ""
 
         with self._session_factory() as session:
-            rows = session.execute(
-                text(f"""
+            rows = (
+                session.execute(
+                    text(f"""
                     SELECT chunk_id, content, document_id, metadata,
                            1 - (vector <=> :qvec::vector) AS score
                     FROM {table}
@@ -166,8 +171,11 @@ class PGVectorStore(VectorStore):
                     ORDER BY vector <=> :qvec::vector
                     LIMIT :k
                 """),
-                params,
-            ).mappings().all()
+                    params,
+                )
+                .mappings()
+                .all()
+            )
 
         results: list[RetrievalResult] = []
         for row in rows:

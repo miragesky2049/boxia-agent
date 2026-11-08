@@ -1,14 +1,20 @@
 """用户端 chat / workflow 运行端点。
 
-- POST /agents/{id}/run/stream   SSE 流式 chat（ReAct 循环，前端 ChatPage 对接）
-- POST /agents/{id}/run           非流式 chat（可选，前端已封装未用）
+- POST /agents/{id}/chatflow/run/stream  统一对话 SSE 入口（0074 PRD M3 端点收敛）：
+  服务端按应用 flow_type 分派——对话流走图管线，智能体/旧聊天应用走 chat 三通道管线
 - POST /agents/{id}/workflow/run   workflow 非流式运行（dag）
+
+历史端点 POST /agents/{id}/run/stream 与 /run 已退役删除：SSE 帧契约由统一入口
+完整保留（run_start/llm_*/tool_*/plan/reflect/result/error/final），并新增
+interrupted 帧承载 F10 工具审批挂起。
 """
 
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -17,9 +23,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from internal.application.apps.chat_service import ChatService
-from internal.application.errors import AppError
+from internal.application.apps.memory_service import MemorySummarizerService
+from internal.application.errors import ValidationError
 from internal.infrastructure.config.settings import get_settings
+from internal.infrastructure.tasks.judge_sampling_tasks import judge_sampling
+from internal.infrastructure.tasks.memory_tasks import extract_memories
 from web.deps.apps_services import (
+    make_agent_memory_repository,
     make_app_resource_service,
     make_application_service,
     make_conversation_repository,
@@ -29,7 +39,7 @@ from web.deps.apps_services import (
 )
 from web.deps.auth import UserAuthDep
 from web.deps.db import UowDep
-from web.deps.graph import build_runner
+from web.deps.graph import build_runner, make_tool_executor_factory
 from web.deps.sse import SSE_HEADERS, sse_event
 from web.deps.tenant import RequestContextDep
 
@@ -43,12 +53,6 @@ class HistoryMessage(BaseModel):
     content: str = ""
 
 
-class RunStreamRequest(BaseModel):
-    query: str = Field(..., min_length=1, max_length=8000)
-    conversation_id: str | None = None
-    history: list[HistoryMessage] | None = None
-
-
 class WorkflowRunRequest(BaseModel):
     inputs: dict[str, Any] = Field(default_factory=dict)
     thread_id: str | None = None
@@ -56,14 +60,26 @@ class WorkflowRunRequest(BaseModel):
     conversation_id: UUID | None = None
 
 
-class ChatflowRunRequest(BaseModel):
+class ConversationRunRequest(BaseModel):
+    """统一对话入口请求体（chatflow 与 agent/legacy chat 共用）。"""
+
     # 纯续跑（resume）时允许为空；message 与 resume 至少提供一个是服务层校验
     message: str = Field("", max_length=8000)
     conversation_id: UUID | None = None
     thread_id: str | None = None
+    # 对话流启动变量（agent 通道忽略）
     inputs: dict[str, Any] = Field(default_factory=dict)
-    # 问答节点/人审中断后的续跑载荷，如 {"answer": "用户回答"}
+    # 中断续跑载荷：对话流为 {"answer": 用户回答}；F10 工具审批为
+    # {"approved": bool, "comment": str}
     resume: dict[str, Any] | None = None
+    # 0074 PRD F8 校准：agent 型前端省略 history 以启用服务端记忆，
+    # 旧聊天应用继续携带；None 与 [] 语义区分沿用 M2 约定
+    history: list[HistoryMessage] | None = None
+    # 0074 PRD F9：随消息携带的图片 URL（节点 visionEnabled 门控）
+    images: list[str] = Field(default_factory=list, max_length=8)
+    # M4 PRD F14.9：手动归位（结束接管、发言权交回会话归属应用）；true 时不要求
+    # message、不发 run，仅清路由态并回一帧 handoff(returned=true)
+    handback: bool = False
 
 
 def get_chat_service(
@@ -83,45 +99,42 @@ def get_chat_service(
         msg_repo=make_message_repository(uow.session),
         run_repo=make_run_repository(uow.session),
         default_llm_model_id=get_settings().llm_model_id,
+        tool_executor_factory=make_tool_executor_factory(
+            uow.session, principal.tenant_id, principal.user_id
+        ),
+        # M4 PRD F15：摘要式记忆执行服务（复用同请求的模型与会话仓储）
+        memory_summarizer=MemorySummarizerService(
+            model_service=make_model_service(uow.session),
+            conv_repo=make_conversation_repository(uow.session),
+        ),
+        # M4 PRD F16.3：轮后长期记忆抽取投递（Celery；broker 不可达由服务侧降级 warning）
+        memory_extract_enqueuer=lambda run_id: extract_memories.delay(str(run_id)),
+        # M4 PRD F16.4：召回注入仓储（longTerm.enabled 时才查询，关闭态零开销）
+        memory_repo=make_agent_memory_repository(uow.session),
+        # M4-d PRD F19.3：线上采样投递（与抽取同任务通道；rate 判定在 ChatService，
+        # broker 不可达由服务侧降级 warning，不影响对话）
+        judge_sampling_enqueuer=lambda run_id: judge_sampling.delay(str(run_id)),
     )
 
 
 ChatServiceDep = Annotated[ChatService, Depends(get_chat_service)]
 
 
-def _parse_conversation_id(raw: str | None) -> UUID | None:
-    if not raw:
-        return None
-    try:
-        return UUID(raw)
-    except ValueError:
-        return None
-
-
-@router.post("/{application_id}/run/stream")
-async def run_agent_stream(
-    application_id: UUID,
-    payload: RunStreamRequest,
-    service: ChatServiceDep,
+def _sse_response(
+    frames: AsyncIterator[tuple[str, dict[str, Any]]],
+    error_code: str,
 ) -> StreamingResponse:
-    """SSE 流式 chat：依次推送 run_start / llm_start / llm_end / tool_start / tool_end / result / error / final。"""
-    conversation_id = _parse_conversation_id(payload.conversation_id)
-    history = [h.model_dump() for h in (payload.history or [])]
+    """SSE 公用泵：服务帧序列 -> SSE 帧；producer 异常统一转 error+final。"""
 
     queue: asyncio.Queue[str | None] = asyncio.Queue()
 
     async def producer() -> None:
         try:
-            async for event_name, data in service.run_agent_stream(
-                application_id=application_id,
-                query=payload.query,
-                conversation_id=conversation_id,
-                history=history,
-            ):
+            async for event_name, data in frames:
                 await queue.put(sse_event(event_name, data))
         except Exception as exc:  # noqa: BLE001
-            logger.exception("chat producer failed")
-            await queue.put(sse_event("error", {"message": str(exc), "code": "chat_failed"}))
+            logger.exception("对话流运行失败 code=%s", error_code)
+            await queue.put(sse_event("error", {"message": str(exc), "code": error_code}))
             await queue.put(sse_event("final", {}))
         finally:
             await queue.put(None)
@@ -138,10 +151,8 @@ async def run_agent_stream(
         finally:
             if not task.done():
                 task.cancel()
-            try:
+            with contextlib.suppress(asyncio.CancelledError, Exception):  # noqa: BLE001
                 await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
 
     return StreamingResponse(
         event_stream(),
@@ -150,86 +161,74 @@ async def run_agent_stream(
     )
 
 
-@router.post("/{application_id}/run")
-async def run_agent(
-    application_id: UUID,
-    payload: RunStreamRequest,
-    service: ChatServiceDep,
-) -> dict:
-    """非流式 chat：跑完整轮 ReAct 后返回 result 数据。"""
-    conversation_id = _parse_conversation_id(payload.conversation_id)
-    history = [h.model_dump() for h in (payload.history or [])]
-
-    result: dict[str, Any] = {}
-    error: dict[str, Any] | None = None
-    async for event_name, data in service.run_agent_stream(
-        application_id=application_id,
-        query=payload.query,
-        conversation_id=conversation_id,
-        history=history,
-    ):
-        if event_name == "result":
-            result = data
-        elif event_name == "error":
-            error = data
-    if error is not None and not result:
-        raise AppError(error.get("message", "chat failed"))
-    return result or {"content": ""}
-
-
 @router.post("/{application_id}/chatflow/run/stream")
-async def run_chatflow_stream(
+async def run_conversation_stream(
     application_id: UUID,
-    payload: ChatflowRunRequest,
+    payload: ConversationRunRequest,
     service: ChatServiceDep,
 ) -> StreamingResponse:
-    """对话流 SSE 运行：推送 run_start / node_* / output_message / question / result / final。"""
-    # 鉴权、参数组合、会话/线程归属必须在返回 StreamingResponse 之前校验，
-    # 这些错误走 JSON 4xx，而不是 SSE error 事件。
-    prepared = service.prepare_chatflow_run(
+    """统一对话 SSE 入口：按应用类型分派对话流 / 智能体 chat 管线。
+
+    鉴权、参数组合、会话/线程归属必须在返回 StreamingResponse 之前校验，
+    这些错误走 JSON 4xx，而不是 SSE error 事件。
+    """
+    app_card = service.resolve_conversation_channel(application_id)
+
+    if app_card.get("flow_type") == "chatflow":
+        prepared = service.prepare_chatflow_run(
+            application_id,
+            message=payload.message,
+            conversation_id=payload.conversation_id,
+            resume=payload.resume,
+            thread_id=payload.thread_id,
+        )
+        return _sse_response(
+            service.run_chatflow_stream(prepared, inputs=payload.inputs),
+            "chatflow_failed",
+        )
+
+    # 0074 PRD M3 端点收敛：agent 与旧 workflow 型聊天应用统一走 chat 三通道管线
+    service.prepare_chat_run(
         application_id,
         message=payload.message,
         conversation_id=payload.conversation_id,
         resume=payload.resume,
-        thread_id=payload.thread_id,
+        handback=payload.handback,
     )
-    queue: asyncio.Queue[str | None] = asyncio.Queue()
-
-    async def producer() -> None:
-        try:
-            async for event_name, data in service.run_chatflow_stream(
-                prepared,
-                inputs=payload.inputs,
-            ):
-                await queue.put(sse_event(event_name, data))
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("chatflow producer failed")
-            await queue.put(sse_event("error", {"message": str(exc), "code": "chatflow_failed"}))
-            await queue.put(sse_event("final", {}))
-        finally:
-            await queue.put(None)
-
-    task = asyncio.create_task(producer())
-
-    async def event_stream():
-        try:
-            while True:
-                item = await queue.get()
-                if item is None:
-                    break
-                yield item
-        finally:
-            if not task.done():
-                task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):  # noqa: BLE001
-                pass
-
-    return StreamingResponse(
-        event_stream(),
-        media_type="text/event-stream",
-        headers=SSE_HEADERS,
+    if payload.handback:
+        # M4 PRD F14.9：手动归位不发 run，清路由态 + 通告帧（4xx 校验已在预检收口）
+        handback_cid = payload.conversation_id
+        if handback_cid is None:
+            # 预检已拦截此形态，此处仅类型收窄兜底
+            raise ValidationError("handback 必须提供 conversation_id")
+        handback_ctx = service.prepare_handback(application_id, handback_cid)
+        return _sse_response(
+            service.run_handback_stream(
+                application_id=application_id,
+                conversation_id=handback_cid,
+                prepared=handback_ctx,
+            ),
+            "chat_failed",
+        )
+    # M4 PRD F14.9：接管路由在 SSE 之前收口（目标不可见 → JSON 4xx，原路由保持不动）
+    route_app_id = service.resolve_handoff_application(
+        application_id,
+        conversation_id=payload.conversation_id,
+        resume=payload.resume,
+    )
+    history = [h.model_dump() for h in payload.history] if payload.history is not None else None
+    return _sse_response(
+        service.run_agent_stream(
+            application_id=application_id,
+            query=payload.message,
+            conversation_id=payload.conversation_id,
+            history=history,
+            images=payload.images or None,
+            resume=payload.resume,
+            thread_id=payload.thread_id,
+            route_application_id=route_app_id if route_app_id != application_id else None,
+        ),
+        "chat_failed",
     )
 
 

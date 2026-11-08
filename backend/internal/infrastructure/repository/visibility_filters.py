@@ -44,6 +44,7 @@ def visibility_filter(
     if tenant_id is None:
         # 无租户上下文：fail-closed，返回 false
         from sqlalchemy import false
+
         return false()
 
     vis_col = resource_model.visibility
@@ -107,6 +108,7 @@ def _current_user_id(scope: AccessScope) -> Any:
     if user_id is None:
         # 返回一个不可能匹配的常量
         from uuid import UUID
+
         return UUID(int=0)
     return user_id
 
@@ -115,5 +117,6 @@ def _current_tenant_group_id(scope: AccessScope) -> Any:
     group_id = getattr(scope, "tenant_group_id", None)
     if group_id is None:
         from uuid import UUID
+
         return UUID(int=0)
     return group_id

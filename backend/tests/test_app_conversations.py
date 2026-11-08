@@ -89,7 +89,10 @@ def _seed_tenant_conversations(
     site, tenant_headers, _ = tenant_admin_client(tenant_client, code)
     role = list_roles(site, tenant_headers)["viewer"]
     user = create_user(
-        site, tenant_headers, username=f"{code}-user", role_id=role["id"],
+        site,
+        tenant_headers,
+        username=f"{code}-user",
+        role_id=role["id"],
     )
     conversation_id = _insert_conversation(
         tenant_id=tenant["id"],
@@ -108,7 +111,9 @@ def test_conversations_list_messages_and_delete(
 ) -> None:
     app_id = _create_app(client, auth_headers, "会话管理测试")
     tenant, conv_id = _seed_tenant_conversations(
-        client, auth_headers, tenant_client,
+        client,
+        auth_headers,
+        tenant_client,
         code="conv",
         application_id=app_id,
         messages=[("user", "你好"), ("assistant", "你好，有什么可以帮你")],
@@ -145,7 +150,9 @@ def test_conversations_list_messages_and_delete(
 
     # 4. 跨租户删除按不存在处理
     other_tenant, _ = _seed_tenant_conversations(
-        client, auth_headers, tenant_client,
+        client,
+        auth_headers,
+        tenant_client,
         code="other",
         application_id=app_id,
         messages=[("user", "别的租户")],

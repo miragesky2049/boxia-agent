@@ -42,11 +42,14 @@ def validate_graph(graph: CanvasGraph) -> list[ValidationIssue]:
     if not start_nodes:
         issues.append(ValidationIssue("error", "missing_start", "画布缺少 START 节点"))
     elif len(start_nodes) > 1:
-        issues.append(ValidationIssue(
-            "error", "multiple_start",
-            f"画布有 {len(start_nodes)} 个 START 节点，只能有一个",
-            start_nodes[0].id,
-        ))
+        issues.append(
+            ValidationIssue(
+                "error",
+                "multiple_start",
+                f"画布有 {len(start_nodes)} 个 START 节点，只能有一个",
+                start_nodes[0].id,
+            )
+        )
 
     # 2. 至少有一个 END
     end_nodes = [n for n in nodes if n.type == NodeType.END]
@@ -57,17 +60,23 @@ def validate_graph(graph: CanvasGraph) -> list[ValidationIssue]:
     node_ids = {n.id for n in nodes}
     for edge in edges:
         if edge.source not in node_ids:
-            issues.append(ValidationIssue(
-                "error", "dangling_edge_source",
-                f"边的 source 节点不存在: {edge.source}",
-                edge.source,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "dangling_edge_source",
+                    f"边的 source 节点不存在: {edge.source}",
+                    edge.source,
+                )
+            )
         if edge.target not in node_ids:
-            issues.append(ValidationIssue(
-                "error", "dangling_edge_target",
-                f"边的 target 节点不存在: {edge.target}",
-                edge.target,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "error",
+                    "dangling_edge_target",
+                    f"边的 target 节点不存在: {edge.target}",
+                    edge.target,
+                )
+            )
 
     # 4/5. 悬空 / 死端检测
     in_degree: dict[str, int] = {n.id: 0 for n in nodes}
@@ -81,28 +90,37 @@ def validate_graph(graph: CanvasGraph) -> list[ValidationIssue]:
     for n in nodes:
         # 草稿编辑时新节点通常是先落画布再连线，缺入边不阻塞保存，发布时再严格拦截
         if n.type != NodeType.START and in_degree[n.id] == 0:
-            issues.append(ValidationIssue(
-                "warning", "no_incoming_edge",
-                f"节点 {n.meta.title or n.id} 没有入边",
-                n.id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    "no_incoming_edge",
+                    f"节点 {n.meta.title or n.id} 没有入边",
+                    n.id,
+                )
+            )
         if n.type != NodeType.END and out_degree[n.id] == 0:
-            issues.append(ValidationIssue(
-                "warning", "no_outgoing_edge",
-                f"节点 {n.meta.title or n.id} 没有出边，执行后会中断",
-                n.id,
-            ))
+            issues.append(
+                ValidationIssue(
+                    "warning",
+                    "no_outgoing_edge",
+                    f"节点 {n.meta.title or n.id} 没有出边，执行后会中断",
+                    n.id,
+                )
+            )
 
     # 6. 环检测：从 START DFS，未访问到的节点构成孤立子图
     if start_nodes:
         reachable = _reachable_from(start_nodes[0].id, out_degree, edges)
         for n in nodes:
             if n.id not in reachable:
-                issues.append(ValidationIssue(
-                    "warning", "unreachable_node",
-                    f"节点 {n.meta.title or n.id} 从 START 不可达（孤立子图或环）",
-                    n.id,
-                ))
+                issues.append(
+                    ValidationIssue(
+                        "warning",
+                        "unreachable_node",
+                        f"节点 {n.meta.title or n.id} 从 START 不可达（孤立子图或环）",
+                        n.id,
+                    )
+                )
 
     return issues
 
@@ -131,14 +149,16 @@ def validate_raw_graph(
     *,
     variable_names: set[str] | None = None,
     system_names: set[str] | None = None,
+    known_models: set[str] | None = None,
 ) -> list[ValidationIssue]:
     """对原始 dict graph 做校验：先 convert 成 IR，再 validate + lint。
 
     convert 失败时返回 error 级问题。用于 save_graph 前的快速校验。
     variable_names / system_names 传入时，额外检查未声明的命名空间变量引用（warning）。
+    known_models 传入时（发布闸门），检查节点模型引用在启用目录内（error）；草稿保存不传。
     """
     from internal.domain.canvas.convert import CanvasConvertError, convert_canvas
-    from internal.domain.canvas.lint import lint_graph, lint_variable_refs
+    from internal.domain.canvas.lint import lint_graph, lint_model_refs, lint_variable_refs
 
     try:
         graph = convert_canvas(raw)
@@ -155,4 +175,5 @@ def validate_raw_graph(
             variable_names=variable_names,
             system_names=system_names,
         )
+        + lint_model_refs(graph, known_models)
     )

@@ -18,16 +18,22 @@ from tests.workflow_canvas import (
 
 
 class FakeLLMService:
-    async def chat(self, *, messages, model, temperature=None, max_tokens=None, response_format=None):
+    async def chat(
+        self, *, messages, model, temperature=None, max_tokens=None, response_format=None
+    ):
         usage = SimpleNamespace(prompt_tokens=10, completion_tokens=20, total_tokens=30)
-        return SimpleNamespace(content=f"fake reply to: {messages[-1]['content']}", model=model, usage=usage)
+        return SimpleNamespace(
+            content=f"fake reply to: {messages[-1]['content']}", model=model, usage=usage
+        )
 
 
 class FakeRunRepo:
     def insert_run(self, **kwargs: Any) -> None:
         pass
 
-    def update_run_status(self, run_id: Any, execute_status: str, output=None, error_message=None) -> None:
+    def update_run_status(
+        self, run_id: Any, execute_status: str, output=None, error_message=None
+    ) -> None:
         pass
 
     def update_run_interrupt(self, run_id: Any, payload: dict) -> None:
@@ -81,7 +87,9 @@ def test_start_llm_end_runs_through():
 
 
 def test_human_canvas_carries_assignee_role():
-    graph = convert_canvas(build_start_human_end_canvas(assignee_role="finance", instructions="财务复核"))
+    graph = convert_canvas(
+        build_start_human_end_canvas(assignee_role="finance", instructions="财务复核")
+    )
     human = next(n for n in graph.nodes if n.type == "60")
     assert human.config["assignee_role"] == "finance"
     assert human.config["instructions"] == "财务复核"

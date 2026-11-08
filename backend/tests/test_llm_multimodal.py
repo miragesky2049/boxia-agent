@@ -36,8 +36,11 @@ class _ScriptedLLM:
 
 def _make_ctx(services: ServiceRegistry, inputs: dict, config: dict) -> NodeContext:
     env = RuntimeEnv(
-        tenant_id=uuid4(), user_id=None, run_id=uuid4(),
-        thread_id="test", application_id=uuid4(),
+        tenant_id=uuid4(),
+        user_id=None,
+        run_id=uuid4(),
+        thread_id="test",
+        application_id=uuid4(),
     )
     return NodeContext(
         node_id="llm_1",

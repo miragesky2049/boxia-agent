@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from internal.domain.canvas.expression import Literal, TemplatedString
+from internal.domain.canvas.expression import LiteralValue, TemplatedString
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult
 from internal.domain.graph.nodes import register_node_handler
@@ -26,11 +26,14 @@ class EndNodeHandler(NodeHandler):
         if return_type == "text" and content not in (None, ""):
             content = self._render(content, ctx)
             if bool(config.get("stream")) and ctx.emit_event is not None:
-                await ctx.emit_event("output_message", {
-                    "content": content,
-                    "role": "assistant",
-                    "stream": True,
-                })
+                await ctx.emit_event(
+                    "output_message",
+                    {
+                        "content": content,
+                        "role": "assistant",
+                        "stream": True,
+                    },
+                )
                 # 流式最终文本也需落库：runtime 会按 emitted_outputs 去重，
                 # 否则刷新后历史里缺失本轮最终回答。
                 await persist_assistant_message(ctx, to_text(content), source="end_node")
@@ -54,7 +57,7 @@ class EndNodeHandler(NodeHandler):
 
 def _unwrap_content(value: Any) -> Any:
     """把 content 字段的 Expr 包装脱壳成实际值。"""
-    if isinstance(value, Literal):
+    if isinstance(value, LiteralValue):
         return value.value
     if isinstance(value, TemplatedString):
         return value.template

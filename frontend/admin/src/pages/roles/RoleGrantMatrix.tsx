@@ -31,7 +31,11 @@ interface RoleGrantMatrixProps {
   isPlatformRole: boolean
 }
 
-export default function RoleGrantMatrix({ roleId, canManage, isPlatformRole }: RoleGrantMatrixProps) {
+export default function RoleGrantMatrix({
+  roleId,
+  canManage,
+  isPlatformRole,
+}: RoleGrantMatrixProps) {
   const { message } = App.useApp()
   const [resourceType, setResourceType] = useState<ResourceType>('tool')
   const [keyword, setKeyword] = useState('')
@@ -235,7 +239,12 @@ export default function RoleGrantMatrix({ roleId, canManage, isPlatformRole }: R
               cancelText="返回"
               onConfirm={() => void handleUnsetTenantWide(row)}
             >
-              <Button type="link" size="small" danger loading={pendingIds.includes(row.resource_id)}>
+              <Button
+                type="link"
+                size="small"
+                danger
+                loading={pendingIds.includes(row.resource_id)}
+              >
                 取消全员可见
               </Button>
             </Popconfirm>
@@ -338,10 +347,12 @@ export default function RoleGrantMatrix({ roleId, canManage, isPlatformRole }: R
               type="primary"
               disabled={grantTargets.length === 0}
               loading={batchBusy}
-              onClick={() => void handleGrant(
-                grantTargets.map((row) => row.resource_id),
-                '',
-              )}
+              onClick={() =>
+                void handleGrant(
+                  grantTargets.map((row) => row.resource_id),
+                  '',
+                )
+              }
             >
               批量授权（{grantTargets.length}）
             </Button>

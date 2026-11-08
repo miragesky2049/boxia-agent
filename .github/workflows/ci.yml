@@ -24,7 +24,8 @@ jobs:
       LOG_LEVEL: WARNING
     services:
       postgres:
-        image: postgres:17-alpine
+        # 迁移 0022 需要 vector 扩展，原生 postgres 镜像无 pgvector，必须用带扩展的镜像
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -123,7 +124,8 @@ jobs:
       ALLOW_TENANT_HEADER: 'true'
     services:
       postgres:
-        image: postgres:17-alpine
+        # 同上：alembic upgrade head 在迁移 0022 需要 pgvector 扩展
+        image: pgvector/pgvector:pg17
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
@@ -132,6 +134,16 @@ jobs:
           - 5432:5432
         options: >-
           --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+      # 应用 KV 缓存走 redis（apps 会话短期记忆）；RedisKvCache 不吞连接错误，CI 必须提供
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10

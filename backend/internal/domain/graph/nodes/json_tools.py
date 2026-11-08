@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import json
-from typing import Any
 
 from internal.domain.canvas.node_type import NodeType
 from internal.domain.graph.node_base import NodeContext, NodeHandler, NodeResult

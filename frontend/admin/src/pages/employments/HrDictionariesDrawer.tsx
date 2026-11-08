@@ -209,21 +209,16 @@ export default function HrDictionariesDrawer({ open, onClose }: Props) {
   ]
 
   return (
-    <Drawer
-      title="HR 字典管理"
-      open={open}
-      onClose={onClose}
-      width={720}
-      destroyOnHidden
-    >
+    <Drawer title="HR 字典管理" open={open} onClose={onClose} width={720} destroyOnHidden>
       <Space direction="vertical" size={16} style={{ width: '100%' }}>
         <Space style={{ justifyContent: 'space-between', width: '100%' }}>
           <Segmented
             value={category}
             onChange={(value) => setCategory(value as HrDictionaryCategory)}
-            options={(
-              Object.keys(CATEGORY_LABEL) as HrDictionaryCategory[]
-            ).map((key) => ({ label: CATEGORY_LABEL[key], value: key }))}
+            options={(Object.keys(CATEGORY_LABEL) as HrDictionaryCategory[]).map((key) => ({
+              label: CATEGORY_LABEL[key],
+              value: key,
+            }))}
           />
           {canWrite && (
             <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
@@ -266,11 +261,7 @@ export default function HrDictionariesDrawer({ open, onClose }: Props) {
           >
             <Input disabled={!creating} maxLength={64} />
           </Form.Item>
-          <Form.Item
-            name="name"
-            label="名称"
-            rules={[{ required: true, message: '请输入名称' }]}
-          >
+          <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input maxLength={100} />
           </Form.Item>
           <Form.Item name="sort_order" label="排序">

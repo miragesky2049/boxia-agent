@@ -125,6 +125,9 @@ class Settings(BaseSettings):
     # 单条会话最多保留多少轮（user+assistant 对），超出后从头部裁剪
     memory_max_turns: int = Field(default=20, ge=1, le=100)
     memory_ttl_seconds: int = Field(default=1800, ge=60, le=86400)
+    # M4 PRD F16.6 隐私硬条件：用户端"我的记忆"管理面未部署的实例必须置 False，
+    # agent-config 保存校验将拒绝开启长期记忆（longTerm.enabled）
+    agent_memory_admin_enabled: bool = True
 
     # ============================================================
     # RAG：Embedding 模型与向量检索配置

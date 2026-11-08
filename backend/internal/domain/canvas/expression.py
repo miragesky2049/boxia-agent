@@ -16,8 +16,9 @@ from __future__ import annotations
 import ast
 import json
 import re
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Callable, Literal
+from typing import Any, Literal
 
 
 class Expr:
@@ -25,7 +26,7 @@ class Expr:
 
 
 @dataclass(frozen=True)
-class Literal(Expr):
+class LiteralValue(Expr):
     """字面量：字符串、数字、布尔、对象。"""
 
     value: Any
@@ -153,9 +154,7 @@ def rewrite_template_refs(
         key=lambda s: (-len(s), s),
     ):
         alias = f"_ref_{next_index}"
-        pattern = re.compile(
-            r"(?<![A-Za-z0-9_.\-])" + re.escape(key) + r"(?![A-Za-z0-9_\-])"
-        )
+        pattern = re.compile(r"(?<![A-Za-z0-9_.\-])" + re.escape(key) + r"(?![A-Za-z0-9_\-])")
         if pattern.search(result):
             result = pattern.sub(alias, result)
             aliases[alias] = key
@@ -230,7 +229,7 @@ class TemplateEvaluator:
             return (left or 0) + (right or 0)
         if isinstance(node, ast.Compare):
             left = self._eval_node(node.left, ctx, aliases)
-            for op, comparator in zip(node.ops, node.comparators):
+            for op, comparator in zip(node.ops, node.comparators, strict=True):
                 right = self._eval_node(comparator, ctx, aliases)
                 if not _compare(left, op, right):
                     return False
@@ -337,7 +336,7 @@ class ExpressionEvaluator:
     """把 Expr 求值成具体值。节点 handler 在 run() 前批量调用。
 
     注意：本类的 eval() 是普通方法，不是 Python 内建 eval()。
-    输入只有 Literal/Ref/GlobalVar/EnvVar/TemplatedString 等封闭类型，不执行任意代码，
+    输入只有 LiteralValue/Ref/GlobalVar/EnvVar/TemplatedString 等封闭类型，不执行任意代码，
     安全等价于 dict 查表。
     """
 
@@ -345,7 +344,7 @@ class ExpressionEvaluator:
         self._template = TemplateEvaluator()
 
     def eval(self, expr: Expr, ctx: EvalContext) -> Any:
-        if isinstance(expr, Literal):
+        if isinstance(expr, LiteralValue):
             return expr.value
         if isinstance(expr, Ref):
             node_out = ctx.node_outputs.get(expr.block_id, {})

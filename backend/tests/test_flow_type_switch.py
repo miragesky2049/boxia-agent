@@ -35,7 +35,11 @@ def _service(flow_type: str, graph: dict | None) -> tuple[ApplicationService, _F
     uow = MagicMock()
     repo = _FakeRepo(flow_type, graph)
     service = ApplicationService(
-        uow, repo, cache=MagicMock(), object_storage=None, default_llm_model_id="test-model",
+        uow,
+        repo,
+        cache=MagicMock(),
+        object_storage=None,
+        default_llm_model_id="test-model",
     )
     return service, repo
 
@@ -82,3 +86,24 @@ def test_same_flow_type_skips_switch_validation():
     service, repo = _service("workflow", _graph("3"))
     service.update_application(uuid4(), flow_type="workflow")
     assert repo.updated["flow_type"] == "workflow"
+
+
+def test_switch_to_agent_allowed_for_agent_shaped_canvas():
+    """0074：仅含 开始/结束/Agent 循环 的画布允许切到智能体。"""
+    service, repo = _service("chatflow", _graph("1", "2", "100"))
+    service.update_application(uuid4(), flow_type="agent")
+    assert repo.updated["flow_type"] == "agent"
+
+
+def test_switch_to_agent_rejected_when_canvas_has_other_nodes():
+    """0074：含 LLM 等编排节点时要求先清理，避免"编辑对象与运行对象不一致"。"""
+    service, repo = _service("workflow", _graph("1", "3", "2"))
+    with pytest.raises(ValidationError, match="切换为智能体前请先清理画布"):
+        service.update_application(uuid4(), flow_type="agent")
+    assert repo.updated == {}
+
+
+def test_switch_to_agent_allowed_when_graph_missing():
+    service, repo = _service("chatflow", None)
+    service.update_application(uuid4(), flow_type="agent")
+    assert repo.updated["flow_type"] == "agent"

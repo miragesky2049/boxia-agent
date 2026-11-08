@@ -104,9 +104,7 @@ def test_single_current_and_user_department_link(
     assert updated.json()["position"] == "高级工程师"
 
 
-def test_transfer_archives_old_employment(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_transfer_archives_old_employment(client: TestClient, auth_headers, tenant_client) -> None:
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client)
     dept_one = _create_dept(site, headers, "一部")
     dept_two = _create_dept(site, headers, "二部")
@@ -141,11 +139,14 @@ def test_transfer_archives_old_employment(
     assert records["items"][0]["is_current"] is True
 
     # 历史记录不能再次调岗
-    assert site.post(
-        f"{EMP_URL}/{current['id']}/transfer",
-        json={"department_id": dept_one["id"]},
-        headers=headers,
-    ).status_code == 422
+    assert (
+        site.post(
+            f"{EMP_URL}/{current['id']}/transfer",
+            json={"department_id": dept_one["id"]},
+            headers=headers,
+        ).status_code
+        == 422
+    )
 
     # 同部门调岗只更新岗位与生效日期，不产生新记录
     same_dept = site.post(
@@ -154,9 +155,7 @@ def test_transfer_archives_old_employment(
         headers=headers,
     )
     assert same_dept.status_code == 200
-    assert site.get(
-        EMP_URL, params={"user_id": user["id"]}, headers=headers
-    ).json()["total"] == 2
+    assert site.get(EMP_URL, params={"user_id": user["id"]}, headers=headers).json()["total"] == 2
 
     # 调岗生效日期不能早于原任职生效日期
     too_early = site.post(
@@ -167,9 +166,7 @@ def test_transfer_archives_old_employment(
     assert too_early.status_code == 422
 
 
-def test_archive_then_rejoin_and_delete(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_archive_then_rejoin_and_delete(client: TestClient, auth_headers, tenant_client) -> None:
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client)
     department = _create_dept(site, headers, "研发部")
     user = create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
@@ -194,15 +191,16 @@ def test_archive_then_rejoin_and_delete(
     users = site.get(USERS_URL, headers=headers).json()["items"]
     alice = next(item for item in users if item["username"] == "alice")
     assert alice["current_department_id"] is None
-    assert site.post(
-        f"{EMP_URL}/{current['id']}/archive",
-        json={},
-        headers=headers,
-    ).status_code == 422
-
-    rejoined = _create_employment(
-        site, headers, user_id=user["id"], department_id=department["id"]
+    assert (
+        site.post(
+            f"{EMP_URL}/{current['id']}/archive",
+            json={},
+            headers=headers,
+        ).status_code
+        == 422
     )
+
+    rejoined = _create_employment(site, headers, user_id=user["id"], department_id=department["id"])
     assert rejoined["is_current"] is True
 
     # 删除当前任职后用户再次变为无部门
@@ -213,9 +211,7 @@ def test_archive_then_rejoin_and_delete(
     assert alice["current_department_id"] is None
 
 
-def test_list_filters_subtree_and_status(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_list_filters_subtree_and_status(client: TestClient, auth_headers, tenant_client) -> None:
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client)
     dept_one = _create_dept(site, headers, "一部")
     dept_child = _create_dept(site, headers, "一组", dept_one["id"])
@@ -225,15 +221,14 @@ def test_list_filters_subtree_and_status(
     user_three = create_user(site, headers, username="user3", role_id=roles["viewer"]["id"])
 
     emp_one = _create_employment(
-        site, headers, user_id=user_one["id"], department_id=dept_one["id"],
+        site,
+        headers,
+        user_id=user_one["id"],
+        department_id=dept_one["id"],
         position="后端工程师",
     )
-    _create_employment(
-        site, headers, user_id=user_two["id"], department_id=dept_child["id"]
-    )
-    _create_employment(
-        site, headers, user_id=user_three["id"], department_id=dept_two["id"]
-    )
+    _create_employment(site, headers, user_id=user_two["id"], department_id=dept_child["id"])
+    _create_employment(site, headers, user_id=user_three["id"], department_id=dept_two["id"])
 
     subtree = site.get(
         EMP_URL, params={"department_id": dept_one["id"], "page_size": 50}, headers=headers
@@ -241,67 +236,71 @@ def test_list_filters_subtree_and_status(
     assert subtree["total"] == 2
     assert {item["user_name"] for item in subtree["items"]} == {"user1", "user2"}
 
-    only_two = site.get(
-        EMP_URL, params={"department_id": dept_two["id"]}, headers=headers
-    ).json()
+    only_two = site.get(EMP_URL, params={"department_id": dept_two["id"]}, headers=headers).json()
     assert [item["user_name"] for item in only_two["items"]] == ["user3"]
 
     by_keyword = site.get(EMP_URL, params={"keyword": "后端"}, headers=headers).json()
     assert [item["id"] for item in by_keyword["items"]] == [emp_one["id"]]
 
-    by_user = site.get(
-        EMP_URL, params={"user_id": user_two["id"]}, headers=headers
-    ).json()
+    by_user = site.get(EMP_URL, params={"user_id": user_two["id"]}, headers=headers).json()
     assert by_user["total"] == 1
 
     # 归档后 is_current 筛选只剩 2 条当前记录
-    assert site.post(
-        f"{EMP_URL}/{emp_one['id']}/archive", json={}, headers=headers
-    ).status_code == 200
+    assert (
+        site.post(f"{EMP_URL}/{emp_one['id']}/archive", json={}, headers=headers).status_code == 200
+    )
     current_only = site.get(
         EMP_URL, params={"is_current": "true", "page_size": 50}, headers=headers
     ).json()
     assert current_only["total"] == 2
-    history_only = site.get(
-        EMP_URL, params={"is_current": "false"}, headers=headers
-    ).json()
+    history_only = site.get(EMP_URL, params={"is_current": "false"}, headers=headers).json()
     assert history_only["total"] == 1
 
 
-def test_employment_validation_rules(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_employment_validation_rules(client: TestClient, auth_headers, tenant_client) -> None:
     site, headers, roles = _setup_tenant(client, auth_headers, tenant_client)
     department = _create_dept(site, headers, "研发部")
     user = create_user(site, headers, username="alice", role_id=roles["viewer"]["id"])
 
     # 停用部门不能新增任职
-    assert site.post(
-        f"{DEPTS_URL}/{department['id']}/status",
-        json={"is_active": False},
-        headers=headers,
-    ).status_code == 200
-    assert site.post(
-        EMP_URL,
-        json={"user_id": user["id"], "department_id": department["id"]},
-        headers=headers,
-    ).status_code == 422
+    assert (
+        site.post(
+            f"{DEPTS_URL}/{department['id']}/status",
+            json={"is_active": False},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    assert (
+        site.post(
+            EMP_URL,
+            json={"user_id": user["id"], "department_id": department["id"]},
+            headers=headers,
+        ).status_code
+        == 422
+    )
 
-    assert site.post(
-        f"{DEPTS_URL}/{department['id']}/status",
-        json={"is_active": True},
-        headers=headers,
-    ).status_code == 200
+    assert (
+        site.post(
+            f"{DEPTS_URL}/{department['id']}/status",
+            json={"is_active": True},
+            headers=headers,
+        ).status_code
+        == 200
+    )
 
     # 不存在的用户
-    assert site.post(
-        EMP_URL,
-        json={
-            "user_id": "00000000-0000-0000-0000-000000000000",
-            "department_id": department["id"],
-        },
-        headers=headers,
-    ).status_code == 422
+    assert (
+        site.post(
+            EMP_URL,
+            json={
+                "user_id": "00000000-0000-0000-0000-000000000000",
+                "department_id": department["id"],
+            },
+            headers=headers,
+        ).status_code
+        == 422
+    )
 
     # 历史任职生效日期不能晚于结束日期
     employment = _create_employment(
@@ -311,16 +310,22 @@ def test_employment_validation_rules(
         department_id=department["id"],
         started_at="2026-01-01",
     )
-    assert site.post(
-        f"{EMP_URL}/{employment['id']}/archive",
-        json={"ended_at": "2026-02-01"},
-        headers=headers,
-    ).status_code == 200
-    assert site.patch(
-        f"{EMP_URL}/{employment['id']}",
-        json={"started_at": "2026-03-01"},
-        headers=headers,
-    ).status_code == 422
+    assert (
+        site.post(
+            f"{EMP_URL}/{employment['id']}/archive",
+            json={"ended_at": "2026-02-01"},
+            headers=headers,
+        ).status_code
+        == 200
+    )
+    assert (
+        site.patch(
+            f"{EMP_URL}/{employment['id']}",
+            json={"started_at": "2026-03-01"},
+            headers=headers,
+        ).status_code
+        == 422
+    )
 
 
 def test_platform_forbidden_and_tenant_isolation(
@@ -329,9 +334,7 @@ def test_platform_forbidden_and_tenant_isolation(
     create_tenant(client, auth_headers, "acme", "Acme 公司")
     create_tenant(client, auth_headers, "globex", "Globex 公司")
     acme_site, acme_headers, _ = tenant_admin_client(tenant_client, "acme")
-    globex_site, globex_headers, _ = tenant_admin_client(
-        tenant_client, "globex"
-    )
+    globex_site, globex_headers, _ = tenant_admin_client(tenant_client, "globex")
     acme_roles = list_roles(acme_site, acme_headers)
     globex_roles = list_roles(globex_site, globex_headers)
 
@@ -347,16 +350,22 @@ def test_platform_forbidden_and_tenant_isolation(
     )
 
     # 不能引用其他租户的部门或用户
-    assert acme_site.post(
-        EMP_URL,
-        json={"user_id": acme_user["id"], "department_id": globex_dept["id"]},
-        headers=acme_headers,
-    ).status_code == 422
-    assert acme_site.post(
-        EMP_URL,
-        json={"user_id": globex_user["id"], "department_id": acme_dept["id"]},
-        headers=acme_headers,
-    ).status_code == 422
+    assert (
+        acme_site.post(
+            EMP_URL,
+            json={"user_id": acme_user["id"], "department_id": globex_dept["id"]},
+            headers=acme_headers,
+        ).status_code
+        == 422
+    )
+    assert (
+        acme_site.post(
+            EMP_URL,
+            json={"user_id": globex_user["id"], "department_id": acme_dept["id"]},
+            headers=acme_headers,
+        ).status_code
+        == 422
+    )
 
     _create_employment(
         acme_site,

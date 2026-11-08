@@ -30,11 +30,7 @@ export function buildDepartmentTreeData(
       treeNode.disabled = true
     }
     if (node.children && node.children.length > 0) {
-      treeNode.children = buildDepartmentTreeData(
-        node.children,
-        disableLevelFrom,
-        disableInactive,
-      )
+      treeNode.children = buildDepartmentTreeData(node.children, disableLevelFrom, disableInactive)
     }
     return treeNode
   })
@@ -42,8 +38,5 @@ export function buildDepartmentTreeData(
 
 /** 扁平化部门树，用于按 id 查找节点。 */
 export function flattenDepartments(nodes: Department[]): Department[] {
-  return nodes.flatMap((node) => [
-    node,
-    ...flattenDepartments(node.children ?? []),
-  ])
+  return nodes.flatMap((node) => [node, ...flattenDepartments(node.children ?? [])])
 }

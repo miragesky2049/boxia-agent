@@ -24,7 +24,9 @@ const MgmtUnitsPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitsPage'))
 const MgmtUnitDetailPage = lazy(() => import('./pages/mgmtUnits/MgmtUnitDetailPage'))
 const AppsIndexPage = lazy(() => import('./pages/apps/AppsIndexPage'))
 const AppEditPage = lazy(() => import('./pages/apps/AppEditPage'))
+const AgentConfigPage = lazy(() => import('./pages/apps/AgentConfigPage'))
 const TenantAppDetailPage = lazy(() => import('./pages/apps/TenantAppDetailPage'))
+const EvalWorkspacePage = lazy(() => import('./pages/apps/EvalWorkspacePage'))
 const MarketplacePage = lazy(() => import('./pages/apps/MarketplacePage'))
 const RunPage = lazy(() => import('./pages/apps/RunPage'))
 const RunsPage = lazy(() => import('./pages/apps/RunsPage'))
@@ -57,6 +59,9 @@ export default function AppRouter() {
             <Route path="/" element={<LandingRedirect />} />
             <Route path="/apps" element={<AppsIndexPage />} />
             <Route path="/apps/:id/edit" element={<AppEditPage />} />
+            {/* 0074：智能体应用的编辑入口是配置表单页，画布仍可从页内“打开画布”进入 */}
+            <Route path="/apps/:id/agent" element={<AgentConfigPage />} />
+            <Route path="/apps/:appId/eval" element={<EvalWorkspacePage />} />
             <Route path="/tenant-apps" element={<Navigate to="/apps" replace />} />
             <Route
               path="/tenant-apps/:appId"

@@ -1,9 +1,5 @@
 import { request } from './client'
-import type {
-  Department,
-  DepartmentCreatePayload,
-  DepartmentUpdatePayload,
-} from './types'
+import type { Department, DepartmentCreatePayload, DepartmentUpdatePayload } from './types'
 
 /** 租户内部门管理：物化路径树，最多 10 级。 */
 export const departmentsApi = {

@@ -33,9 +33,7 @@ class DocumentService:
         """分页查询文档元数据。"""
         page = max(page, 1)
         page_size = min(max(page_size, 1), 100)
-        items, total = self._uow.documents.list_page(
-            page, page_size, keyword, ingest_status
-        )
+        items, total = self._uow.documents.list_page(page, page_size, keyword, ingest_status)
         return Page(items=items, total=total, page=page, page_size=page_size)
 
     def get(self, document_id: UUID) -> Document:

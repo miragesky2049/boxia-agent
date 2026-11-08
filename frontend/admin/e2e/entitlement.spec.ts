@@ -78,7 +78,9 @@ async function tenantAdminToken(request: APIRequestContext): Promise<string> {
       ).json()
     ).access_token
   }
-  throw new Error(`无法获取租户管理员令牌：尝试的密码均不可用（可能已触发登录锁定） [${attempts.join(', ')}]`)
+  throw new Error(
+    `无法获取租户管理员令牌：尝试的密码均不可用（可能已触发登录锁定） [${attempts.join(', ')}]`,
+  )
 }
 
 async function createPlatformSkill(
@@ -166,11 +168,7 @@ test.describe('权益流 E2E（§5.3）', () => {
       const picker = page.getByRole('dialog', { name: '选择要开通的对象' })
       await expect(picker.getByRole('button', { name: '下一步：预览' })).toBeDisabled()
       await picker.locator('.ant-select-selector').first().click()
-      await page
-        .locator('.ant-select-item-option')
-        .filter({ hasText: '技能' })
-        .first()
-        .click()
+      await page.locator('.ant-select-item-option').filter({ hasText: '技能' }).first().click()
       const skillRow = picker.getByRole('row', { name: new RegExp(name) })
       await expect(skillRow).toBeVisible()
       await skillRow.getByRole('checkbox').click()
@@ -212,11 +210,7 @@ test.describe('权益流 E2E（§5.3）', () => {
       await loginPlatform(page)
       await page.goto('/resources')
       await page.locator('.ant-select-selector', { hasText: '审核状态' }).click()
-      await page
-        .locator('.ant-select-item-option')
-        .filter({ hasText: '待审核' })
-        .first()
-        .click()
+      await page.locator('.ant-select-item-option').filter({ hasText: '待审核' }).first().click()
 
       const row = page.getByRole('row', { name: new RegExp(name) })
       await expect(row).toBeVisible()
@@ -224,9 +218,7 @@ test.describe('权益流 E2E（§5.3）', () => {
       await row.getByRole('button', { name: /审\s*核/ }).click()
 
       const dialog = page.getByRole('dialog', { name: `审核资源：${name}` })
-      await dialog
-        .getByPlaceholder('审核备注（可选，驳回时建议写明原因）')
-        .fill('e2e 审核通过')
+      await dialog.getByPlaceholder('审核备注（可选，驳回时建议写明原因）').fill('e2e 审核通过')
       await dialog.getByRole('button', { name: /通\s*过/ }).click()
       await expect(page.getByText('已通过审核')).toBeVisible()
 
@@ -271,16 +263,12 @@ test.describe('权益流 E2E（§5.3）', () => {
       const grantedRow = page.getByRole('row', { name: new RegExp(grantedName) })
       await expect(grantedRow).toBeVisible()
       await expect(grantedRow).toContainText('未授权')
-      await expect(
-        page.getByRole('row', { name: new RegExp(notGrantedName) }),
-      ).toHaveCount(0)
+      await expect(page.getByRole('row', { name: new RegExp(notGrantedName) })).toHaveCount(0)
 
       await grantedRow.getByRole('checkbox').click()
       await page.getByRole('button', { name: /批量授权（1）/ }).click()
       await expect(page.getByText('已授权 1 项')).toBeVisible()
-      await expect(
-        page.getByRole('row', { name: new RegExp(grantedName) }),
-      ).toContainText('已授权')
+      await expect(page.getByRole('row', { name: new RegExp(grantedName) })).toContainText('已授权')
     } finally {
       await batchEntitlement(request, token, tenantId, 'revoke', [
         { object_type: 'skill', object_id: grantedId },

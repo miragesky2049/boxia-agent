@@ -40,4 +40,4 @@ export const CANVAS_TOKENS = {
 
   // 层级
   z: { guides: 90, toolbar: 100, overlay: 120 },
-} as const;
+} as const

@@ -100,21 +100,25 @@ def test_build_runner_uses_one_run_id_everywhere(monkeypatch):
     monkeypatch.setattr(graph_deps, "ToolExecutorService", _FakeToolExecutor)
     monkeypatch.setattr(graph_deps, "AsyncMessageRepository", _FakeAsyncMessageRepository)
     monkeypatch.setattr(
-        graph_deps, "AsyncConversationRepository", _FakeAsyncConversationRepository,
+        graph_deps,
+        "AsyncConversationRepository",
+        _FakeAsyncConversationRepository,
     )
     monkeypatch.setattr(graph_deps, "register_retrieval_services", lambda services: None)
 
     uow = SimpleNamespace(session=object())
-    runtime = asyncio.run(graph_deps.build_runner(
-        _FakeService(),
-        uow,
-        None,
-        tenant_id=tenant_id,
-        application_id=application_id,
-        thread_id="conv-1",
-        run_id=run_id,
-        current_user_id=user_id,
-    ))
+    runtime = asyncio.run(
+        graph_deps.build_runner(
+            _FakeService(),
+            uow,
+            None,
+            tenant_id=tenant_id,
+            application_id=application_id,
+            thread_id="conv-1",
+            run_id=run_id,
+            current_user_id=user_id,
+        )
+    )
 
     assert runtime.run_id == run_id
     assert captured["tool_run_id"] == run_id
@@ -241,7 +245,10 @@ def test_run_chatflow_persists_user_and_final_message():
     application_id = uuid4()
     run_id = uuid4()
     runner = _FakeRunner(
-        run_id, "conv-1", application_id, output={"output": "最终回答"},
+        run_id,
+        "conv-1",
+        application_id,
+        output={"output": "最终回答"},
     )
     _, factory = _make_runner_factory(runner)
     service = _service(factory)
@@ -287,7 +294,10 @@ def test_run_chatflow_resume_reuses_interrupted_run_and_persists_answer():
     run_repo = _FakeRunRepo({interrupted_run_id})
     resume = {"answer": "选项 A"}
     runner = _FakeRunner(
-        interrupted_run_id, "conv-1", application_id, output={"output": "续跑完成"},
+        interrupted_run_id,
+        "conv-1",
+        application_id,
+        output={"output": "续跑完成"},
     )
     seen, factory = _make_runner_factory(runner)
     service = _service(factory, run_repo)
@@ -324,8 +334,7 @@ def test_run_chatflow_interrupt_persists_question_and_touches_conversation():
 
     assert "question" in [name for name, _ in events]
     question_messages = [
-        m for m in service._msg_repo.messages
-        if (m.get("metadata") or {}).get("type") == "question"
+        m for m in service._msg_repo.messages if (m.get("metadata") or {}).get("type") == "question"
     ]
     assert len(question_messages) == 1
     assert question_messages[0]["content"] == "选哪个"

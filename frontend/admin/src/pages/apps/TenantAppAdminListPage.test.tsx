@@ -142,10 +142,10 @@ describe('TenantAppAdminListPage 应用配置入口', () => {
     )
     renderPage()
 
-    await waitFor(
-      () => expect(screen.getByText('范围内应用')).toBeInTheDocument(),
-      { timeout: 10000, interval: 50 },
-    )
+    await waitFor(() => expect(screen.getByText('范围内应用')).toBeInTheDocument(), {
+      timeout: 10000,
+      interval: 50,
+    })
 
     const disabledButton = screen
       .getByText('范围外应用')

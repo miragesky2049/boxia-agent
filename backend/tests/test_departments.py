@@ -44,9 +44,7 @@ def _update_dept(
     *,
     expected: int = 200,
 ) -> dict:
-    response = site.patch(
-        f"{DEPTS_URL}/{department_id}", json=payload, headers=headers
-    )
+    response = site.patch(f"{DEPTS_URL}/{department_id}", json=payload, headers=headers)
     assert response.status_code == expected, response.text
     return response.json() if expected == 200 else {}
 
@@ -56,17 +54,13 @@ def _chain(site: TestClient, headers: dict[str, str], prefix: str, depth: int) -
     nodes: list[dict] = []
     parent_id: str | None = None
     for index in range(depth):
-        node = _create_dept(
-            site, headers, name=f"{prefix}-{index + 1}", parent_id=parent_id
-        )
+        node = _create_dept(site, headers, name=f"{prefix}-{index + 1}", parent_id=parent_id)
         nodes.append(node)
         parent_id = node["id"]
     return nodes
 
 
-def test_department_tree_and_path(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_department_tree_and_path(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
@@ -134,9 +128,7 @@ def test_code_and_same_parent_name_conflict(
     assert same_name_child.status_code == 201, same_name_child.text
 
 
-def test_level_limit_ten(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_level_limit_ten(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
@@ -151,9 +143,7 @@ def test_level_limit_ten(
     assert response.status_code == 422
 
 
-def test_move_subtree_path_and_level(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_move_subtree_path_and_level(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
@@ -192,9 +182,7 @@ def test_move_subtree_path_and_level(
     assert cycle.status_code == 422
 
 
-def test_move_cannot_exceed_level_limit(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_move_cannot_exceed_level_limit(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
@@ -216,9 +204,7 @@ def test_move_cannot_exceed_level_limit(
     assert d_roots[0]["children"][0]["id"] == node_d1["id"]
 
 
-def test_delete_protection(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_delete_protection(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
     roles = list_roles(site, headers)
@@ -238,15 +224,16 @@ def test_delete_protection(
     )
     assert employment.status_code == 201, employment.text
     assert site.delete(f"{DEPTS_URL}/{root['id']}", headers=headers).status_code == 409
-    assert site.delete(
-        f"/api/v1/admin/employments/{employment.json()['id']}", headers=headers
-    ).status_code == 204
+    assert (
+        site.delete(
+            f"/api/v1/admin/employments/{employment.json()['id']}", headers=headers
+        ).status_code
+        == 204
+    )
     assert site.delete(f"{DEPTS_URL}/{root['id']}", headers=headers).status_code == 204
 
 
-def test_disable_blocks_create_and_move(
-    client: TestClient, auth_headers, tenant_client
-) -> None:
+def test_disable_blocks_create_and_move(client: TestClient, auth_headers, tenant_client) -> None:
     create_tenant(client, auth_headers)
     site, headers, _ = tenant_admin_client(tenant_client, "acme")
 
@@ -259,11 +246,14 @@ def test_disable_blocks_create_and_move(
     assert disabled.status_code == 200
     assert disabled.json()["is_active"] is False
 
-    assert site.post(
-        DEPTS_URL,
-        json={"name": "停用下子部门", "parent_id": root["id"]},
-        headers=headers,
-    ).status_code == 422
+    assert (
+        site.post(
+            DEPTS_URL,
+            json={"name": "停用下子部门", "parent_id": root["id"]},
+            headers=headers,
+        ).status_code
+        == 422
+    )
 
     enabled = site.post(
         f"{DEPTS_URL}/{root['id']}/status",
@@ -280,11 +270,14 @@ def test_disable_blocks_create_and_move(
 
     # 不能移入已停用部门
     other = _create_dept(site, headers, name="停用根")
-    assert site.post(
-        f"{DEPTS_URL}/{other['id']}/status",
-        json={"is_active": False},
-        headers=headers,
-    ).status_code == 200
+    assert (
+        site.post(
+            f"{DEPTS_URL}/{other['id']}/status",
+            json={"is_active": False},
+            headers=headers,
+        ).status_code
+        == 200
+    )
     moved = site.patch(
         f"{DEPTS_URL}/{child.json()['id']}",
         json={"parent_id": other["id"], "name": "恢复后子部门", "code": None, "sort_order": 0},

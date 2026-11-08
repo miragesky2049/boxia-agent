@@ -8,12 +8,12 @@ from fastapi import APIRouter, Depends, Request, status
 from internal.domain.entity.mgmt_unit import ManagementUnit
 from web.admin.schemas.mgmt_unit import (
     MgmtUnitCreateRequest,
-    MgmtUnitDepartmentsReplaceRequest,
     MgmtUnitDepartmentOut,
+    MgmtUnitDepartmentsReplaceRequest,
     MgmtUnitOut,
     MgmtUnitUpdateRequest,
-    MgmtUnitUsersReplaceRequest,
     MgmtUnitUserOut,
+    MgmtUnitUsersReplaceRequest,
 )
 from web.deps.auth import AdminAuthDep, require_permission
 from web.deps.http import client_meta

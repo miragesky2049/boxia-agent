@@ -21,8 +21,8 @@ from internal.domain.graph.node_base import (
     RuntimeEnv,
     ServiceRegistry,
 )
-from internal.domain.graph.nodes.api_plugin import ApiPluginNodeHandler
 from internal.domain.graph.nodes import get_node_handler
+from internal.domain.graph.nodes.api_plugin import ApiPluginNodeHandler
 
 
 def _make_env() -> RuntimeEnv:
@@ -84,7 +84,7 @@ def test_calls_tool_executor_with_name_and_args():
     async def fake_executor(name: str, args: dict) -> str:
         captured["name"] = name
         captured["args"] = args
-        return f"温度 25°C"
+        return "温度 25°C"
 
     services = ServiceRegistry({"tool_executor": fake_executor})
     handler = ApiPluginNodeHandler()

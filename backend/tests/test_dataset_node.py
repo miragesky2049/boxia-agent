@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-from typing import Any
 from uuid import uuid4
 
 from internal.domain.graph.node_base import NodeContext, NodeResult, RuntimeEnv, ServiceRegistry
@@ -112,12 +111,24 @@ def test_dataset_delete_removes_chunks_by_document_id():
     services = ServiceRegistry({"vector_store": store})
 
     async def _seed() -> None:
-        await store.upsert([
-            Chunk(chunk_id="c1", content="a", dataset_id="ds", document_id="doc-1", vector=[1.0]),
-            Chunk(chunk_id="c2", content="b", dataset_id="ds", document_id="doc-2", vector=[1.0]),
-            Chunk(chunk_id="c3", content="c", dataset_id="ds", document_id="", vector=[1.0],
-                  metadata={"document_id": "doc-1"}),
-        ])
+        await store.upsert(
+            [
+                Chunk(
+                    chunk_id="c1", content="a", dataset_id="ds", document_id="doc-1", vector=[1.0]
+                ),
+                Chunk(
+                    chunk_id="c2", content="b", dataset_id="ds", document_id="doc-2", vector=[1.0]
+                ),
+                Chunk(
+                    chunk_id="c3",
+                    content="c",
+                    dataset_id="ds",
+                    document_id="",
+                    vector=[1.0],
+                    metadata={"document_id": "doc-1"},
+                ),
+            ]
+        )
 
     asyncio.run(_seed())
 

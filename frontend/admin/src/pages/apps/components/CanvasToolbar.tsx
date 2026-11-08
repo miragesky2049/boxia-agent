@@ -1,61 +1,80 @@
-import { Button, Dropdown, Tooltip } from 'antd';
+import { Button, Dropdown, Tooltip } from 'antd'
 import {
-  ZoomInOutlined, ZoomOutOutlined, CompressOutlined, FullscreenOutlined,
-  PlusOutlined, CaretRightOutlined, UndoOutlined, RedoOutlined, DownOutlined,
+  ZoomInOutlined,
+  ZoomOutOutlined,
+  CompressOutlined,
+  FullscreenOutlined,
+  PlusOutlined,
+  CaretRightOutlined,
+  UndoOutlined,
+  RedoOutlined,
+  DownOutlined,
   DownloadOutlined,
-} from '@ant-design/icons';
-import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor';
-import { CANVAS_TOKENS } from '../canvas/tokens';
-import { fitView, setZoom, zoomBy } from '../canvas/adapters/flowgramContext';
+} from '@ant-design/icons'
+import type { FreeLayoutPluginContext } from '@flowgram.ai/free-layout-editor'
+import { CANVAS_TOKENS } from '../canvas/tokens'
+import { fitView, setZoom, zoomBy } from '../canvas/adapters/flowgramContext'
 
 // 缩放快捷档位（对齐 Coze 下拉）：选中项与当前 zoom 完全一致时高亮
-const ZOOM_PRESETS = [0.5, 0.75, 1, 1.5, 2];
+const ZOOM_PRESETS = [0.5, 0.75, 1, 1.5, 2]
 
 interface CanvasToolbarProps {
-  ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>;
-  zoom: number;
-  onAddNode: () => void;
-  onRun: () => void;
-  running?: boolean;
-  canUndo?: boolean;
-  canRedo?: boolean;
-  onUndo?: () => void;
-  onRedo?: () => void;
-  onExportJson?: () => void;
-  onExportPng?: (mode: 'full' | 'viewport') => void;
-  exportingPng?: boolean;
+  ctxRef: React.MutableRefObject<FreeLayoutPluginContext | null>
+  zoom: number
+  onAddNode: () => void
+  onRun: () => void
+  running?: boolean
+  canUndo?: boolean
+  canRedo?: boolean
+  onUndo?: () => void
+  onRedo?: () => void
+  onExportJson?: () => void
+  onExportPng?: (mode: 'full' | 'viewport') => void
+  exportingPng?: boolean
 }
 
 // 画布底部居中浮条（V3，对齐 Coze）：撤销/重做 | 缩放 / 适应 / 全屏 | +添加节点 | 试运行
 export function CanvasToolbar({
-  ctxRef, zoom, onAddNode, onRun, running, canUndo, canRedo, onUndo, onRedo,
-  onExportJson, onExportPng, exportingPng,
+  ctxRef,
+  zoom,
+  onAddNode,
+  onRun,
+  running,
+  canUndo,
+  canRedo,
+  onUndo,
+  onRedo,
+  onExportJson,
+  onExportPng,
+  exportingPng,
 }: CanvasToolbarProps) {
   // 画布缩放服务挂在 playground.config 上，取值路径收敛在 flowgramContext
-  const applyZoom = (next: number) => setZoom(ctxRef.current, next);
-  const handleZoom = (delta: number) => zoomBy(ctxRef.current, delta);
-  const handleFit = () => { void fitView(ctxRef.current, true); };
+  const applyZoom = (next: number) => setZoom(ctxRef.current, next)
+  const handleZoom = (delta: number) => zoomBy(ctxRef.current, delta)
+  const handleFit = () => {
+    void fitView(ctxRef.current, true)
+  }
 
-  const zoomPercent = Math.round(zoom * 100);
+  const zoomPercent = Math.round(zoom * 100)
   const zoomMenuItems = [
     ...ZOOM_PRESETS.map((preset) => ({
       key: String(preset),
       label: `${Math.round(preset * 100)}%`,
     })),
     { key: 'fit', label: '自适应' },
-  ];
-  const matchedPreset = ZOOM_PRESETS.find((p) => Math.abs(p - zoom) < 0.001);
-  const selectedZoomKeys = matchedPreset ? [String(matchedPreset)] : [];
+  ]
+  const matchedPreset = ZOOM_PRESETS.find((p) => Math.abs(p - zoom) < 0.001)
+  const selectedZoomKeys = matchedPreset ? [String(matchedPreset)] : []
 
   const handleFullscreen = () => {
-    const el = document.querySelector('.gedit-playground-container') as HTMLElement | null;
-    if (!el) return;
+    const el = document.querySelector('.gedit-playground-container') as HTMLElement | null
+    if (!el) return
     if (document.fullscreenElement) {
-      document.exitFullscreen?.();
+      document.exitFullscreen?.()
     } else {
-      el.requestFullscreen?.();
+      el.requestFullscreen?.()
     }
-  };
+  }
 
   return (
     <div
@@ -76,16 +95,33 @@ export function CanvasToolbar({
       }}
     >
       <Tooltip title="撤销 (Ctrl+Z)">
-        <Button size="small" type="text" icon={<UndoOutlined />} disabled={!canUndo} onClick={onUndo} />
+        <Button
+          size="small"
+          type="text"
+          icon={<UndoOutlined />}
+          disabled={!canUndo}
+          onClick={onUndo}
+        />
       </Tooltip>
       <Tooltip title="重做 (Ctrl+Shift+Z)">
-        <Button size="small" type="text" icon={<RedoOutlined />} disabled={!canRedo} onClick={onRedo} />
+        <Button
+          size="small"
+          type="text"
+          icon={<RedoOutlined />}
+          disabled={!canRedo}
+          onClick={onRedo}
+        />
       </Tooltip>
 
       <div style={{ width: 1, height: 18, background: CANVAS_TOKENS.border, margin: '0 8px' }} />
 
       <Tooltip title="缩小">
-        <Button size="small" type="text" icon={<ZoomOutOutlined />} onClick={() => handleZoom(-0.1)} />
+        <Button
+          size="small"
+          type="text"
+          icon={<ZoomOutOutlined />}
+          onClick={() => handleZoom(-0.1)}
+        />
       </Tooltip>
       <Dropdown
         trigger={['click']}
@@ -95,10 +131,10 @@ export function CanvasToolbar({
           selectedKeys: selectedZoomKeys,
           onClick: ({ key }) => {
             if (key === 'fit') {
-              handleFit();
-              return;
+              handleFit()
+              return
             }
-            applyZoom(Number(key));
+            applyZoom(Number(key))
           },
         }}
       >
@@ -107,7 +143,12 @@ export function CanvasToolbar({
         </Button>
       </Dropdown>
       <Tooltip title="放大">
-        <Button size="small" type="text" icon={<ZoomInOutlined />} onClick={() => handleZoom(0.1)} />
+        <Button
+          size="small"
+          type="text"
+          icon={<ZoomInOutlined />}
+          onClick={() => handleZoom(0.1)}
+        />
       </Tooltip>
       <Tooltip title="适应视图">
         <Button size="small" type="text" icon={<CompressOutlined />} onClick={handleFit} />
@@ -125,9 +166,9 @@ export function CanvasToolbar({
               { key: 'png-viewport', label: '导出 PNG（当前视口）', disabled: exportingPng },
             ],
             onClick: ({ key }) => {
-              if (key === 'json') onExportJson?.();
-              else if (key === 'png-full') onExportPng?.('full');
-              else if (key === 'png-viewport') onExportPng?.('viewport');
+              if (key === 'json') onExportJson?.()
+              else if (key === 'png-full') onExportPng?.('full')
+              else if (key === 'png-viewport') onExportPng?.('viewport')
             },
           }}
         >
@@ -144,7 +185,9 @@ export function CanvasToolbar({
         icon={<PlusOutlined />}
         onClick={onAddNode}
         style={{
-          background: CANVAS_TOKENS.accentSoft, color: CANVAS_TOKENS.accentText, borderColor: CANVAS_TOKENS.accentSoft,
+          background: CANVAS_TOKENS.accentSoft,
+          color: CANVAS_TOKENS.accentText,
+          borderColor: CANVAS_TOKENS.accentSoft,
           fontWeight: 500,
         }}
       >
@@ -160,12 +203,13 @@ export function CanvasToolbar({
         loading={running}
         onClick={onRun}
         style={{
-          background: CANVAS_TOKENS.run, borderColor: CANVAS_TOKENS.run,
+          background: CANVAS_TOKENS.run,
+          borderColor: CANVAS_TOKENS.run,
           fontWeight: 500,
         }}
       >
         试运行
       </Button>
     </div>
-  );
+  )
 }

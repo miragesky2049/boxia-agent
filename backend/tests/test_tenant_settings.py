@@ -29,7 +29,9 @@ class FakeSettingsRepo:
         self.store[str(tenant_id)] = {
             "id": uuid4(),
             "tenant_id": str(tenant_id),
-            "default_model_catalog_id": str(default_model_catalog_id) if default_model_catalog_id else None,
+            "default_model_catalog_id": str(default_model_catalog_id)
+            if default_model_catalog_id
+            else None,
             "allowed_catalog_ids": [str(x) for x in allowed_catalog_ids],
             "plugin_whitelist": list(plugin_whitelist),
             "updated_at": "2026-10-31",
@@ -51,7 +53,9 @@ class FakeModelRepo:
         return {"id": cid, "model_id": f"model-{cid[:8]}"}
 
 
-def _make_service(catalogs: set[str] | None = None) -> tuple[TenantSettingsService, FakeSettingsRepo]:
+def _make_service(
+    catalogs: set[str] | None = None,
+) -> tuple[TenantSettingsService, FakeSettingsRepo]:
     session = MagicMock()
     repo = FakeSettingsRepo()
     # DDD 四期：仓储改由构造参数注入
@@ -72,9 +76,7 @@ def test_get_returns_empty_when_no_row():
 def test_upsert_persists_fields():
     default_cid = uuid4()
     allowed = [uuid4(), uuid4()]
-    service, repo = _make_service(
-        catalogs={str(default_cid), str(allowed[0]), str(allowed[1])}
-    )
+    service, repo = _make_service(catalogs={str(default_cid), str(allowed[0]), str(allowed[1])})
     tenant_id = uuid4()
     view = service.update(
         tenant_id,

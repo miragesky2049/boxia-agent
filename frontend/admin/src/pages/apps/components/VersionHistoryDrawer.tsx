@@ -1,5 +1,5 @@
-import { Button, Drawer, Space, Tag, Typography } from 'antd';
-import type { GraphVersionItem } from '../../../api/apps';
+import { Button, Drawer, Space, Tag, Typography } from 'antd'
+import type { GraphVersionItem } from '../../../api/apps'
 
 // 版本历史抽屉（B9）：整图版本快照 + 回滚
 export function VersionHistoryDrawer({
@@ -8,18 +8,13 @@ export function VersionHistoryDrawer({
   onClose,
   onRollback,
 }: {
-  open: boolean;
-  versions: GraphVersionItem[];
-  onClose: () => void;
-  onRollback: (version: number) => void;
+  open: boolean
+  versions: GraphVersionItem[]
+  onClose: () => void
+  onRollback: (version: number) => void
 }) {
   return (
-    <Drawer
-      title="版本历史"
-      open={open}
-      onClose={onClose}
-      width="min(480px, 92vw)"
-    >
+    <Drawer title="版本历史" open={open} onClose={onClose} width="min(480px, 92vw)">
       {versions.length === 0 ? (
         <Typography.Text type="secondary">暂无历史版本</Typography.Text>
       ) : (
@@ -28,7 +23,9 @@ export function VersionHistoryDrawer({
             <div
               key={v.id}
               style={{
-                padding: 12, border: '1px solid #f0f0f0', borderRadius: 8,
+                padding: 12,
+                border: '1px solid #f0f0f0',
+                borderRadius: 8,
                 background: idx === 0 ? '#f6ffed' : '#fff',
               }}
             >
@@ -64,5 +61,5 @@ export function VersionHistoryDrawer({
         </Space>
       )}
     </Drawer>
-  );
+  )
 }

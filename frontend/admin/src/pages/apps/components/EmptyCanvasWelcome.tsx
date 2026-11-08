@@ -1,6 +1,6 @@
 // 空白画布欢迎页：当画布中只有 start 节点时显示引导
 export function EmptyCanvasWelcome({ visible }: { visible: boolean }) {
-  if (!visible) return null;
+  if (!visible) return null
   return (
     <div
       style={{
@@ -22,5 +22,5 @@ export function EmptyCanvasWelcome({ visible }: { visible: boolean }) {
         点击左侧节点库中的节点即可添加到画布，拖拽端口即可连线
       </div>
     </div>
-  );
+  )
 }

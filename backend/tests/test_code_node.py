@@ -46,11 +46,11 @@ def test_code_node_executes_user_function():
     sandbox = PythonSandbox(timeout_s=5.0)
     services = ServiceRegistry({"sandbox": sandbox})
 
-    user_code = '''
+    user_code = """
 def main(args):
     text = args.get("input", "")
     return {"output": f"echo: {text}", "len": len(text)}
-'''
+"""
     handler = CodeNodeHandler()
     ctx = NodeContext(
         node_id="code_1",
@@ -70,12 +70,12 @@ def test_code_node_timeout_raises():
     sandbox = PythonSandbox(timeout_s=1.0)
     services = ServiceRegistry({"sandbox": sandbox})
 
-    user_code = '''
+    user_code = """
 def main(args):
     while True:
         pass
     return {}
-'''
+"""
     handler = CodeNodeHandler()
     ctx = NodeContext(
         node_id="code_1",
@@ -94,7 +94,7 @@ def main(args):
 
 def test_sandbox_allows_whitelisted_modules():
     """白名单内的模块（re/json/math）应能正常 import。"""
-    code = '''
+    code = """
 import re
 import json
 import math
@@ -107,7 +107,7 @@ def main(args):
         "pi_rounded": round(math.pi, 2),
         "json_ok": json.dumps({"a": 1}),
     }
-'''
+"""
     result = _run_sandbox(code, {"text": "order 123 total 456"})
     assert result.exit_code == 0
     assert result.outputs["digits"] == ["123", "456"]
@@ -117,12 +117,12 @@ def main(args):
 
 def test_sandbox_blocks_disallowed_os_import():
     """import os 应被拒绝，__error__ 包含白名单提示。"""
-    code = '''
+    code = """
 import os
 
 def main(args):
     return {"cwd": os.getcwd()}
-'''
+"""
     result = _run_sandbox(code)
     assert result.exit_code != 0
     assert "__error__" in result.outputs
@@ -132,12 +132,12 @@ def main(args):
 
 def test_sandbox_blocks_subprocess_import():
     """import subprocess 应被拒绝。"""
-    code = '''
+    code = """
 import subprocess
 
 def main(args):
     return {"out": subprocess.check_output(["echo", "hi"])}
-'''
+"""
     result = _run_sandbox(code)
     assert result.exit_code != 0
     assert "__error__" in result.outputs
@@ -145,13 +145,13 @@ def main(args):
 
 def test_sandbox_blocks_dynamic_importlib():
     """importlib 动态加载也应被白名单拦截。"""
-    code = '''
+    code = """
 import importlib
 
 def main(args):
     os = importlib.import_module("os")
     return {"cwd": os.getcwd()}
-'''
+"""
     result = _run_sandbox(code)
     assert result.exit_code != 0
     assert "__error__" in result.outputs
@@ -162,12 +162,12 @@ def test_sandbox_custom_allowed_modules():
     from internal.infrastructure.sandbox.python_sandbox import PythonSandbox as SB
 
     custom = SB(timeout_s=5.0, allowed_modules=frozenset({"json", "os"}))
-    code = '''
+    code = """
 import os
 
 def main(args):
     return {"cwd_len": len(os.getcwd())}
-'''
+"""
     result = asyncio.run(custom.run(code, {}))
     # os.getcwd() 返回路径长度 > 0
     assert result.exit_code == 0

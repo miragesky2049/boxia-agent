@@ -12,7 +12,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from dataclasses import dataclass
 from typing import Any
@@ -75,7 +74,7 @@ class AuthService:
         if row is None:
             return AuthResult(has_auth=False, auth_info=None)
         expire_time = row.get("expire_time")
-        if hasattr(expire_time, "isoformat"):
+        if expire_time is not None and hasattr(expire_time, "isoformat"):
             expire_str = expire_time.isoformat()
         else:
             expire_str = str(expire_time) if expire_time else None

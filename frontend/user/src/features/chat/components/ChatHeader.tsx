@@ -1,4 +1,4 @@
-import { ArrowLeftOutlined, MenuOutlined } from '@ant-design/icons'
+import { ArrowLeftOutlined, MenuOutlined, BookOutlined } from '@ant-design/icons'
 import type { AgentStatus, ChatAgent } from '../types'
 
 interface ChatHeaderProps {
@@ -6,9 +6,11 @@ interface ChatHeaderProps {
   status?: AgentStatus
   onBack?: () => void
   onOpenMenu?: () => void
+  /** M4 PRD F16.6：智能体应用提供"我的记忆"入口 */
+  onOpenMemories?: () => void
 }
 
-export function ChatHeader({ agent, status = 'online', onBack, onOpenMenu }: ChatHeaderProps) {
+export function ChatHeader({ agent, status = 'online', onBack, onOpenMenu, onOpenMemories }: ChatHeaderProps) {
   return (
     <header className="lc-header">
       {onOpenMenu && (
@@ -37,6 +39,18 @@ export function ChatHeader({ agent, status = 'online', onBack, onOpenMenu }: Cha
           </span>
         </span>
       </div>
+
+      {onOpenMemories && (
+        <button
+          type="button"
+          className="lc-icon-btn lc-header__memories"
+          onClick={onOpenMemories}
+          aria-label="我的记忆"
+          title="我的记忆"
+        >
+          <BookOutlined />
+        </button>
+      )}
     </header>
   )
 }

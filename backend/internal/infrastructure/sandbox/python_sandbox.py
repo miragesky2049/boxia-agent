@@ -31,12 +31,24 @@ logger = logging.getLogger(__name__)
 DEFAULT_ALLOWED_MODULES: frozenset[str] = frozenset(
     {
         # JSON / 数据结构
-        "json", "re", "math", "datetime", "collections", "itertools",
-        "functools", "string", "decimal", "fractions",
+        "json",
+        "re",
+        "math",
+        "datetime",
+        "collections",
+        "itertools",
+        "functools",
+        "string",
+        "decimal",
+        "fractions",
         # 编码 / 哈希（不涉及网络）
-        "hashlib", "base64", "binascii", "urllib.parse",
+        "hashlib",
+        "base64",
+        "binascii",
+        "urllib.parse",
         # 随机 / 类型提示
-        "random", "typing",
+        "random",
+        "typing",
     }
 )
 
@@ -103,7 +115,7 @@ class PythonSandbox:
                 proc.communicate(input=payload.encode("utf-8")),
                 timeout=self._timeout_s,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             proc.kill()
             await proc.wait()
             return SandboxResult(
@@ -135,7 +147,7 @@ class PythonSandbox:
         """
         allowed = sorted(self._allowed_modules)
         allowed_repr = repr(allowed)
-        return f'''
+        return f"""
 import json, sys, traceback
 
 _ALLOWED = set({allowed_repr})
@@ -174,7 +186,7 @@ try:
 except Exception:
     sys.stdout.write(json.dumps({{"__error__": traceback.format_exc()}}))
     sys.exit(1)
-'''
+"""
 
     def _build_env(self) -> dict[str, str]:
         """隔离环境：只保留最小必要变量。"""

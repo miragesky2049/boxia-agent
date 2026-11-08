@@ -97,9 +97,7 @@ def split_markdown(
         for piece in pieces:
             piece = piece.strip()
             if piece:
-                chunks.append(
-                    Chunk(content=piece, heading_path=list(current_heading_path))
-                )
+                chunks.append(Chunk(content=piece, heading_path=list(current_heading_path)))
         # 保留尾部 overlap 作为下一段起点（跨 section 不保留，避免标题串味）
         flushed_text = section_text
         buffer_lines = []

@@ -24,8 +24,10 @@ class AuditLogModel(Base):
 
     id: Mapped[UuidPrimaryKey]
     # tenant_id 非空：产品级操作 = PLATFORM_TENANT_ID（全零 UUID）；租户操作 = 真实租户 ID。
+    # ondelete 以库侧既有 FK（SET NULL）为准，模型只做登记不再产生漂移；
+    # 该列 NOT NULL，删除租户实际会被拒，如需改 RESTRICT 须配套迁移。
     tenant_id: Mapped[UUID] = mapped_column(
-        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="RESTRICT"), nullable=False
+        Uuid(as_uuid=True), ForeignKey("tenants.id", ondelete="SET NULL"), nullable=False
     )
     actor_id: Mapped[UUID | None] = mapped_column(Uuid(as_uuid=True))
     actor_username: Mapped[str] = mapped_column(String(64), nullable=False, default="")

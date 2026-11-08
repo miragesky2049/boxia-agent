@@ -93,9 +93,7 @@ class MgmtUnitDepartmentModel(Base):
     """mgmt_unit_departments 表：管理单元关联部门（含子树开关）。"""
 
     __tablename__ = "mgmt_unit_departments"
-    __table_args__ = (
-        Index("ix_mud_department", "department_id"),
-    )
+    __table_args__ = (Index("ix_mud_department", "department_id"),)
 
     unit_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -108,18 +106,14 @@ class MgmtUnitDepartmentModel(Base):
         primary_key=True,
     )
     include_subtree: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class MgmtUnitUserModel(Base):
     """mgmt_unit_users 表：管理单元关联人员。"""
 
     __tablename__ = "mgmt_unit_users"
-    __table_args__ = (
-        Index("ix_muu_user", "user_id"),
-    )
+    __table_args__ = (Index("ix_muu_user", "user_id"),)
 
     unit_id: Mapped[UUID] = mapped_column(
         Uuid(as_uuid=True),
@@ -131,6 +125,4 @@ class MgmtUnitUserModel(Base):
         ForeignKey("users.id", ondelete="CASCADE"),
         primary_key=True,
     )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
