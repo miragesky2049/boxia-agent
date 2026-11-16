@@ -9,7 +9,7 @@
 1. `docker compose` 启动 PostgreSQL。
 2. 后端启动时读取环境变量，校验配置；生产环境还会校验密钥强度。
 3. 后端装配中间件：请求 ID → 访问日志 → 审计 → 安全响应头 → CORS。
-4. 按站点装配路由：`/health/*`、`/metrics`，以及本站点的 `/api/v1/*`（可选 `/api/*` 兼容别名）；管理端挂 admin/public，用户端只挂 user。
+4. 按站点装配路由：`/health/*`、`/metrics`，以及本站点的 `/api/v1/*`；管理端挂 admin/public，用户端只挂 user。
 5. 两个站点各自启动 Uvicorn：管理端 8000、用户端 8001，多个 worker 同时监听。
 6. 两个前端分别由 Nginx 提供静态文件，并把 `/api/` 反向代理到本站点后端。
 

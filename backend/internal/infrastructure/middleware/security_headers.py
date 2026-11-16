@@ -4,7 +4,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
 
-_AUTH_PATH_PREFIXES = ("/api/v1/admin/auth", "/api/admin/auth")
+_AUTH_PATH_PREFIX = "/api/v1/admin/auth"
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -18,6 +18,6 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers.setdefault(
             "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
         )
-        if request.url.path.startswith(_AUTH_PATH_PREFIXES):
+        if request.url.path.startswith(_AUTH_PATH_PREFIX):
             response.headers.setdefault("Cache-Control", "no-store")
         return response

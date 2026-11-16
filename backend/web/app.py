@@ -94,8 +94,6 @@ def create_app(site: SiteName, settings: Settings | None = None) -> FastAPI:
     application.include_router(health_router)
     api_router = build_admin_api_router() if site == "admin" else build_user_api_router()
     application.include_router(api_router, prefix="/api/v1")
-    if settings.legacy_api_enabled:
-        application.include_router(api_router, prefix="/api", include_in_schema=False)
 
     @application.get("/", include_in_schema=False)
     def health_banner() -> dict[str, str]:

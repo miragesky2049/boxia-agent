@@ -325,7 +325,3 @@ def test_audit_logs_record_events(client: TestClient, auth_headers: dict[str, st
     assert body["items"][0]["action"] == "auth.login"
 
 
-def test_legacy_api_alias(client: TestClient) -> None:
-    response = client.post("/api/admin/auth/login", json=ADMIN_LOGIN)
-
-    assert response.status_code == 200

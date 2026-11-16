@@ -106,7 +106,6 @@ class Settings(BaseSettings):
     otel_traces_sampler_ratio: float = Field(default=1.0, ge=0.0, le=1.0)
 
     docs_enabled: bool | None = None
-    legacy_api_enabled: bool = True
 
     # ============================================================
     # LLM 运行时配置（当前为开发调试直连 OpenAI 兼容网关，
