@@ -45,6 +45,21 @@ def test_user_site_excludes_admin_and_public_routes(
     assert acme.get("/api/v1/public/context").status_code == 404
 
 
+def test_legacy_api_prefix_not_registered(
+    client: TestClient,
+    auth_headers: dict[str, str],
+    user_tenant_client,
+) -> None:
+    """两个站点都只注册 /api/v1，旧的 /api 别名已下线；成对的正向断言用于排除租户作用域拒绝造成的假 404。"""
+    assert client.post("/api/admin/auth/login", json={}).status_code == 404
+    assert client.post("/api/v1/admin/auth/login", json={}).status_code == 422
+
+    _create_tenant(client, auth_headers)
+    acme = user_tenant_client(TENANT_CODE)
+    assert acme.get("/api/v1/user/me").status_code == 401
+    assert acme.post("/api/user/auth/login", json={}).status_code == 404
+
+
 def _create_user(tenant_client) -> None:
     """以租户超管身份创建只读最终用户。"""
     acme = tenant_client(TENANT_CODE)
