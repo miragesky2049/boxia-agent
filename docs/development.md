@@ -288,7 +288,6 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 | `ALLOW_TENANT_HEADER`         | `false`             | 否       | 是否允许 `X-Tenant-Code` 请求头识别租户；**仅 `local` 有效**                                                                                          |
 | `CORS_ORIGINS`                | 空                  | 否       | 逗号分隔的允许来源；生产禁止 `*`                                                                                                                      |
 | `DOCS_ENABLED`                | 生产关闭            | 否       | 是否暴露 Swagger 文档                                                                                                                                 |
-| `LEGACY_API_ENABLED`          | `true`              | 否       | 是否保留 `/api` 兼容别名                                                                                                                              |
 | `LOG_LEVEL`                   | `INFO`              | 否       | 日志级别                                                                                                                                              |
 | `LOG_JSON`                    | 生产默认 `true`     | 否       | 是否输出 JSON 日志                                                                                                                                    |
 | `OTEL_EXPORTER_OTLP_ENDPOINT` | 空                  | 否       | 链路数据上报地址，不配则不上报                                                                                                                        |
@@ -516,8 +515,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 ### 8.1 基本约定
 
-- 统一前缀：`/api/v1`
-- 兼容别名：`LEGACY_API_ENABLED=true` 时同时注册 `/api`（不进入文档）
+- 统一前缀：`/api/v1`（不再提供 `/api` 兼容别名）
 - 两个站点独立部署、独立路由：
   - 管理端站点（`web.app_admin:app`）：`/api/v1/admin/**`、`/api/v1/public/**`
   - 用户端站点（`web.app_user:app`）：`/api/v1/user/**`，必须通过租户子域名访问

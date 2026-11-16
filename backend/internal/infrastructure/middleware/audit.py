@@ -15,6 +15,7 @@ from internal.infrastructure.observability.metrics import AUDIT_WRITE_FAILURE
 
 logger = logging.getLogger("boxia.audit")
 _WRITE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
+_ADMIN_PATH_PREFIX = "/api/v1/admin/"
 # 主键为 UUID：只把形如 8-4-4-4-12 的路径段识别为资源 ID，避免误记子路径
 _UUID_SEGMENT = re.compile(
     r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}"
@@ -54,16 +55,17 @@ class AuditMiddleware(BaseHTTPMiddleware):
 
 def _parse_resource(path: str) -> tuple[str | None, str]:
     """从管理端路径解析资源类型与 id，忽略认证类接口。"""
-    for prefix in ("/api/v1/admin/", "/api/admin/"):
-        if path.startswith(prefix):
-            parts = path[len(prefix) :].split("/")
-            # auth/users 由应用服务自行写审计，中间件不重复记录
-            if not parts or not parts[0] or parts[0] in {"auth", "users"}:
-                return None, ""
-            resource_type = parts[0]
-            resource_id = parts[1] if len(parts) > 1 and _UUID_SEGMENT.fullmatch(parts[1]) else ""
-            return resource_type, resource_id
-    return None, ""
+    if not path.startswith(_ADMIN_PATH_PREFIX):
+        return None, ""
+
+    parts = path[len(_ADMIN_PATH_PREFIX) :].split("/")
+    # auth/users 由应用服务自行写审计，中间件不重复记录
+    if not parts or not parts[0] or parts[0] in {"auth", "users"}:
+        return None, ""
+
+    resource_type = parts[0]
+    resource_id = parts[1] if len(parts) > 1 and _UUID_SEGMENT.fullmatch(parts[1]) else ""
+    return resource_type, resource_id
 
 
 def _write_audit(payload: dict) -> None:
