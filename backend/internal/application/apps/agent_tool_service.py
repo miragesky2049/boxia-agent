@@ -9,7 +9,7 @@
 - 递归防护：与 workflow 即工具共用祖先链与预算（call_chain 共享，深度≤3 + 链路去环，
   R15），agent→workflow→agent 混合链同样受限；
 - 目标门槛：同租户用户可见 + flow_type=agent + 已发布（F14.1），不可用在 describe
-  返回 None（跳过合成）、invoke 抛 RuntimeError（转 [error] observation 回灌模型自纠）。
+  返回 None（跳过合成）、invoke 抛 RuntimeError（转为 [error] observation 返回给模型自行修正）。
 
 C8 子 run 不投记忆抽取：抽取只由 ChatService 主会话提交后投递（F16.3），
 子 run 走 runner.invoke 不经该路径，天然不触发，无需额外开关。
@@ -106,7 +106,7 @@ class AgentToolService:
         """执行目标智能体并返回最终文本 observation。
 
         目标不可用/成环/超深/问题为空抛 RuntimeError，由 ReAct 内核转
-        [error] observation 回灌模型自纠，不中断对话（与工作流工具同语义）。
+        [error] observation 返回给模型，让其基于错误信息自行修正，不中断对话（与工作流工具同语义）。
         """
         card = await self._resolve_target(application_id, chain, enforce_chain=True)
         if card is None:
@@ -147,7 +147,7 @@ class AgentToolService:
     ) -> dict[str, Any] | None:
         """鉴权 + 类型 + 发布态（+ 调用链防护）校验，返回应用卡片或 None。
 
-        enforce_chain=False 用于 describe：工具清单可先展示，环/深度在执行时兜底；
+        enforce_chain=False 用于 describe：工具清单可先展示，环/深度在执行阶段再校验拦截；
         invoke 路径做完整防护（与 WorkflowToolService 同构）。
         """
         try:

@@ -364,7 +364,7 @@ def test_truncate_strategy_keeps_legacy_behavior() -> None:
 def test_inprocess_channel_injects_summary_system_block() -> None:
     """进程内内核通道：messages = system → 摘要 system 段 → 历史 → 当前问题。"""
     client = _RecordingClient()
-    # 无显式 systemPrompt → use_canvas=False（legacy 兜底通道），但 tools 仍在
+    # 无显式 systemPrompt → use_canvas=False（legacy 兼容通道），但 tools 仍在
     service, cap = _make_service(
         _graph({"memory": _memory_cfg(keepRecentTurns=1)}, with_system_prompt=False),
         history_rows=_rows(4),

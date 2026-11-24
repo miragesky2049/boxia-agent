@@ -9,7 +9,7 @@ Create Date: 2026-11-04
   应用物理删除为高危不可逆操作，该授权范围过宽。
 - 本迁移回收平台 admin 及所有租户角色的授权，仅保留平台租户（全零 UUID）superadmin；
   与 0063 租户删除的授权口径及 PLATFORM_ONLY_CODES 保持一致。
-- permission_resources 已由 0038 入库，此处仅 ON CONFLICT 兜底，不新增资源。
+- permission_resources 已由 0038 入库，此处仅 ON CONFLICT 防止重复插入，不新增资源。
 """
 
 from collections.abc import Sequence
@@ -27,7 +27,7 @@ _PERMISSION_CODE = "button:app:delete"
 
 
 def upgrade() -> None:
-    # 权限资源兜底（正常已由 0038 写入）
+    # 权限资源补插（正常已由 0038 写入）
     op.execute(
         f"""
         INSERT INTO permission_resources

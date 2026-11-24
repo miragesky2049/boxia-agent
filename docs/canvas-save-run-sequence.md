@@ -1,24 +1,24 @@
 # 画布保存与对话引擎 · 整体时序文档
 
 > 行号以 2026-11-24 HEAD（feature/app/20261104）为准。
-> 阅读路径：**第 1 章**看全貌 → **第 3/4 章**每条流程"极简图 → 完整图 → 分步讲解" → **第 5/6 章**查代码细节。
+> 文档结构：**第 1 章** 概览；**第 3/4 章** 两条流程依次为流程概述、完整时序与分步说明；**第 5/6 章** API 对照与常见问题。
 
 ## 目录
 
-- [1. 一页速览](#1-一页速览)
-- [2. 概念词典](#2-概念词典)
-- [3. 流程一：管理端画布保存](#3-流程一管理端对话流画布保存)（含 **3.4 画布最终保存结构 / Schema 说明书**）
+- [1. 概览](#1-概览)
+- [2. 术语表](#2-术语表)
+- [3. 流程一：管理端画布保存](#3-流程一管理端对话流画布保存)（含 **3.4 画布保存结构 / Schema 说明**）
 - [4. 流程二：用户端对话引擎](#4-流程二用户端对话引擎一次-chatflow-运行)
 - [5. LangGraph API 对照表](#5-langgraph-api-对照表本项目封装点)
 - [6. 常见疑问 FAQ](#6-常见疑问faq)
 
 ---
 
-## 1. 一页速览
+## 1. 概览
 
 ### 1.1 系统全景
 
-两条流程在「画布 JSON」处交汇：**保存流程生产版本 JSON，运行流程消费版本 JSON**，中间靠"版本指针 + Redis 缓存"衔接。
+两条流程在「画布 JSON」处交汇：**保存流程生产版本 JSON，运行流程消费版本 JSON**，中间通过版本指针与 Redis 缓存衔接。
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#212121','primaryBorderColor':'#607d8b','lineColor':'#546e7a','edgeLabelBackground':'#ffffff','fontFamily':'sans-serif'}}}%%
@@ -35,13 +35,13 @@ flowchart LR
     SVC1 -.->|保存后删缓存| RD
     subgraph 用户端["流程二：用户端（frontend/user）"]
         U[ChatPage] -->|POST + SSE| API2[chat.py]
-        API2 --> CS[ChatService 事件泵]
+        API2 --> CS[ChatService 事件循环]
         CS --> RT[GraphRuntime]
         RT -->|convert + compile| LG[LangGraph 执行]
     end
     RD -.->|miss 回源| PG
     RT -->|读画布| RD
-    LG -->|interrupt 存档/续跑| PG
+    LG -->|interrupt checkpoint/恢复执行| PG
     RT -->|run/消息落库| PG
     LG -->|astream_events 事件| RT -.->|SSE 帧| U
     style 管理端 fill:#e3f2fd,stroke:#1e88e5,color:#0d47a1
@@ -49,57 +49,57 @@ flowchart LR
     style 存储 fill:#fff8e1,stroke:#f9a825,color:#795548
 ```
 
-### 1.2 三条铁律（理解两条流程的关键）
+### 1.2 三个核心约定
 
-| # | 铁律 | 含义 |
+| # | 约定 | 含义 |
 |---|---|---|
-| 1 | 草稿不影响线上 | 运行永远按 **租户 pin > published > latest** 选版本；发布=只改一根指针 |
-| 2 | 保存不编译，运行才编译 | 保存链路零 LangGraph 调用；每次运行请求现做 convert+compile（纯内存毫秒级） |
-| 3 | checkpoint ≠ 聊天记忆 | checkpoint 存"图跑到一半的现场"（中断续跑用）；多轮记忆在 Postgres `message` 表，LLM 节点按需回捞 |
+| 1 | 草稿不影响线上 | 运行始终按 **租户锁定版本 > published > latest** 选择版本；发布仅切换版本指针 |
+| 2 | 保存不编译，运行才编译 | 保存链路零 LangGraph 调用；每次运行请求即时执行 convert+compile（纯内存毫秒级） |
+| 3 | checkpoint ≠ 聊天记忆 | checkpoint 保存图执行中断点处的完整状态（供中断恢复使用）；多轮记忆存于 Postgres `message` 表，LLM 节点按需读取 |
 
 ### 1.3 数据落点总表
 
 | 数据 | 表/位置 | 写入时机 |
 |---|---|---|
-| 画布版本快照 | Postgres `application_graph_version`（JSONB，>1MB 转对象存储留 ref）——**"最新/生效版本"的唯一存放表**：version 最大行=最新，指针指向行=生效 | 每次保存追加一行（version+1） |
-| 当前草稿 | Postgres `application_graph`（UPSERT 覆盖；**不承载生效版本**，仅兼容旧读路径） | 每次保存 |
-| live 指针 | `application.published_graph_version`（只存版本号，不存 JSON） | 发布 |
-| 租户锁版本 | `tenant_application_instance.pinned_graph_version` | 市场开通/pin |
+| 画布版本快照 | Postgres `application_graph_version`（JSONB，>1MB 转对象存储留 ref）——**最新/生效版本的唯一存放表**：version 最大行为最新，指针指向行为生效 | 每次保存追加一行（version+1） |
+| 当前草稿 | Postgres `application_graph`（UPSERT 覆盖；**不承载生效版本**，仅兼容旧读取路径） | 每次保存 |
+| 已发布版本指针 | `application.published_graph_version`（只存版本号，不存 JSON） | 发布 |
+| 租户锁定版本 | `tenant_application_instance.pinned_graph_version` | 市场开通/锁定 |
 | 会话 / 消息 | Postgres `conversation` / `message` | 首条消息建会话；用户消息先于执行落库，最终回复流结束提交 |
-| 执行账本 | `run`（含画布快照）/ `run_node_execution` / `tenant_usage_ledger` | run 先建，每节点即时写 |
-| 断点存档 | LangGraph checkpoint 表（Postgres） | interrupt 时全量写，resume 后继续更新 |
+| 执行记录 | `run`（含画布快照）/ `run_node_execution` / `tenant_usage_ledger` | run 先建，每节点即时写 |
+| 中断检查点 | LangGraph checkpoint 表（Postgres） | interrupt 时全量写，resume 后继续更新 |
 | 画布缓存 | Redis `graph:{app}:v{ver}`，TTL 300s | 读时回填，保存/发布时删除 |
 
 ---
 
-## 2. 概念词典
+## 2. 术语表
 
-| 名词 | 大白话解释 |
+| 名词 | 说明 |
 |---|---|
-| 画布 / graph | 对话流在编辑器里拖出来的"流程图"。节点=一个个步骤，连线=步骤怎么走 |
-| FlowGram | 管理端编辑器框架（@flowgram.ai/free-layout-editor），只管"显示和编辑"，不懂业务 |
-| Coze IR | 画布的标准存档 JSON：`{nodes[], edges[], variables}`，字段风格学 coze。**前端画的、数据库存的、后端编译的都是这个格式** |
-| CanvasGraph IR | Coze JSON 在 domain 层的 Python 对象化（表达式、子图、错误策略都变成强类型），是"翻译中间语" |
-| 草稿 / 发布 / 版本 | 每保存一次=追加一条整图快照（版本号+1，只追加不改历史）；发布=把指针切到最新版 |
-| 租户 pin | 某租户开通应用时钉住某版本，之后平台再发布新版也不影响它 |
-| LangGraph | LangChain 团队的开源"状态机执行器"：按图顺序调节点、节点间传共享状态字典、支持分支/循环/中断续跑 |
-| StateGraph / CompiledStateGraph | LangGraph 里"正在建的图"和"竣工可跑的图"。本项目 Compiler 从画布 JSON 造前者、`compile()` 出后者 |
+| 画布 / graph | 对话流在编辑器中编排出的流程图。节点对应执行步骤，连线对应步骤间的走向 |
+| FlowGram | 管理端编辑器框架（@flowgram.ai/free-layout-editor），只负责画布的显示与编辑，不涉及业务逻辑 |
+| Coze IR | 画布的标准存储 JSON：`{nodes[], edges[], variables}`，字段风格对齐 coze。前端编辑、数据库存储、后端编译统一使用该格式 |
+| CanvasGraph IR | Coze JSON 在 domain 层的 Python 对象化（表达式、子图、错误策略均为强类型），承担转换中间表示的角色 |
+| 草稿 / 发布 / 版本 | 每次保存追加一条整图快照（版本号 +1，只追加不改历史）；发布即将指针切换到目标版本 |
+| 租户锁定版本 | 租户开通应用时锁定某个图版本，此后平台再发布新版本也不影响该租户 |
+| LangGraph | LangChain 团队开源的状态机执行器：按图顺序调度节点、节点间传递共享状态字典、支持分支/循环/中断恢复执行 |
+| StateGraph / CompiledStateGraph | LangGraph 中构建中的图与编译完成可执行的图。本项目 Compiler 从画布 JSON 构建前者，`compile()` 产出后者 |
 | WorkflowState | 节点之间传递的数据包（TypedDict）：用户输入、各节点输出、全局变量池、最终 output |
-| checkpointer / checkpoint | LangGraph 的"存档系统"。每步把 State 落库，图可停一半以后接着跑。本项目用 `AsyncPostgresSaver`（存 Postgres） |
-| `interrupt()` / `Command(resume)` | LangGraph 一对 API：节点内喊"停下等我拿人类输入" / "输入给它、从断点原地继续"。用于问答节点、人工审核 |
-| `astream_events` | LangGraph 的"实况解说"：每进入/离开节点吐一个事件，后端翻译成前端消息 |
-| SSE | 服务器单向推送：HTTP 连接挂着，服务器持续发小帧 `event: xxx\ndata: {...}\n\n`，前端逐帧渲染（打字机效果） |
-| 节点 Handler | 每种节点的 Python 执行逻辑：LLM 节点=调大模型，IF 节点=比大小，HTTP 节点=发请求 |
+| checkpointer / checkpoint | LangGraph 的检查点存储机制。每步将 State 落库，执行中断后可从 checkpoint 恢复。本项目用 `AsyncPostgresSaver`（存 Postgres） |
+| `interrupt()` / `Command(resume)` | LangGraph 的一对 API：节点内调用 `interrupt()` 挂起等待人类输入；再以 `Command(resume)` 传入输入、从断点原地继续执行。用于问答节点、人工审核 |
+| `astream_events` | LangGraph 的事件流接口：每进入/离开节点输出一个事件，后端将其转换为前端消息 |
+| SSE | 服务器单向推送：HTTP 连接保持打开，服务器持续发送小帧 `event: xxx\ndata: {...}\n\n`，前端逐帧渲染（打字机效果） |
+| 节点 Handler | 每种节点的 Python 执行逻辑：LLM 节点调用模型，IF 节点做条件判断，HTTP 节点发送请求 |
 
-**分层地图（DDD）**
+**分层结构（DDD）**
 
 ```
 frontend/admin（编辑器+保存）      frontend/user（会话+运行）
         ↓ HTTP                            ↓ POST / SSE
-web/            FastAPI 路由、鉴权、SSE 组装（"前台"）
-application/    业务编排：save_graph / publish_graph / ChatService 事件泵（"管家"）
-domain/         纯业务：画布校验、IR 转换、LangGraph 编译、运行循环（"工厂"，不 import 网络/数据库）
-infrastructure/ PostgreSQL / Redis / 对象存储 仓储实现（"仓库管理员"）
+web/            FastAPI 路由、鉴权、SSE 组装
+application/    业务编排：save_graph / publish_graph / ChatService 事件循环
+domain/         纯业务：画布校验、IR 转换、LangGraph 编译、运行循环（不 import 网络/数据库）
+infrastructure/ PostgreSQL / Redis / 对象存储 仓储实现
 ```
 
 组合根：运行链路的所有跨层依赖（LLM 客户端、仓储、消息适配器）在 `web/deps/graph.py:build_runner` 集中装配后注入 domain——这是 domain 层能保持纯净的原因。
@@ -108,7 +108,7 @@ infrastructure/ PostgreSQL / Redis / 对象存储 仓储实现（"仓库管理�
 
 ## 3. 流程一：管理端对话流画布保存
 
-### 3.1 极简版（30 秒看懂）
+### 3.1 流程概述
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#212121','primaryBorderColor':'#607d8b','lineColor':'#546e7a','textColor':'#212121','actorBkg':'#ffffff','actorBorder':'#607d8b','actorTextColor':'#212121','actorLineColor':'#90a4ae','signalColor':'#455a64','signalTextColor':'#212121','labelBoxBkgColor':'#eceff1','labelBoxBorderColor':'#607d8b','labelTextColor':'#212121','loopTextColor':'#212121','noteBkgColor':'#fff9c4','noteBorderColor':'#f9a825','noteTextColor':'#212121','sequenceNumberColor':'#ffffff'}}}%%
@@ -118,16 +118,16 @@ sequenceDiagram
     participant D as PostgreSQL
     rect rgb(255,255,255)
     E->>E: 0. 拖拽节点，800ms 防抖倒计时
-    E->>A: 1. 发"体检请求"（校验）
-    A-->>E: 错误只在节点画红框，不拦保存
-    E->>A: 2. 整图打包存草稿
+    E->>A: 1. 发送校验请求
+    A-->>E: 校验错误仅在节点标红提示，不阻止保存
+    E->>A: 2. 整图打包保存草稿
     A->>D: 追加一条版本快照（version+1）
-    E->>A: 3. （可选）点发布
-    A->>D: 只把 published 指针切到最新版 = 上线
+    E->>A: 3. （可选）发布
+    A->>D: 将 published 指针切换到最新版
     end
 ```
 
-一句话：**保存=攒版本，发布=切指针**。
+核心逻辑：**保存即追加版本，发布即切换指针**。
 
 ### 3.2 完整时序图
 
@@ -158,12 +158,12 @@ sequenceDiagram
     ADM-->>ED: 200
     ED->>ED: fromCozeIR(cozeIR.ts:83) Coze IR → FlowGram JSON → 渲染节点和连线
 
-    Note over ED,RD: 阶段1 体检（POST /admin/apps/validate-graph，不阻塞保存）<br/>触发：800ms debounce scheduleSave(:699)，来源 onContentChange(:2198) / 加节点(:~999) / 删节点(:1221) / Ctrl+S(:1786)
-    ED->>ADM: validateGraph(apps.ts:790) 体 {graph, application_id}
+    Note over ED,RD: 阶段1 校验（POST /admin/apps/validate-graph，不阻塞保存）<br/>触发：800ms debounce scheduleSave(:699)，来源 onContentChange(:2198) / 加节点(:~999) / 删节点(:1221) / Ctrl+S(:1786)
+    ED->>ADM: validateGraph(apps.ts:790) 请求体 {graph, application_id}
     ADM->>DOM: validate_raw_graph(validate.py:147)
     DOM->>DOM: convert_canvas(:50) → validate_graph(validate.py:33) → lint_graph(lint.py:45) → lint_variable_refs(lint.py:203)
     DOM-->>ADM: {valid, issues[{severity,code,node_id}]}
-    ADM-->>ED: 200，issues 驱动节点红框（collectIssuesForNodes :658）
+    ADM-->>ED: 200，issues 驱动节点标红提示（collectIssuesForNodes :658）
 
     Note over ED,RD: 阶段2 草稿保存（PUT /admin/apps/{id}/graph，整图覆盖）
     ED->>ED: collectFullGraph(:673) 含嵌套子图 → toCozeIR(cozeIR.ts:32) 转 Coze IR
@@ -179,14 +179,14 @@ sequenceDiagram
             SVC->>OSS: 写对象存储(:~836-843)，DB 行只存 {"__graph_ref__": uri}，失败降级内联
         end
         SVC->>DB: insert_graph_version(repo:570) 追加整图 JSONB 版本快照
-        SVC->>DB: update_graph(repo:489) UPSERT application_graph（兼容旧读路径）
+        SVC->>DB: update_graph(repo:489) UPSERT application_graph（兼容旧读取路径）
         SVC->>DB: 审计 GRAPH_SAVE(:870) → uow.commit(:~890)
-        SVC--)RD: _invalidate_graph_cache(:1192) 删缓存键 + 广播（fire-and-forget，无订阅方，TTL 兜底）
+        SVC--)RD: _invalidate_graph_cache(:1192) 删缓存键 + 广播（fire-and-forget，无订阅方，TTL 保底）
         SVC-->>ADM: {runtime_mode, version} → 状态条 saved
     end
 
     Note over ED,RD: 阶段3 发布（唯一切 live 的动作）
-    ED->>ED: handlePublish(:788) 先体检，有 error 级问题直接拒发
+    ED->>ED: handlePublish(:788) 先校验，存在 error 级问题直接拒绝发布
     ED->>ADM: publishGraph(apps.ts:625) POST /publish
     ADM->>SVC: publish_graph(:1005)
     SVC->>SVC: _parse_graph(:309) 重读 latest，解 __graph_ref__
@@ -203,42 +203,40 @@ sequenceDiagram
         SVC->>DB: UPDATE tenant_application_instance.pinned_graph_version（repo:681）
     end
 
-    Note over ED,RD: 阶段5 调试运行：apps_admin.py:509 流式 / :537 单节点试运行 / :601 resume 流<br/>make_canvas_debug_runtime（graph.py:195）直接吃未保存画布 → 执行引擎同图2<br/>**保存/发布链路零 LangGraph 调用**，仅 convert_canvas 与运行链路共用
+    Note over ED,RD: 阶段5 调试运行：apps_admin.py:509 流式 / :537 单节点试运行 / :601 resume 流<br/>make_canvas_debug_runtime（graph.py:195）直接使用未保存画布 → 执行引擎同图2<br/>**保存/发布链路零 LangGraph 调用**，仅 convert_canvas 与运行链路共用
     end
 ```
 
-> **配色说明**：全图只铺**一块白色底纸**（单层 rect、不再分段上色——分段色带按消息跨度自动收缩宽度，导致宽窄参差；嵌套色带更有错位 bug），深浅两种背景渲染完全一致。参与者头部底色=所属层（🔵前端 / 🟢后端 / 🟠存储外部）；阶段划分由**贯穿全宽的黄色横幅注释**（阶段0~5）标示。
+### 3.3 分阶段说明
 
-### 3.3 分阶段讲解
-
-| 阶段 | 干什么 | 为什么这样设计 | 失败会怎样 |
+| 阶段 | 操作内容 | 设计理由 | 失败处理 |
 |---|---|---|---|
-| 0 打开 | GET 读草稿整图 + 版本指针，`fromCozeIR` 还原成编辑器可渲染格式 | 编辑对象永远是草稿最新版，与线上解耦 | 应用不可见统一 404 |
-| 1 体检 | 转 IR → 结构校验 → lint，返回 issues | **校验与保存解耦**：半成品也能存，红框即时反馈 | 体检接口自身失败不影响编辑 |
-| 2 保存 | 草稿闸门（5 种致命错误）→ version+1 追加快照 + UPSERT 草稿表 + 审计 + 删缓存 | 整图快照=可回滚可追溯；>1MB 外置防大行 | 422 VALIDATION_ERROR，状态条报错，可重试 |
-| 3 发布 | 全量 error 闸门 + 指针切换 | 发布是**唯一**让改动生效的动作，闸门从严；幂等 | 有 error 拒发，线上保持旧版 |
-| 4 版本 | 列表/回滚/租户 pin | 回滚=追加而非改写（审计链完整）；pin 保护租户存量行为 | — |
-| 5 调试 | 未保存画布直接跑 | 试错成本零：不产生版本、不动指针 | 走 debug 会话，不污染真实消息 |
+| 0 打开 | GET 读草稿整图 + 版本指针，`fromCozeIR` 还原成编辑器可渲染格式 | 编辑对象始终是草稿最新版，与线上解耦 | 应用不可见统一返回 404 |
+| 1 校验 | 转 IR → 结构校验 → lint，返回 issues | **校验与保存解耦**：未完成的图也能保存，节点标红即时反馈 | 校验接口自身失败不影响编辑 |
+| 2 保存 | 草稿校验（5 种致命错误拦截）→ version+1 追加快照 + UPSERT 草稿表 + 审计 + 删缓存 | 整图快照可回滚可追溯；>1MB 外置避免大行 | 422 VALIDATION_ERROR，状态条报错，可重试 |
+| 3 发布 | 全量 error 校验 + 指针切换 | 发布是**唯一**使改动生效的操作，校验从严；幂等 | 存在 error 拒绝发布，线上保持旧版 |
+| 4 版本 | 列表/回滚/租户锁定版本 | 回滚为追加而非改写（审计链完整）；锁定版本保护租户存量行为 | — |
+| 5 调试 | 未保存画布直接运行 | 试错成本低：不产生版本、不切换指针 | 走 debug 会话，不污染真实消息 |
 
-### 3.4 画布的最终保存结构（Schema 说明书）
+### 3.4 画布保存结构（Schema 说明）
 
-**三层同心**：数据库行（外壳）→ 整图 JSON 快照（schema_json 列，即 Coze IR）→ 运行时被翻译成的 CanvasGraph IR（Python 对象，见 4.3 步⑥，不在库里存储）。本节讲前两层。
+**三层结构**：数据库行→ 整图 JSON 快照（schema_json 列，即 Coze IR）→ 运行时转换得到的 CanvasGraph IR（Python 对象，见 4.3 步⑥，不入库存储）。本节讲前两层。
 
-#### 3.4.1 数据库外壳：两张表 + 一根指针
+#### 3.4.1 存储结构：两张表与版本指针
 
 | 表 | 定位 | 列 |
 |---|---|---|
 | `application_graph` | **当前草稿**，与应用 1:1 | `application_id`(PK, FK→application, CASCADE) · `schema_json`(JSONB 整图) · `graph_schema_version`(int, 默认 1) · `runtime_mode`(`dag`/`agent_loop` CHECK 约束) · `created_at` · `updated_at` |
 | `application_graph_version` | **版本历史**，每次保存追加一行 | `id`(PK) · `application_id`(FK) · `version`(int) · `schema_json`(JSONB 整图快照) · `runtime_mode` · `changelog`(text) · `created_by`(uuid) · `created_at`；唯一约束 `(application_id, version)`，索引 `(application_id, version DESC)` |
-| `application.published_graph_version` | **live 指针**（int，指向版本表的 version） | 发布=改它；NULL=从未发布 |
-| `tenant_application_instance.pinned_graph_version` | **租户锁**（int，NULL=跟随） | 开通时钉版本 |
+| `application.published_graph_version` | **已发布版本指针**（int，指向版本表的 version） | 发布即修改此指针；NULL=从未发布 |
+| `tenant_application_instance.pinned_graph_version` | **租户锁定版本**（int，NULL=跟随最新版） | 开通时锁定版本 |
 
 > **"最新生效版本"在哪张表**：统一落在 **`application_graph_version`**，靠"version 最大值 + 指针"两个维度定位——
 > - **最新版本**：`application_graph_version` 中 `version` 最大的那一行（`get_latest_graph_version` repo:598，`ORDER BY version DESC LIMIT 1`），每次保存追加、永不覆盖。
 > - **生效中版本**：内容同在 `application_graph_version`，具体哪一行由指针决定（优先级 `tenant_application_instance.pinned_graph_version` > `application.published_graph_version`，两列存的都是版本表的 version 号，本身不存 JSON）。
-> - ⚠️ `application_graph` **不是**生效版本表：只是草稿 1:1 副本，每次保存 UPSERT 覆盖，仅为兼容旧读路径保留。
+> - ⚠️ `application_graph` **不是**生效版本表：只是草稿的 1:1 副本，每次保存 UPSERT 覆盖，仅为兼容旧读取路径保留。
 
->1MB 的外壳替换：`schema_json` 不存整图，改存 `{"__graph_ref__": "<对象存储URI>"}`，读取时 `_parse_graph`(application_service.py:309) 解引用回灌；写对象存储失败自动降级回内联。
+> 超过 1MB 时的外置存储方案：`schema_json` 不存整图，改存 `{"__graph_ref__": "<对象存储URI>"}`，读取时 `_parse_graph`(application_service.py:309) 解引用还原整图；写对象存储失败自动降级为内联存储。
 
 #### 3.4.2 整图 JSON（schema_json 的内容 = Coze IR）
 
@@ -246,7 +244,7 @@ sequenceDiagram
 
 ```jsonc
 {
-  "schema_version": 1,        // 存档格式版本；DB 独立列 graph_schema_version 另存一份，IR 内这份用于往返透传
+  "schema_version": 1,        // 存储格式版本；DB 独立列 graph_schema_version 另存一份，IR 内这份用于往返透传
   "nodes": [ /* 节点数组，见 3.4.3 */ ],
   "edges": [ /* 连线数组，见 3.4.5 */ ],
   "variables": [ /* 可选：graph 级全局变量声明，见 3.4.6 */ ],
@@ -264,7 +262,7 @@ sequenceDiagram
 | `type` | string | ✅ | 数字类型码字符串（对齐 coze StandardNodeType，枚举 node_type.py:12）。常用：`1`开始 `2`结束 `3`LLM `4`插件 `5`代码 `6`知识库 `8`if_else `9`子工作流 `13`中间输出 `15`文本处理 `18`问答 `19/29`break/continue `20/40`设变量 `21`循环 `22`意图识别 `28`批量 `30`输入 `32`变量合并 `45`HTTP `51-57`会话消息增删改查 `60`人工审核 `100`agent_loop(自定义) `211+`本地扩展。缺 id / 未知 type / UNSUPPORTED_TYPES(node_type.py:81) → `convert_failed` 类致命错误 |
 | `meta.position` | `{x,y}` | ✅ | 画布坐标（仅编辑器和观测用，运行时不参与调度） |
 | `data.nodeMeta` | object | ✅ | 节点显示信息：`title`(必填展示名) · `description` · `icon`（后两者可空，convert 有默认值） |
-| `data.inputs` | object | ✅ | **混合袋**（convert.py:173-210 拆成两部分）：`inputParameters`(运行时入参→Expr) + `settingOnError`(错误策略) 为标准字段；其余全部键值→`config`（节点特定配置，见 3.4.4） |
+| `data.inputs` | object | ✅ | **混合字段集合**（convert.py:173-210 拆成两部分）：`inputParameters`(运行时入参→Expr) + `settingOnError`(错误策略) 为标准字段；其余全部键值→`config`（节点特定配置，见 3.4.4） |
 | `data.outputs` | array | 建议 | 输出端口声明（PortSpec model.py:17）：`name`(下游引用它的键) · `type`(`string/integer/float/boolean/object/list/image`) · `description` · `required`(默认 false)。运行时该节点的结果就按这些 name 写进 `state.node_outputs[node.id]` |
 | `blocks` | array | 仅子图节点 | loop(21)/batch(28)/subworkflow(9) 的**内嵌子图节点数组**，结构与 nodes[] 相同，递归转换（convert.py:135-140/155-161） |
 | `edges` | array | 仅子图节点 | 子图内部连线，结构与顶层 edges 相同。⚠️ 注意：节点级 `edges`（在节点对象里）= 子图内连边；顶层 `edges` = 主图连线，两者不同层 |
@@ -291,7 +289,7 @@ sequenceDiagram
 ```
 
 - **③ 的 `[{name, input}]` 数组会被压平**成 `{name: value}`（`_flatten_named_param_lists` convert.py:212），handler 直接 `config["temperature"]` 取值。
-- ③ 里单个 ValueExpression：纯字面量**脱壳成裸值**；含 `{{...}}` 模板或 ref 则保留为 Expr 运行时求值（`_coerce_config_value` :228-246）。
+- ③ 里单个 ValueExpression：纯字面量**直接转为普通值**；含 `{{...}}` 模板或 ref 则保留为 Expr 运行时求值（`_coerce_config_value` :228-246）。
 
 **ValueExpression（值的统一信封）**（convert.py:248-301，`_convert_value_expression` :257）：
 
@@ -306,11 +304,11 @@ sequenceDiagram
 
 | value.type | content 形态 | 翻译成 Expr | 含义 |
 |---|---|---|---|
-| `literal` | 任意值；字符串含 `{{variables.x}}`/`{{system.Y}}` 时 | `Literal`；模板串→`TemplatedString`(运行时插值) | 手打的固定值 |
-| `ref` + `content.source="block-output"` | `{source, blockID, name}` | `Ref(blockID, name)` | 引用**上游某节点的某个输出**（跨节点数据流主线） |
+| `literal` | 任意值；字符串含 `{{variables.x}}`/`{{system.Y}}` 时 | `Literal`；模板串→`TemplatedString`(运行时插值) | 手动输入的固定值 |
+| `ref` + `content.source="block-output"` | `{source, blockID, name}` | `Ref(blockID, name)` | 引用**上游节点的输出**（跨节点数据流的主要方式） |
 | `ref` + `source="variable"` 或 `global_variable_*` | 同上 | `GlobalVar(name)` | 引用全局变量池（state.globals） |
 | `object_ref` | 结构化对象 | `Literal(content)` 原样（:296 暂未展开） | 对象字段级引用（预留） |
-| 未知/缺 value | — | `Literal` 兜底 | — |
+| 未知/缺 value | — | 保底按 `Literal` 处理 | — |
 
 #### 3.4.5 边对象（edges[] 每一项）
 
@@ -344,9 +342,9 @@ sequenceDiagram
 | `processType` | int / 0 | `0`=异常中断整个工作流（run=error）；`1`=跳过本节点继续，用 `dataOnErr` 当输出 |
 | `retryTimes` | int / 0 | 节点级重试次数（compiler.py:279 `_execute_with_policy` 实施） |
 | `timeoutMs` | int / 180000 | 节点超时毫秒 |
-| `dataOnErr` | str / "" | 跳过后写入 `state.errors` 并作为该节点输出的兜底值 |
+| `dataOnErr` | str / "" | 跳过后写入 `state.errors` 并作为该节点输出的保底值 |
 
-#### 3.4.8 一个完整最小例子（开始→LLM→结束）
+#### 3.4.8 最小完整示例（开始→LLM→结束）
 
 ```json
 {
@@ -379,15 +377,15 @@ sequenceDiagram
 }
 ```
 
-数据流读法：`start-1` 声明输出 `query` → `llm-2` 用 `ref(block-output, blockID=start-1, name=query)` 拿它 → `end-1` 再引用 `llm-2` 的 `output`。**引用全是字符串 id 软连接**，没有外键，这就是保存时 `validate_graph`(validate.py:33) 要查悬空引用的原因。
+数据流说明：`start-1` 声明输出 `query` → `llm-2` 通过 `ref(block-output, blockID=start-1, name=query)` 引用它 → `end-1` 再引用 `llm-2` 的 `output`。**引用均为字符串 id 软连接**，无外键约束，因此保存时需要 `validate_graph`(validate.py:33) 校验悬空引用。
 
 ---
 
 ## 4. 流程二：用户端对话引擎（一次 chatflow 运行）
 
-### 4.1 极简版（30 秒看懂）
+### 4.1 流程概述
 
-用一张具体画布举例：`开始 → LLM(写诗) → 问答(要不要再来一首?) → 结束`。
+以一张具体画布为例：`开始 → LLM(写诗) → 问答(是否继续?) → 结束`。
 
 ```mermaid
 %%{init: {'theme':'base','themeVariables':{'background':'#ffffff','primaryColor':'#ffffff','primaryTextColor':'#212121','primaryBorderColor':'#607d8b','lineColor':'#546e7a','textColor':'#212121','actorBkg':'#ffffff','actorBorder':'#607d8b','actorTextColor':'#212121','actorLineColor':'#90a4ae','signalColor':'#455a64','signalTextColor':'#212121','labelBoxBkgColor':'#eceff1','labelBoxBorderColor':'#607d8b','labelTextColor':'#212121','loopTextColor':'#212121','noteBkgColor':'#fff9c4','noteBorderColor':'#f9a825','noteTextColor':'#212121','sequenceNumberColor':'#ffffff'}}}%%
@@ -396,13 +394,13 @@ sequenceDiagram
     participant B as 后端
     participant G as LangGraph 执行器
     rect rgb(255,255,255)
-    U->>B: 1. 发消息（长连接，要求边跑边回字幕/SSE）
-    B->>B: 2. 进门检查：应用/会话归属；首条消息建会话
-    B->>B: 3. 拿图：租户pin > published > 草稿（Redis 缓存→DB 回源）
-    B->>B: 4. 翻译+编译：画布 JSON → CanvasGraph → StateGraph → 竣工图（每次现做）
-    B->>G: 5. 开跑：初始 State 进图，逐节点执行（先建 run、先存用户消息）
-    G-->>U: 6. 字幕：节点开始/LLM 逐字/节点结束 → SSE 帧
-    G--)G: 7. 问答节点 interrupt()：现场存档、这一轮停；用户答复带 resume 读档原地续跑
+    U->>B: 1. 发送消息（长连接，要求流式返回 SSE）
+    B->>B: 2. 入口校验：应用/会话归属；首条消息建会话
+    B->>B: 3. 加载图：租户锁定 > published > 草稿（Redis 缓存→DB 回源）
+    B->>B: 4. 转换编译：画布 JSON → CanvasGraph → StateGraph → 可执行图（每次即时编译）
+    B->>G: 5. 启动执行：初始 State 进图，逐节点执行（先建 run、先存用户消息）
+    G-->>U: 6. 流式输出：节点开始/LLM 逐 token/节点结束 → SSE 帧
+    G--)G: 7. 问答节点 interrupt()：保存 checkpoint、本轮暂停；用户答复后 resume 从检查点恢复执行
     G-->>U: 8. END：result 帧（最终回答）+ final 帧，回复落库、run=success
     end
 ```
@@ -418,7 +416,7 @@ sequenceDiagram
     end
     box rgb(200,230,201) 后端应用层
     participant R as chat.py<br/>POST /{id}/chatflow/run/stream
-    participant CS as ChatService<br/>chat_service.py 事件泵
+    participant CS as ChatService<br/>chat_service.py 事件循环
     participant BR as deps/graph.py<br/>build_runner 组合根
     end
     box rgb(209,196,233) 执行域 domain
@@ -434,26 +432,26 @@ sequenceDiagram
     end
 
     rect rgb(255,255,255)
-    Note over U,WH: ① 进门与搭台
+    Note over U,WH: ① 加载上下文
     U->>R: runChatflowStream(agentRun.ts:286→postSseStream :167)<br/>body = message / conversation_id / thread_id / inputs / resume
     R->>CS: prepare_chatflow_run(:1674)
-    Note over CS,CS: 校验 flow_type==chatflow、resume 必带 conversation_id、会话归属<br/>_bind_chatflow_thread_id(:1920) 防跨会话读 checkpoint<br/>此阶段错误走 JSON 4xx，不进 SSE 流
+    Note over CS,CS: 校验 flow_type==chatflow、resume 必带 conversation_id、会话归属<br/>_bind_chatflow_thread_id(:1920) 防止跨会话读取 checkpoint<br/>此阶段错误走 JSON 4xx，不进 SSE 流
     CS->>DB: 首条消息 → insert_conversation 新建会话
     CS-->>R: ChatflowPreparedRun(:210)
-    R->>CS: run_chatflow_stream(:1726) 内建传送带 asyncio.Queue + create_task（:1750/:1827），定义 emitter(:1752) 与 make_runner(:1755)
+    R->>CS: run_chatflow_stream(:1726) 内置事件队列 asyncio.Queue + create_task（:1750/:1827），定义 emitter(:1752) 与 make_runner(:1755)
     R->>R: StreamingResponse(SSE) 挂起长连接
 
-    Note over U,WH: ② 拿图装配
+    Note over U,WH: ② 读取图版本并装配执行上下文
     CS->>BR: build_runner(:273)
-    BR->>RD: get_runtime_graph(application_service.py:937) 读缓存键 graph:{app}:v{ver}（TTL 300s）<br/>版本选择 租户pin > published > latest
+    BR->>RD: get_runtime_graph(application_service.py:937) 读缓存键 graph:{app}:v{ver}（TTL 300s）<br/>版本选择：租户锁定 > published > latest
     RD-->>BR: 画布 JSON（miss 回 DB application_graph_version，再应用租户 config 覆盖）
     BR->>ND: 注册 ServiceRegistry：llm / http / tool_executor / retrieval / sandbox / 会话消息异步适配器(:353-372) / subgraph_loader（def :150，调用 :374）
     BR->>RT: new GraphRuntime(canvas_json, run/usage/audit/webhook repos, on_node_event=emitter)(:408)
 
-    Note over U,WH: ③ 记账、编译、开跑
-    CS->>DB: ensure_run(:1799→runtime:208) INSERT run（含画布快照）——先记账再干活
+    Note over U,WH: ③ 创建运行记录并编译启动
+    CS->>DB: ensure_run(:1799→runtime:208) INSERT run（含画布快照）——先建记录再执行
     CS->>DB: append_message role=user(:1802) 用户消息先于 invoke 落库
-    RT->>CO: _ensure_compiled(:113) 每请求执行一遍，实例级 memo
+    RT->>CO: _ensure_compiled(:113) 每次请求执行一遍，实例级缓存
     CO->>CO: convert_canvas(convert.py:50) Coze IR → CanvasGraph IR（表达式 Ref/GlobalVar/TemplatedString、子图递归、ErrorPolicy）
     CO->>LG: Compiler.compile(compiler.py:75) 落到 langgraph.graph.StateGraph(state_schema)(:93)<br/>每 CanvasNode → sg.add_node(id, node_fn)(:101，node_fn 由 _build_node_fn :201 生成)<br/>→ sg.set_entry_point(start)(:105) → 普通边 sg.add_edge(:121) / IF、INTENT sg.add_conditional_edges(router :335/:371)<br/>→ 无出边节点 sg.add_edge(node, END)(:129) → sg.compile(checkpointer=AsyncPostgresSaver)(:131，runtime.py:131-139 挂载)
     RT->>LG: compiled.astream_events(initial_state, config={"thread_id": 租户前缀(:42)}, version="v2")(runtime.py:647)
@@ -463,11 +461,11 @@ sequenceDiagram
         LG-->>RT: v2 事件 on_chain_start(:663，metadata.langgraph_node) → emitter("node_start") 入队
         LG->>ND: await node_fn → handler.run(ctx)，NodeContext 含求值后 inputs / services / emit_event
         opt LLM 带历史（needHistory/historyLimit，llm.py:76-77/:114-118；_load_conversation_history def :338）
-            ND->>DB: list_by_conversation（message_repository.py:63，经 llm.py:367 调用）捞最近 N 条
-            DB-->>ND: 历史消息拼进 messages（多轮记忆走 Postgres message 表，非 Redis）
+            ND->>DB: list_by_conversation（message_repository.py:63，经 llm.py:367 调用）读取最近 N 条
+            DB-->>ND: 历史消息拼进 messages（多轮记忆读取 Postgres message 表，非 Redis）
         end
         opt loop(21)/batch(28)/subworkflow(9) 子图
-            ND->>CO: Compiler.compile(subgraph, checkpointer=None)（loop.py:88 / batch.py:94 / subworkflow.py:69）递归编译执行，子图不参与断点续跑
+            ND->>CO: Compiler.compile(subgraph, checkpointer=None)（loop.py:88 / batch.py:94 / subworkflow.py:69）递归编译执行，子图不参与断点恢复
         end
         opt LLM 流式（stream 开 + 无 tools + 有 emit 通道）
             ND-->>RT: emit("llm_token", delta)（llm.py:325，经 _emit 闭包 compiler.py:217 补 node_id）
@@ -480,7 +478,7 @@ sequenceDiagram
         RT-->>CS: emitter("node_end", {outputs, duration_ms}) 入队
     end
 
-    Note over U,WH: ⑤ 结局三分支
+    Note over U,WH: ⑤ 三种终止条件
     alt question(18)/input(30)/human_task(60) 中断
         ND->>LG: langgraph.types.interrupt(payload)（question.py:24→:127 / human_task.py:18→:43，handler 内暂停）
         LG->>DB: AsyncPostgresSaver 将中断处 WorkflowState 全量写 checkpoint 表（checkpoint.py:50）
@@ -488,7 +486,7 @@ sequenceDiagram
         RT->>DB: update_run_interrupt(:91) run=interrupted + 冗余 payload
         RT-->>CS: 自封装 GraphInterrupted(runtime.py:33) → question/interrupted 事件；中断消息落库(_handle_chatflow_interrupt :1947)
     else 正常完成
-        LG-->>RT: 根链 on_chain_end name=="LangGraph"(:654) 捕获 final state（兜底 compiled.aget_state :601）
+        LG-->>RT: 根链 on_chain_end name=="LangGraph"(:654) 捕获 final state（取不到时由 compiled.aget_state :601 补读）
         RT->>DB: update_run_status(:384) run=success + output
         CS->>DB: assistant 最终消息 + conv.touch + uow.commit（流结束统一提交 :1896-1913，touch:1905、commit:1906）
         RT--)WH: _notify_webhooks(:792) 异步 POST run_finished（SSRF 校验）
@@ -499,59 +497,57 @@ sequenceDiagram
         CS-->>R: error {message, code} → SSE
     end
 
-    Note over U,WH: ⑥ 出泵收尾
-    CS-->>R: 主协程从 Queue 取 event/output/interrupted/error/done 逐条出泵
+    Note over U,WH: ⑥ 收尾处理
+    CS-->>R: 主协程从 Queue 取 event/output/interrupted/error/done 逐条发送
     R-->>U: sse_event(sse.py:16) 帧序：run_start → node_start/llm_token/node_end/output_message（穿插）→ result / question / interrupted → final（客户端断开时路由 finally 取消 producer，chat.py:139/:153，_sse_response）
 
-    Note over U,WH: ⑦ resume 读档（中断后的第二次请求：回答问答节点 / 审批通过）
+    Note over U,WH: ⑦ 恢复执行（中断后的第二次请求：回答问答节点 / 审批通过）
     U->>R: 同一接口，body.resume = {answer / 审批结论}（useChatSession.ts:387，人审 :789）
-    R->>CS: resume 必带 conversation_id，复用中断 run 的 run_id(:1772-1780)<br/>上轮中断未答直接发新消息 → 换新子线程 f"{cid}:{uuid4()}" 弃旧中断(:1788)
+    R->>CS: resume 必带 conversation_id，复用中断 run 的 run_id(:1772-1780)<br/>上一轮中断未答复而直接发新消息 → 换新子线程 f"{cid}:{uuid4()}" 放弃旧中断(:1788)
     CS->>RT: runner.resume(payload)(runtime.py:512)
-    RT->>LG: compiled.aget_state 校验存档点(:540) → astream_events(Command(resume=payload))(runtime.py:19→:535/:647)<br/>按 thread_id 读 checkpoint，handler 从 interrupt() 调用点原地返回 payload，不重跑已完成节点
-    LG-->>U: 后续事件流照常出泵（回到上方"正常完成/再中断"分支）
+    RT->>LG: compiled.aget_state 校验 checkpoint(:540) → astream_events(Command(resume=payload))(runtime.py:19→:535/:647)<br/>按 thread_id 读 checkpoint，handler 从 interrupt() 调用点原地返回 payload，已完成节点不重复执行
+    LG-->>U: 后续事件流照常发出（回到上方"正常完成/再中断"分支）
     end
 ```
 
-> **配色说明**：全图只铺**一块白色底纸**（单层 rect、不分段上色——分段色带会按消息跨度自动收缩宽度导致宽窄参差，嵌套色带更有错位 bug），深浅两种背景渲染完全一致。参与者头部底色=所属层（🔵用户端 / 🟢后端应用层 / 🟣执行域 domain / 🟠存储与外部）；流程七步由**贯穿全宽的黄色横幅注释**（①进门搭台 → ②拿图装配 → ③记账编译开跑 → ④执行循环 → ⑤结局三分支 → ⑥出泵收尾 → ⑦resume 读档）标示。
+### 4.3 分步说明（对照上图 autonumber）
 
-### 4.3 分步讲解（对照上图 autonumber）
-
-| 步 | 名称 | 大白话 | 关键代码 |
+| 步 | 名称 | 说明 | 关键代码 |
 |---|---|---|---|
-| ① | 进门检查 | 应用是不是对话流、会话是不是你的、thread 必须绑会话；错就返回普通 JSON 4xx，不占长连接 | `chat_service.py:1674 prepare_chatflow_run` |
-| ② | 搭台子 | 应用层建一个"传送带"（asyncio.Queue）+ 后台执行任务，同时给前端挂起 SSE 长连接 | `chat.py:164`、`chat_service.py:1750/:1827` |
-| ③ | 拿图 | 按 pin>published>latest 选版本；Redis 命中给 JSON，miss 查库+租户 config 覆盖 | `application_service.py:937` |
-| ④ | 装配 | 组合根把 LLM 客户端、仓储、消息适配器等注入 ServiceRegistry，再造 GraphRuntime（domain 层不 import infra 全靠这里） | `deps/graph.py:273 build_runner` |
-| ⑤ | 记账 | run 记录（附画布快照）+ 用户消息**先落库再执行**，炸了也有据可查 | `runtime.py:208`、`chat_service.py:1802` |
-| ⑥ | 翻译编译 | Coze JSON→CanvasGraph→LangGraph StateGraph→竣工图；**每请求现做，不缓存编译产物** | `convert.py:50`、`compiler.py:75/93/101/105/121/371/131` |
-| ⑦ | 执行循环 | `astream_events(v2)` 逐节点跑；IF/INTENT 按 route 选线；loop/batch 子图不带存档；LLM 边生成边吐 token；带历史配置的节点先捞 message 表 | `runtime.py:647`，各 `nodes/*.py` |
-| ⑧ | 字幕转发 | 两条通道进同一个 emitter：LangGraph 生命周期事件（node_start/end）+ 节点主动 emit（llm_token/output_message）；泵从 Queue 取帧 → SSE | `node_base.py:68`、`compiler.py:217`、`deps/sse.py:16` |
-| ⑨ | 存档/读档 | 问答/人审节点 `interrupt()` 现场全量进 checkpoint 表，本轮停；答复带 `resume` → `Command(resume)` 读档**原地继续**，不重复调 LLM、不重复计费 | `question.py:127`、`runtime.py:512/:535` |
-| ⑩ | 结账 | 最终回复+conv.touch 统一 commit，run=success；webhook 异步通知；节点级错误按 ErrorPolicy 重试/降级，图级错误 run=error+`error` 帧；**用户关页 → finally 取消执行** | `chat_service.py:1896-1913`、`runtime.py:406-430/:792`、`chat.py:139/:153` |
+| ① | 入口校验 | 校验应用是否为对话流、会话归属、thread 必须绑定会话；校验失败返回普通 JSON 4xx，不占用长连接 | `chat_service.py:1674 prepare_chatflow_run` |
+| ② | 建事件队列与长连接 | 应用层创建事件队列（asyncio.Queue）与后台执行任务，同时为前端挂起 SSE 长连接 | `chat.py:164`、`chat_service.py:1750/:1827` |
+| ③ | 读取图版本 | 按租户锁定 > published > latest 选择版本；Redis 命中返回 JSON，miss 查库并应用租户 config 覆盖 | `application_service.py:937` |
+| ④ | 装配执行上下文 | 组合根将 LLM 客户端、仓储、消息适配器等注入 ServiceRegistry，再创建 GraphRuntime（对 infrastructure 的依赖全部在此装配，domain 层不 import） | `deps/graph.py:273 build_runner` |
+| ⑤ | 创建运行记录 | run 记录（附画布快照）+ 用户消息**先落库再执行**，异常时有据可查 | `runtime.py:208`、`chat_service.py:1802` |
+| ⑥ | 转换编译 | Coze JSON→CanvasGraph→LangGraph StateGraph→编译产物；**每次请求即时生成，不缓存编译产物** | `convert.py:50`、`compiler.py:75/93/101/105/121/371/131` |
+| ⑦ | 执行循环 | `astream_events(v2)` 逐节点执行；IF/INTENT 按 route 选分支；loop/batch 子图不写 checkpoint；LLM 边生成边输出 token；开启历史配置的节点先读取 message 表 | `runtime.py:647`，各 `nodes/*.py` |
+| ⑧ | 事件转发 | 两条通道进入同一个 emitter：LangGraph 生命周期事件（node_start/end）+ 节点主动 emit（llm_token/output_message）；从 Queue 逐帧取出 → SSE | `node_base.py:68`、`compiler.py:217`、`deps/sse.py:16` |
+| ⑨ | 检查点保存/恢复执行 | 问答/人工审核节点 `interrupt()` 将中断点状态全量写入 checkpoint 表，本轮暂停；答复携带 `resume` → `Command(resume)` 从检查点**原地恢复执行**，不重复调 LLM、不重复计费 | `question.py:127`、`runtime.py:512/:535` |
+| ⑩ | 收尾提交 | 最终回复+conv.touch 统一 commit，run=success；webhook 异步通知；节点级错误按 ErrorPolicy 重试/降级，图级错误 run=error+`error` 帧；**用户关闭页面 → finally 取消执行** | `chat_service.py:1896-1913`、`runtime.py:406-430/:792`、`chat.py:139/:153` |
 
 ### 4.4 SSE 事件协议
 
-| 事件 | 谁发的 | 前端含义 |
+| 事件 | 发送方 | 前端含义 |
 |---|---|---|
-| `run_start` | 泵起始 | 本轮执行编号：conversation_id / thread_id / run_id |
-| `node_start` / `node_end` | LangGraph on_chain_* | 画布上节点亮起/完成（状态、outputs、耗时） |
-| `llm_token` | LLM Handler emit | 字幕追加一个字（打字机效果） |
-| `output_message` | output/end 节点 | 图跑一半先说句话，不结束执行 |
+| `run_start` | 事件循环起始 | 本轮执行编号：conversation_id / thread_id / run_id |
+| `node_start` / `node_end` | LangGraph on_chain_* | 画布节点开始执行/执行完成（状态、outputs、耗时） |
+| `llm_token` | LLM Handler emit | 回答文本逐 token 追加（打字机效果） |
+| `output_message` | output/end 节点 | 执行过程中输出中间消息，不结束执行 |
 | `result` | 流终点 | 最终回答 + 完整 output |
-| `question` / `interrupted` | 中断分支 | 图停住等回答/审批，下次请求带 resume |
+| `question` / `interrupted` | 中断分支 | 执行暂停等待回答/审批，下次请求携带 resume |
 | `error` | 失败分支 | 中止 + 错误文案 |
 | `final` | 收尾 | 恒为最后一帧，前端关流 |
 
-### 4.5 入口变体（同一引擎的不同门）
+### 4.5 同一引擎的不同调用入口
 
 | 入口 | 路由 | 应用层 | 区别 |
 |---|---|---|---|
 | chatflow 流式（主链路） | `chat.py:164` | `chat_service.py:1726` | 上图全流程 |
-| 纯 DAG 工作流流式 | `workflow.py:103/:118` | `workflow_service.py:253/:344` | 同构事件泵、同事件协议 |
-| workflow 非流式（POST /{id}/workflow/run） | `chat.py`（`POST /{id}/workflow/run`） | `chat_service.py:1400 run_workflow` | 攒完再返回，无 SSE |
-| ReAct 对话 | `chat.py:164`（入口已并入，按 flow_type 分派） | `chat_service.py:303 run_agent_stream` | **不走图引擎**，事件协议另一套；接管/handback 路由在同一路由（chat.py:195-216） |
-| 接管/交还路由（handback） | `chat.py:164`（handback 分支 chat.py:195-216） | `chat_service.py:1545 run_handback_stream` | 接管链校验后切换 owner 继续对话 |
-| 管理端调试流式 | `apps_admin.py:509` | `graph.py:195 make_canvas_debug_runtime` | 直接吃未保存画布 |
+| 纯 DAG 工作流流式 | `workflow.py:103/:118` | `workflow_service.py:253/:344` | 复用同一事件循环实现与事件协议 |
+| workflow 非流式（POST /{id}/workflow/run） | `chat.py`（`POST /{id}/workflow/run`） | `chat_service.py:1400 run_workflow` | 聚合全部结果后一次性返回，无 SSE |
+| ReAct 对话 | `chat.py:164`（入口已并入，按 flow_type 分派） | `chat_service.py:303 run_agent_stream` | **不走图引擎**，事件协议另一套；转交/交还（handoff/handback）路由在同一路由（chat.py:195-216） |
+| Agent 交还路由（handback） | `chat.py:164`（handback 分支 chat.py:195-216） | `chat_service.py:1545 run_handback_stream` | 转交链校验后切换会话归属（owner）继续对话 |
+| 管理端调试流式 | `apps_admin.py:509` | `graph.py:195 make_canvas_debug_runtime` | 直接使用未保存画布 |
 | 单节点试运行 | `apps_admin.py:537` | `runtime.py:456 invoke_node` → `compiler.py:133` | 只跑一个节点 |
 
 ---
@@ -565,7 +561,7 @@ sequenceDiagram
 | `set_entry_point(id)` | 同上 | compiler.py:105 | start(1) 节点入口 |
 | `add_edge(src, dst)` / `END` | 同上 | compiler.py:121 / :129 | 普通边；无出边节点接 END 哨兵 |
 | `add_conditional_edges(src, router)` | 同上 | compiler.py:371（`_add_conditional_edges :335`） | if_else(8)/intent(22) 按 `node_outputs[node].route` 查 route_map |
-| `compile(checkpointer=...)` | 同上 | compiler.py:131 ← runtime.py:131-139 | 产出 CompiledStateGraph；主图挂 AsyncPostgresSaver，loop/batch/subworkflow 子图 `checkpointer=None`（loop.py:88 / batch.py:94 / subworkflow.py:69），子图不支持断点续跑 |
+| `compile(checkpointer=...)` | 同上 | compiler.py:131 ← runtime.py:131-139 | 产出 CompiledStateGraph；主图挂 AsyncPostgresSaver，loop/batch/subworkflow 子图 `checkpointer=None`（loop.py:88 / batch.py:94 / subworkflow.py:69），子图不支持断点恢复 |
 | `compiled.astream_events(state, config, version="v2")` | CompiledStateGraph 方法 | runtime.py:647 `_stream_and_record`（def :639） | 运行主循环；按 on_chain_start/end/error(:663/:676/:707，metadata.langgraph_node :651) 分发事件与落库，**取代 invoke** 以获得逐节点流 |
 | `compiled.aget_state(config)` | 同上 | runtime.py:355/:540/:601 | 检出 `tasks[].interrupts`、读 final state |
 | `compiled.aget_state_history(config, limit)` | 同上 | runtime.py:609 `list_state_history`（fork 路径 :271） | checkpoint 历史回放 |
@@ -573,7 +569,7 @@ sequenceDiagram
 | `langgraph.types.Command(resume=payload)` | runtime.py:19 | :535（`resume :512`） | 按 thread_id 从 checkpoint 恢复，interrupt() 原地返回 payload |
 | `AsyncPostgresSaver` | `langgraph.checkpoint.postgres.aio`，checkpoint.py:50 | 编译期挂载（runtime.py:127-130） | 进程级单例（`get_checkpointer :23`）；checkpoint 落 Postgres，thread_id 加租户前缀隔离（runtime.py:42） |
 
-> 易混点：`GraphInterrupted`（runtime.py:33）是**自封装异常**，非 LangGraph 原生——由 `aget_state` 检出 interrupts 后抛出，供应用层转 SSE。
+> 注意：`GraphInterrupted`（runtime.py:33）是**自封装异常**，非 LangGraph 原生——由 `aget_state` 检出 interrupts 后抛出，供应用层转 SSE。
 
 ---
 
@@ -581,10 +577,10 @@ sequenceDiagram
 
 | 问题 | 答案 |
 |---|---|
-| 为什么保存时不"编译好备用"？ | 编译是纯内存毫秒级操作；且画布要经租户 pin/config 覆盖才定稿，保存期不知道将来谁在跑。只缓存贵的部分（查库取 JSON，Redis 300s）。 |
-| 聊天历史为什么不在 Redis？ | 历史是"不能丢的账本"，落 Postgres `message` 表，LLM 节点按 needHistory 回捞。Redis 只放丢了也无所谓的缓存。 |
-| checkpoint 是多轮记忆吗？ | 不是。checkpoint 存"图跑到一半的全部现场"（变量、各节点输出），只服务中断续跑/回放。 |
-| 为什么存草稿不影响线上？ | 运行按 租户pin > published > latest 选版本，草稿只在未发布应用调试时可见。 |
-| 问答续跑会不会把前面的 LLM 重调一遍（双倍扣费）？ | 不会。`Command(resume)` 从 checkpoint 恢复，interrupt() 原地返回，已完成节点输出都在存档里。 |
-| 用户关掉网页后台还跑吗？ | 不跑。SSE 断开后路由 finally 取消 producer（chat.py:139/:153，_sse_response），已落库的 run 保持原状态。 |
-| `graph:invalidate` 广播有人听吗？ | 目前没有订阅任务，只有发布端；跨进程一致性靠 300s TTL 兜底。需即时失效可补常驻订阅（已知缺口，非缺陷结论）。 |
+| 为什么保存时不预先编译？ | 编译是纯内存毫秒级操作；且运行时画布需经租户锁定版本/config 覆盖才定稿，保存时无法预知执行对象。仅缓存开销大的部分（查库取 JSON，Redis 300s）。 |
+| 聊天历史为什么不在 Redis？ | 历史消息属于不可丢失的数据，落 Postgres `message` 表，LLM 节点按 needHistory 读取。Redis 只存放允许失效的缓存。 |
+| checkpoint 是多轮记忆吗？ | 不是。checkpoint 保存执行中断点的完整状态（变量、各节点输出），仅服务于中断恢复/回放。 |
+| 为什么存草稿不影响线上？ | 运行按 租户锁定版本 > published > latest 选择版本，草稿只在未发布应用调试时可见。 |
+| 问答恢复执行会不会重复调用前面的 LLM（重复计费）？ | 不会。`Command(resume)` 从 checkpoint 恢复，interrupt() 原地返回，已完成节点的输出都保存在检查点中。 |
+| 用户关闭页面后后台还继续执行吗？ | 不会。SSE 断开后路由 finally 取消 producer（chat.py:139/:153，_sse_response），已落库的 run 保持原状态。 |
+| `graph:invalidate` 广播是否有订阅方？ | 目前没有订阅任务，只有发布端；跨进程一致性由 300s TTL 保底。需即时失效可补充常驻订阅（已知缺口，非缺陷结论）。 |

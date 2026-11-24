@@ -194,7 +194,7 @@ class ApplicationRepository:
     ) -> dict:
         """整体覆盖写入可见范围：upsert scope 行 + 清空并重写 whitelist。
 
-        使用 ON CONFLICT 兜底并发：两个请求同时首次写入时，唯一约束
+        使用 ON CONFLICT 处理并发冲突：两个请求同时首次写入时，唯一约束
         (application_id, tenant_id) 让后到的请求走 DO UPDATE 分支，不会报 23505。
         """
         scope_pk = self._session.execute(
@@ -258,7 +258,7 @@ class ApplicationRepository:
     def ensure_scope_on_subscribe(self, application_id: UUID, tenant_id: UUID) -> None:
         """租户订阅产品级应用时调用：无 scope 则按平台 visibility_template 初始化。
 
-        一期策略：不依赖显式钩子，list_visible_for_user 对缺失 scope 已按模板惰性兜底；
+        一期策略：不依赖显式钩子，list_visible_for_user 查询时对缺失 scope 已按模板惰性生成默认可见范围；
         本方法保留供未来显式 hook（3 处订阅创建点 / 租户级应用创建）使用。
         """
         row = self._session.execute(
@@ -724,9 +724,9 @@ class ApplicationRepository:
 
         可见范围解析（0068）：
         - scope 有记录：visibility='all' 全员可见；'whitelist' 需命中部门/角色/用户白名单。
-        - scope 无记录（订阅后未配置）：产品级应用按平台模板 visibility_template 兜底；
-          租户级应用一期不做创建、兜底为不可见（未来创建时会显式写 scope）。
-        孤儿数据兜底：subject_id 无外键，三条 JOIN 链路（departments /
+        - scope 无记录（订阅后未配置）：产品级应用按平台模板 visibility_template 生成默认可见范围；
+          租户级应用一期不做创建、默认视为不可见（未来创建时会显式写 scope）。
+        孤儿数据处理：subject_id 无外键，三条 JOIN 链路（departments /
         user_employments+users / user_roles）在主体被删后自然过滤，无需级联清理。
         """
         params: dict[str, Any] = {"tid": str(tenant_id), "uid": str(user_id)}
@@ -802,16 +802,16 @@ class ApplicationRepository:
                           )
                         )
                     )
-                    -- 分支 3：scope 不存在，按 owner_type 兜底
+                    -- 分支 3：scope 不存在，按 owner_type 应用默认规则
                     OR (
                       NOT EXISTS (
                         SELECT 1 FROM app_visibility_scope s
                         WHERE s.application_id = a.id AND s.tenant_id = :tid
                       )
                       AND (
-                        -- 产品级应用：按平台模板兜底（模板为 whitelist 时等待租户配置，暂不可见）
+                        -- 产品级应用：按平台模板生成默认可见范围（模板为 whitelist 时等待租户配置，暂不可见）
                         (a.owner_type = 'platform' AND a.visibility_template = 'all')
-                        -- 租户级应用：一期不做创建，兜底不可见；未来创建时显式写 scope
+                        -- 租户级应用：一期不做创建，默认不可见；未来创建时显式写 scope
                         OR (a.owner_type = 'tenant' AND false)
                       )
                     )

@@ -1,7 +1,7 @@
 import type { ConfigFieldMeta, NodeMeta } from '../../../../api/nodeMeta'
 
 // 后端 node_meta.py 是展示事实源；本文件只做「接口结果 → 前端展示结构」的一层适配。
-// 本地 fallback（ICON_MAP / NEXT_FALLBACK / SECTION_DEFS）仅在后端字段缺失时兜底。
+// 本地 fallback（ICON_MAP / NEXT_FALLBACK / SECTION_DEFS）仅在后端字段缺失时使用。
 
 export interface NextRecommendation {
   typeKey: string
@@ -87,7 +87,7 @@ export function buildCategoryGroups(
     .filter((group) => group.items.length > 0)
 }
 
-// 配置字段分组：优先读后端 field.group；全部为空时返回 null，由本地 SECTION_DEFS 兜底
+// 配置字段分组：优先读后端 field.group；全部为空时返回 null，由本地 SECTION_DEFS 处理
 export function groupFieldsByMetaGroup(fields: ConfigFieldMeta[]): ConfigSectionShape[] | null {
   if (!fields.some((f) => f.group)) return null
   const order: string[] = []
@@ -103,7 +103,7 @@ export function groupFieldsByMetaGroup(fields: ConfigFieldMeta[]): ConfigSection
   return order.map((title) => ({ title, fields: grouped.get(title)! }))
 }
 
-// 「下一步」推荐兜底：仅当后端 meta 缺失 next_recommendations 时使用
+// 「下一步」推荐的本地默认值：仅当后端 meta 缺失 next_recommendations 时使用
 const NEXT_FALLBACK: Record<string, string[]> = {
   start: ['llm', 'dataset', 'if_else', 'code'],
   llm: ['if_else', 'dataset', 'http', 'end'],

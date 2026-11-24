@@ -102,7 +102,7 @@ describe('useChatSession 对话流协议', () => {
     ])
   })
 
-  it('无 output_message 时用 result.outputs 兜底输出', async () => {
+  it('无 output_message 时使用 result.outputs 作为输出', async () => {
     chatflowRun.mockImplementation(emit([
       { event: 'run_start', data: { conversation_id: 'c2', thread_id: 't2', run_id: 'r2' } },
       { event: 'result', data: { outputs: { output: '兜底输出' } } },
@@ -363,7 +363,7 @@ describe('useChatSession 接管协议', () => {
     })
     expect(agentRun.mock.calls).toHaveLength(0)
 
-    // 接管提交后摘要反映移交（result 帧对齐兜底不误清）
+    // 接管提交后摘要反映移交（result 帧后的对齐不会误清除移交状态）
     conversationList.mockResolvedValue([
       {
         conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,
@@ -424,7 +424,7 @@ describe('useChatSession 接管协议', () => {
     expect(result.current.messages[2].answeredBy).toBe('天气专家')
   })
 
-  it('会话列表透出接管标记（handoffAgent）', async () => {
+  it('会话列表展示接管标记（handoffAgent）', async () => {
     conversationList.mockResolvedValue([
       {
         conversation_id: 'c1', title: '查天气', created_at: null, updated_at: null,

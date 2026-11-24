@@ -60,8 +60,8 @@ export function NodeCard({
   inputChips,
   flowType,
 }: NodeCardProps) {
-  // 动态副标题优先，后端 subtitle_hint 仅作静态兜底；
-  // 对话流开始节点用「输入」芯片行表达，不兜底显示「工作流入口」
+  // 动态副标题优先，后端 subtitle_hint 仅作静态默认值；
+  // 对话流开始节点用「输入」芯片行表达，不会回退显示「工作流入口」
   const dynamicSubtitle = buildNodeSubtitle(typeKey, config, flowType)
   const subtitle = inputChips?.length ? dynamicSubtitle : dynamicSubtitle || subtitleHint || ''
   const [hover, setHover] = useState(false)

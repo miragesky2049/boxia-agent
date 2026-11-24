@@ -131,7 +131,7 @@ const FIELD_CONTROLS: Record<string, FieldRenderer> = {
   },
 }
 
-// 未注册的类型按文本渲染，保证新增字段类型不会直接崩掉
+// 未注册的类型按文本渲染，保证新增字段类型不会导致页面渲染失败
 export function FieldControl(props: FieldControlProps) {
   const Renderer = FIELD_CONTROLS[props.field.field_type] ?? FIELD_CONTROLS.text!
   return <>{Renderer(props)}</>

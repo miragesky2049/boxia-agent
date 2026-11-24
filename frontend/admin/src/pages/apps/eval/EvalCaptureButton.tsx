@@ -9,7 +9,7 @@ interface EvalCaptureButtonProps {
 
 /**
  * run 记录「加入评测集」按钮（F18.2 冷启动捕获）：选定数据集后把该 run 的
- * 问句与产出物化为评测用例；捕获校验（同应用/success/问句非空）由后端兜底。
+ * 问句与产出物化为评测用例；捕获校验（同应用/success/问句非空）由后端统一执行。
  */
 export default function EvalCaptureButton({ applicationId, runId }: EvalCaptureButtonProps) {
   const { message } = App.useApp()

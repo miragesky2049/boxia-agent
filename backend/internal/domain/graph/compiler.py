@@ -342,7 +342,7 @@ class Compiler:
 
         IF：route 为 case_id / "else"，兼容旧图 "true"/"false"。
         意图识别：route 为分类 ID 字符串（"1"/"2"...），未命中走 "0"（其他）。
-        router 查找时按 route → 业务兜底端口顺序查找。
+        router 查找时按 route → 业务默认端口顺序查找。
         """
         route_map: dict[str, str] = {}
         for edge in out_edges:
@@ -354,7 +354,7 @@ class Compiler:
             route = str(node_out.get("route") or "else")
             if route in route_map:
                 return route_map[route]
-            # 意图识别：其他/兜底端口
+            # 意图识别：其他/默认端口
             if route not in ("else", "false"):
                 for fallback in ("0", "other", "else", "false"):
                     if fallback in route_map:

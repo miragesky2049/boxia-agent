@@ -30,7 +30,7 @@ class ModelService:
         """列出所有已启用的模型（供前端下拉选择）。
 
         返回字段：model_id / display_name / provider_name / capabilities。
-        capabilities 统一补 default_temperature / default_max_tokens 兜底，
+        capabilities 统一补齐 default_temperature / default_max_tokens 默认值，
         前端选中模型后可直接回填 temperature/maxTokens 字段。
         若表为空（开发态），回退到 settings.llm_model_id + llm_temperature/llm_max_tokens。
         """

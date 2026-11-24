@@ -151,7 +151,7 @@ def parse_extract_ops(raw: str) -> list[dict[str, Any]]:
     再 loads；非法 JSON/非列表 → 空列表（调用方按"本轮无沉淀"处理）。
     逐条校验：op 白名单；add/update 必须有非空 content（超 500 字符硬截断，
     换行折叠为空格）；update/delete 必须有 memory_id；add 的 kind 越界按 fact
-    兜底，update 的 kind 缺失置 None（仓储 COALESCE 保留原分类）。
+    回退为默认值 fact，update 的 kind 缺失置 None（仓储 COALESCE 保留原分类）。
     """
     text = raw or ""
     start, end = text.find("["), text.rfind("]")
@@ -180,8 +180,8 @@ def parse_extract_ops(raw: str) -> list[dict[str, Any]]:
             continue
         kind: str | None = str(item.get("kind") or "").strip().lower()
         if kind not in MEMORY_KINDS:
-            # update 缺 kind 不再兜底 fact（否则 COALESCE 反把原分类静默改写），
-            # 置 None 由仓储 COALESCE 保留原 kind；add 仍兜底 fact
+            # update 缺 kind 不再回退为 fact（否则 COALESCE 反把原分类静默改写），
+            # 置 None 由仓储 COALESCE 保留原 kind；add 仍按默认值 fact 处理
             kind = None if op == "update" else "fact"
         ops.append(
             {
@@ -277,7 +277,7 @@ def plan_summarization(
        整体重算；
     2. 待压缩段 = 水位线之后、保留窗口之前的消息（轮数超 keep_recent_turns 即非空）；
     3. 轮数未超但估算 token 超预算 80% → 从最旧继续右移窗口边界压缩，原文段最少
-       保留 2 条（单条超长的最新轮压不掉，由调用方 trim_history 兜底）。
+       保留 2 条（单条超长的最新轮无法压缩，最终由调用方 trim_history 裁剪）。
     """
     valid: list[dict[str, Any]] = [
         {"id": row.get("id"), "role": str(row.get("role")), "content": str(row.get("content"))}

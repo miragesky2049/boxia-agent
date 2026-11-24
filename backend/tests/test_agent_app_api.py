@@ -1,4 +1,4 @@
-"""0074 智能体应用端到端：flow_type=agent 建应用（DB CHECK）、配置面 API、运行闸门。
+"""0074 智能体应用端到端：flow_type=agent 建应用（DB CHECK）、配置面 API、运行校验。
 
 平台侧走 apps-admin 的 agent-config 读写；用户侧验证可见范围继承（0068 机制
 与 flow_type 无关）与 workflow 运行接口对 agent 的拒绝。真实 Postgres。
@@ -161,12 +161,12 @@ def test_agent_app_user_side_visibility_and_workflow_gate(
     persistent_user_tenant_client,
 ) -> None:
     """可见范围继承：agent 与 workflow 走同一 0068 订阅链路出现在用户列表；
-    workflow 运行接口闸门必须拒绝 agent（防绕道固定流程执行）。"""
+    workflow 运行接口校验必须拒绝 agent（防绕道固定流程执行）。"""
     platform = _platform_headers(client)
     agent_id = _create_app(client, platform, "产品顾问2", "agent")
     client.put(
         f"{ADMIN_APPS}/{agent_id}/agent-config",
-        # M4-c F14.6：卡片透出 sub_agents；未订阅目标不可见 → name 收敛为空串
+        # M4-c F14.6：卡片返回 sub_agents；未订阅目标不可见 → name 收敛为空串
         json=_agent_config_form(
             subAgents=[
                 {

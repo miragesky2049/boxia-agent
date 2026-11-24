@@ -56,7 +56,7 @@ describe('nodePresentation', () => {
     ])
   })
 
-  it('后端分组全部为空时返回 null，交由本地兜底', () => {
+  it('后端分组全部为空时返回 null，交由本地默认分组处理', () => {
     const fields = [
       {
         name: 'a',
@@ -104,7 +104,7 @@ describe('nodePresentation', () => {
     ])
   })
 
-  it('后端未给推荐时回落本地兜底，未知类型返回空', () => {
+  it('后端未给推荐时回落本地默认值，未知类型返回空', () => {
     const keyToMeta = { llm: makeMeta({ type_key: 'llm', title: '大模型' }) }
     const meta = makeMeta({ type_key: 'start' })
     expect(resolveNextRecommendations(meta, keyToMeta)[0]).toEqual({

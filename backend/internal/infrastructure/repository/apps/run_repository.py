@@ -146,7 +146,7 @@ class RunRepository:
         """按 thread 定位未结束 run（不限应用）——M4 PRD R21 resume 护栏。
 
         接管轮的审批快照 run 归目标应用，而 resume 请求 URL 恒为会话归属应用；
-        thread 含会话 id 天然不跨会话，仅在同一会话的子线程形态上兜底二次定位，
+        thread 含会话 id 天然不跨会话，仅在同一会话的子线程形态上追加一次二次定位，
         快照续跑的应用归属取自 run 行自身（workflow_id），绝不参考 active 路由。
         """
         row = self._session.execute(

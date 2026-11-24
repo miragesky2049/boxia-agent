@@ -1,7 +1,7 @@
 """长期记忆仓储：agent_memory 表读写（M4 PRD F16.2/F16.3/F16.4）。
 
 原生 SQL 风格对齐 conversation_repository；调用方（抽取管线/召回注入/管理面）
-传入已鉴权的 tenant×app×user 作用域，仓储只负责按作用域读写，不做越权兜底。
+传入已鉴权的 tenant×app×user 作用域，仓储只负责按作用域读写，越权拦截由调用方负责。
 """
 
 from __future__ import annotations

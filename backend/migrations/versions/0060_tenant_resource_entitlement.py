@@ -8,7 +8,7 @@ Create Date: 2026-11-03
 - 表语义是"租户对资源的权益行"，原名与角色授权复数表 resource_grants 极易混淆，改名收口口径。
 - 约束/索引名随表同步更名，避免遗留 resource_grant_* 前缀误导运维查询。
 - 保留同名兼容视图 resource_grant 一个发布周期：简单单表视图在 PG 下可读写，
-  兜底尚未切流的旁路查询；下一迭代 contract 阶段删除。
+  兼容尚未切流的旁路查询；下一迭代 contract 阶段删除。
 """
 
 from collections.abc import Sequence

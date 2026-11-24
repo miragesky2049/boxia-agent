@@ -39,7 +39,7 @@ function timeText(value: string | null): string {
 
 /**
  * 质量看板（M4-d T-d9，F18.6）：评测批与线上采样概览 + 逐日均分趋势 +
- * 低分清单（飞轮入口：一键 from-run 转评测集，评测批即可消费）。
+ * 低分清单（评测闭环入口：一键 from-run 转评测集，评测批即可消费）。
  */
 export default function QualityPanel({ applicationId }: QualityPanelProps) {
   // null=未加载（含失败后保持 null 展示提示）；setState 全部在请求回调内

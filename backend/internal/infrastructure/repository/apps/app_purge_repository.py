@@ -55,7 +55,7 @@ _SNAPSHOT_SQL = """
 # - 无 FK 裸列与多态表先清，避免遗留孤儿；
 # - run.workflow_id 对 application RESTRICT，run 必须先于 application（级联 run_node_execution）；
 # - application_apply 为 RESTRICT，必须先于 application；
-# - message 末位兜底（正常已随 conversation CASCADE）。
+# - message 末位补删（正常已随 conversation CASCADE）。
 _PURGE_STEPS: tuple[tuple[str, str], ...] = (
     (
         "application_user_variable",

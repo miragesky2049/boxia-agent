@@ -52,7 +52,7 @@ class ConversationRepository:
                 "created_at, updated_at, "
                 # M4 PRD F15.2：摘要与水位线（ChatService 组装短期记忆时消费）
                 "summary, summary_through_message_id, summary_updated_at, "
-                # M4 PRD F14.9：接管路由态（统一入口分派与会话列表消费）
+                # M4 PRD F14.9：转交路由状态（handoff）（统一入口分派与会话列表消费）
                 "active_application_id, handoff_chain "
                 "FROM conversation WHERE id = :id"
             ),
@@ -67,7 +67,7 @@ class ConversationRepository:
         active_application_id: UUID | None,
         handoff_chain: list[str],
     ) -> None:
-        """写接管路由态（M4 PRD F14.9）：active_application_id=None 即归位主助手。
+        """写转交路由状态（M4 PRD F14.9）：active_application_id=None 即归位主助手。
 
         调用方约束（R21）：接管切换只允许发生在 run 成功提交后；本方法只做存取，
         链深/去环判定在 domain/agent/handoff，仓储不重复校验。
@@ -111,7 +111,7 @@ class ConversationRepository:
         rows = self._session.execute(
             text(
                 "SELECT id, tenant_id, user_id, application_id, title, channel, "
-                # M4 PRD F14.10：发言权指针（会话列表徽标 additive 透出）
+                # M4 PRD F14.10：发言权指针（会话列表徽标 additive 输出）
                 "created_at, updated_at, active_application_id "
                 "FROM conversation "
                 "WHERE tenant_id = :tid AND user_id = :uid "

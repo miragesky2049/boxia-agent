@@ -171,7 +171,7 @@ class ApplicationRepositoryProtocol(Protocol):
         user_id: UUID,
         keyword: str | None = None,
     ) -> list[dict[str, Any]]:
-        """user 端可见应用卡片列表：租户自建 + 已开通实例，叠加 v2 可见范围（scope/白名单/模板兜底）过滤。"""
+        """user 端可见应用卡片列表：租户自建 + 已开通实例，叠加 v2 可见范围（scope/白名单/模板默认值）过滤。"""
         ...
 
     def count_copies(self, source_name: str) -> int:
@@ -438,7 +438,7 @@ class RunRepositoryProtocol(Protocol):
     ) -> dict | None: ...
 
     def get_running_by_thread_any_app(self, tenant_id: UUID, thread_id: str) -> dict | None:
-        """M4 PRD R21：resume 在归属应用未命中时按线程兜底定位快照 run（含 workflow_id）。"""
+        """M4 PRD R21：resume 在归属应用未命中时改用线程维度定位快照 run（含 workflow_id）。"""
         ...
 
     def list_runs(
@@ -824,7 +824,7 @@ class EntitlementRequestLogRepositoryProtocol(Protocol):
 class AgentMemoryRepositoryProtocol(Protocol):
     """长期记忆仓储端口：agent_memory（M4 PRD F16.2/F16.3/F16.4）。
 
-    作用域（tenant×app×user）由已鉴权的上游传入，仓储不做越权兜底；
+    作用域（tenant×app×user）由已鉴权的上游传入，仓储不再重复做越权校验；
     "活跃"= status='active'，归档条目只读不回召回。
     """
 

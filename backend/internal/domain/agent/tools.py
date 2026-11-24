@@ -192,7 +192,7 @@ class LoadSkillTool(Tool):
     渐进式披露（Progressive Disclosure）：
       - system prompt 里只暴露 skill 清单（name + description）
       - LLM 判断该用哪个 skill 后，通过本工具拿到完整规则
-      - 避免把所有 skill 全量塞进 system prompt 导致 token 膨胀
+      - 避免把所有 skill 全量写入 system prompt 导致 token 膨胀
     """
 
     def __init__(self, skills: list[SkillManifest]) -> None:

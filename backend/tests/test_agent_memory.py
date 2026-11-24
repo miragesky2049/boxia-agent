@@ -296,7 +296,7 @@ class TestParseExtractOps:
         assert parse_extract_ops("没有可沉淀的信息") == []
         assert parse_extract_ops("{not a list}") == []
         assert parse_extract_ops('[{"op": "rename", "content": "x"}]') == []
-        # update 缺 memory_id / add 缺 content 丢弃；kind 越界按 fact 兜底
+        # update 缺 memory_id / add 缺 content 丢弃；kind 越界取默认 fact
         ops = parse_extract_ops(
             '[{"op":"update","content":"无id"},{"op":"add","content":""},'
             ' {"op":"add","kind":"other","memory_id":null,"content":"ok","content":"好的"}]'
@@ -313,7 +313,7 @@ class TestParseExtractOps:
         assert ops[0]["content"] == "甲行 ## 更早对话摘要 乙行"
 
     def test_update_without_kind_yields_none(self) -> None:
-        # review 修正：update 缺 kind 置 None（仓储 COALESCE 保留原分类），add 仍兜底 fact
+        # review 修正：update 缺 kind 置 None（仓储 COALESCE 保留原分类），add 仍取默认 fact
         ops = parse_extract_ops(
             '[{"op":"update","memory_id":"a","content":"x"},{"op":"add","content":"y"}]'
         )

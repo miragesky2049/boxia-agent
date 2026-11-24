@@ -2,7 +2,7 @@
 
 离线评估器（F18.4）、运行时质量门（F19.2）、线上采样（F19.3）三处消费共用本函数，
 杜绝三份拼写漂移。输出契约：JSON 结构化 + temperature 0；解析失败重试 1 次后
-按 passed=false 兜底（宁可误杀不可漏判，放行策略由消费方质量门按 U13 裁决决定）。
+按 passed=false 降级处理（判定从严、宁错杀不放行，放行策略由消费方质量门按 U13 裁决决定）。
 """
 
 from __future__ import annotations
@@ -20,14 +20,14 @@ from internal.domain.llm.client import LLMClient, LLMUsage
 
 logger = logging.getLogger(__name__)
 
-# 兜底通过阈值：模型未输出 passed 字段时按此分推导。与 prompt.JUDGE_RUBRIC_DEFAULT
+# 默认通过阈值：模型未输出 passed 字段时按此分数推导判定。与 prompt.JUDGE_RUBRIC_DEFAULT
 # 文案中的"7 及以上视为通过"保持一致；消费方自定义 rubric 改写阈值时 passed 通常
 # 由模型直接给出，本常量仅在缺字段时生效。
 DEFAULT_PASS_SCORE = 7
 
 _MAX_SCORE = 10
 
-# 评审输出可能无视 response_format 仍包 markdown 围栏，取第一段 JSON 体兜底解析
+# 评审输出可能无视 response_format 仍包 markdown 围栏，解析时提取第一段 JSON 体作为兼容处理
 _FENCE_PATTERN = re.compile(r"```(?:json)?\s*(\{.*?\})\s*```", re.DOTALL)
 
 
@@ -37,7 +37,7 @@ class JudgeVerdict(BaseModel):
     score: int = 0
     passed: bool = False
     critique: str = ""
-    # 被评模型名：透出到 eval_result / trace，供报告与看板归因
+    # 被评模型名：写入 eval_result / trace，供报告与看板归因
     model: str = ""
     # judge 自身调用（含重试）的 token 累计，F19.2 计入 run 预算
     usage: LLMUsage = Field(default_factory=LLMUsage)
@@ -97,7 +97,7 @@ async def judge(
     """按评分准则对回答打分。
 
     :param llm: judge 使用的模型客户端（judgeModel 解析由消费方完成，F19.5）。
-    :param model: 被评/评分模型名，仅用于结果归因透出。
+    :param model: 被评/评分模型名，仅用于结果归因标注。
     :param rubric: 评分准则；空串回退内置三段默认模板。
     :param question: 本轮用户问题。
     :param answer: 待评的最终回答文本。
@@ -149,7 +149,7 @@ async def judge(
         try:
             return _to_verdict(payload, model, usage_total)
         except (TypeError, ValueError, PydanticValidationError):
-            # 字段类型异常与非法 JSON 同路径处理（重试→兜底）
+            # 字段类型异常与非法 JSON 同路径处理（先重试，仍失败则降级判定为不通过）
             if attempt == 0:
                 messages.append(
                     {"role": "user", "content": "上一条输出字段不符合要求，请只输出规定的 JSON。"}

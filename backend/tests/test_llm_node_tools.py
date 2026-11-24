@@ -151,7 +151,7 @@ def test_llm_node_react_loop_executes_tool_and_returns_final_text() -> None:
 
 
 def test_llm_node_tool_executor_unavailable_returns_error_text() -> None:
-    """LLM 请求 tool_call 但 services 没注册 tool_executor 时，回灌错误文本。"""
+    """LLM 请求 tool_call 但 services 没注册 tool_executor 时，把错误文本写回 messages 返回给模型。"""
 
     class _OnceLLM(_MockLLM):
         async def chat(self, **kwargs) -> _Resp:  # type: ignore[override]

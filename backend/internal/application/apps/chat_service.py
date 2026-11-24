@@ -118,7 +118,7 @@ def _approval_decision_text(approved: bool, comment: str) -> str:
 
 
 def _parse_phase_json(text: str) -> Any:
-    """plan/reflect 阶段的模型输出是 JSON 文本；解析失败返回 None（原样透出不影响展示）。"""
+    """plan/reflect 阶段的模型输出是 JSON 文本；解析失败返回 None（原样返回，不影响展示）。"""
     if not text:
         return None
     try:
@@ -128,7 +128,7 @@ def _parse_phase_json(text: str) -> Any:
 
 
 def _row_metadata(row: dict[str, Any]) -> dict[str, Any]:
-    """message 行 metadata 列兼容读取：jsonb 正常为 dict，字符串形态兜底解析。"""
+    """message 行 metadata 列兼容读取：jsonb 正常为 dict，字符串形态需再解析一次。"""
     md = row.get("metadata")
     if isinstance(md, str):
         try:
@@ -153,7 +153,7 @@ class _ChatRunState:
     agent_finished: bool = False
     # 0074 PRD F10：画布节点整轮挂起时的审批现场 {approval, snapshot}
     awaiting: dict[str, Any] | None = None
-    # M4 PRD F14.9：内核接管/归位命中时节点透出的 handoff 事件载荷；None = 本轮未接管
+    # M4 PRD F14.9：内核接管/归位命中时节点输出的 handoff 事件载荷；None = 本轮未接管
     handoff: dict[str, Any] | None = None
     # M4 PRD F19.2：质量门终判 {score,passed,attempts[,error]}；None = 本轮门未执行/关闭
     judge: dict[str, Any] | None = None
@@ -324,7 +324,7 @@ class ChatService:
         run 并从其快照续跑（复用被挂起的 run 行）；挂起本轮以 interrupted 帧收尾，
         不落 assistant 消息、不发 result。F9：images 透传节点按 visionEnabled 门控。
         """
-        # 1. 可见性闸门
+        # 1. 可见性校验
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )
@@ -397,7 +397,7 @@ class ChatService:
                 user_message_application_id=application_id
                 if run_app_id != application_id
                 else None,
-                # F14.9：应答应用 ≠ 会话归属应用即为接管轮（含 R21 resume 兜底改判轮），
+                # F14.9：应答应用 ≠ 会话归属应用即为接管轮（含 R21 resume 回退定位后的改判轮），
                 # 入站现场据此注入 hand_back 并允许归位
                 handoff_inbound=(
                     {"from_application_id": str(application_id)}
@@ -496,7 +496,7 @@ class ChatService:
                         "iterations": state.iterations,
                         "usage": state.usage_total,
                         "finish_reason": state.finish_reason,
-                        # M4-d F19.2：质量门终判 additive 透出（门关态帧与基线逐字段一致）
+                        # M4-d F19.2：质量门终判以 additive 字段输出（门关态帧与基线逐字段一致）
                         **({"judge": state.judge} if state.judge is not None else {}),
                     },
                 )
@@ -554,7 +554,7 @@ class ChatService:
         配置键以画布 coze 命名（systemPrompt/modleName/tools/maxToolRounds）为准，
         旧 snake_case 键保留一个迭代周期的兼容读取。仅当画布节点能完整复刻旧 chat
         行为才交棒 GraphRuntime：
-        - tools 必须画布显式声明（legacy tool_resource_ids 兜底出的节点读不到）；
+        - tools 必须画布显式声明（由 legacy tool_resource_ids 兼容换算出的工具，节点读不到）；
         - modleName 显式（旧通道缺省回退 default_llm_model_id，节点拿不到该回退值）；
         - camelCase systemPrompt 显式（节点只认 camel；旧通道回退应用名 prompt 时
           两侧拼出的 system 消息不同）。
@@ -967,7 +967,7 @@ class ChatService:
             "memory_ids": list(spec.memory_ids),
         }
         if spec.approval_resume is not None:
-            # 0074 PRD F10：审批裁决 + 执行快照，节点从快照还原续跑（非法快照按新 run 兜底）
+            # 0074 PRD F10：审批裁决 + 执行快照，节点从快照还原续跑（快照非法时按新 run 重新执行）
             start_inputs["approval_resume"] = spec.approval_resume
         if spec.handoff_inbound is not None:
             # M4 PRD F14.9：接管轮入站现场，节点据此注入 hand_back 归位伪工具
@@ -1063,7 +1063,7 @@ class ChatService:
         """M4 PRD R21：resume 按原线程二次定位快照 run（不限应用）。
 
         接管轮的审批 run 挂在应答应用下而 resume 请求 URL 恒为会话归属应用，
-        直接定位未命中时以线程（含会话 id，天然不跨会话）兜底；续跑应用取自
+        直接定位未命中时改用线程维度定位（含会话 id，天然不跨会话）；续跑应用取自
         run 行的 workflow_id，不参考 active 路由。返回额外含 application_id。
         """
         finder = getattr(self._run_repo, "get_running_by_thread_any_app", None)
@@ -1134,7 +1134,7 @@ class ChatService:
         （前端 agentRun.ts 忽略 llm_start，不影响渲染）；画布无 token 级流
         （与旧 tools 分支一致，旧分支本就没有 llm_token）。
         """
-        # 0074 PRD F4.1：深度模式的 plan/reflect 结果透出为 additive SSE 事件
+        # 0074 PRD F4.1：深度模式的 plan/reflect 结果以 additive SSE 事件下发
         # （前端不识别时安全忽略；仅 assistant 回复帧外发，请求帧不发，避免刷屏）
         if event_type == "prompt_text" and data.get("phase") in ("plan", "reflect"):
             if data.get("role") != "assistant":
@@ -1271,7 +1271,7 @@ class ChatService:
                 usage = outputs.get("usage")
                 if isinstance(usage, dict):
                     state.usage_total = usage
-                # 0074 PRD F11.1：节点透出 finish_reason 时覆盖默认 stop（当前仅预算触顶）
+                # 0074 PRD F11.1：节点返回 finish_reason 时覆盖默认 stop（当前仅预算触顶）
                 finish_reason = outputs.get("finish_reason")
                 if isinstance(finish_reason, str) and finish_reason:
                     state.finish_reason = finish_reason
@@ -1323,7 +1323,7 @@ class ChatService:
             limit=limit,
             offset=offset,
         )
-        # M4 PRD F14.10：接管中会话 additive 透出发言权应用（id+名）；NULL 不出新键，
+        # M4 PRD F14.10：接管中会话 additive 返回发言权应用（id+名）；NULL 不出新键，
         # 基线响应逐字段一致
         name_cache: dict[str, str] = {}
         items: list[dict[str, Any]] = []
@@ -1372,7 +1372,7 @@ class ChatService:
         for r in rows:
             role = r.get("role")
             # T-c8（F14.10）：system 行仅放行接管通告形态供历史回放重建通告气泡，
-            # 其余 system/tool 行维持不透出；application_id additive 透出（应答徽标）
+            # 其余 system/tool 行维持不返回；application_id 以 additive 字段返回（应答徽标）
             if role == "system" and _row_metadata(r).get("kind") != "handoff_notice":
                 continue
             if role not in ("user", "assistant", "system"):
@@ -1455,7 +1455,7 @@ class ChatService:
 
         路由层按 flow_type 选择管线：chatflow → run_chatflow_stream；
         其余（agent / 旧 workflow 型聊天应用）→ run_agent_stream 三通道。
-        可见性校验在此完成，流内重复校验由两条管线各自兜底。
+        可见性校验在此完成，流内重复校验由两条管线各自执行。
         """
         return self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
@@ -1496,7 +1496,7 @@ class ChatService:
         conversation_id: UUID | None,
         resume: dict[str, Any] | None,
     ) -> UUID:
-        """统一入口接管路由（M4 PRD F14.9）：返回本轮应答应用，4xx 语义（SSE 之前调用）。
+        """统一入口的 Agent 转交路由（M4 PRD F14.9）：返回本轮应答应用，4xx 语义（SSE 之前调用）。
 
         - resume 不经路由（R21 护栏，快照续跑由流内按原线程定位）；无会话/会话校验
           不过一律原样返回，基线错误口径（会话不存在或无权访问）留在消费方收口；
@@ -1992,7 +1992,7 @@ class ChatService:
             name = record.get("name") or cfg.get("tool_name")
             if not name:
                 # 20261106 review 修正：执行器按租户工具目录 name 索引查找，编造的
-                # tool_{hex} 兜底名必然查不到，只会产生"模型可见但执行必失败"的假声明，
+                # tool_{hex} 占位名必然查不到，只会产生"模型可见但执行必失败"的假声明，
                 # 空名资源直接跳过并不再暴露给模型
                 logger.warning("legacy 工具资源缺少名称，跳过 rid=%s", rid)
                 continue

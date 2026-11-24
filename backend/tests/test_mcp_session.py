@@ -17,6 +17,14 @@ from internal.domain.agent.mcp_client import (
 
 _TIMEOUT_MARK = "超时"
 
+# 20261124：McpSession 的连接与调用共用同一个 timeout_seconds 预算，而进程内 fastmcp
+# 握手实测稳态约 180ms、Windows 冷启动约 550ms。原取 0.2s 时预算小于握手耗时，
+# 超时发生在 connect 阶段，用例测不到条目级调用超时；故取 2.0s，对冷启动仍有约 3.6 倍余量。
+_CALL_TIMEOUT_UNDER_TEST_SECONDS = 2.0
+
+# 慢工具 sleep 时长：需明显大于上面的调用超时预算，确保 wait_for 先触发
+_SLOW_TOOL_SECONDS = 5.0
+
 
 def test_connect_call_close_roundtrip(in_process_mcp_server):
     """显式生命周期：connect→call→close 全链路可用。"""
@@ -120,10 +128,12 @@ def test_call_timeout_raises_and_closes_session(in_process_mcp_server):
     """条目级超时：wait_for 触发后抛 McpClientError 并关闭不可信连接（F17.3②）。"""
 
     async def scenario() -> tuple[str, bool]:
-        session = McpSession(in_process_mcp_server.url, timeout_seconds=0.2)
+        session = McpSession(
+            in_process_mcp_server.url, timeout_seconds=_CALL_TIMEOUT_UNDER_TEST_SECONDS
+        )
         await session.connect()
         with pytest.raises(McpClientError) as exc_info:
-            await session.call_tool("slow", {"seconds": 5})
+            await session.call_tool("slow", {"seconds": _SLOW_TOOL_SECONDS})
         return str(exc_info.value), session.is_connected
 
     message, still_connected = asyncio.run(scenario())

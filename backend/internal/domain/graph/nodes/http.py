@@ -118,7 +118,7 @@ class HttpNodeHandler(NodeHandler):
         form_body: dict[str, str] | None = None
         if body_type == "json":
             json_body = _parse_json_body(config.get("bodyJson"))
-            # 兼容旧逻辑：未配置 bodyJson 时用 inputs 兜底
+            # 兼容旧逻辑：未配置 bodyJson 时默认使用 inputs 作为请求体
             if json_body is None and ctx.inputs:
                 json_body = ctx.inputs
             headers.setdefault("Content-Type", "application/json")

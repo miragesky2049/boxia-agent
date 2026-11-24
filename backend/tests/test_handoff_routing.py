@@ -1,4 +1,4 @@
-"""M4 PRD F14.9 接管路由态（T-c5，先测试后实现）。
+"""M4 PRD F14.9 Agent 转交（handoff）路由态（T-c5，先测试后实现）。
 
 覆盖出口条件全集：
 - 路由：active NULL=归属应用应答（与基线逐字段一致）；active≠URL 应用→目标应答，
@@ -507,14 +507,14 @@ def test_resume_locates_snapshot_by_thread_not_active() -> None:
         )
     )
     assert [name for name, _ in frames][-2] == "result"
-    # 直接定位（归属应用）未命中后才允许按线程兜底，且兜底不再换 thread
+    # 直接定位（归属应用）未命中后才允许按线程回退查找，且回退不再换 thread
     assert run_repo.direct_calls and run_repo.fallback_calls == [thread]
     assert cap["app_service"].graph_calls == [str(_TARGET)]
     assert cap["factory_kwargs"][0]["thread_id"] == thread
 
 
 def test_resume_same_app_pending_skips_fallback() -> None:
-    # 基线：快照 run 就在归属应用线程上 → 直接命中，不触发 any_app 兜底
+    # 基线：快照 run 就在归属应用线程上 → 直接命中，不触发 any_app 回退
     conv = _make_conv()
     run_repo = _FakeRunRepo()
     run_repo.by_thread[str(conv["id"])] = _pending_run_row(str(conv["id"]), _OWNER)
@@ -628,7 +628,7 @@ def test_handback_stream_clears_routing_and_emits_notice_frame() -> None:
     assert cap["app_service"].graph_calls == []
 
 
-# ---------------------------------------------------------------- 会话列表透出
+# ---------------------------------------------------------------- 会话列表输出
 
 
 def test_list_conversations_exposes_active_application_additively() -> None:
@@ -651,7 +651,7 @@ def test_list_conversations_exposes_active_application_additively() -> None:
 
 def _handoff_kernel_events(*, application_id: str | None, returned: bool) -> list[tuple[str, dict]]:
     """构造与 agent_loop 节点 F14.9 出口一致的画布 trace：接管轮正文外发、
-    outputs.handoff 透出、finish_reason 覆盖。"""
+    outputs.handoff 输出、finish_reason 覆盖。"""
     tool_name = "hand_back" if returned else "agent_expert"
     finish = "handed_back" if returned else "handed_off"
     handoff = {
@@ -846,7 +846,7 @@ def test_kernel_handoff_depth_rejected() -> None:
 
 
 def test_kernel_handoff_invisible_target_rejected() -> None:
-    """应答中途目标应用不可见（配置保存后被下架）：可见性兜底拒绝，原路由不动。"""
+    """应答中途目标应用不可见（配置保存后被下架）：最终可见性校验拒绝，原路由不动。"""
     ghost = uuid4()
     conv = _make_conv()
     service, cap = _make_service(
@@ -916,7 +916,7 @@ def test_list_messages_replays_handoff_notice_and_app_attribution() -> None:
         {
             "id": uuid4(),
             "role": "system",
-            "content": "非接管类系统行不透出",
+            "content": "非接管类系统行不返回",
             "application_id": _OWNER,
             "tool_calls": None,
             "created_at": None,

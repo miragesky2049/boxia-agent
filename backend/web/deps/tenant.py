@@ -7,7 +7,7 @@
 4. local 环境的回环/本机主机（``localhost``、``127.0.0.1``、局域网 IP 等）
    在开启 ``ALLOW_TENANT_HEADER`` 时可用 ``X-Tenant-Code`` 临时切换，``platform``
    表示产品级；
-5. local 环境兜底为默认租户或产品级平台；其余环境无法识别的 Host 一律 404，
+5. local 环境在域名无法匹配时默认取默认租户或产品级平台；其余环境无法识别的 Host 一律 404，
    绝不静默回退产品级平台。
 """
 
@@ -33,7 +33,7 @@ from internal.infrastructure.repository.postgres_tenant_repository import (
 
 TENANT_HEADER = "X-Tenant-Code"
 PLATFORM_HEADER_VALUE = "platform"
-# 本机调试入口：这些 Host 不参与子域名解析，仅用于 header 覆盖或兜底
+# 本机调试入口：这些 Host 不参与子域名解析，仅用于 header 覆盖或默认租户解析
 _BOOTSTRAP_HOSTS = {"localhost", "testserver"}
 # 与租户编码、平台子域名保持一致的一级标签格式
 _LABEL_PATTERN = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
@@ -111,7 +111,7 @@ def _resolve_from_header(request: Request, settings: Settings) -> RequestContext
 
 
 def _resolve_from_host(request: Request) -> RequestContext | None:
-    """按域名解析作用域；返回 None 表示交给本地 header/默认兜底。"""
+    """按域名解析作用域；返回 None 表示交给本地 header 覆盖或默认规则处理。"""
     settings = get_settings()
     host = _host_without_port(request)
 

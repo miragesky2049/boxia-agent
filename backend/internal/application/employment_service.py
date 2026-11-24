@@ -334,7 +334,7 @@ class EmploymentService:
     # ---- 内部辅助 ----
 
     def _insert(self, values: dict) -> Employment:
-        """写入任职记录，靠部分唯一索引兜底并发。"""
+        """写入任职记录，并发冲突由部分唯一索引拦截。"""
         return self._uow.employments.create(values)
 
     def _normalize_hr_fields(

@@ -1,7 +1,7 @@
-"""应用可见范围 v2（0068）：按 (应用, 租户) 隔离的 scope/白名单/兜底/锁定语义。
+"""应用可见范围 v2（0068）：按 (应用, 租户) 隔离的 scope/白名单/模板回退/锁定语义。
 
 覆盖技术方案 §4.1 的 14 个用例：用户端过滤、三种白名单主体、锁定、
-模板兜底、订阅窗口、老接口下线、upsert 并发、孤儿主体过滤、configured 标记。
+模板回退、订阅窗口、老接口下线、upsert 并发、孤儿主体过滤、configured 标记。
 """
 
 from concurrent.futures import ThreadPoolExecutor
@@ -254,7 +254,7 @@ def test_lock_blocks_tenant_update(client, auth_headers, tenant_client) -> None:
     assert put.status_code == 403, put.text
 
 
-# ========== 用例 6/7：scope 不存在时按平台模板兜底 ==========
+# ========== 用例 6/7：scope 不存在时回退平台模板 ==========
 def test_no_scope_falls_back_to_template(
     client, auth_headers, tenant_client, user_tenant_client, user_login_headers
 ) -> None:
@@ -263,7 +263,7 @@ def test_no_scope_falls_back_to_template(
     )
     create_user(site, site_headers, username="tpl-user", role_id=roles["viewer"]["id"])
 
-    # 模板 all：兜底可见
+    # 模板 all：回退后可见
     app_all = _create_enabled_platform_app(client, auth_headers, "模板all应用")
     _subscribe(tenant_id, app_all)
     assert app_all in _visible_app_ids(

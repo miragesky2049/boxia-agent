@@ -4,7 +4,7 @@
 - 无 tools + ctx.emit_event 可用时，走 chat_stream 路径
 - 每个 delta chunk 触发一次 llm_token 事件
 - 最终 outputs["output"] 是所有 delta 聚合
-- usage 从收尾 chunk 回灌
+- usage 取自收尾 chunk
 """
 
 from __future__ import annotations
@@ -126,7 +126,7 @@ def test_llm_node_streaming_emits_tokens_and_aggregates_output() -> None:
     # 最终输出聚合
     assert result.outputs["output"] == "你好，boxia"
 
-    # usage 从收尾 chunk 回灌
+    # usage 取自收尾 chunk
     assert result.usage == {
         "prompt_tokens": 10,
         "completion_tokens": 8,
