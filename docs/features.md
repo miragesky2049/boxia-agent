@@ -37,6 +37,9 @@
 /change-password
 /apps                    应用管理（产品级平台；租户显示「我的应用」）
 /apps/:id/edit           应用编排（画布 + 节点配置 + 调试面板）
+/apps/:id/agent          智能体配置表单页（对话应用/智能体的编辑入口，页内可打开画布）
+/apps/:appId/eval        评测工作台（评测运行、judge 抽样与看板）
+/tenant-apps/:appId      租户已开通应用详情（page:tenant-apps，租户）
 /marketplace             应用市场（租户浏览与开通）
 /marketplace/apps/:appId/run    试运行应用
 /marketplace/apps/:appId/runs   运行历史
@@ -53,6 +56,8 @@
 /tenants                 租户管理（page:tenants，产品级）
 /tenants/:id             租户详情
 /tenants/:id/settings    租户设置
+/entitlements            权益管理（page:entitlements，产品级；实例配额与有效期）
+/apply-workbench         权益申请工作台（page:entitlements，产品级）
 /audit                   审计日志（page:audit）
 *                        404
 ```
@@ -85,33 +90,39 @@
 **执行时序图（一次用户请求）：**
 
 ```text
- 用户端      FastAPI     GraphRunner     LLMClient      ToolGateway     租户工具
-   │           │              │               │               │              │
-   │ POST /run │              │               │               │              │
-   │──────────►│              │               │               │              │
-   │           │ invoke()    │               │               │              │
-   │           │─────────────►│               │               │              │
-   │           │              │ Start 节点返回 inputs         │              │
-   │           │              │               │               │              │
-   │           │              │ LLM 节点：渲染 prompt        │              │
-   │           │              │──────────────►│               │              │
-   │           │              │               │ (RAG 开关开则先查向量库)      │
-   │           │              │◄──────────────│ output        │              │
-   │           │              │               │               │              │
-   │           │              │ HTTP/插件节点：│               │              │
-   │           │              │──────────────────────────────►│              │
-   │           │              │               │               │ ① SSRF 校验  │
-   │           │              │               │               │ ② 熔断检查   │
-   │           │              │               │               │ ③ 限流检查   │
-   │           │              │               │               │ ④ 重试循环   │
-   │           │              │               │               │─────────────►│
-   │           │              │               │               │◄─────────────│
-   │           │              │◄──────────────────────────────│ 8KB 裁剪     │
-   │           │              │               │               │              │
-   │           │              │ End 节点渲染输出模板        │              │
-   │           │◄─────────────│ outputs + 节点状态 + usage  │              │
-   │◄──────────│              │               │               │              │
+  用户端           FastAPI       GraphRuntime       LLMClient     ToolGateway    租户工具
+     │                │                │                │              │             │
+     │ POST /run      │                │                │              │             │
+     │───────────────►│                │                │              │             │
+     │                │ compile +      │                │              │             │
+     │                │ astream_events │                │              │             │
+     │                │───────────────►│                │              │             │
+     │                │                │ Start 节点返回 inputs         │             │
+     │                │                │ 渲染 prompt    │              │             │
+     │                │                │───────────────►│              │             │
+     │                │                │ (RAG 开关开则先查向量库)      │             │
+     │                │                │◄───────────────│ output       │             │
+     │                │                │ HTTP/插件节点：工具调用       │             │
+     │                │                │──────────────────────────────►│             │
+     │                │                │                │ ① SSRF 校验 │             │
+     │                │                │                │ ② 熔断检查  │             │
+     │                │                │                │ ③ 限流检查  │             │
+     │                │                │                │ ④ 共享连接池│             │
+     │                │                │                │ ⑤ 重试循环  │             │
+     │                │                │                │─────────────►│             │
+     │                │                │                │◄─────────────│             │
+     │                │                │                │ ⑥ 8KB 裁剪  │             │
+     │                │                │◄──────────────────────────────│             │
+     │                │                │ checkpoint 落库（中断可续跑） │             │
+     │                │ outputs + usage│                │              │             │
+     │                │◄───────────────│                │              │             │
+     │ SSE 帧流       │                │                │              │             │
+     │◄───────────────│                │                │              │             │
 ```
+
+SSE 帧按节点逐个下发：`node_start` / `llm_token` / `node_end`，画布实时高亮；
+checkpoint 落 Postgres，中断后可续跑（事件协议详见
+[canvas-save-run-sequence.md](./canvas-save-run-sequence.md) 4.4）。
 
 不写一行代码，在画布上拖出一个「query → LLM 改写 → 查工具 → 返回答案」的流水线：
 

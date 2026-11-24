@@ -1,6 +1,6 @@
 # 画布保存与对话引擎 · 整体时序文档
 
-> 行号以 2026-11-06 HEAD 为准。
+> 行号以 2026-11-24 HEAD（feature/app/20261104）为准。
 > 阅读路径：**第 1 章**看全貌 → **第 3/4 章**每条流程"极简图 → 完整图 → 分步讲解" → **第 5/6 章**查代码细节。
 
 ## 目录
@@ -150,60 +150,60 @@ sequenceDiagram
     end
 
     rect rgb(255,255,255)
-    Note over ED,RD: 阶段0 打开编辑页（GET /admin/apps/{id}/graph，apps_admin.py:299）
-    ED->>ADM: 页面加载（AppEditPage.tsx:556 / :1726）
+    Note over ED,RD: 阶段0 打开编辑页（GET /admin/apps/{id}/graph，apps_admin.py:326）
+    ED->>ADM: 页面加载（AppEditPage.tsx:618-623 / :1920-1922）
     ADM->>SVC: get_app_graph
     SVC->>DB: 读草稿整图 application_graph + published_graph_version 指针
     DB-->>ADM: {graph, runtime_mode, graph_schema_version, published_graph_version, flow_type}
     ADM-->>ED: 200
-    ED->>ED: fromCozeIR(cozeIR.ts:78) Coze IR → FlowGram JSON → 渲染节点和连线
+    ED->>ED: fromCozeIR(cozeIR.ts:83) Coze IR → FlowGram JSON → 渲染节点和连线
 
-    Note over ED,RD: 阶段1 体检（POST /admin/apps/validate-graph，不阻塞保存）<br/>触发：800ms debounce scheduleSave(:635)，来源 onContentChange(:1991) / 加节点(:916) / 删节点(:1109) / Ctrl+S(:1610)
-    ED->>ADM: validateGraph(apps.ts:762) 体 {graph, application_id}
-    ADM->>DOM: validate_raw_graph(validate.py:129)
-    DOM->>DOM: convert_canvas(:51) → validate_graph(:33) → lint_graph(:43) → lint_variable_refs(:188)
+    Note over ED,RD: 阶段1 体检（POST /admin/apps/validate-graph，不阻塞保存）<br/>触发：800ms debounce scheduleSave(:699)，来源 onContentChange(:2198) / 加节点(:~999) / 删节点(:1221) / Ctrl+S(:1786)
+    ED->>ADM: validateGraph(apps.ts:790) 体 {graph, application_id}
+    ADM->>DOM: validate_raw_graph(validate.py:147)
+    DOM->>DOM: convert_canvas(:50) → validate_graph(validate.py:33) → lint_graph(lint.py:45) → lint_variable_refs(lint.py:203)
     DOM-->>ADM: {valid, issues[{severity,code,node_id}]}
-    ADM-->>ED: 200，issues 驱动节点红框（collectIssuesForNodes :594）
+    ADM-->>ED: 200，issues 驱动节点红框（collectIssuesForNodes :658）
 
     Note over ED,RD: 阶段2 草稿保存（PUT /admin/apps/{id}/graph，整图覆盖）
-    ED->>ED: collectFullGraph(:609) 含嵌套子图 → toCozeIR(cozeIR.ts:32) 转 Coze IR
-    ED->>ADM: saveAppGraph(apps.ts:549) PUT graph {graph}
-    ADM->>SVC: save_graph(:709)
-    SVC->>SVC: 存在性(:712) + nodes 非空(:716)
-    SVC->>DOM: validate_raw_graph(:726)
-    alt 命中 DRAFT_BLOCKING_CODES(:204 缺start/多start/悬空边x2/convert_failed)
-        SVC-->>ED: 422 {detail, code, request_id}（web/errors.py:40）→ 状态条 error(:649)
+    ED->>ED: collectFullGraph(:673) 含嵌套子图 → toCozeIR(cozeIR.ts:32) 转 Coze IR
+    ED->>ADM: saveAppGraph(apps.ts:577) PUT graph {graph}
+    ADM->>SVC: save_graph(:796)
+    SVC->>SVC: 存在性(:806) + nodes 非空(:809)
+    SVC->>DOM: validate_raw_graph(:814)
+    alt 命中 DRAFT_BLOCKING_CODES(:271 缺start/多start/悬空边x2/convert_failed)
+        SVC-->>ED: 422 {detail, code, request_id}（web/errors.py:48-55）→ 状态条 error(:714)
     else 通过草稿闸门
-        SVC->>SVC: _infer_runtime_mode(:35)；version = latest+1
-        opt 整图 > 1MB（:212）
-            SVC->>OSS: 写对象存储(:744)，DB 行只存 {"__graph_ref__": uri}，失败降级内联
+        SVC->>SVC: _infer_runtime_mode(:39)；version = latest+1
+        opt 整图 > 1MB（:281 常量，判断处 :831）
+            SVC->>OSS: 写对象存储(:~836-843)，DB 行只存 {"__graph_ref__": uri}，失败降级内联
         end
-        SVC->>DB: insert_graph_version(repo:564) 追加整图 JSONB 版本快照
-        SVC->>DB: update_graph(repo:483) UPSERT application_graph（兼容旧读路径）
-        SVC->>DB: 审计 GRAPH_SAVE(:781) → uow.commit(:798)
-        SVC--)RD: _invalidate_graph_cache(:1071) 删缓存键 + 广播（fire-and-forget，无订阅方，TTL 兜底）
+        SVC->>DB: insert_graph_version(repo:570) 追加整图 JSONB 版本快照
+        SVC->>DB: update_graph(repo:489) UPSERT application_graph（兼容旧读路径）
+        SVC->>DB: 审计 GRAPH_SAVE(:870) → uow.commit(:~890)
+        SVC--)RD: _invalidate_graph_cache(:1192) 删缓存键 + 广播（fire-and-forget，无订阅方，TTL 兜底）
         SVC-->>ADM: {runtime_mode, version} → 状态条 saved
     end
 
     Note over ED,RD: 阶段3 发布（唯一切 live 的动作）
-    ED->>ED: handlePublish(:727) 先体检，有 error 级问题直接拒发
-    ED->>ADM: publishGraph(apps.ts:597) POST /publish
-    ADM->>SVC: publish_graph(:889)
-    SVC->>SVC: _parse_graph(:240) 重读 latest，解 __graph_ref__
-    SVC->>DOM: validate_raw_graph 发布闸门（全部 error 阻断 :916，前5条拼接报错）
-    SVC->>DB: set_published_graph_version(repo:413) 指针=latest
+    ED->>ED: handlePublish(:788) 先体检，有 error 级问题直接拒发
+    ED->>ADM: publishGraph(apps.ts:625) POST /publish
+    ADM->>SVC: publish_graph(:1005)
+    SVC->>SVC: _parse_graph(:309) 重读 latest，解 __graph_ref__
+    SVC->>DOM: validate_raw_graph 发布闸门（全部 error 阻断 :~1033-1036，前5条拼接报错）
+    SVC->>DB: set_published_graph_version(repo:412) 指针=latest
     SVC->>DB: 审计 GRAPH_PUBLISH → commit
     SVC--)RD: 缓存失效（重复发布同版本幂等）
 
     Note over ED,RD: 阶段4 版本管理（只追加、不改历史）
-    ED->>ADM: 版本列表（apps_admin.py:332 → repo:614）
-    ED->>ADM: 回滚（:341）= 旧版本内容再追加为新版本行
+    ED->>ADM: 版本列表（apps_admin.py:386 → repo:620）
+    ED->>ADM: 回滚（:395）= 旧版本内容再追加为新版本行
     opt 租户锁版本（市场开通）
-        ADM->>SVC: pin（:399）
-        SVC->>DB: UPDATE tenant_application_instance.pinned_graph_version（repo:675）
+        ADM->>SVC: pin（:453）
+        SVC->>DB: UPDATE tenant_application_instance.pinned_graph_version（repo:681）
     end
 
-    Note over ED,RD: 阶段5 调试运行：apps_admin.py:456 / :484 单节点试运行<br/>make_canvas_debug_runtime（graph.py:162）直接吃未保存画布 → 执行引擎同图2<br/>**保存/发布链路零 LangGraph 调用**，仅 convert_canvas 与运行链路共用
+    Note over ED,RD: 阶段5 调试运行：apps_admin.py:509 流式 / :537 单节点试运行 / :601 resume 流<br/>make_canvas_debug_runtime（graph.py:195）直接吃未保存画布 → 执行引擎同图2<br/>**保存/发布链路零 LangGraph 调用**，仅 convert_canvas 与运行链路共用
     end
 ```
 
@@ -234,15 +234,15 @@ sequenceDiagram
 | `tenant_application_instance.pinned_graph_version` | **租户锁**（int，NULL=跟随） | 开通时钉版本 |
 
 > **"最新生效版本"在哪张表**：统一落在 **`application_graph_version`**，靠"version 最大值 + 指针"两个维度定位——
-> - **最新版本**：`application_graph_version` 中 `version` 最大的那一行（`get_latest_graph_version` repo:592，`ORDER BY version DESC LIMIT 1`），每次保存追加、永不覆盖。
+> - **最新版本**：`application_graph_version` 中 `version` 最大的那一行（`get_latest_graph_version` repo:598，`ORDER BY version DESC LIMIT 1`），每次保存追加、永不覆盖。
 > - **生效中版本**：内容同在 `application_graph_version`，具体哪一行由指针决定（优先级 `tenant_application_instance.pinned_graph_version` > `application.published_graph_version`，两列存的都是版本表的 version 号，本身不存 JSON）。
 > - ⚠️ `application_graph` **不是**生效版本表：只是草稿 1:1 副本，每次保存 UPSERT 覆盖，仅为兼容旧读路径保留。
 
->1MB 的外壳替换：`schema_json` 不存整图，改存 `{"__graph_ref__": "<对象存储URI>"}`，读取时 `_parse_graph`(application_service.py:240) 解引用回灌；写对象存储失败自动降级回内联。
+>1MB 的外壳替换：`schema_json` 不存整图，改存 `{"__graph_ref__": "<对象存储URI>"}`，读取时 `_parse_graph`(application_service.py:309) 解引用回灌；写对象存储失败自动降级回内联。
 
 #### 3.4.2 整图 JSON（schema_json 的内容 = Coze IR）
 
-顶层骨架（`toCozeIR` cozeIR.ts:32-76 产出；后端 `convert_canvas` convert.py:51-63 消费）：
+顶层骨架（`toCozeIR` cozeIR.ts:32-76 产出；后端 `convert_canvas` convert.py:50-63 消费）：
 
 ```jsonc
 {
@@ -264,16 +264,16 @@ sequenceDiagram
 | `type` | string | ✅ | 数字类型码字符串（对齐 coze StandardNodeType，枚举 node_type.py:12）。常用：`1`开始 `2`结束 `3`LLM `4`插件 `5`代码 `6`知识库 `8`if_else `9`子工作流 `13`中间输出 `15`文本处理 `18`问答 `19/29`break/continue `20/40`设变量 `21`循环 `22`意图识别 `28`批量 `30`输入 `32`变量合并 `45`HTTP `51-57`会话消息增删改查 `60`人工审核 `100`agent_loop(自定义) `211+`本地扩展。缺 id / 未知 type / UNSUPPORTED_TYPES(node_type.py:81) → `convert_failed` 类致命错误 |
 | `meta.position` | `{x,y}` | ✅ | 画布坐标（仅编辑器和观测用，运行时不参与调度） |
 | `data.nodeMeta` | object | ✅ | 节点显示信息：`title`(必填展示名) · `description` · `icon`（后两者可空，convert 有默认值） |
-| `data.inputs` | object | ✅ | **混合袋**（convert.py:154-190 拆成两部分）：`inputParameters`(运行时入参→Expr) + `settingOnError`(错误策略) 为标准字段；其余全部键值→`config`（节点特定配置，见 3.4.4） |
+| `data.inputs` | object | ✅ | **混合袋**（convert.py:173-210 拆成两部分）：`inputParameters`(运行时入参→Expr) + `settingOnError`(错误策略) 为标准字段；其余全部键值→`config`（节点特定配置，见 3.4.4） |
 | `data.outputs` | array | 建议 | 输出端口声明（PortSpec model.py:17）：`name`(下游引用它的键) · `type`(`string/integer/float/boolean/object/list/image`) · `description` · `required`(默认 false)。运行时该节点的结果就按这些 name 写进 `state.node_outputs[node.id]` |
-| `blocks` | array | 仅子图节点 | loop(21)/batch(28)/subworkflow(9) 的**内嵌子图节点数组**，结构与 nodes[] 相同，递归转换（convert.py:117-121/135-142） |
+| `blocks` | array | 仅子图节点 | loop(21)/batch(28)/subworkflow(9) 的**内嵌子图节点数组**，结构与 nodes[] 相同，递归转换（convert.py:135-140/155-161） |
 | `edges` | array | 仅子图节点 | 子图内部连线，结构与顶层 edges 相同。⚠️ 注意：节点级 `edges`（在节点对象里）= 子图内连边；顶层 `edges` = 主图连线，两者不同层 |
 
 #### 3.4.4 `data.inputs` 内部约定
 
 ```jsonc
 "inputs": {
-  // ① 标准字段：运行时入参。数组，每项 {name, input:<ValueExpression>}（convert.py:173-179 → CanvasNode.inputs[name]）
+  // ① 标准字段：运行时入参。数组，每项 {name, input:<ValueExpression>}（convert.py:191-197 → CanvasNode.inputs[name]）
   "inputParameters": [
     { "name": "input",
       "input": { "type": "string",
@@ -281,19 +281,19 @@ sequenceDiagram
                             "content": { "source": "block-output", "blockID": "start-1", "name": "query" },
                             "rawMeta": {} } } }
   ],
-  // ② 标准字段：错误处理策略（convert.py:113，见 3.4.7）
+  // ② 标准字段：错误处理策略（convert.py:130-132，见 3.4.7）
   "settingOnError": { "processType": 1, "retryTimes": 2, "timeoutMs": 60000, "dataOnErr": "" },
-  // ③ 节点特定配置（除上面两键外的一切，convert.py:182-185 → CanvasNode.config）
+  // ③ 节点特定配置（除上面两键外的一切，convert.py:199-205 → CanvasNode.config）
   "llmParam": [ { "name": "model_id", "input": "glm-4" }, { "name": "temperature", "input": "0.8" } ],
   "cases": [ /* if_else 分支条件数组 */ ],
   "content": { /* output/question 节点的文本，可为 ValueExpression */ }
 }
 ```
 
-- **③ 的 `[{name, input}]` 数组会被压平**成 `{name: value}`（`_flatten_named_param_lists` convert.py:193-204），handler 直接 `config["temperature"]` 取值。
-- ③ 里单个 ValueExpression：纯字面量**脱壳成裸值**；含 `{{...}}` 模板或 ref 则保留为 Expr 运行时求值（`_coerce_config_value` :207-224）。
+- **③ 的 `[{name, input}]` 数组会被压平**成 `{name: value}`（`_flatten_named_param_lists` convert.py:212），handler 直接 `config["temperature"]` 取值。
+- ③ 里单个 ValueExpression：纯字面量**脱壳成裸值**；含 `{{...}}` 模板或 ref 则保留为 Expr 运行时求值（`_coerce_config_value` :228-246）。
 
-**ValueExpression（值的统一信封）**（convert.py:236-279）：
+**ValueExpression（值的统一信封）**（convert.py:248-301，`_convert_value_expression` :257）：
 
 ```jsonc
 { "type": "string",               // 声明类型：string/integer/float/boolean/object/array…
@@ -309,7 +309,7 @@ sequenceDiagram
 | `literal` | 任意值；字符串含 `{{variables.x}}`/`{{system.Y}}` 时 | `Literal`；模板串→`TemplatedString`(运行时插值) | 手打的固定值 |
 | `ref` + `content.source="block-output"` | `{source, blockID, name}` | `Ref(blockID, name)` | 引用**上游某节点的某个输出**（跨节点数据流主线） |
 | `ref` + `source="variable"` 或 `global_variable_*` | 同上 | `GlobalVar(name)` | 引用全局变量池（state.globals） |
-| `object_ref` | 结构化对象 | `Literal(content)` 原样（:275-277 暂未展开） | 对象字段级引用（预留） |
+| `object_ref` | 结构化对象 | `Literal(content)` 原样（:296 暂未展开） | 对象字段级引用（预留） |
 | 未知/缺 value | — | `Literal` 兜底 | — |
 
 #### 3.4.5 边对象（edges[] 每一项）
@@ -329,7 +329,7 @@ sequenceDiagram
 #### 3.4.6 全局变量声明（variables[]，兼容字段）
 
 ```jsonc
-{ "name": "style",          // 或 coze 格式 variableName，两种都认（convert.py:66-77）
+{ "name": "style",          // 或 coze 格式 variableName，两种都认（convert.py:85-97，variableName :92）
   "type": "string",         // string/number/boolean/object/array（VariableDef model.py:82-90）
   "default": "现代诗",       // graph 启动时写入 state.globals 的初始值
   "description": "写作风格" }
@@ -342,7 +342,7 @@ sequenceDiagram
 | 键 | 类型/默认 | 含义（ErrorPolicy，model.py:37-50） |
 |---|---|---|
 | `processType` | int / 0 | `0`=异常中断整个工作流（run=error）；`1`=跳过本节点继续，用 `dataOnErr` 当输出 |
-| `retryTimes` | int / 0 | 节点级重试次数（compiler.py:283 `_execute_with_policy` 实施） |
+| `retryTimes` | int / 0 | 节点级重试次数（compiler.py:279 `_execute_with_policy` 实施） |
 | `timeoutMs` | int / 180000 | 节点超时毫秒 |
 | `dataOnErr` | str / "" | 跳过后写入 `state.errors` 并作为该节点输出的兜底值 |
 
@@ -425,7 +425,7 @@ sequenceDiagram
     participant RT as GraphRuntime<br/>runtime.py
     participant CO as convert + Compiler<br/>domain 编译层
     participant LG as LangGraph 原生 API<br/>StateGraph / CompiledStateGraph
-    participant ND as 节点 Handler<br/>nodes/ 下 30+ 类型
+    participant ND as 节点 Handler<br/>nodes/ 下 28 文件 / 39 个 Handler 类
     end
     box rgb(255,236,179) 存储 / 外部
     participant DB as PostgreSQL
@@ -435,79 +435,79 @@ sequenceDiagram
 
     rect rgb(255,255,255)
     Note over U,WH: ① 进门与搭台
-    U->>R: runChatflowStream(agentRun.ts:222→postSseStream :124)<br/>body = message / conversation_id / thread_id / inputs / resume
-    R->>CS: prepare_chatflow_run(:490)
-    Note over CS,CS: 校验 flow_type==chatflow、resume 必带 conversation_id、会话归属<br/>_bind_chatflow_thread_id(:724) 防跨会话读 checkpoint<br/>此阶段错误走 JSON 4xx，不进 SSE 流
+    U->>R: runChatflowStream(agentRun.ts:286→postSseStream :167)<br/>body = message / conversation_id / thread_id / inputs / resume
+    R->>CS: prepare_chatflow_run(:1674)
+    Note over CS,CS: 校验 flow_type==chatflow、resume 必带 conversation_id、会话归属<br/>_bind_chatflow_thread_id(:1920) 防跨会话读 checkpoint<br/>此阶段错误走 JSON 4xx，不进 SSE 流
     CS->>DB: 首条消息 → insert_conversation 新建会话
-    CS-->>R: ChatflowPreparedRun(:61)
-    R->>R: asyncio.Queue + create_task(run_task)(:626) → StreamingResponse(SSE)
-    R->>CS: run_chatflow_stream(:542) 定义 emitter(:568) 与 make_runner(:571)
+    CS-->>R: ChatflowPreparedRun(:210)
+    R->>CS: run_chatflow_stream(:1726) 内建传送带 asyncio.Queue + create_task（:1750/:1827），定义 emitter(:1752) 与 make_runner(:1755)
+    R->>R: StreamingResponse(SSE) 挂起长连接
 
     Note over U,WH: ② 拿图装配
-    CS->>BR: build_runner(:208)
-    BR->>RD: get_runtime_graph(application_service.py:833) 读缓存键 graph:{app}:v{ver}（TTL 300s）<br/>版本选择 租户pin > published > latest
+    CS->>BR: build_runner(:273)
+    BR->>RD: get_runtime_graph(application_service.py:937) 读缓存键 graph:{app}:v{ver}（TTL 300s）<br/>版本选择 租户pin > published > latest
     RD-->>BR: 画布 JSON（miss 回 DB application_graph_version，再应用租户 config 覆盖）
-    BR->>ND: 注册 ServiceRegistry：llm / http / tool_executor / retrieval / sandbox / 会话消息异步适配器(:277) / subgraph_loader(:120)
-    BR->>RT: new GraphRuntime(canvas_json, run/usage/audit/webhook repos, on_node_event=emitter)(:295)
+    BR->>ND: 注册 ServiceRegistry：llm / http / tool_executor / retrieval / sandbox / 会话消息异步适配器(:353-372) / subgraph_loader（def :150，调用 :374）
+    BR->>RT: new GraphRuntime(canvas_json, run/usage/audit/webhook repos, on_node_event=emitter)(:408)
 
     Note over U,WH: ③ 记账、编译、开跑
-    CS->>DB: ensure_run(:605→runtime:201) INSERT run（含画布快照）——先记账再干活
-    CS->>DB: append_message role=user(:616) 用户消息先于 invoke 落库
-    RT->>CO: _ensure_compiled(:109) 每请求执行一遍，实例级 memo
-    CO->>CO: convert_canvas(convert.py:51) Coze IR → CanvasGraph IR（表达式 Ref/GlobalVar/TemplatedString、子图递归、ErrorPolicy）
-    CO->>LG: Compiler.compile(compiler.py:75) 落到 langgraph.graph.StateGraph(state_schema)(:93)<br/>每 CanvasNode → sg.add_node(id, node_fn)(:101，node_fn 由 _build_node_fn :203 生成)<br/>→ sg.set_entry_point(start)(:105) → 普通边 sg.add_edge(:121) / IF、INTENT sg.add_conditional_edges(router :335/:371)<br/>→ 无出边节点 sg.add_edge(node, END)(:129) → sg.compile(checkpointer=AsyncPostgresSaver)(:131，runtime.py:135 挂载)
-    RT->>LG: compiled.astream_events(initial_state, config={"thread_id": 租户前缀(:42)}, version="v2")(runtime.py:543)
+    CS->>DB: ensure_run(:1799→runtime:208) INSERT run（含画布快照）——先记账再干活
+    CS->>DB: append_message role=user(:1802) 用户消息先于 invoke 落库
+    RT->>CO: _ensure_compiled(:113) 每请求执行一遍，实例级 memo
+    CO->>CO: convert_canvas(convert.py:50) Coze IR → CanvasGraph IR（表达式 Ref/GlobalVar/TemplatedString、子图递归、ErrorPolicy）
+    CO->>LG: Compiler.compile(compiler.py:75) 落到 langgraph.graph.StateGraph(state_schema)(:93)<br/>每 CanvasNode → sg.add_node(id, node_fn)(:101，node_fn 由 _build_node_fn :201 生成)<br/>→ sg.set_entry_point(start)(:105) → 普通边 sg.add_edge(:121) / IF、INTENT sg.add_conditional_edges(router :335/:371)<br/>→ 无出边节点 sg.add_edge(node, END)(:129) → sg.compile(checkpointer=AsyncPostgresSaver)(:131，runtime.py:131-139 挂载)
+    RT->>LG: compiled.astream_events(initial_state, config={"thread_id": 租户前缀(:42)}, version="v2")(runtime.py:647)
 
     Note over U,WH: ④ 执行循环
     loop 节点调度（start/end/llm/api_plugin/code/if_else/loop/batch/intent/http/human_task/agent_loop…）
-        LG-->>RT: v2 事件 on_chain_start(:559，metadata.langgraph_node) → emitter("node_start") 入队
+        LG-->>RT: v2 事件 on_chain_start(:663，metadata.langgraph_node) → emitter("node_start") 入队
         LG->>ND: await node_fn → handler.run(ctx)，NodeContext 含求值后 inputs / services / emit_event
-        opt LLM 带历史（needHistory/historyLimit，llm.py:101-107 _load_conversation_history）
-            ND->>DB: list_messages_by_conversation（message_repository.py:63）捞最近 N 条
+        opt LLM 带历史（needHistory/historyLimit，llm.py:76-77/:114-118；_load_conversation_history def :338）
+            ND->>DB: list_by_conversation（message_repository.py:63，经 llm.py:367 调用）捞最近 N 条
             DB-->>ND: 历史消息拼进 messages（多轮记忆走 Postgres message 表，非 Redis）
         end
         opt loop(21)/batch(28)/subworkflow(9) 子图
-            ND->>CO: Compiler.compile(subgraph, checkpointer=None)（loop.py:85 / batch.py:91 / subworkflow.py:67）递归编译执行，子图不参与断点续跑
+            ND->>CO: Compiler.compile(subgraph, checkpointer=None)（loop.py:88 / batch.py:94 / subworkflow.py:69）递归编译执行，子图不参与断点续跑
         end
         opt LLM 流式（stream 开 + 无 tools + 有 emit 通道）
-            ND-->>RT: emit("llm_token", delta)（llm.py:325，经 _emit 闭包 compiler.py:219 补 node_id）
+            ND-->>RT: emit("llm_token", delta)（llm.py:325，经 _emit 闭包 compiler.py:217 补 node_id）
         end
         opt output(13)/end(2) 中间输出
             ND-->>RT: emit("output_message", content)（output.py:121 / end.py:28）
         end
-        LG-->>RT: v2 事件 on_chain_end(:568)（异常为 on_chain_error :594）
-        RT->>DB: _record_node_execution(:612) INSERT run_node_execution；LLM 节点写 tenant_usage_ledger(:649)
+        LG-->>RT: v2 事件 on_chain_end(:676)（异常为 on_chain_error :707）
+        RT->>DB: _record_node_execution(:730) INSERT run_node_execution；LLM 节点写 tenant_usage_ledger(:~778-790)
         RT-->>CS: emitter("node_end", {outputs, duration_ms}) 入队
     end
 
     Note over U,WH: ⑤ 结局三分支
     alt question(18)/input(30)/human_task(60) 中断
-        ND->>LG: langgraph.types.interrupt(payload)（question.py:24→:126 / human_task.py:18→:43，handler 内暂停）
+        ND->>LG: langgraph.types.interrupt(payload)（question.py:24→:127 / human_task.py:18→:43，handler 内暂停）
         LG->>DB: AsyncPostgresSaver 将中断处 WorkflowState 全量写 checkpoint 表（checkpoint.py:50）
-        RT->>LG: compiled.aget_state(config) 检出 tasks[].interrupts（runtime.py:266/:443）
-        RT->>DB: update_run_interrupt(:83) run=interrupted + 冗余 payload
-        RT-->>CS: 自封装 GraphInterrupted(runtime.py:33) → question/interrupted 事件；中断消息落库(_handle_chatflow_interrupt :751)
+        RT->>LG: compiled.aget_state(config) 检出 tasks[].interrupts（runtime.py:355/:540）
+        RT->>DB: update_run_interrupt(:91) run=interrupted + 冗余 payload
+        RT-->>CS: 自封装 GraphInterrupted(runtime.py:33) → question/interrupted 事件；中断消息落库(_handle_chatflow_interrupt :1947)
     else 正常完成
-        LG-->>RT: 根链 on_chain_end name=="LangGraph"(:550) 捕获 final state（兜底 compiled.aget_state :266）
-        RT->>DB: update_run_status(:293) run=success + output
-        CS->>DB: assistant 最终消息 + conv.touch + uow.commit（流结束统一提交 :701-713）
-        RT--)WH: _notify_webhooks(:674) 异步 POST run_finished（SSRF 校验）
+        LG-->>RT: 根链 on_chain_end name=="LangGraph"(:654) 捕获 final state（兜底 compiled.aget_state :601）
+        RT->>DB: update_run_status(:384) run=success + output
+        CS->>DB: assistant 最终消息 + conv.touch + uow.commit（流结束统一提交 :1896-1913，touch:1905、commit:1906）
+        RT--)WH: _notify_webhooks(:792) 异步 POST run_finished（SSRF 校验）
     else 失败
-        Note over RT,ND: 节点级 ErrorPolicy timeout/retry/dataOnErr 降级写 state.errors（compiler.py:283）；<br/>process_type=0 时异常继续抛出，由 LangGraph 标记节点 error（compiler.py:293）→ on_chain_error
-        RT->>DB: 图级异常(:317-357) run=error + audit_logs
+        Note over RT,ND: 节点级 ErrorPolicy timeout/retry/dataOnErr 降级写 state.errors（compiler.py:279）；<br/>process_type=0 时异常继续抛出，由 LangGraph 标记节点 error（compiler.py:289）→ on_chain_error
+        RT->>DB: 图级异常(:406-430) run=error + audit_logs
         RT--)WH: POST run_error
         CS-->>R: error {message, code} → SSE
     end
 
     Note over U,WH: ⑥ 出泵收尾
     CS-->>R: 主协程从 Queue 取 event/output/interrupted/error/done 逐条出泵
-    R-->>U: sse_event(sse.py:16) 帧序：run_start → node_start/llm_token/node_end/output_message（穿插）→ result / question / interrupted → final（客户端断开时路由 finally 取消 producer，chat.py:138）
+    R-->>U: sse_event(sse.py:16) 帧序：run_start → node_start/llm_token/node_end/output_message（穿插）→ result / question / interrupted → final（客户端断开时路由 finally 取消 producer，chat.py:139/:153，_sse_response）
 
     Note over U,WH: ⑦ resume 读档（中断后的第二次请求：回答问答节点 / 审批通过）
-    U->>R: 同一接口，body.resume = {answer / 审批结论}（useChatSession.ts:190）
-    R->>CS: resume 必带 conversation_id，复用中断 run 的 run_id(:588)<br/>上轮中断未答直接发新消息 → 换新子线程 f"{cid}:{uuid4()}" 弃旧中断(:599)
-    CS->>RT: runner.resume(payload)(runtime.py:415)
-    RT->>LG: compiled.aget_state 校验存档点(:443) → astream_events(Command(resume=payload))(runtime.py:19→:437/:543)<br/>按 thread_id 读 checkpoint，handler 从 interrupt() 调用点原地返回 payload，不重跑已完成节点
+    U->>R: 同一接口，body.resume = {answer / 审批结论}（useChatSession.ts:387，人审 :789）
+    R->>CS: resume 必带 conversation_id，复用中断 run 的 run_id(:1772-1780)<br/>上轮中断未答直接发新消息 → 换新子线程 f"{cid}:{uuid4()}" 弃旧中断(:1788)
+    CS->>RT: runner.resume(payload)(runtime.py:512)
+    RT->>LG: compiled.aget_state 校验存档点(:540) → astream_events(Command(resume=payload))(runtime.py:19→:535/:647)<br/>按 thread_id 读 checkpoint，handler 从 interrupt() 调用点原地返回 payload，不重跑已完成节点
     LG-->>U: 后续事件流照常出泵（回到上方"正常完成/再中断"分支）
     end
 ```
@@ -518,16 +518,16 @@ sequenceDiagram
 
 | 步 | 名称 | 大白话 | 关键代码 |
 |---|---|---|---|
-| ① | 进门检查 | 应用是不是对话流、会话是不是你的、thread 必须绑会话；错就返回普通 JSON 4xx，不占长连接 | `chat_service.py:490 prepare_chatflow_run` |
-| ② | 搭台子 | 路由建一个"传送带"（asyncio.Queue）+ 后台执行任务，同时给前端挂起 SSE 长连接 | `chat.py:181`、`:626` |
-| ③ | 拿图 | 按 pin>published>latest 选版本；Redis 命中给 JSON，miss 查库+租户 config 覆盖 | `application_service.py:833` |
-| ④ | 装配 | 组合根把 LLM 客户端、仓储、消息适配器等注入 ServiceRegistry，再造 GraphRuntime（domain 层不 import infra 全靠这里） | `deps/graph.py:208 build_runner` |
-| ⑤ | 记账 | run 记录（附画布快照）+ 用户消息**先落库再执行**，炸了也有据可查 | `runtime.py:201`、`chat_service.py:616` |
-| ⑥ | 翻译编译 | Coze JSON→CanvasGraph→LangGraph StateGraph→竣工图；**每请求现做，不缓存编译产物** | `convert.py:51`、`compiler.py:75/93/101/105/121/371/131` |
-| ⑦ | 执行循环 | `astream_events(v2)` 逐节点跑；IF/INTENT 按 route 选线；loop/batch 子图不带存档；LLM 边生成边吐 token；带历史配置的节点先捞 message 表 | `runtime.py:543`，各 `nodes/*.py` |
-| ⑧ | 字幕转发 | 两条通道进同一个 emitter：LangGraph 生命周期事件（node_start/end）+ 节点主动 emit（llm_token/output_message）；泵从 Queue 取帧 → SSE | `node_base.py:69`、`compiler.py:219`、`deps/sse.py:16` |
-| ⑨ | 存档/读档 | 问答/人审节点 `interrupt()` 现场全量进 checkpoint 表，本轮停；答复带 `resume` → `Command(resume)` 读档**原地继续**，不重复调 LLM、不重复计费 | `question.py:126`、`runtime.py:415/:437` |
-| ⑩ | 结账 | 最终回复+conv.touch 统一 commit，run=success；webhook 异步通知；节点级错误按 ErrorPolicy 重试/降级，图级错误 run=error+`error` 帧；**用户关页 → finally 取消执行** | `chat_service.py:701-713`、`runtime.py:317-357/:674`、`chat.py:138` |
+| ① | 进门检查 | 应用是不是对话流、会话是不是你的、thread 必须绑会话；错就返回普通 JSON 4xx，不占长连接 | `chat_service.py:1674 prepare_chatflow_run` |
+| ② | 搭台子 | 应用层建一个"传送带"（asyncio.Queue）+ 后台执行任务，同时给前端挂起 SSE 长连接 | `chat.py:164`、`chat_service.py:1750/:1827` |
+| ③ | 拿图 | 按 pin>published>latest 选版本；Redis 命中给 JSON，miss 查库+租户 config 覆盖 | `application_service.py:937` |
+| ④ | 装配 | 组合根把 LLM 客户端、仓储、消息适配器等注入 ServiceRegistry，再造 GraphRuntime（domain 层不 import infra 全靠这里） | `deps/graph.py:273 build_runner` |
+| ⑤ | 记账 | run 记录（附画布快照）+ 用户消息**先落库再执行**，炸了也有据可查 | `runtime.py:208`、`chat_service.py:1802` |
+| ⑥ | 翻译编译 | Coze JSON→CanvasGraph→LangGraph StateGraph→竣工图；**每请求现做，不缓存编译产物** | `convert.py:50`、`compiler.py:75/93/101/105/121/371/131` |
+| ⑦ | 执行循环 | `astream_events(v2)` 逐节点跑；IF/INTENT 按 route 选线；loop/batch 子图不带存档；LLM 边生成边吐 token；带历史配置的节点先捞 message 表 | `runtime.py:647`，各 `nodes/*.py` |
+| ⑧ | 字幕转发 | 两条通道进同一个 emitter：LangGraph 生命周期事件（node_start/end）+ 节点主动 emit（llm_token/output_message）；泵从 Queue 取帧 → SSE | `node_base.py:68`、`compiler.py:217`、`deps/sse.py:16` |
+| ⑨ | 存档/读档 | 问答/人审节点 `interrupt()` 现场全量进 checkpoint 表，本轮停；答复带 `resume` → `Command(resume)` 读档**原地继续**，不重复调 LLM、不重复计费 | `question.py:127`、`runtime.py:512/:535` |
+| ⑩ | 结账 | 最终回复+conv.touch 统一 commit，run=success；webhook 异步通知；节点级错误按 ErrorPolicy 重试/降级，图级错误 run=error+`error` 帧；**用户关页 → finally 取消执行** | `chat_service.py:1896-1913`、`runtime.py:406-430/:792`、`chat.py:139/:153` |
 
 ### 4.4 SSE 事件协议
 
@@ -546,12 +546,13 @@ sequenceDiagram
 
 | 入口 | 路由 | 应用层 | 区别 |
 |---|---|---|---|
-| chatflow 流式（主链路） | `chat.py:181` | `chat_service.py:542` | 上图全流程 |
-| 纯 DAG 工作流流式 | `workflow.py:104/:119` | `workflow_service.py:253/:344` | 同构事件泵、同事件协议 |
-| 非流式 JSON 运行 | `chat.py:236` | `chat_service.py:430` | 攒完再返回，无 SSE |
-| ReAct 对话 | `chat.py:101` | ChatService LLM+工具循环 | **不走图引擎**，事件协议另一套 |
-| 管理端调试流式 | `apps_admin.py:456` | `graph.py:162 make_canvas_debug_runtime` | 直接吃未保存画布 |
-| 单节点试运行 | `apps_admin.py:484` | `runtime.py:359 invoke_node` → `compiler.py:133` | 只跑一个节点 |
+| chatflow 流式（主链路） | `chat.py:164` | `chat_service.py:1726` | 上图全流程 |
+| 纯 DAG 工作流流式 | `workflow.py:103/:118` | `workflow_service.py:253/:344` | 同构事件泵、同事件协议 |
+| workflow 非流式（POST /{id}/workflow/run） | `chat.py`（`POST /{id}/workflow/run`） | `chat_service.py:1400 run_workflow` | 攒完再返回，无 SSE |
+| ReAct 对话 | `chat.py:164`（入口已并入，按 flow_type 分派） | `chat_service.py:303 run_agent_stream` | **不走图引擎**，事件协议另一套；接管/handback 路由在同一路由（chat.py:195-216） |
+| 接管/交还路由（handback） | `chat.py:164`（handback 分支 chat.py:195-216） | `chat_service.py:1545 run_handback_stream` | 接管链校验后切换 owner 继续对话 |
+| 管理端调试流式 | `apps_admin.py:509` | `graph.py:195 make_canvas_debug_runtime` | 直接吃未保存画布 |
+| 单节点试运行 | `apps_admin.py:537` | `runtime.py:456 invoke_node` → `compiler.py:133` | 只跑一个节点 |
 
 ---
 
@@ -560,16 +561,16 @@ sequenceDiagram
 | LangGraph API | import 位置 | 本项目调用点 | 用途 |
 |---|---|---|---|
 | `StateGraph(state_schema)` | `langgraph.graph`，compiler.py:17 | compiler.py:93 | 构建可变图；state_schema 由 `_build_state_schema`(:34) 生成，`WorkflowState`(state.py:21 TypedDict) 并行字段以 `Annotated[..., merge_dict]`(state.py:14) 挂 reducer |
-| `add_node(id, node_fn)` | 同上 | compiler.py:101 | 每个 CanvasNode 注册为 async node_fn（`_build_node_fn :203` 闭包：求值 inputs → 组 NodeContext → ErrorPolicy 包 handler） |
+| `add_node(id, node_fn)` | 同上 | compiler.py:101 | 每个 CanvasNode 注册为 async node_fn（`_build_node_fn :201` 闭包：求值 inputs → 组 NodeContext → ErrorPolicy 包 handler） |
 | `set_entry_point(id)` | 同上 | compiler.py:105 | start(1) 节点入口 |
 | `add_edge(src, dst)` / `END` | 同上 | compiler.py:121 / :129 | 普通边；无出边节点接 END 哨兵 |
 | `add_conditional_edges(src, router)` | 同上 | compiler.py:371（`_add_conditional_edges :335`） | if_else(8)/intent(22) 按 `node_outputs[node].route` 查 route_map |
-| `compile(checkpointer=...)` | 同上 | compiler.py:131 ← runtime.py:135 | 产出 CompiledStateGraph；主图挂 AsyncPostgresSaver，loop/batch/subworkflow 子图 `checkpointer=None`（loop.py:85 / batch.py:91 / subworkflow.py:67），子图不支持断点续跑 |
-| `compiled.astream_events(state, config, version="v2")` | CompiledStateGraph 方法 | runtime.py:543 `_stream_and_record` | 运行主循环；按 on_chain_start/end/error(:559/:568/:594，metadata.langgraph_node :547) 分发事件与落库，**取代 invoke** 以获得逐节点流 |
-| `compiled.aget_state(config)` | 同上 | runtime.py:266/:443/:501 | 检出 `tasks[].interrupts`、读 final state |
-| `compiled.aget_state_history(config, limit)` | 同上 | runtime.py:520 `list_state_history` | checkpoint 历史回放 |
-| `langgraph.types.interrupt(payload)` | question.py:24 / human_task.py:18 | :126 / :43 | handler 内挂起：state 全量落 checkpointer，图停止调度 |
-| `langgraph.types.Command(resume=payload)` | runtime.py:19 | :437（`resume :415`） | 按 thread_id 从 checkpoint 恢复，interrupt() 原地返回 payload |
+| `compile(checkpointer=...)` | 同上 | compiler.py:131 ← runtime.py:131-139 | 产出 CompiledStateGraph；主图挂 AsyncPostgresSaver，loop/batch/subworkflow 子图 `checkpointer=None`（loop.py:88 / batch.py:94 / subworkflow.py:69），子图不支持断点续跑 |
+| `compiled.astream_events(state, config, version="v2")` | CompiledStateGraph 方法 | runtime.py:647 `_stream_and_record`（def :639） | 运行主循环；按 on_chain_start/end/error(:663/:676/:707，metadata.langgraph_node :651) 分发事件与落库，**取代 invoke** 以获得逐节点流 |
+| `compiled.aget_state(config)` | 同上 | runtime.py:355/:540/:601 | 检出 `tasks[].interrupts`、读 final state |
+| `compiled.aget_state_history(config, limit)` | 同上 | runtime.py:609 `list_state_history`（fork 路径 :271） | checkpoint 历史回放 |
+| `langgraph.types.interrupt(payload)` | question.py:24 / human_task.py:18 | :127 / :43 | handler 内挂起：state 全量落 checkpointer，图停止调度 |
+| `langgraph.types.Command(resume=payload)` | runtime.py:19 | :535（`resume :512`） | 按 thread_id 从 checkpoint 恢复，interrupt() 原地返回 payload |
 | `AsyncPostgresSaver` | `langgraph.checkpoint.postgres.aio`，checkpoint.py:50 | 编译期挂载（runtime.py:127-130） | 进程级单例（`get_checkpointer :23`）；checkpoint 落 Postgres，thread_id 加租户前缀隔离（runtime.py:42） |
 
 > 易混点：`GraphInterrupted`（runtime.py:33）是**自封装异常**，非 LangGraph 原生——由 `aget_state` 检出 interrupts 后抛出，供应用层转 SSE。
@@ -585,5 +586,5 @@ sequenceDiagram
 | checkpoint 是多轮记忆吗？ | 不是。checkpoint 存"图跑到一半的全部现场"（变量、各节点输出），只服务中断续跑/回放。 |
 | 为什么存草稿不影响线上？ | 运行按 租户pin > published > latest 选版本，草稿只在未发布应用调试时可见。 |
 | 问答续跑会不会把前面的 LLM 重调一遍（双倍扣费）？ | 不会。`Command(resume)` 从 checkpoint 恢复，interrupt() 原地返回，已完成节点输出都在存档里。 |
-| 用户关掉网页后台还跑吗？ | 不跑。SSE 断开后路由 finally 取消 producer（chat.py:138），已落库的 run 保持原状态。 |
+| 用户关掉网页后台还跑吗？ | 不跑。SSE 断开后路由 finally 取消 producer（chat.py:139/:153，_sse_response），已落库的 run 保持原状态。 |
 | `graph:invalidate` 广播有人听吗？ | 目前没有订阅任务，只有发布端；跨进程一致性靠 300s TTL 兜底。需即时失效可补常驻订阅（已知缺口，非缺陷结论）。 |

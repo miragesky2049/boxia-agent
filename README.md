@@ -39,38 +39,73 @@
    └──────────┬──────────┘              └──────────┬──────────┘
               │ /api/v1/admin/**                     │ /api/v1/user/**
               ▼                                      ▼
-   ┌──────────────────────────────────────────────────────────────┐
-   │              FastAPI (Python 3.12, Uvicorn)                   │
-   │  ┌────────────────┐                              ┌───────────┐ │
-   │  │ admin 站点 8000 │                              │ user 8001 │ │
-   │  └──────┬─────────┘                              └─────┬─────┘ │
-   │         └──────────────┬─────────────────────────────────┘     │
-   │                        ▼                                        │
-   │  ┌────────────────────────────────────────────────────────┐    │
-   │  │ GraphRuntime（LangGraph DAG：调试 / 试运行 / 断点续跑） │    │
-   │  │ ChatService（ReAct 对话循环 + SSE）                     │    │
-   │  │ ToolGateway（SSRF / 熔断 / 限流 / 重试 / 连接池）       │    │
-   │  │ RetrievalService（RAG 召回 + 精排 + prompt 注入）       │    │
-   │  └──┬──────────────┬──────────────┬───────────────┬────────┘    │
-   └─────┼──────────────┼──────────────┼───────────────┼─────────────┘
+   ┌───────────────────────────────────────────────────────────────┐
+   │        FastAPI (Python 3.12, Uvicorn) 双站点 8000 / 8001       │
+   │  ┌─────────────────────────────────────────────────────────┐  │
+   │  │ web 接入层：路由 / 鉴权 / 多租户作用域解析 / SSE 组装    │  │
+   │  ├─────────────────────────────────────────────────────────┤  │
+   │  │ application 用例层：chat / run / memory / eval /        │  │
+   │  │   entitlement / grant / resource / model / audit ...    │  │
+   │  ├─────────────────────────────────────────────────────────┤  │
+   │  │ domain 领域层（纯业务，可脱离框架单测）                  │  │
+   │  │   GraphRuntime（LangGraph DAG：调试 / 试运行 / 断点续跑）│  │
+   │  │   ReAct 统一对话循环 + 接管路由（handoff）+ SSE          │  │
+   │  │   记忆分层（摘要压缩 + 长期记忆抽取）+ 评测（judge 飞轮） │  │
+   │  │   ToolGateway（SSRF/熔断/限流/重试/连接池）+ MCP 会话池  │  │
+   │  │   RetrievalService（RAG 召回 + 精排 + prompt 注入）      │  │
+   │  ├─────────────────────────────────────────────────────────┤  │
+   │  │ infrastructure：ORM 仓储 / UnitOfWork / Redis / 向量库 / │  │
+   │  │   对象存储 / 代码沙箱 / Celery 任务 / OTel 可观测性      │  │
+   │  └──┬──────────────┬──────────────┬───────────────┬────────┘  │
+   └─────┼──────────────┼──────────────┼───────────────┼───────────┘
          ▼              ▼              ▼               ▼
-   ┌──────────┐  ┌──────────┐  ┌──────────┐    ┌──────────────┐
-   │ Postgres │  │  Redis   │  │  Celery  │    │  大模型服务   │
-   │  17+pgv  │  │ 记忆/队列 │  │(RAG/权益)│    │ OpenAI兼容    │
-   │  :5432   │  │  :6379   │  │          │    │              │
-   └──────────┘  └──────────┘  └──────────┘    └──────────────┘
-                         │
-                         ▼
-                  ┌──────────────┐
-                  │ 外部租户工具  │  ◄── SSRF 防护 + 治理网关
-                  │ HTTP / MCP   │
-                  └──────────────┘
+   ┌──────────┐  ┌──────────┐  ┌──────────────┐  ┌──────────────┐
+   │ Postgres │  │  Redis   │  │   Celery     │  │  大模型服务   │
+   │ 17+pgv   │  │ 画布缓存/ │  │ worker+beat │  │ OpenAI兼容    │
+   │  :5432   │  │ 记忆/队列 │  │ RAG/记忆抽取 │  │              │
+   │ +MinIO   │  │  :6379   │  │ /权益/评测    │  └──────────────┘
+   └──────────┘  └──────────┘  └──────┬───────┘
+                                      ▼
+                              ┌──────────────┐
+                              │ 外部租户工具  │  ◄── SSRF 防护 + 治理网关
+                              │ HTTP / MCP   │      （MCP 会话池保持）
+                              └──────────────┘
 ```
 
-- **后端**：Python 3.12 + FastAPI，两个独立站点（admin / user），共享同一套业务与引擎层
+- **后端**：Python 3.12 + FastAPI，两个独立站点（admin / user），代码按 DDD 分层（web → application → domain ← infrastructure），共享同一套业务与引擎层
 - **管理端前端**：React 18 + Ant Design 5 + Semi UI + @flowgram.ai 画布
 - **用户端前端**：React 18 + Ant Design 5 + react-markdown 对话渲染
-- **数据库**：PostgreSQL 17（pgvector）+ Redis 7 + Celery（RAG ingest / 权益周期任务）
+- **数据层**：PostgreSQL 17（pgvector）+ Redis 7 + Celery（RAG ingest / 长期记忆抽取 / 权益与评测周期任务）+ MinIO 对象存储（可切本地）
+
+### 📸 功能一览（真实截图，免启动预览）
+
+以下截图来自本地运行环境（演示数据），按「平台管理员 → 租户管理员 → 最终用户」三种视角展示。
+
+**平台管理员（管理端）**
+
+| 应用管理 | 画布编排 |
+| --- | --- |
+| ![应用管理](docs/assets/screenshots/admin-apps.png) | ![画布编排](docs/assets/screenshots/admin-canvas.png) |
+
+| 应用市场 | 资源（工具 / 提示词 / 技能 / 知识） |
+| --- | --- |
+| ![应用市场](docs/assets/screenshots/admin-marketplace.png) | ![资源管理](docs/assets/screenshots/admin-resources.png) |
+
+| 租户管理 | 审计日志 |
+| --- | --- |
+| ![租户管理](docs/assets/screenshots/admin-tenants.png) | ![审计日志](docs/assets/screenshots/admin-audit.png) |
+
+**租户管理员（管理端租户子域）**：管理本租户用户、角色、授权与已开通应用。
+
+| 已开通应用 | 用户管理 |
+| --- | --- |
+| ![租户应用](docs/assets/screenshots/tenant-apps.png) | ![租户用户](docs/assets/screenshots/tenant-users.png) |
+
+**最终用户（用户端门户）**：浏览授权应用，直接对话（流式输出）或运行工作流。
+
+| 我的应用 | 对话运行 |
+| --- | --- |
+| ![我的应用](docs/assets/screenshots/user-apps.png) | ![对话运行](docs/assets/screenshots/user-chat.png) |
 
 ### 5 分钟把项目跑起来
 
@@ -142,7 +177,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | **图运行时** | LangGraph 1.2、langgraph-checkpoint-postgres | DAG 编译执行、断点续跑、调试 / 试运行 SSE |
 | **Agent 与工具** | FastMCP 4、httpx（HTTP/2 + keep-alive） | ReAct 对话循环、MCP client、统一工具治理网关 |
 | **RAG** | pgvector、pymilvus（可选）、pypdf、python-docx | 文档切分 → embedding → 向量召回 → cross-encoder 精排 |
-| **异步任务** | Celery 5（Redis broker）、celery beat | RAG ingest、权益生效 / 到期 / 宽限期回收 / 对账 |
+| **异步任务** | Celery 5（Redis broker）、celery beat | RAG ingest、长期记忆抽取、评测抽样、权益生效 / 到期 / 宽限期回收 / 对账 |
 | **缓存 / 短期记忆** | Redis 7（hiredis） | 多 DB 用途：短期记忆、Celery broker、结果后端 |
 | **认证** | PyJWT、bcrypt | Access Token（30 min）+ Refresh Token（DB 存 SHA-256） |
 | **可观测性** | OpenTelemetry（OTLP HTTP）、Prometheus、python-json-logger | 链路追踪、`/metrics`、结构化日志、请求 ID |
