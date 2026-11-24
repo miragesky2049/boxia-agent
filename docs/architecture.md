@@ -102,7 +102,7 @@ UnitOfWork.commit()
 
 | 形态 | 执行器 | 适用 |
 | --- | --- | --- |
-| 对话 / agent_loop | `ChatService` 的 ReAct 循环（`LLMClient` + 工具执行） | 用户端对话、工具调用轨迹 |
+| 对话 / agent_loop | `ChatService` 的 ReAct 循环（`internal/domain/agent/react.py` 统一，`LLMClient` + 工具执行） | 用户端对话、工具调用轨迹 |
 | DAG / workflow | `GraphRuntime`（LangGraph 编译画布） | 节点编排、单节点调试、断点续跑 |
 
 ```text
@@ -116,14 +116,17 @@ web/user/routers/agents.py 解析 application_id
   ▼
 internal/application/apps/chat_service.py
   ├─ 读取会话与历史消息（conversation / message）
-  ├─ chat：拼系统提示 + 历史 + 工具 → ReAct 循环
+  ├─ chat：拼系统提示 + 历史 + 工具 → react.py 统一 ReAct 循环
   └─ workflow：web/deps/graph.py:build_runner() 构造 GraphRuntime
   ▼
 internal/domain/graph/runtime.py（GraphRuntime）
   ├─ 按 application_id 取运行时图（Redis 缓存 + 租户 pin / config 覆盖）
   ├─ 节点执行：llm / http / api_plugin / code / dataset / loop / ...
   ├─ RAG 节点：RetrievalService 召回 → rerank → 注入 prompt
-  ├─ 工具节点：ToolExecutorService → ToolGateway（SSRF → 熔断 → 限流 → 重试 → 连接池 → 8KB 截断）
+  ├─ 工具节点：ToolExecutorService → ToolGateway（SSRF → 熔断 → 限流 → 连接池 → 重试 → 8KB 截断）
+  ├─ 接管路由（handoff）：agent_loop 节点声明接管，conversation 记录 owner / 接管链
+  ├─ 轮后长期记忆抽取：SSE 收尾投递 Celery memory_tasks，异步抽取落 agent_memory
+  ├─ 评测抽样：judge 抽样任务（Celery）异步给 run 打分
   └─ checkpoint 落库（tenant 隔离），支持断点续跑 / 单节点调试
   ▼
 SSE 事件流：节点开始 / 增量 token / 工具调用轨迹 / 节点结束 / 运行结束

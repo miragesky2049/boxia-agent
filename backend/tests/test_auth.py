@@ -323,5 +323,3 @@ def test_audit_logs_record_events(client: TestClient, auth_headers: dict[str, st
     body = response.json()
     assert body["total"] >= 1
     assert body["items"][0]["action"] == "auth.login"
-
-

@@ -28,27 +28,33 @@
 │  FastAPI 双站点（admin 8000 / user 8001）   │
 │  web → application → domain → infrastructure│
 │  GraphRuntime（LangGraph DAG）              │
-│  ChatService（ReAct 对话循环）              │
+│  ChatService（react.py 统一 ReAct 循环）    │
+│  接管路由（handoff）                        │
+│  记忆分层（摘要 + 长期记忆）                │
 │  RetrievalService / ToolGateway             │
 └──────┬──────────────┬───────────────┬──────┘
        │              │               │
 ┌──────▼─────┐ ┌──────▼─────┐  ┌──────▼────────┐
-│ PostgreSQL │ │   Redis    │  │ Celery (RAG)  │
-│ + pgvector │ │ 记忆 / 缓存 │  │ 文档切分/向量化 │
-└────────────┘ └────────────┘  └──────┬────────┘
+│ PostgreSQL │ │   Redis    │  │ Celery 任务   │
+│ + pgvector │ │ 画布缓存   │  │ RAG ingest    │
+└────────────┘ │ 短期记忆   │  │ 记忆抽取      │
+               └────────────┘  │ 评测抽样      │
+                               │ 权益流转      │
+                               └──────┬────────┘
                                       │
                               ┌───────▼────────┐
                               │ 外部 HTTP/MCP  │
-                              │ 工具（经网关）  │
+                              │ 工具（经网关） │
                               └────────────────┘
 ```
 
-讲解时强调四点：
+讲解时强调五点：
 
 1. **应用是唯一模型**：`application` 存应用，`application_graph` 存草稿图，发布时写不可变的 `application_graph_version`，市场开通后 `tenant_application_instance` 钉住版本。
 2. **运行时与业务层解耦**：`internal/domain/graph` 只负责画布编译与节点执行，鉴权、可见性、事务提交由 `web` 与 `internal/application` 负责。
 3. **前后端完全分离**：开发时 Vite 代理 `/api`，生产时 Nginx 反代，前端不直接连数据库。
 4. **事务边界**：仓储只 `flush`，应用服务统一 `commit`，审计与业务同事务。
+5. **记忆与评测闭环**：轮后 Celery 抽取长期记忆、judge 抽样评测反哺迭代；接管路由（handoff）让会话在多个智能体应用间流转。
 
 ### 13.4 技术选型与理由
 

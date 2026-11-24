@@ -19,6 +19,7 @@ from internal.domain.agent.governance import CircuitBreaker, RateLimiter
 from internal.domain.agent.run_context import AgentRunContext
 from internal.domain.constants import PLATFORM_TENANT_ID
 from internal.domain.errors import ValidationError
+from internal.domain.security.proxy_policy import httpx_trust_env
 from internal.domain.security.ssrf_guard import validate_outbound_url
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,8 @@ class _ClientPool:
             if client is not None and not client.is_closed:
                 return client
             client = httpx.AsyncClient(
+                # 环回目标直连，避免系统代理劫持本地工具请求（20261124，proxy_policy）
+                trust_env=httpx_trust_env(base_url),
                 timeout=httpx.Timeout(
                     DEFAULT_OVERALL_TIMEOUT,
                     connect=DEFAULT_CONNECT_TIMEOUT,

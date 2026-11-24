@@ -10,6 +10,7 @@ from types import TracebackType
 from typing import Any
 
 from internal.domain.agent.mcp_observer import mcp_observer
+from internal.domain.security.proxy_policy import httpx_trust_env
 
 logger = logging.getLogger(__name__)
 
@@ -39,22 +40,47 @@ class McpClientError(Exception):
 
 
 def _make_client(server_url: str, headers: dict[str, str] | None) -> Any:
-    """构造 fastmcp Client；带自定义请求头时走 StreamableHttpTransport。
+    """构造 fastmcp Client（统一走 StreamableHttpTransport，注入 httpx 工厂）。
 
     0074 PRD F6：MCP server 多需 API Key 等请求头，fastmcp 的裸 URL 形态不支持，
     显式构造 transport 传入 headers。依赖缺失在此统一抛 McpClientError。
+
+    20261124：开发机开启系统代理/TUN 时，httpx 的 trust_env 会把发往
+    127.0.0.1 的本地 MCP 请求也送进代理导致连接报错；工厂对环回目标禁用
+    trust_env 强制直连（见 domain/security/proxy_policy），其余目标保持默认。
     """
     try:
         from fastmcp import Client
+        from fastmcp.client.transports import StreamableHttpTransport
     except ImportError as exc:  # pragma: no cover
         raise McpClientError(
             "未安装 fastmcp 依赖，无法调用 MCP server；请在 backend 安装 fastmcp"
         ) from exc
-    if not headers:
-        return Client(server_url)
-    from fastmcp.client.transports import StreamableHttpTransport
+    import httpx
 
-    return Client(StreamableHttpTransport(url=server_url, headers=dict(headers)))
+    def _httpx_client_factory(
+        headers: dict[str, str] | None = None,
+        timeout: Any = None,
+        auth: Any = None,
+        **kwargs: Any,
+    ) -> Any:
+        # 兼容 McpHttpClientFactory 协议：fastmcp 调用时不透传 url，环回判定用闭包中的 server_url
+        client_kwargs: dict[str, Any] = dict(kwargs)
+        if headers is not None:
+            client_kwargs["headers"] = headers
+        if timeout is not None:
+            client_kwargs["timeout"] = timeout
+        if auth is not None:
+            client_kwargs["auth"] = auth
+        client_kwargs.setdefault("follow_redirects", True)
+        return httpx.AsyncClient(trust_env=httpx_trust_env(server_url), **client_kwargs)
+
+    transport = StreamableHttpTransport(
+        url=server_url,
+        headers=dict(headers) if headers else None,
+        httpx_client_factory=_httpx_client_factory,
+    )
+    return Client(transport)
 
 
 def _extract_result_text(result: Any) -> str:
