@@ -21,8 +21,8 @@
 ▼              ▼
 管理端 API      用户端 API
 127.0.0.1:8000  127.0.0.1:8001     ← 两个站点独立打包、独立路由
-/admin/**       /user/**
-/public/**
+/api/v1/admin   /api/v1/user       ← 各站点还挂 /health、/metrics
+/api/v1/public
 │              │
 └──────┬───────┘
        ▼
@@ -32,7 +32,7 @@
 - **后端**：Python 3.12 + FastAPI，两个独立站点入口（`web.app_admin:app` / `web.app_user:app`），负责登录鉴权、数据读写、业务规则。
 - **管理端**：React 18 + TypeScript + Ant Design 5 + Semi UI + @flowgram.ai/free-layout-editor，负责应用画布、市场、资源、工具、授权、租户与审计管理。
 - **用户端**：React + TypeScript，最终用户登录后浏览可见应用并直接对话。
-- **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（记忆 / Celery）+ Celery（知识库异步 ingest + 权益周期任务）。
+- **数据库**：PostgreSQL 17（开发时用 Docker 启动）+ Redis（画布缓存 / 短期记忆 / Celery）+ Celery（知识库异步 ingest、长期记忆抽取、评测抽样与权益周期任务）。
 
 ### 1.3 核心能力
 

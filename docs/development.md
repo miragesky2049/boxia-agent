@@ -79,29 +79,38 @@ boxia-agent/
 │   │   ├── api_v1.py            # admin / user 两套独立的 /api/v1 路由聚合
 │   │   ├── admin/
 │   │   │   ├── router.py        # 受保护路由聚合（统一前缀与管理员鉴权）
-│   │   │   ├── routers/         # 接口：apps_admin / marketplace / resources / tools /
-│   │   │   │                    #       documents / models / roles / users / tenants /
+│   │   │   ├── routers/         # 接口：apps_admin / marketplace / resources / tenant_apps /
+│   │   │   │                    #       documents / models / roles / users / tenants / entitlements /
+│   │   │   │                    #       eval_admin / agent_memories / mcp_admin / webhook / audit_logs /
 │   │   │   │                    #       departments / employments / mgmt_units / applies ...
 │   │   │   └── schemas/         # 请求/响应模型
-│   │   ├── user/                # 用户端站点：agents（应用）/ chat / auth / profile
-│   │   └── deps/                # 数据库、服务、鉴权、租户作用域、SSE 依赖
+│   │   ├── user/                # 用户端站点：agents（应用）/ chat / workflow / memories / auth / profile
+│   │   └── deps/                # 数据库、服务、鉴权、租户作用域、图装配（build_runner）、SSE 依赖
 │   ├── internal/
 │   │   ├── domain/              # 领域层（纯业务，不依赖框架）
 │   │   │   ├── entity/          # 实体：application / resource / role / user / tenant / department ...
 │   │   │   ├── repository/      # 仓储协议
-│   │   │   ├── agent/           # Agent Loop：plan/execute/reflect、工具执行、MCP client、tool_gateway
-│   │   │   ├── canvas/          # 画布 DSL：node_type / node_meta / 转换 / 校验 / 表达式
+│   │   │   ├── agent/           # ReAct 统一循环（react）/ 记忆分层（memory）/ 接管路由（handoff）/
+│   │   │   │                    # judge 评测 / MCP client + 会话池 / tool_gateway 治理网关
+│   │   │   ├── canvas/          # 画布 DSL：node_type / node_meta / 转换 / 校验 / lint / 表达式
 │   │   │   ├── graph/           # 图运行时：compiler / runtime / checkpoint / state / nodes/*
-│   │   │   ├── llm/             # LLM 适配层：client / adapter / messages
+│   │   │   ├── llm/             # LLM 适配层：client / adapter / messages / multimodal
 │   │   │   ├── retrieval/       # RAG：embedding / vector_store / rerank / query_rewrite / text_split
+│   │   │   ├── auth/            # 作用域鉴权规则、授权判定
+│   │   │   ├── security/        # SSRF 校验规则
+│   │   │   ├── cache/           # KV 缓存抽象
 │   │   │   └── storage/         # 对象存储抽象
 │   │   ├── application/         # 用例服务（编排）
-│   │   │   ├── apps/            # application_service / chat_service / resource_service /
-│   │   │   │                    # model_service / tenant_settings_service / prompt_optimize_service
-│   │   │   └── ...              # auth / role / tenant / user / department / employment / grant ...
-│   │   └── infrastructure/      # 配置、ORM、仓储实现、安全、日志、中间件、链路追踪、Celery
+│   │   │   ├── apps/            # application_service / chat_service / run_service / memory_service /
+│   │   │   │                    # eval_run_service / judge_sampling_service / resource_service /
+│   │   │   │                    # model_service / entitlement_service / webhook_service / canvas_debug /
+│   │   │   │                    # mcp_discovery / tenant_settings_service / prompt_optimize_service ...
+│   │   │   └── ...              # auth / role / tenant / user / department / employment / grant /
+│   │   │                        # retrieval / ingestion / document ...
+│   │   └── infrastructure/      # 配置、ORM 模型、仓储实现、安全、日志中间件、链路追踪、Celery、
+│   │                            # Redis 缓存、向量库（pgvector/Milvus）、对象存储、Python 沙箱
 │   ├── docker/                  # 本地 PostgreSQL / Redis 编排
-│   ├── migrations/              # Alembic 迁移（当前 head：0048_document_permissions）
+│   ├── migrations/              # Alembic 迁移（当前 head：0081_runtime_sample_unique）
 │   ├── scripts/                 # create_admin / seed_demo / wait_for_db
 │   ├── tests/                   # 后端接口与运行时测试
 │   └── Dockerfile
@@ -150,7 +159,7 @@ boxia-agent/
 | 新增一个管理端接口   | `backend/web/admin/routers/xxx.py`（路由）+ `backend/web/admin/schemas/xxx.py`（模型）→ `backend/internal/application/xxx_service.py`（业务）→ 仓储实现 |
 | 调整画布节点类型     | `backend/internal/domain/canvas/node_type.py`（编码）+ `node_meta.py`（元数据）+ `internal/domain/graph/nodes/*`（运行实现）                                                     |
 | 调整图执行           | `backend/internal/domain/graph/compiler.py`、`runtime.py`、`state.py`、`checkpoint.py`                                                                                          |
-| 调整 Agent Loop      | `backend/internal/domain/agent/loop.py`、`tools.py`、`tool_executor.py`、`tool_gateway.py`                                                                                      |
+| 调整 Agent 循环      | `backend/internal/domain/agent/react.py`、`tools.py`、`tool_executor.py`、`tool_gateway.py`（接管路由 `handoff.py`、记忆 `memory.py`）                                          |
 | 调整 RAG             | `backend/internal/domain/retrieval/*` + `backend/internal/application/ingestion_service.py`                                                                                     |
 | 新增一张表           | `backend/internal/infrastructure/model/xxx.py`（ORM）→ `backend/internal/domain/entity/xxx.py`（实体）→ 生成 Alembic 迁移                                                        |
 | 新增一个管理端页面   | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装）                                                              |
@@ -820,16 +829,16 @@ ingest 状态机：`pending → queued → processing → ready` 或 `failed`（
 - 租户作用域：必须通过租户子域名访问（`<租户编码>.<ROOT_DOMAIN>`）；平台域名或未知域名返回 404/403。
 - 可见性：开通实例 ∩ 角色/管理单元数据范围 ∩ 实例级可见范围 ∩ `is_enabled=true`。
 
-**SSE 事件帧格式**（`/run/stream`）：
+**SSE 事件帧格式**（`/run/stream`，ReAct 通道）：
 
 ```text
 event: run_start
-data: {"run_id":"...","agent_id":"..."}
+data: {"run_id":"...","tools":[...]}
 
 event: llm_start
 data: {"model":"deepseek-chat"}
 
-event: llm_delta
+event: llm_token
 data: {"text":"你"}
 
 event: tool_start
@@ -841,6 +850,8 @@ data: {"tool_name":"query_erp","output":"晴天 25℃","duration_ms":234}
 event: final
 data: {"content":"今天北京晴天 25℃","usage":{"prompt_tokens":123,"completion_tokens":45}}
 ```
+
+> DAG / 对话流（chatflow）运行走图执行通道，事件为 `node_start / node_end / llm_token / output_message / result / question / interrupted / final`，协议详见 [canvas-save-run-sequence.md 4.4](./canvas-save-run-sequence.md)。
 
 响应头带 `Cache-Control: no-cache`、`Connection: keep-alive`、`X-Accel-Buffering: no`（Nginx 不缓冲）。
 

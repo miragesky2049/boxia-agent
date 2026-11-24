@@ -21,17 +21,17 @@ backend-admin / backend-user 容器（FastAPI）
    │              │
    │              ├──► db 容器（PostgreSQL 17 + pgvector，不对外）
    │              │
-   │              └──► Redis（DB 0 短期记忆 / DB 1 Celery broker / DB 2 Celery result）
+   │              └──► Redis（DB 0 缓存/短期记忆 / DB 1 Celery broker / DB 2 Celery result）
    ▲                          ▲
-   ├─── celery-worker 容器（消费 RAG ingest 与权益周期任务队列，独立进程）
-   └─── celery-beat 容器（定时投递权益周期任务，必须单副本）
+   ├─── celery-worker 容器（消费 RAG ingest / 记忆抽取 / 评测抽样 / 权益周期任务队列，独立进程）
+   └─── celery-beat 容器（定时投递权益流转等周期任务，必须单副本）
 ```
 
 - 只暴露 443（以及 80 用于跳转 HTTPS）。
 - 入口使用泛域名 `*.example.com`：`platform.example.com` 为产品级平台，其余子域为租户。
 - `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker`、`celery-beat` 不发布端口，只走 Compose 内部网络。
 - 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
-- `celery-worker` 与 backend 镜像同包，仅启动命令不同；它同时消费知识库 ingest 与权益周期任务（生效 / 到期流转、宽限期回收、对账），生产环境应保持运行。
+- `celery-worker` 与 backend 镜像同包，仅启动命令不同；它同时消费知识库 ingest、长期记忆抽取、评测 judge 抽样与权益周期任务（生效 / 到期流转、宽限期回收、对账），生产环境应保持运行。
 - `celery-beat` 同样与 backend 镜像同包，只按周期投递任务、不执行任务；**必须保持单副本**，多实例会导致定时任务重复投递。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
