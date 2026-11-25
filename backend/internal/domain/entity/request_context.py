@@ -19,7 +19,7 @@ class RequestContext:
     scope: str
     tenant: Tenant | None
     host: str
-    # 作用域解析来源：host=域名，header=本地调试请求头，default=本地兜底
+    # 作用域解析来源：host=域名，header=本地调试请求头，default=本地默认值
     resolution: TenantResolution = "host"
 
     @property

@@ -771,7 +771,7 @@ def test_chat_mcp_or_workflows_only_agent_goes_canvas_channel() -> None:
 
 
 def test_chat_deep_mode_reacts_only_false_and_emits_plan_reflect_frames() -> None:
-    """F4：agent+画布+planExecuteReflect → react_only=False；plan/reflect 透出 additive 帧，
+    """F4：agent+画布+planExecuteReflect → react_only=False；plan/reflect 输出 additive 帧，
     node_end 的 finish_reason 覆盖 result 帧（F11.1 预算触顶走同一通道）。"""
     graph = _canvas_graph()
     graph["nodes"][0]["data"]["inputs"]["reasoningMode"] = {
@@ -836,7 +836,7 @@ def test_chat_deep_mode_reacts_only_false_and_emits_plan_reflect_frames() -> Non
         and reflect["done"] is False
         and reflect["suggestion"] == "补充"
     )
-    # node_end 透出 budget_exceeded 覆盖 execute llm_end 的 stop
+    # node_end 输出 budget_exceeded 覆盖 execute llm_end 的 stop
     assert frames[4][1]["finish_reason"] == "budget_exceeded"
 
 
@@ -1187,7 +1187,7 @@ def test_chat_prepare_run_and_channel_resolution() -> None:
 def test_chat_canvas_handoff_round_frames_exclude_round_text() -> None:
     """M4 PRD F14.9（T-c6 + T-c7 收口）帧锁定：接管轮的 llm_end 正文外发但不进
     result 帧与 assistant 落库；tool_handoff trace 被安全忽略（无 tool_start/
-    tool_end 帧）；outputs.finish_reason 覆盖通道透出 handed_off；
+    tool_end 帧）；outputs.finish_reason 覆盖通道输出 handed_off；
     outputs.handoff 经 8b 收口切路由并先于 result 发 handoff 帧。"""
     target_app = str(uuid4())
     graph = _agent_graph_with(
@@ -1320,7 +1320,7 @@ def test_chat_sub_agents_only_agent_goes_canvas_channel() -> None:
     assert cap["model_service"].calls == []
 
 
-# ---------- M4-d F19.2：质量门帧透出。门关态与基线逐字段一致（上一用例即守卫），
+# ---------- M4-d F19.2：质量门帧输出。门关态与基线逐字段一致（上一用例即守卫），
 # 门开态 judge trace 帧 + result/落库 metadata 均为 additive ----------
 
 

@@ -1,6 +1,6 @@
 import type { NodeMeta } from '../../../../api/nodeMeta'
 
-// 节点能力判断：优先读后端 meta.capabilities，缺失时用本地兜底。
+// 节点能力判断：优先读后端 meta.capabilities，缺失时使用本地默认配置。
 // 页面与组件不再散落 typeKey === 'start' 这类判断。
 
 export interface NodeCapabilitiesView {

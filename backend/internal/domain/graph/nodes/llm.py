@@ -16,10 +16,10 @@ config 约定（来自 coze llmParam 压平后的结构）：
 1. 先把 prompt 里的 {{input}} 占位符替换成当前节点的 inputs["input"]（coze 约定）
 2. 再用 ExpressionEvaluator 求值 {{node.output.field}} 这类模板引用
 
-工具执行：通过 ctx.services.get("tool_executor") 拿执行器；
-    tool_executor(name: str, arguments: dict) -> str，返回值文本回灌给 LLM。
-    执行白名单 = config.tools 声明的工具名：模型调用未声明工具直接拒绝回灌，
-    不触达执行器（防越权使用租户全量工具目录）；未注册执行器时回灌 "[error] 工具未注册"。
+工具执行：通过 ctx.services.get("tool_executor") 获取执行器；
+    tool_executor(name: str, arguments: dict) -> str，返回值文本作为 observation 返回给 LLM。
+    执行白名单 = config.tools 声明的工具名：模型调用未声明工具时直接拒绝并把
+    拒绝文本返回给模型，不触达执行器（防越权使用租户全量工具目录）；未注册执行器时返回 "[error] 工具未注册"。
 """
 
 from __future__ import annotations
@@ -135,7 +135,7 @@ class LLMNodeHandler(NodeHandler):
             else None
         )
 
-        # ReAct 循环：调 LLM → 若返回 tool_calls 则执行 → 把结果回灌 → 再调
+        # ReAct 循环：调用 LLM → 若返回 tool_calls 则执行 → 结果追加写入 messages → 再次调用
         aggregated_usage: dict[str, int] = {
             "prompt_tokens": 0,
             "completion_tokens": 0,
@@ -255,7 +255,7 @@ async def _run_streaming(
 ) -> tuple[str, str]:
     """流式 LLM 调用：逐 chunk emit llm_token 事件，聚合完整 content / reasoning 返回。
 
-    仅用于无 tools 的纯生成场景。stream 结束时若服务端返回 usage，回灌到 aggregated_usage。
+    仅用于无 tools 的纯生成场景。stream 结束时若服务端返回 usage，累加到 aggregated_usage。
     """
     assert ctx.emit_event is not None  # 调用方已保证
 

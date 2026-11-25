@@ -367,17 +367,23 @@ test.describe('权益流 E2E（§5.3）', () => {
     })
     expect(forbidden.status(), await forbidden.text()).toBe(403)
 
+    // 每次硬导航都会触发 SPA 重启的 refresh 轮转；404 文本在 DOM 渲染即断言通过，
+    // 若不等本轮网络完成就切下一跳，新旧文档可能先后用同一 refresh token，
+    // 被服务端判重放而撤销整族会话（表现为被踢回 /login），故逐跳 networkidle 串行化
     await loginTenant(page, request, token)
     await page.goto('/entitlements')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
 
     // 0073：旧角色授权路由已从任何作用域下线
     await page.goto('/role-access')
+    await page.waitForLoadState('networkidle')
     await expect(page.getByText('页面不存在或已被移除。')).toBeVisible()
 
     // 404 页不套后台布局（无用户菜单），先回 /apps 再退出；
     // 已登录状态下 goto('/login') 会被会话重定向到 /apps，必须先走 UI 退出登录
     await page.goto('/apps')
+    await page.waitForLoadState('networkidle')
     await page.locator('.admin-header__user').click()
     await page.getByRole('menuitem', { name: '退出登录' }).click()
     await expect(page).toHaveURL(/\/login/)

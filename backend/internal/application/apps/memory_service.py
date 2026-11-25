@@ -4,7 +4,7 @@ MemorySummarizerService：把 plan_summarization 产出的待压缩段 + 旧摘�
 增量合并，成功后按乐观并发回写 conversation 摘要水位线（update_summary_if_marker）。
 失败契约（F15.5）：模型解析失败 / LLM 异常超时 / 空产出 / 回写让位一律返回
 None 并记 warning，绝不抛出——调用方沿用旧摘要 + truncate 组合，摘要链路
-不得阻塞对话主流程。兜底面为不可预测的网络/网关异常故捕获 Exception，
+不得阻塞对话主流程。捕获范围覆盖不可预测的网络/网关异常故使用 Exception，
 但均记录日志与上下文，不做静默吞异常处理。
 
 MemoryExtractorService：轮后异步（Celery）从单轮对话抽取长期记忆，对照现有

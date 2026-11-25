@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # 本地开发一键启动：
-#   - 自动拉起 PostgreSQL / Redis（docker compose）
+#   - 自动启动 PostgreSQL / Redis（docker compose）
 #   - 清理上次残留的 Vite / Uvicorn 端口占用
 #   - uv sync + alembic 迁移
 #   - 后台启动后端（热重载）+ Celery RAG worker + beat 定时调度器
@@ -32,12 +32,12 @@ cleanup() {
   for pid in "${BACKEND_PIDS[@]:-}"; do
     [ -n "$pid" ] && kill "$pid" 2>/dev/null || true
   done
-  # 顺手清理 Vite（dev-all.mjs 已在 SIGINT 时处理，这里兜底）
+  # 顺手清理 Vite（dev-all.mjs 已在 SIGINT 时处理，这里再补一次清理）
   (cd "$ROOT/frontend" && node scripts/stop-all.mjs "${SITES[@]}" >/dev/null 2>&1 || true)
 }
 trap cleanup EXIT INT TERM
 
-# ---------- 1. 拉起基础设施（PostgreSQL + Redis） ----------
+# ---------- 1. 启动基础设施（PostgreSQL + Redis） ----------
 echo "==> 启动 PostgreSQL / Redis（docker compose）"
 docker compose -f "$ROOT/backend/docker/postgresql/docker-compose.yml" up -d
 docker compose -f "$ROOT/backend/docker/redis/docker-compose.yml" up -d

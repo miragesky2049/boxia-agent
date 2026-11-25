@@ -2,16 +2,16 @@
 
 ## 1. 项目是什么
 
-### 1.1 一句话定位
+### 1.1 项目简介
 
-**一个面向企业内部的 AI 应用编排与运营平台。** 管理员不用写代码，就能在可视化画布上组合模型、提示词、工具与知识库，编排成应用后发布到市场，按租户与角色授权给最终用户使用。
+**一个面向企业内部的 AI 应用编排与运营平台。** 管理员通过可视化画布即可组合模型、提示词、工具与知识库，编排成应用后发布到市场，按租户与角色授权给最终用户使用。
 
 ### 1.2 系统组成
 
 项目由三块组成，彼此独立开发、通过 HTTP 接口通信：
 
 ```text
-你的浏览器
+浏览器
 │
 ├── 管理端  http://localhost:5173    ← 平台/租户管理员使用（React）
 │           http://*.localhost:5173  ← 本地验证平台/租户子域名
@@ -39,12 +39,12 @@
 | 模块         | 能力                                                                                           |
 |--------------|------------------------------------------------------------------------------------------------|
 | 应用编排     | 可视化画布（@flowgram.ai/free-layout-editor，节点 / 连线 / 小地图 / 缩放）；节点覆盖 Start、End、LLM、HTTP、API 插件、Code、Dataset 检索、IF、Loop、Sub-workflow、Set Variable、Variable Merge、Text、JSON、Batch、Conversation、Agent Loop、Human Approval 等（节点类型与 coze 数字编码对齐，未实现类型在转换阶段显式报错） |
-| 图执行引擎   | LangGraph 运行时：DAG 编译、拓扑校验（环检测 / 多 Start / 变量类型）、节点级状态机、checkpoint 断点续跑、调试运行（整图 / 单节点 / 流式 SSE）、运行记录与节点耗时用量 |
-| 应用发布     | 草稿图与不可变发布版本分离；发布生成 graph version，可回滚；租户可钉住发布版本；上架市场、上下架、启用/停用 |
-| 应用市场     | 平台应用上架后，租户可浏览、申请/订阅、试用；租户开通生成 `tenant_application_instance`（授权方式、配额、有效期、钉住版本） |
+| 图执行引擎   | LangGraph 运行时：DAG 编译、拓扑校验（环检测 / 多 Start / 变量类型）、节点级状态机、checkpoint 断点恢复、调试运行（整图 / 单节点 / 流式 SSE）、运行记录与节点耗时用量 |
+| 应用发布     | 草稿图与不可变发布版本分离；发布生成 graph version，可回滚；租户可锁定发布版本；上架市场、上下架、启用/停用 |
+| 应用市场     | 平台应用上架后，租户可浏览、申请/订阅、试用；租户开通生成 `tenant_application_instance`（授权方式、配额、有效期、锁定版本） |
 | RAG 知识库   | 文档按 Markdown 标题层级切分（保留 heading_path）→ embedding（bge-large-zh）写入向量库；检索链路：LLM query 改写（指代消解 + 多 query 变体）→ 并行向量召回 → Cross-Encoder rerank 精排（bge-reranker-v2-m3）→ 阈值过滤注入 prompt；ingest 走 Celery 异步任务，状态机 `pending → queued → processing → ready/failed`；向量库抽象支持 pgvector / Milvus |
-| 工具治理网关 | 所有跨网 HTTP 工具调用统一经过 `tool_gateway`：超时三档、可重试错误指数退避、按 (租户, 工具) 熔断、按租户限流、按 base_url 共享 httpx 连接池（HTTP/2 + keep-alive）、响应超 8KB 自动裁剪；熔断/限流/连接失败时返回中文降级文本回灌 LLM，不中断主循环 |
-| 工具接入向导 | admin 工具页 4 Tab（基础信息/服务连接/高级治理/试运行）；粘贴 curl 自动解析 method/url/headers/body；输入 MCP server URL 自动 `list_tools` 拉取工具列表勾选批量入库；高级配置滑块调超时/重试/熔断/限流 |
+| 工具调用网关 | 所有跨网 HTTP 工具调用统一经过 `tool_gateway`：超时三档、可重试错误指数退避、按 (租户, 工具) 熔断、按租户限流、按 base_url 共享 httpx 连接池（HTTP/2 + keep-alive）、响应超 8KB 自动裁剪；熔断/限流/连接失败时以中文降级文本作为观察结果返回给模型，不中断执行主流程 |
+| 工具接入向导 | admin 工具页 4 Tab（基础信息/服务连接/高级治理/试运行）；粘贴 curl 自动解析 method/url/headers/body；输入 MCP server URL 自动 `list_tools` 拉取工具列表勾选批量入库；高级配置通过滑块调整超时/重试/熔断/限流 |
 | SSRF 防护    | 所有出站 URL 强制校验：拒绝 loopback（127.0.0.0/8）、链路本地（169.254.0.0/16，含云元数据 169.254.169.254）、组播、保留、未指定地址；允许 RFC1918 私网（10.x / 172.16-31.x / 192.168.x）——租户内网 MCP 是合法部署形态 |
 | 资源管理     | 工具、提示词、技能、知识四类资源统一存 `resource` 表，按平台 / 租户归属；资源可通过 `resource_grant` 开放给租户，租户内再按角色收窄 |
 | 模型管理     | 平台维护模型供应商（`model_provider`：base_url / api_key）与模型目录（`model_catalog`：模型 ID、显示名、能力标签）；租户可在平台允许范围内选择模型 |
@@ -57,30 +57,30 @@
 | 认证与会话   | 短期 Access Token + 可撤销 Refresh Token，单次轮换、重放检测、跨标签页同步                     |
 | 权限控制     | 功能权限按权限资源编码校验菜单、页面、按钮与资源读写；列表、详情、写操作均由服务端按数据授权过滤 |
 | 安全防护     | 登录锁定、防用户名枚举、密码策略、统一错误模型、安全响应头、接口限流                           |
-| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标、租户 token 用量账本     |
+| 审计与可观测 | 审计日志、请求 ID、结构化日志、OpenTelemetry 链路追踪、Prometheus 指标、租户 token 用量记录     |
 | 工程化交付   | Alembic 迁移、Docker Compose、Nginx 反代、GitHub Actions、备份恢复脚本                         |
 
 ### 1.4 名词解释
 
-第一次看可能不懂的词，先看这张表：
+文档中涉及的术语说明如下：
 
-| 名词              | 用大白话解释                                                                         |
+| 名词              | 说明                                                                                 |
 |-------------------|--------------------------------------------------------------------------------------|
 | 应用（Application）| 一个配置好的 AI 应用，本质是一张画布（DAG 或 Agent Loop），有自己的模型、提示词、工具与知识库 |
-| 画布（Canvas）    | 可视化编排界面。拖节点、连线，就得到一条可执行流程 |
-| 节点（Node）      | 画布里的一个步骤。Start 收输入、LLM 调模型、HTTP/API 调接口、Dataset 查知识库、IF 做分支、End 输出结果 |
-| 图版本（Graph Version） | 发布时冻结的图快照。改草稿不影响线上运行，可回滚，租户可钉住某个版本 |
+| 画布（Canvas）    | 可视化编排界面，通过拖拽节点与连线组成可执行流程 |
+| 节点（Node）      | 画布中的一个执行步骤。Start 接收输入、LLM 调用模型、HTTP/API 调用接口、Dataset 检索知识库、IF 做分支、End 输出结果 |
+| 图版本（Graph Version） | 发布时冻结的图快照。改草稿不影响线上运行，可回滚，租户可锁定某个版本 |
 | 运行（Run）       | 一次执行记录，保存输入、输出、节点级耗时与用量，可用于排障与回放 |
 | 工具（Tool）      | 应用可以调用的外部接口，比如"查询天气""创建工单"。支持 HTTP 直连和 MCP 协议两种 |
-| MCP               | Model Context Protocol，一种标准的工具协议。租户跑一个 MCP Server，平台连上去自动发现它提供哪些工具，不用手写 JSON Schema |
+| MCP               | Model Context Protocol，一种标准的工具协议。租户跑一个 MCP Server，平台连上去自动发现它提供哪些工具，无需手写 JSON Schema |
 | 资源（Resource）  | 工具、提示词、技能、知识四类可复用能力的统一抽象，平台维护后可授权给租户 |
 | 提示词（Prompt）  | 写给 AI 模型的指令模板，决定它怎么理解和回答；支持 `{{变量}}` / `{{节点名.字段}}` 模板插值 |
-| 熔断（Circuit Breaker） | 保险丝。某个工具连续失败达到阈值后自动"跳闸"，一段时间内不调它，直接返回"稍后重试"，避免压垮对方 |
-| 限流（Rate Limit） | 每个租户每秒最多调固定次数工具，超出直接返回"请稍后再试"，防止一个租户刷爆平台 |
-| SSRF              | 服务端请求伪造。防止 AI 被 prompt 注入后让平台去访问云元数据（169.254.169.254）、本机（127.0.0.1）等危险地址 |
+| 熔断（Circuit Breaker） | 某个工具连续失败达到阈值后自动触发熔断（熔断开路），在恢复窗口内不再调用该工具，直接返回"稍后重试"，避免持续冲击下游服务 |
+| 限流（Rate Limit） | 每个租户每秒最多调用固定次数工具，超出时直接返回"请稍后再试"，避免单个租户占满平台处理能力 |
+| SSRF              | 服务端请求伪造。防止平台被 prompt 注入后访问云元数据（169.254.169.254）、本机（127.0.0.1）等敏感地址 |
 | 应用市场          | 平台管理员上架应用，租户浏览、订阅/试用后在自己租户内使用 |
 | 迁移（Migration） | 数据库结构的升级脚本。代码更新后执行迁移，表结构才会同步                             |
-| Token             | 登录成功后服务器发的"通行证"。之后每次请求都带上它，服务器才知道你是谁               |
+| Token             | 登录成功后由服务器签发的身份凭证，后续请求需携带该凭证，服务器据此识别用户身份       |
 | RBAC              | 基于角色的权限控制。不同角色能做的事不一样                                           |
 | 产品级平台        | 通过 `platform.<根域名>` 访问，跨租户运营，维护产品级应用、资源、模型与租户授权；产品级资源统一用配置的产品级租户 UUID（`PLATFORM_TENANT_ID`）标识 |
 | 租户级平台        | 通过 `<租户编码>.<根域名>` 访问，从市场开通应用，维护本租户自己的资源、角色与用户    |
@@ -108,9 +108,9 @@
 - 产品级平台账号单独存于 `admin_users` 并绑定平台角色；租户管理员与普通用户统一存于 `users`，通过 `user_roles` 绑定租户角色。
 - 角色只在所属作用域内生效：产品级账号只能登录 `platform.<根域名>`，租户账号只能登录本租户子域名；不同作用域可以使用相同用户名。
 
-> 项目**不预置任何默认账号和默认密码**。第一个管理员必须由你手动创建，见 3.2。
+> 项目**不预置任何默认账号和默认密码**。第一个管理员需手动创建，见 3.2。
 
-### 1.6 技术栈速览
+### 1.6 技术栈概览
 
 | 部分     | 主要技术                                                                     |
 |----------|------------------------------------------------------------------------------|
@@ -119,9 +119,9 @@
 | RAG      | bge-large-zh-v1.5（embedding）、bge-reranker-v2-m3（cross-encoder 精排）、OpenAI 兼容 LLM（query 改写）；向量库支持 pgvector / Milvus |
 | 管理端   | React 18.2、TypeScript 5.8、Vite 5、Ant Design 5、Semi UI、@flowgram.ai/free-layout-editor（画布）、Zustand、Inversify |
 | 用户端   | React 18.2、TypeScript 5.8、Vite 5、Ant Design 5、react-markdown + remark-gfm、highlight.js |
-| 图执行引擎 | LangGraph 运行时（checkpoint 断点续跑）、节点编译与拓扑校验、SSE 流式调试 |
-| 工具协议 | MCP（Model Context Protocol）Streamable HTTP/SSE；HTTP 工具走统一治理网关 |
-| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标、租户用量账本         |
+| 图执行引擎 | LangGraph 运行时（checkpoint 断点恢复）、节点编译与拓扑校验、SSE 流式调试 |
+| 工具协议 | MCP（Model Context Protocol）Streamable HTTP/SSE；HTTP 工具走统一工具调用网关 |
+| 可观测性 | 结构化日志、请求追踪（OpenTelemetry）、Prometheus 指标、租户用量记录         |
 | 测试     | pytest + httpx、Vitest + Testing Library、Playwright                         |
 | 代码质量 | ruff、mypy、oxlint、Prettier、pre-commit                                     |
 | 部署     | Docker Compose、Nginx、GitHub Actions                                        |
@@ -177,13 +177,13 @@ cd boxia-agent
 
 > 克隆私有仓库时，HTTPS 方式会要求输入 GitHub 用户名和 Token（不是登录密码）；SSH 方式要求本机已生成并上传 SSH 公钥。
 
-后面的命令默认都在**仓库根目录**执行；需要切换目录时文中会注明 `cd`。如果不确定自己在哪，执行 `pwd` 查看当前目录。
+后面的命令默认都在**仓库根目录**执行；需要切换目录时文中会注明 `cd`。如果不确定当前所在目录，执行 `pwd` 查看。
 
-> 不用 Docker 也可以：本地安装 PostgreSQL 17，然后把 `backend/.env` 里的 `DATABASE_URL` 改成你自己的连接串即可。其他步骤不变。
+> 不用 Docker 也可以：本地安装 PostgreSQL 17，然后把 `backend/.env` 里的 `DATABASE_URL` 改为实际使用的连接串即可。其他步骤不变。
 
 ---
 
-## 3. 第一次启动
+## 3. 首次启动
 
 整个过程分三步：启动数据库 → 启动后端 → 启动管理端。
 
@@ -197,7 +197,7 @@ docker compose -f backend/docker/postgresql/docker-compose.yml up -d
 
 这条命令会在后台启动一个 PostgreSQL 容器（默认账号 `postgres`，密码 `postgres`，数据库 `boxia_agent`），端口只绑定本机 `127.0.0.1:5432`。编排文件把 Compose 项目名固定为 `postgresql`，因此 `docker compose ls` 中显示的名称不受执行目录影响。
 
-确认它真的起来了：
+确认容器已启动：
 
 ```bash
 docker ps
@@ -245,7 +245,7 @@ Redis 默认绑 `127.0.0.1:6379`，开 AOF + 256mb `allkeys-lru`；DB 0 短期�
 
 **已有 PostgreSQL / Redis 时，跳过上面的 `docker compose up`**
 
-如果你本地或公司内网已经有 PostgreSQL、Redis（比如直装的 PG、公司云托管 Redis、其他项目共用的实例），不需要再起一套 Docker 容器，只要改 `backend/.env` 里的四个连接串即可：
+如本地或公司内网已有 PostgreSQL、Redis（例如直装的 PG、公司云托管 Redis、其他项目共用的实例），无需再起一套 Docker 容器，只改 `backend/.env` 里的四个连接串即可：
 
 | 场景 | 改哪个变量 |
 |------|------------|
@@ -281,7 +281,7 @@ Windows PowerShell 用户把 `cp` 换成：
 Copy-Item .env.example .env
 ```
 
-`.env` 是本地配置文件，**不要提交到 Git**（`.gitignore` 已经忽略它）。示例配置里的数据库连接正好对应上一步启动的 PostgreSQL，所以本地开发不用改。
+`.env` 是本地配置文件，**不要提交到 Git**（`.gitignore` 已经忽略它）。示例配置里的数据库连接正好对应上一步启动的 PostgreSQL，本地开发无需修改。
 
 **2）安装后端依赖**
 
@@ -370,7 +370,7 @@ uv run python -m scripts.create_admin
 
 可用 `openssl rand -base64 18` 之类的方式生成随机密码，确认其满足上面的长度与字符类别要求；**不要使用文档或他人示例中的密码**。
 
-推荐用交互方式输入密码，这样密码不会留在命令历史里。如果你确实需要非交互方式（比如自动化脚本），请通过环境变量传入你自己生成的密码：
+推荐用交互方式输入密码，这样密码不会留在命令历史里。如确需非交互方式（例如自动化脚本），请通过环境变量传入自行生成的密码：
 
 ```bash
 ADMIN_USERNAME=admin ADMIN_PASSWORD='<你的强密码>' uv run python -m scripts.create_admin
@@ -441,13 +441,13 @@ pnpm run stop          # 停止两个前端
 
 打开 <http://localhost:5173>：
 
-1. 账号填 `admin`，密码填你在 3.2 第 4 步设置的密码。
+1. 账号填 `admin`，密码为 3.2 第 4 步设置的密码。
 2. **首次登录会强制跳转到改密页面**，按提示设置新密码。
 3. 改密后会自动回到登录页，用新密码重新登录，即可进入管理后台。
 
-### 3.4 第四步：确认一切正常
+### 3.4 第四步：启动验证
 
-逐项打勾：
+按以下清单逐项验证：
 
 - [ ] `http://127.0.0.1:8000/health/ready` 返回 `ok`
 - [ ] `http://127.0.0.1:8000/docs` 能打开
@@ -457,14 +457,14 @@ pnpm run stop          # 停止两个前端
 - [ ] `http://platform.localhost:5173` 能打开产品级登录页
 - [ ] 创建租户后，`http://<租户编码>.localhost:5173` 能打开对应租户的登录页
 
-启动用户端后再补打勾：
+启动用户端后再补充验证：
 
 - [ ] `http://127.0.0.1:8001/health/live` 能返回
 - [ ] `http://<租户编码>.localhost:5174`（或 `http://localhost:5174?tenant=<租户编码>`）能用普通用户账号登录
 - [ ] 登录后看到应用卡片列表，能进入对话页
-- [ ] 进入对话页能发送一条消息并收到回复；若应用挂了工具，回复下方能看到可折叠的工具调用轨迹
+- [ ] 进入对话页能发送一条消息并收到回复；若应用配置了工具，回复下方能看到可折叠的工具调用轨迹
 
-全部通过，说明本地环境已经可用。
+全部通过后，本地环境即部署完成。
 
 ### 3.5 第五步（可选）：启动用户端
 
@@ -505,9 +505,9 @@ pnpm run dev     # http://localhost:5174
 
 > 对话页按「渐进式披露」原则默认折叠工具调用细节，只在用户主动展开时展示入参与返回。
 
-### 3.6 懒人版一键启动
+### 3.6 一键启动脚本
 
-先回到仓库根目录。如果能使用 Git Bash，一条命令就能拉起全部服务（含数据库、后端、Celery、前端），不带参数时启动两个站点：
+先回到仓库根目录。如可使用 Git Bash，一条命令即可启动全部服务（含数据库、后端、Celery、前端），不带参数时启动两个站点：
 
 ```bash
 ./ops/dev.sh          # 统一启动：管理端 + 用户端
@@ -529,7 +529,7 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 它会按顺序执行：
 
-1. 通过 docker compose 拉起 PostgreSQL（`backend/docker/postgresql/`）和 Redis（`backend/docker/redis/`），已在运行则跳过
+1. 通过 docker compose 启动 PostgreSQL（`backend/docker/postgresql/`）和 Redis（`backend/docker/redis/`），已在运行则跳过
 2. 清理上次残留的 Vite（5173/5174）和 Uvicorn（8000/8001）端口占用，避免 "Port already in use"
 3. 如果 `backend/.env` 不存在，自动从 `.env.example` 复制
 4. 执行 `uv sync` 和 `alembic upgrade head`
@@ -540,9 +540,9 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 
 注意：
 
-- 它**不会自动创建管理员**，仍然需要先完成 3.2 第 4 步。
+- 脚本**不会自动创建管理员**，仍需先完成 3.2 第 4 步。
 - RAG / Agent 运行依赖 `LLM_API_KEY`、`EMBEDDING_API_KEY`，首次启动前请在 `backend/.env` 中填入；缺失时对话与知识库接口会报错，但不影响登录与基础管理。
-- 如果 Vite 控制台报 `ECONNREFUSED 127.0.0.1:8001`，说明对应用户端后端没起，见 [4.15](#415-vite-控制台报-http-proxy-error-api-econnrefused-1270018001)。
+- 如果 Vite 控制台报 `ECONNREFUSED 127.0.0.1:8001`，说明对应用户端后端未启动，见 [4.15](#415-vite-控制台报-http-proxy-error-api-econnrefused-1270018001)。
 
 ### 3.7 如何停止服务
 
@@ -552,7 +552,7 @@ PowerShell 需要显式指定 Git Bash 路径（不要直接写 `bash ops/dev.sh
 | 管理端 / 用户端 | 在对应终端按 `Ctrl + C`；或执行 `cd frontend && pnpm run stop`（两个前端）/ `pnpm run stop admin`（单个） |
 | 数据库          | 执行 `docker compose -f backend/docker/postgresql/docker-compose.yml down`              |
 
-> `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-想彻底重置本地数据库)。
+> `down` 只停止并删除容器，**不会删除数据**。只有加 `-v` 才会连数据一起删除，见 [4.9](#49-彻底重置本地数据库)。
 
 ### 3.8 端口速查
 
@@ -603,7 +603,7 @@ cd frontend/admin && pnpm test
 
 ---
 
-## 4. 新手常见问题
+## 4. 常见问题
 
 ### 4.1 提示 `uv: command not found`
 
@@ -689,15 +689,15 @@ $env:ADMIN_PASSWORD="你的密码"
 uv run python -m scripts.create_admin
 ```
 
-或者干脆不加环境变量，直接在 `backend` 目录运行 `uv run python -m scripts.create_admin`，按提示输入。
+或者不设置环境变量，直接在 `backend` 目录运行 `uv run python -m scripts.create_admin`，按提示输入。
 
 ### 4.8 启动前端提示 Node 版本过低
 
 升级 Node.js 到 `20.19+` 或 `22.12+`。安装新版本后重新打开终端，用 `node --version` 确认。
 
-### 4.9 想彻底重置本地数据库
+### 4.9 彻底重置本地数据库
 
-如果数据库被改乱、迁移对不上，可以删掉本地数据重新开始：
+如果数据库结构异常、迁移版本不一致，可以删除本地数据重新开始：
 
 > 警告：下面的命令会**删除本地数据库中的所有数据**，只适合本地开发环境，千万不要在生产服务器执行。
 
@@ -748,7 +748,7 @@ uv run alembic heads       # 与 current 一致即表示已是最新
 
 另外，alembic 的日志输出到 **stderr**。如果只用 `> log.txt` 重定向 stdout，日志会被漏掉，需要写成 `2>&1`。
 
-想在本地看清 `Running upgrade` 的完整输出，可以先降一级再升回来（会真实回滚数据库，只在本地开发库执行）：
+如需在本地观察 `Running upgrade` 的完整输出，可以先降一级再升回来（会真实回滚数据库，只在本地开发库执行）：
 
 ```bash
 uv run alembic downgrade -1
@@ -829,9 +829,9 @@ proxy: {
 
 - `frontend/user` 下所有 `/api/*` 请求都会被转发到 `127.0.0.1:8001`（user 端后端）。
 - `frontend/admin` 下的 `/api/*` 转发到 `127.0.0.1:8000`（admin 端后端）。
-- 若报错是 `8000 ECONNREFUSED`，对应就是 admin 端后端没起，排查思路一致。
+- 若报错是 `8000 ECONNREFUSED`，对应为 admin 端后端未启动，排查思路一致。
 
-先确认端口是否真的在监听：
+先确认端口是否在监听：
 
 ```bash
 # Windows (Git Bash / PowerShell)
@@ -841,9 +841,9 @@ netstat -ano | findstr :8001
 lsof -i :8001
 ```
 
-没有输出即说明后端进程没在跑。解决方法任选其一：
+没有输出即说明后端进程未运行。解决方法任选其一：
 
-1. **推荐：一键脚本拉起全部服务**（数据库 + 双后端 + Celery + Vite）：
+1. **推荐：使用一键脚本启动全部服务**（数据库 + 双后端 + Celery + Vite）：
    ```bash
    ./ops/dev.sh all
    ```
@@ -863,4 +863,3 @@ lsof -i :8001
 > 想让前端代理指向其它后端地址（如远程联调环境），可在 `frontend/user/.env.local` 中设置 `VITE_PROXY_TARGET=http://<host>:<port>`，无需改 `vite.config.ts`。
 
 ---
-

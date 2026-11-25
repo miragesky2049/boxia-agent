@@ -25,7 +25,7 @@ config 约定：
   {applicationId, mode: "delegate"|"handoff", toolName?, description?}；
   delegate 项合成 agent_{slug} 委派工具（固定 question 入参），执行经
   services["agent_tool"]；handoff 项合成同名声明性工具（不进执行器分派），
-  模型调用即整轮短路并经 outputs.handoff 透出接管语义（M4 PRD F14.9，T-c6）
+  模型调用即整轮短路并经 outputs.handoff 返回接管语义（M4 PRD F14.9，T-c6）
 - memory: 短期记忆配置（0074 PRD F8）。user 端 chat 通道由 ChatService 依据
   本配置拉取会话历史并经 history 入参注入；画布试运行/工作流编排本期不自动拉历史
 - sensitiveTools: 需人工审批的工具声明（0074 PRD F10），项为
@@ -35,15 +35,15 @@ config 约定：
 - qualityGate: 运行时质量门（M4 PRD F19.2），{enabled, judgeModel?, rubric?,
   passScore?, maxRegen?}。节点收敛产出终稿后调 judge 内核打分（score>=passScore
   为过，阈值判定在本消费方，不信内核 payload.passed）；不达标且重生未超
-  maxRegen → critique 作 user 消息追加后再跑一次 execute（judge 与重生消耗均
+  maxRegen → critique 作 user 消息追加后再执行一次 execute（judge 与重生消耗均
   计入本 run usage/tokenBudget）；达上限仍不过或 judge 异常 → fail-open 放行
-  （U13 裁决）；终判经 outputs.judge 与 trace "judge" 事件 additive 透出。
+  （U13 裁决）；终判经 outputs.judge 与 trace "judge" 事件 additive 输出。
   审批挂起轮/接管轮/预算触顶轮/空答案轮/子 run（workflow_chain 非空，C8）跳过
 
 运行期入参（ctx.eval_context.input，20261106 P3 chat 兼容通道专用；
 画布试运行/工作流不携带这些键，行为与改造前一致）：
-- react_only: 跳过 plan/reflect，只跑一轮 execute（对齐旧 chat SSE 通道的调用成本与语义）
-- history: 多轮消息 [{role, content}, ...]，拼在 system 与当前问题之间
+- react_only: 跳过 plan/reflect，只执行一轮 execute（对齐旧 chat SSE 通道的调用成本与语义）
+- history: 多轮消息 [{role, content}, ...]，组装在 system 与当前问题之间
 - context: AgentRunContext 的 to_storage_dict 平铺形态（画布入参需 JSONB 可
   序列化，20261106 review 修正），节点内还原后透传给 LLM 请求（租户 header
   与 chat 旧通道一致）；已是 AgentRunContext 实例时原样使用
@@ -55,11 +55,11 @@ config 约定：
   config.visionEnabled 门控
 - approval_resume: 0074 PRD F10 审批续跑入参
   {approved: bool, comment: str, snapshot: {...}}；snapshot 为本节点上次挂起时
-  经 outputs 透出的执行现场（messages/plan_tasks/reflect_round/reflect_history/
+  经 outputs 返回的执行现场（messages/plan_tasks/reflect_round/reflect_history/
   usage），节点据此跳过 PLAN 与 always 库检索、还原消息后从待答轮继续执行
 - handoff_inbound: M4 PRD F14.9 接管目标侧入参 {from_application_id: 会话归属
-  应用 ID}（ChatService 在接管路由轮写入）；存在时自动注入 hand_back 归位声明
-  工具，模型调用即短路并透出 returned=true 的 handoff 输出
+  应用 ID}（ChatService 在 Agent 转交轮写入）；存在时自动注入 hand_back 归位声明
+  工具，模型调用即短路并输出 returned=true 的 handoff 结果
 
 F10 挂起流程：execute 的某轮 tool_calls 命中 sensitiveTools 且调用 ID 未经批准
 时，内核不执行该轮任何工具，节点提前返回
@@ -69,7 +69,7 @@ outputs={"awaiting_approval": True, "approval": {type/iteration/待答调用},
 中断，R6 断连清理语义不受影响）。
 
 F14.9 接管流程：execute 任一轮调用 handoff 声明工具（或目标侧 hand_back）时，
-内核整轮短路（同轮其余工具也不执行、正文不作最终回答），节点透出
+内核整轮短路（同轮其余工具也不执行、正文不作最终回答），节点返回
 outputs={"handoff": {tool_name/tool_call_id/application_id/returned/...},
 "finish_reason": "handed_off"|"handed_back"}（复用预算的 outputs 覆盖通道，
 JSONB 可序列化）；消费方（ChatService）据此切换或归位会话路由态。深度模式下
@@ -621,7 +621,7 @@ class AgentLoopNodeHandler(NodeHandler):
                     return observation
                 application_id = workflow_map.get(name)
                 if application_id is not None:
-                    # 理论不可达（有挂载行必有服务），防御性兜底并收窄类型；
+                    # 理论不可达（有挂载行必有服务），防御性检查并收窄类型；
                     # 环/深度防护在应用层端口内做（RuntimeError → [error] observation）
                     if workflow_service is None:
                         return "[error] workflow_tool 服务未注册"
@@ -639,7 +639,7 @@ class AgentLoopNodeHandler(NodeHandler):
                     )
                 agent_application_id = agent_map.get(name)
                 if agent_application_id is not None:
-                    # 理论不可达（有挂载行必有服务），防御性兜底；环/深度防护在应用层端口内
+                    # 理论不可达（有挂载行必有服务），防御性检查；环/深度防护在应用层端口内
                     if agent_service is None:
                         return "[error] agent_tool 服务未注册"
                     return await agent_service.invoke(
@@ -720,7 +720,7 @@ class AgentLoopNodeHandler(NodeHandler):
         handoff_info: dict[str, Any] | None = None
 
         # F10 审批裁决 → 待答轮调用 ID 集合：批准即放行快照里全部待答调用，
-        # 拒绝即全部回灌拒绝 observation（整轮语义，与门控"整轮挂起"对称）
+        # 拒绝即全部返回拒绝 observation（整轮语义，与门控"整轮挂起"对称）
         approved_ids: set[str] = set()
         rejected_ids: set[str] = set()
         if resume:
@@ -875,7 +875,7 @@ class AgentLoopNodeHandler(NodeHandler):
 
             if awaiting_info is not None:
                 # 0074 PRD F10：本轮含未获批的敏感工具调用，整轮挂起，
-                # 执行现场经 outputs.snapshot 透出给消费方（ChatService）持久化
+                # 执行现场经 outputs.snapshot 返回给消费方（ChatService）持久化
                 return NodeResult(
                     outputs={
                         "output": "",
@@ -916,7 +916,7 @@ class AgentLoopNodeHandler(NodeHandler):
                 "model": model_id,
             }
             if final_finish_reason:
-                # 仅预算触顶/接管短路时透出 finish_reason（正常收敛沿用 llm_end 通道的语义，
+                # 仅预算触顶/接管短路时输出 finish_reason（正常收敛沿用 llm_end 通道的语义，
                 # chat 侧 _map_canvas_trace 读到该键会覆盖 result 帧 finish_reason）
                 outputs["finish_reason"] = final_finish_reason
             if handoff_info is not None:
@@ -924,7 +924,7 @@ class AgentLoopNodeHandler(NodeHandler):
                 # 消费方（ChatService，T-c7）据此切换或归位会话路由态
                 outputs["handoff"] = handoff_info
             if gate_outcome is not None:
-                # M4-d F19.2：judge 终判 additive 透出（门关/判废时不写该键，门关态帧与基线逐字段一致）
+                # M4-d F19.2：judge 终判 additive 输出（门关/判废时不写该键，门关态帧与基线逐字段一致）
                 outputs["judge"] = gate_outcome
             return NodeResult(outputs=outputs, usage=usage_total)
         finally:
@@ -1101,7 +1101,7 @@ class AgentLoopNodeHandler(NodeHandler):
                     },
                 )
             elif event.kind == "approval_required":
-                # 0074 PRD F10：整轮挂起。透出 trace 供运行详情页展示，
+                # 0074 PRD F10：整轮挂起。输出 trace 供运行详情页展示，
                 # payload 交回 run() 组装 approval/snapshot 输出
                 awaiting = payload
                 await emit(
@@ -1139,13 +1139,13 @@ class AgentLoopNodeHandler(NodeHandler):
 
     # ---------- 质量门（M4 PRD F19.2）----------
     async def _apply_quality_gate(self, gc: _GateContext) -> dict[str, Any] | None:
-        """对收敛终稿跑 judge 打分与有限次重生，返回 outputs.judge 终判。
+        """对收敛终稿执行 judge 打分与有限次重生，返回 outputs.judge 终判。
 
         返回 None 表示重生途中出现审批挂起/接管短路，门结论作废（gc.state 已同步
         更新，调用方按原通道出快照/切路由）；达 maxRegen 仍不过、judge 调用异常、
         预算耗尽均 fail-open 放行（U13 裁决 + 验收 7），judge 异常时带 error 标记。
         阈值判定在本消费方（score >= passScore），不信内核 payload.passed——
-        内核缺省 7 兜底会与自定义 passScore 漂移。
+        内核缺省按 7 推导判定，会与自定义 passScore 漂移。
         """
         gate = gc.gate
         max_regen = int(gate["maxRegen"])
@@ -1211,13 +1211,13 @@ class AgentLoopNodeHandler(NodeHandler):
                 }
             )
             # 批末 review P1-1：重生推进一个真实轮次，挂起/接管走原通道时
-            # 快照轮次与现场自洽（续跑从该轮起点继续，不复跑已完成轮）
+            # 快照轮次与现场自洽（续跑从该轮起点继续，不重复执行已完成轮）
             gc.state.reflect_round += 1
             execute_result = await gc.do_execute(gc.state.reflect_round)
             gc.state.awaiting = execute_result["awaiting"]
             gc.state.handoff = execute_result["handoff"]
             if gc.state.awaiting is not None or gc.state.handoff is not None:
-                # 重生途中进入审批/接管通道：门结论作废，挂起现场与接管语义优先透出
+                # 重生途中进入审批/接管通道：门结论作废，优先返回挂起现场与接管语义
                 return None
             gc.state.budget_hit = execute_result["budget_hit"]
             new_answer = str(execute_result["content"] or "")
@@ -1614,7 +1614,7 @@ def _parse_mcp_entries(raw: Any) -> list[dict[str, Any]]:
 def _parse_mcp_timeout_seconds(raw: Any) -> float:
     """条目级调用超时（F17.3②）：合法区间 1~300s，缺省/非法回落默认 30s。
 
-    表单侧（T-b3）会做严格校验，此处是运行期兜底：脏配置不能让节点崩溃。
+    表单侧（T-b3）会做严格校验，此处是运行期默认值回退：脏配置不能导致节点执行失败。
     """
     if raw is None:
         return DEFAULT_TIMEOUT_SECONDS
@@ -1654,7 +1654,7 @@ def _parse_sub_agent_entries(raw: Any) -> list[dict[str, Any]]:
     """subAgents 配置 → 归一化协作挂载列表（M4-c F14.1）。
 
     缺/非法 applicationId 跳过；mode 非法回落 delegate；delegate+handoff 合计超
-    MAX_SUB_AGENTS 截断（表单侧已严格校验，此处是运行期兜底，脏配置不能让节点崩）。
+    MAX_SUB_AGENTS 截断（表单侧已严格校验，此处是运行期保底校验，脏配置不能导致节点执行失败）。
     """
     if not isinstance(raw, list):
         return []

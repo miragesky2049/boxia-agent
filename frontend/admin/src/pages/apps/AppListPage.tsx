@@ -708,7 +708,7 @@ export default function AppListPage() {
           <Form.Item
             label="默认可见范围模板"
             name="visibility_template"
-            tooltip="租户未配置可见范围时的兜底值：全员可见，或等待租户自行配置白名单"
+            tooltip="租户未配置可见范围时的默认值：全员可见，或等待租户自行配置白名单"
           >
             <Radio.Group
               options={[

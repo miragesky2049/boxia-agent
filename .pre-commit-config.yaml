@@ -26,14 +26,19 @@ repos:
         language: system
         files: ^backend/.*\.py$
         pass_filenames: false
+      # 20261124：pnpm 在 manifest 与 node_modules 不一致时会在 run/exec 前自动 install
+      # 并重写 pnpm-lock.yaml（实测一次提交里耗 2m22s、锁文件 +6 -2），钩子不该改依赖，
+      # 故统一用 --config.verify-deps-before-run=false 关闭；依赖同步交 ops/dev.sh 或手工 install
       - id: frontend-oxlint
         name: frontend oxlint
-        entry: pnpm --dir frontend/admin exec oxlint src
+        entry: pnpm --dir frontend/admin --config.verify-deps-before-run=false exec oxlint src
         language: system
         files: ^frontend/admin/src/.*\.(ts|tsx)$
         pass_filenames: false
       - id: frontend-prettier
         name: frontend prettier check
-        entry: pnpm --dir frontend/admin run format:check
+        entry: pnpm --dir frontend/admin --config.verify-deps-before-run=false run format:check
         language: system
         files: ^frontend/admin/.*\.(ts|tsx|css|json)$
+        # pnpm --dir 把工作目录切到 frontend/admin，pre-commit 传入的仓库根相对路径在该目录下无法解析
+        pass_filenames: false

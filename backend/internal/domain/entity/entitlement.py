@@ -23,7 +23,7 @@ STATUS_REVOKED = "revoked"
 STATUS_WAIT_EFFECT = "wait_effect"
 STATUS_EXPIRED = "expired"
 
-# 终态：时间不再参与计算，直接透出持久值（suspended/disabled 视为不可用）
+# 终态：时间不再参与计算，直接返回持久值（suspended/disabled 视为不可用）
 _TERMINAL_STATUSES = frozenset({STATUS_REVOKED, STATUS_SUSPENDED, STATUS_DISABLED})
 
 
@@ -34,7 +34,7 @@ def effective_status(
     now: datetime,
     grace_days: int = 0,
 ) -> str:
-    """读侧生效判定：revoked/suspended/disabled 原样透出；其余按时间区间归一到三态。
+    """读侧生效判定：revoked/suspended/disabled 原样返回；其余按时间区间归一到三态。
 
     宽限期（P3-11）：grace_days>0 时到期后 N 天内仍显 expired（只读窗口，配置保留可恢复），
     超过窗口读作 revoked，与定时流转口径一致；grace_days=0 关闭宽限期，行为同旧版。

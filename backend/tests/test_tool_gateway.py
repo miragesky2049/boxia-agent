@@ -174,7 +174,7 @@ def test_invoke_http_5xx_retries_then_raises() -> None:
 
 
 def test_invoke_http_4xx_raises_tool_execution_error() -> None:
-    """4xx 不重试，抛 ToolExecutionError 回灌 LLM。"""
+    """4xx 不重试，抛 ToolExecutionError 作为 observation 返回给 LLM。"""
     mock_response = MagicMock(status_code=400, text="bad params")
     mock_client = AsyncMock()
     mock_client.request = AsyncMock(return_value=mock_response)

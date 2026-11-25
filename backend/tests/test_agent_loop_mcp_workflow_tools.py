@@ -383,7 +383,7 @@ def test_knowledge_tool_end_carries_chunks_meta() -> None:
     assert meta[0]["excerpt"].startswith("退款需在")
 
 
-# ---------- F11.1：节点侧预算透出 ----------
+# ---------- F11.1：节点侧预算输出 ----------
 def test_node_token_budget_marks_finish_reason_and_skips_tool() -> None:
     touched: list[str] = []
 
@@ -611,7 +611,7 @@ def test_sub_agent_handoff_prompt_section_and_mixed_mounts() -> None:
 
 def test_sub_agent_handoff_synthesizes_declarative_tool_and_short_circuits() -> None:
     """T-c6：mode=handoff 合成声明性工具（describe 同 delegate 口径 + 接管注记），
-    命中即整轮短路，经 outputs.handoff 透出；不进执行器分派（invoke 零调用）。"""
+    命中即整轮短路，经 outputs.handoff 返回；不进执行器分派（invoke 零调用）。"""
     fake = _FakeAgentTool(described={})
     llm = _ScriptedLLM(
         [
@@ -658,7 +658,7 @@ def test_sub_agent_handoff_without_call_keeps_baseline_outputs() -> None:
 
 def test_hand_back_injected_on_inbound_target_side() -> None:
     """T-c6：ChatService 写 handoff_inbound 入参后，目标侧自动注入 hand_back
-    声明工具，模型调用即透出 returned=True 的 handoff（handed_back）。"""
+    声明工具，模型调用即返回 returned=True 的 handoff（handed_back）。"""
     llm = _ScriptedLLM(
         [
             _Resp(content="", tool_calls=[_ToolCall("c1", "hand_back", "{}")], usage=_Usage(1, 1)),

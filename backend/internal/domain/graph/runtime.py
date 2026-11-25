@@ -257,7 +257,7 @@ class GraphRuntime:
             if delete_thread is None:
                 return
             await delete_thread(make_checkpoint_thread_id(self.tenant_id, self.thread_id))
-        except Exception:  # noqa: BLE001 - 兜底清理失败不掩盖断连主流程
+        except Exception:  # noqa: BLE001 - 断连时的 checkpoint 清理失败不应影响断连主流程
             logger.warning("checkpoint 清理失败 thread=%s run=%s", self.thread_id, self.run_id)
 
     async def list_checkpoint_history(self, limit: int = 20) -> list[dict[str, Any]]:

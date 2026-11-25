@@ -150,7 +150,7 @@ def test_agent_loop_reflect_not_done_then_re_execute() -> None:
 
 
 def test_agent_loop_with_tool_call_in_execute_phase() -> None:
-    """Execute 阶段 LLM 返回 tool_calls，工具被执行后回灌。"""
+    """Execute 阶段 LLM 返回 tool_calls，工具执行后结果写回 messages 返回给模型。"""
     tool_calls_seen: list[tuple[str, dict]] = []
 
     def _tool_executor(name: str, args: dict) -> str:
@@ -477,7 +477,7 @@ def _knowledge_services(llm_script: list[_Resp], store: _FakeVectorStore) -> dic
 
 
 def test_agent_loop_datasets_on_demand_synthesizes_knowledge_tool() -> None:
-    """onDemand 库合成 knowledge_search_1 工具：模型发起检索 → 走向量库 → 结果回灌。"""
+    """onDemand 库合成 knowledge_search_1 工具：模型发起检索 → 走向量库 → 结果写回 messages。"""
     store = _FakeVectorStore({"d1": [_FakeSearchResult("退款需在7天内申请", 0.912)]})
     kit = _knowledge_services(
         [
@@ -509,7 +509,7 @@ def test_agent_loop_datasets_on_demand_synthesizes_knowledge_tool() -> None:
     assert store.searches[0]["dataset_id"] == "d1"
     assert store.searches[0]["top_k"] == 3
     assert store.searches[0]["tenant_id"] == str(ctx.env.tenant_id)
-    # 检索结果以 tool 消息回灌（带相关性序号格式）
+    # 检索结果以 tool 消息追加到消息列表（带相关性序号格式）
     second_messages = kit["llm"].calls[1]["messages"]
     tool_msg = next(m for m in second_messages if m["role"] == "tool")
     assert "退款需在7天内申请" in tool_msg["content"]
@@ -727,7 +727,7 @@ def test_agent_loop_awaiting_approval_outputs_snapshot() -> None:
     assert snapshot["reflect_round"] == 0 and snapshot["plan_tasks"] == []
     assert snapshot["usage"]["total_tokens"] == 5
     assert result.usage["total_tokens"] == 5
-    # trace 透出挂起事件供运行详情页展示
+    # trace 输出挂起事件供运行详情页展示
     assert any(t == "tool_approval_required" for t, _ in events)
 
 
@@ -781,7 +781,7 @@ def test_agent_loop_resume_approved_executes_pending_round() -> None:
 
 
 def test_agent_loop_resume_rejected_does_not_execute() -> None:
-    """拒绝续跑：pending 调用回灌拒绝 observation，不触达执行器。"""
+    """拒绝续跑：pending 调用返回拒绝 observation 给模型，不触达执行器。"""
 
     def executor(name: str, args: dict) -> str:
         raise AssertionError("拒绝的调用不得执行")

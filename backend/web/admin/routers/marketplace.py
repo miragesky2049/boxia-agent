@@ -219,7 +219,7 @@ async def resume_application(
     且状态为 interrupted，否则 404。防止跨租户通过伪造 thread_id 接管他人运行。
 
     同时校验人审节点配置的 assignee_role：当前 principal 的 role_code 必须匹配，
-    superadmin 始终放行（超管兜底）。不匹配抛 403。
+    superadmin 始终放行（免角色校验）。不匹配抛 403。
     """
     tenant_id = context.tenant_id
     if tenant_id is None:

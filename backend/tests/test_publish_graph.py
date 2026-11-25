@@ -5,7 +5,7 @@
 2. get_runtime_graph 在未发布时回退 latest（向后兼容）
 3. get_runtime_graph 在发布后取 published 版本，而不是未发布的新 draft
 4. 无 graph 时 publish 抛 NotFoundError
-5. 发布闸门：画布引用不在启用模型目录中的 modleName 时拦截发布
+5. 发布校验：画布引用不在启用模型目录中的 modleName 时拦截发布
 """
 
 from __future__ import annotations
@@ -82,7 +82,7 @@ class FakeUow:
 
 
 class FakeModelRepo:
-    """最小模型目录 fake：只为发布闸门提供启用中的 model_id 集合。"""
+    """最小模型目录 fake：只为发布校验提供启用中的 model_id 集合。"""
 
     def __init__(self, model_ids: list[str]) -> None:
         self._model_ids = model_ids
@@ -207,7 +207,7 @@ def test_publish_blocks_unknown_model_reference():
 
 
 def test_publish_allows_catalog_model_and_empty_reference():
-    """目录内模型可发布；未配置模型的画布不受闸门影响。"""
+    """目录内模型可发布；未配置模型的画布不受该校验影响。"""
     service, app_id, repo = _make_service(model_repo=FakeModelRepo(["deepseek-v4-flash"]))
     _save_agent_draft(service, app_id, "deepseek-v4-flash")
     assert service.publish_graph(app_id)["published_version"] == 1

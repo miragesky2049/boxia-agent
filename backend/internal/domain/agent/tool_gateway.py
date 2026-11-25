@@ -1,8 +1,8 @@
 """跨网工具调用统一治理层：超时 / 重试 / 熔断 / 限流 / 连接池 / 降级。
 
 所有 HTTP 工具调用强制经过这一层，不允许 HttpTool 裸调 httpx。
-设计目标：让 LLM 主循环与 ToolNode 完全无感租户网络问题——熔断/限流/连接失败
-时返回标准 observation 文本回灌 LLM，而不是把异常抛到主循环。
+设计目标：租户网络问题（熔断/限流/连接失败）不外泄到 LLM 主循环与
+ToolNode——失败时返回标准 observation 文本给模型，而不是把异常抛到主循环。
 """
 
 from __future__ import annotations
@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class ToolExecutionError(Exception):
-    """工具执行失败：runner 捕获后作为 tool 结果回灌给 LLM，不中断主循环。"""
+    """工具执行失败：runner 捕获后作为 tool 结果返回给 LLM，不中断主循环。"""
 
     def __init__(self, message: str) -> None:
         super().__init__(message)

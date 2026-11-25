@@ -93,7 +93,7 @@ async def get_agent(
                 or node_cfg.get("model_id")
                 or ""
             )
-            # M4-c F14.6（additive）：协作挂载透出 [{application_id, name, mode}]。
+            # M4-c F14.6（additive）：协作挂载返回 [{application_id, name, mode}]。
             # 画布条目只存 ID，展示名按当前用户可见应用卡片解析（不可见则空串，
             # 前端据 mode 徽标退化显示 ID 尾段，不阻塞详情）
             sub_agent_entries = [
@@ -175,7 +175,7 @@ async def get_agent(
             for rid in node_cfg.get("tool_resource_ids") or []:
                 tools.append({"type": "tool", "resource_id": str(rid)})
     except Exception:  # noqa: BLE001
-        # graph 未配置或加载失败时保持空壳兜底，不影响应用详情返回
+        # graph 未配置或加载失败时保持空壳返回，不影响应用详情返回
         pass
 
     return {

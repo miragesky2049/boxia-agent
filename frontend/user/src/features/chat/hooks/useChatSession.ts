@@ -337,7 +337,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         })
       })
       .catch((err: unknown) => {
-        console.error('对齐接管路由态失败', err)
+        console.error('对齐接管状态失败', err)
       })
   }, [fetchConversations])
 
@@ -597,7 +597,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
                   dispatch({ type: 'set_conversation', conversationId })
                 }
                 // M4-c T-c9：result 帧必然后于服务端 run 提交发出，每轮结束都向
-                // 会话摘要对齐一次发言权（断连窗丢帧、专家自动归位等路径的兜底收敛）
+                // 会话摘要对齐一次发言权（覆盖断连丢帧、专家自动归位等场景的最终同步）
                 syncHandoffFromSummary()
                 // M4 PRD F14.10：接管/归位轮 result 正文为空（通告走 handoff 帧），
                 // 用 stop 收口并移除无内容的助手占位，避免 live 留下空泡
@@ -932,7 +932,7 @@ export function useChatSession({ agentId, flowType }: UseChatSessionParams) {
         id: item.conversation_id,
         title: item.title || '未命名会话',
         updatedAt: formatConversationTime(item.updated_at),
-        // M4 PRD F14.10：接管中会话在侧栏透出应答专家名
+        // M4 PRD F14.10：接管中会话在侧栏展示应答专家名
         handoffAgent: item.active_application || undefined,
       })),
     [conversations],

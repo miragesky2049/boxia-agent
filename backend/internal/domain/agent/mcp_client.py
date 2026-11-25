@@ -20,7 +20,7 @@ DEFAULT_TIMEOUT_SECONDS = 30.0
 # 连接失败最大尝试次数：1 次原始 + 1 次重试（F17.3③；工具调用不自动重试——非幂等）
 _MAX_CONNECT_ATTEMPTS = 2
 
-# close 的兜底预算：调用超时被 wait_for 取消后连接状态不可信，close 需快速收尾
+# close 自身的超时上限：调用超时被 wait_for 取消后连接状态不可信，close 需快速完成
 _CLOSE_TIMEOUT_SECONDS = 5.0
 
 

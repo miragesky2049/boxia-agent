@@ -201,8 +201,9 @@ test.describe('多租户', () => {
 
     try {
       await loginTenant(page, request, token)
+      // 0070 起租户 /apps 复用订阅应用列表（表格视图），0072 起应用开通走可见范围
       await page.goto('/apps')
-      await expect(page.getByText(name)).toHaveCount(0)
+      await expect(page.getByRole('row', { name: new RegExp(name) })).toHaveCount(0)
 
       const granted = await request.post('/api/v1/admin/entitlements/batch', {
         headers: { Authorization: `Bearer ${token}` },
@@ -215,11 +216,11 @@ test.describe('多租户', () => {
       expect(granted.ok()).toBeTruthy()
 
       await page.reload()
-      const card = page.locator('.ant-card', { hasText: name })
-      await expect(card).toBeVisible()
-      await expect(card).toContainText('已开通')
+      const row = page.getByRole('row', { name: new RegExp(name) })
+      await expect(row).toBeVisible()
+      await expect(row).toContainText('全员可见')
     } finally {
-      // 应用无物理删除端点：回收权益即可让租户侧不可见
+      // 先回收权益解除租户实例引用，再物理删除应用，避免历次运行残留堆积（分页挤出效应）
       await request.post('/api/v1/admin/entitlements/batch', {
         headers: { Authorization: `Bearer ${token}` },
         data: {
@@ -228,6 +229,10 @@ test.describe('多租户', () => {
           items: [{ object_type: 'app', object_id: appId }],
         },
       })
+      const purged = await request.delete(`/api/v1/admin/apps/${appId}?confirm=true`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+      expect(purged.status()).toBe(200)
     }
   })
 

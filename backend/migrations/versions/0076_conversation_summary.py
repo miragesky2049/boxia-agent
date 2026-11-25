@@ -7,7 +7,7 @@
 - summary_through_message_id 指向"摘要已覆盖到"的那条消息，其后的消息按原文
   进上下文；回写走乐观并发（UPDATE ... WHERE 水位线 IS NOT DISTINCT FROM 旧值），
   因此不建外键——message 清空/物理删除不应被摘要引用锁住，水位线悬空由
-  plan_summarization 按"找不到该条消息则整体重算"兜底。
+  plan_summarization 按"找不到该条消息则整体重算"处理。
 存量行不受影响：三列均可空。
 """
 

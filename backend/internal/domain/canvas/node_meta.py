@@ -8,14 +8,14 @@
 - category: 分类（basic/ai/plugin/workflow/logic/io/control/knowledge/component/conversation/history/message/misc，前端分组对齐 coze）
 - icon: 图标字符（emoji/短文本，前端直接渲染）
 - description: 节点一句话描述（hover 提示）
-- subtitle_hint: 静态副标题兜底（依赖运行期 config 的动态副标题仍由前端生成）
+- subtitle_hint: 静态副标题（动态副标题不可用时的默认展示；运行期 config 动态副标题由前端生成）
 - next_recommendations: 推荐下游 type_key 列表（「下一步」区块）
 - capabilities: 能力声明（可删/可复制/可试运行/有子图/有输出）
 - default_ports: 默认 input/output 端口列表
 - config_fields: 配置表单字段 schema，每个字段带 group（配置抽屉分组标题）
 
 新增节点 handler 时，必须同时在本文件登记一条元数据，前端节点库才能看到。
-展示层图标/分组/副标题兜底/推荐/配置分组全部由本文件驱动，前端只保留离线 fallback。
+展示层图标/分组/副标题默认值/推荐/配置分组全部由本文件驱动，前端只保留离线 fallback。
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ _NODE_METAS: list[NodeMeta] = [
                 name="modleName",
                 label="模型",
                 field_type="model_picker",
-                description="留空或模型不可用时按关键词包含匹配兜底",
+                description="留空或模型不可用时回退为按关键词包含匹配",
                 group="意图设置",
             ),
             ConfigFieldMeta(

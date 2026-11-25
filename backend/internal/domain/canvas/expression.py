@@ -131,7 +131,7 @@ def rewrite_template_refs(
     result = expr
     next_index = 0
 
-    # 1) 节点引用：优先吃掉固定的 `.output` 关键字，再兜底裸节点 ID
+    # 1) 节点引用：优先匹配固定的 `.output` 关键字，再回退匹配裸节点 ID
     for node_id in sorted({n for n in node_ids if n}, key=lambda s: (-len(s), s)):
         alias = f"_ref_{next_index}"
         head = r"(?<![A-Za-z0-9_.\-])" + re.escape(node_id)

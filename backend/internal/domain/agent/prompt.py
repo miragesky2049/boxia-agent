@@ -82,7 +82,7 @@ EXTRACT_PROMPT = """你是用户记忆管理助手，负责从一轮对话中挑
 
 
 # M4-d PRD F19.1（20261108）：judge 默认评分准则——相关性/事实性/无害性三段，
-# 通过分阈值 7 与 JudgeVerdict 兜底推导常量（judge.DEFAULT_PASS_SCORE）保持一致；
+# 通过分阈值 7 与 JudgeVerdict 缺字段时的默认推导常量（judge.DEFAULT_PASS_SCORE）保持一致；
 # 应用配置 qualityGate.rubric / judgeSampling.rubric / 评估器 config.rubric 非空时覆盖。
 JUDGE_RUBRIC_DEFAULT = (
     "从相关性（是否直接回应问题）、事实性（事实与引用是否准确、有无编造）、"

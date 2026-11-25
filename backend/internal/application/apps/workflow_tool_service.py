@@ -90,7 +90,7 @@ class WorkflowToolService:
         """执行目标 workflow 并返回文本 observation。
 
         目标不可用/环/超深抛 RuntimeError，由 ReAct 内核转 [error] observation
-        回灌模型自纠，不中断对话（与知识库工具失败语义一致）。
+        返回给模型，让其基于错误信息自行修正，不中断对话（与知识库工具失败语义一致）。
         """
         resolved = await self._resolve_target(application_id, chain, spec_only=False)
         if resolved is None:
@@ -128,7 +128,7 @@ class WorkflowToolService:
         """鉴权 + 类型 + 环/深度校验，返回 (卡片, 运行时 graph)。
 
         spec_only=True 用于 describe：只跳过不可用项，不做环/深度硬拒绝
-        （工具清单可先展示，执行时再兜底）。invoke 路径做完整防护。
+        （工具清单可先展示，环/深度在执行阶段再拦截）。invoke 路径做完整防护。
         """
         try:
             app_id = UUID(str(application_id))

@@ -28,7 +28,7 @@ function makeMeta(typeKey: string, capabilities: Partial<NodeCapabilities> = {})
 }
 
 describe('resolveCapabilities', () => {
-  it('后端声明优先于本地兜底', () => {
+  it('后端声明优先于本地默认配置', () => {
     const meta = makeMeta('start', { deletable: true })
     expect(resolveCapabilities(meta, 'start').deletable).toBe(true)
   })
@@ -40,7 +40,7 @@ describe('resolveCapabilities', () => {
     expect(caps.hasOutputs).toBe(false)
   })
 
-  it('元数据缺失时使用本地兜底', () => {
+  it('元数据缺失时使用本地默认配置', () => {
     expect(canDelete(undefined, 'start')).toBe(false)
     // start/end 为画布系统节点：start 不可复制，end 同样不可复制
     expect(canCopy(undefined, 'start')).toBe(false)

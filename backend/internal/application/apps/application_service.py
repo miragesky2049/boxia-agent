@@ -354,7 +354,7 @@ class ApplicationService:
     ):
         """仓储/缓存/默认模型 ID 由组合根（web/deps/apps_services.py）构造注入。
 
-        model_repo（可选）：发布闸门读取启用中的模型目录，用于拦截画布引用不存在
+        model_repo（可选）：发布校验时读取启用中的模型目录，用于拦截画布引用不存在
         模型的发布；轻量 fake/测试未注入时跳过该项检查。
         """
         self._uow = uow
@@ -727,7 +727,7 @@ class ApplicationService:
     def get_tenant_visibility(self, application_id: UUID, tenant_id: UUID) -> dict:
         """读取本租户内某应用的可见范围。
 
-        scope 不存在时按平台 visibility_template 兜底返回（不写库）；
+        scope 不存在时按平台 visibility_template 返回默认值（不写库）；
         返回值带 configured 字段，前端据此区分「未配置」和「已配置」。
         """
         app = self._repo.get_application(application_id)
@@ -942,11 +942,11 @@ class ApplicationService:
         """运行时 graph：Redis 缓存命中即返回；miss 回 DB，应用租户 config 覆盖。
 
         版本选择顺序（T13）：
-        1. 租户 pinned_graph_version（最高优先级，运营兜底）
+        1. 租户 pinned_graph_version（最高优先级，供运营人工覆盖）
         2. application.published_graph_version（用户端实际跑的 live 版本）
         3. latest version（未发布时回退，向后兼容）
         """
-        # 1. 读 latest version 兜底
+        # 1. 读 latest version（无已发布版本时的回退版本）
         latest = self._repo.get_latest_graph_version(application_id)
         if latest is None:
             raise NotFoundError("graph 不存在")
@@ -957,7 +957,7 @@ class ApplicationService:
         published_version = app.get("published_graph_version") if app else None
         base_version = int(published_version) if published_version else latest_version
 
-        # 3. 租户 pin 覆盖；实例存在但已失效（撤销/过期）时兜底拒绝，防绕过入口门槛
+        # 3. 租户 pin 覆盖；实例存在但已失效（撤销/过期）时直接拒绝，防止绕过入口校验
         pinned_version = base_version
         if tenant_id is not None:
             inst = self._repo.get_instance(tenant_id, application_id)
@@ -991,7 +991,7 @@ class ApplicationService:
 
     # ========== 发布动作（draft → live 快照） ==========
     def _known_model_ids(self) -> set[str] | None:
-        """发布闸门的可用模型集合：目录中已启用模型 + settings 默认模型兜底。
+        """发布校验的可用模型集合：目录中已启用模型 + settings 默认模型（保底加入）。
 
         组合根未注入 model_repo（fake/测试装配）时返回 None，调用方跳过模型检查，
         避免测试环境因目录为空而误拦截所有发布。
@@ -1021,7 +1021,7 @@ class ApplicationService:
         if latest is None:
             raise NotFoundError("graph 不存在，请先保存画布")
 
-        # 发布是运行态闸门：结构、必填项、表达式、未连线节点全部按 error 拦截
+        # 发布属于运行态校验：结构、必填项、表达式、未连线节点全部按 error 拦截
         latest_graph = _parse_graph(latest.get("graph"), self._storage)
         variable_names, system_names = self.validation_variable_scope(application_id)
         issues = validate_raw_graph(
@@ -1182,7 +1182,7 @@ class ApplicationService:
         tenant_id: UUID,
         user_id: UUID,
     ) -> dict:
-        """用户访问应用前的鉴权闸门：不可见抛 NotFoundError。"""
+        """用户访问应用前的鉴权检查：不可见抛 NotFoundError。"""
         app = self.get_visible_app_for_user(application_id, tenant_id, user_id)
         if app is None:
             raise NotFoundError("应用不存在或未开通")
@@ -1378,7 +1378,7 @@ class ApplicationService:
 
         不复制（运行态/租户关系数据）：
         - app_visibility_scope / whitelist（v2 可见范围按 (应用, 租户) 隔离，
-          属租户侧配置；副本新租户按继承的 visibility_template 走兜底）
+          属租户侧配置；副本新租户使用继承的 visibility_template 作为默认值）
         - tenant_application_instance、tenant_application_config、application_user_variable
         - conversation、message、run、run_node_execution、tenant_usage_ledger
         - event_webhook、resource_grants、entitlement_plan_item、application_apply
@@ -1401,7 +1401,7 @@ class ApplicationService:
             new_name = f"{source_name}的副本"
         else:
             new_name = f"{source_name}的副本{existing_copies + 1}"
-        # 名称长度兜底（application.name 列长度 200）
+        # 名称超长时截断，防止超出列宽（application.name 列长度 200）
         if len(new_name) > 200:
             new_name = new_name[:197] + "..."
 
@@ -1451,7 +1451,7 @@ class ApplicationService:
                     created_by=actor_id,
                 )
 
-            # v2 可见范围（app_visibility_scope）属租户侧配置，随副本新租户订阅按模板兜底，不复制
+            # v2 可见范围（app_visibility_scope）属租户侧配置，不复制；副本新租户订阅时用模板默认值
 
             # 写审计日志
             self._uow.audit_logs.record(

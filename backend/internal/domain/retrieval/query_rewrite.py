@@ -77,7 +77,7 @@ class LLMQueryRewriter(QueryRewriter):
         history: list[dict],
         variant_count: int = 3,
     ) -> QueryRewriteResult:
-        """调用 LLM 生成改写结果；解析失败时兜底返回原始 query。"""
+        """调用 LLM 生成改写结果；解析失败时原样返回原始 query。"""
         if not query.strip():
             return QueryRewriteResult(standalone=query, variants=[])
 
@@ -137,7 +137,7 @@ class LLMQueryRewriter(QueryRewriter):
                 return data
         except json.JSONDecodeError:
             pass
-        # 兜底：抓第一个 { ... } 块
+        # 直接解析失败时，提取第一个 { ... } 块
         match = re.search(r"\{.*\}", cleaned, flags=re.DOTALL)
         if not match:
             return None

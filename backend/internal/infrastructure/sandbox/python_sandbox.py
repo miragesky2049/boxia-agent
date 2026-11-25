@@ -5,7 +5,7 @@
 - 通过 stdin/stdout 传 JSON，避免命令注入
 - 超时强制 kill
 - import 白名单：只允许纯计算/字符串/时间相关的标准库，禁止 os/sys/subprocess/socket 等
-- 内存/CPU 限制在 POSIX 下用 resource.setrlimit，Windows 下仅超时兜底
+- 内存/CPU 限制在 POSIX 下用 resource.setrlimit，Windows 下仅靠超时保护
 
 用户代码约定：
     def main(args: dict) -> dict:
@@ -141,7 +141,7 @@ class PythonSandbox:
         )
 
     def _build_wrapper(self, user_code: str) -> str:
-        """生成包装脚本：把用户代码塞进 main 调用，捕获 JSON 输出。
+        """生成包装脚本：将用户代码包装为 main 调用，捕获 JSON 输出。
 
         在执行用户代码前注入受限的 __builtins__.__import__，只允许白名单模块。
         """
