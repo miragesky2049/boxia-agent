@@ -17,7 +17,7 @@ class EntitlementItemIn(BaseModel):
 
 
 class EntitlementBatchRequest(BaseModel):
-    """批量开通/取消请求；items 上限 100（服务层另有 200 兜底）。"""
+    """批量开通/取消请求；items 上限 100（服务层另有 200 条的上限校验）。"""
 
     tenant_id: UUID
     mode: Literal["grant", "revoke"]

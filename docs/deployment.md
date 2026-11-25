@@ -1,8 +1,8 @@
 > 返回 [项目手册](../README.md)
 
-## 14. 生产环境落地部署
+## 14. 生产环境部署
 
-> 本节命令用于 **Linux 生产服务器**。本地开发不需要看这一节。执行前请先在服务器安装 Docker Engine 与 Docker Compose v2，并克隆代码。
+> 本节命令适用于 **Linux 生产服务器**，本地开发环境无需参照。执行前请先在服务器安装 Docker Engine 与 Docker Compose v2，并克隆代码。
 
 ### 14.1 推荐部署架构
 
@@ -31,8 +31,8 @@ backend-admin / backend-user 容器（FastAPI）
 - 入口使用泛域名 `*.example.com`：`platform.example.com` 为产品级平台，其余子域为租户。
 - `backend-admin`、`backend-user`、`db`、`redis`、`celery-worker`、`celery-beat` 不发布端口，只走 Compose 内部网络。
 - 两个站点镜像与容器独立：`backend-admin` 只挂 admin 路由，`backend-user` 只挂 user 路由。
-- `celery-worker` 与 backend 镜像同包，仅启动命令不同；它同时消费知识库 ingest、长期记忆抽取、评测 judge 抽样与权益周期任务（生效 / 到期流转、宽限期回收、对账），生产环境应保持运行。
-- `celery-beat` 同样与 backend 镜像同包，只按周期投递任务、不执行任务；**必须保持单副本**，多实例会导致定时任务重复投递。
+- `celery-worker` 与 backend 使用同一镜像，仅启动命令不同；同时消费知识库 ingest、长期记忆抽取、评测 judge 抽样与权益周期任务（生效 / 到期流转、宽限期回收、对账）队列，生产环境应保持运行。
+- `celery-beat` 同样与 backend 使用同一镜像，只按周期投递任务、不执行任务；**必须保持单副本**，多实例会导致定时任务重复投递。
 - `/metrics` 由前端 Nginx 直接拒绝外部访问；如需采集，从内部网络访问。
 
 ### 14.2 服务器准备
@@ -44,7 +44,7 @@ backend-admin / backend-user 容器（FastAPI）
 | 磁盘       | 40 GB 以上，数据库单独规划增长                      |
 | 软件       | Docker Engine 24+、Docker Compose v2、Git           |
 | 网络       | 安全组/防火墙只开放 22、80、443；22 建议限制来源 IP |
-| 域名       | 准备一个域名并解析到服务器公网 IP                   |
+| 域名       | 配置一个域名并解析到服务器公网 IP                   |
 | 时间同步   | 开启 NTP，避免令牌和日志时间异常                    |
 
 ### 14.3 准备环境变量与密钥
@@ -139,7 +139,7 @@ openssl rand -hex 32
 
 开发/测试环境同样在 `ops/` 下新建 `.env.dev`、`.env.test`，把 `APP_ENV` 改为 `dev` / `test`，根域名换成独立泛域名（如 `dev.example.com` / `test.example.com`），`HTTP_PORT` / `USER_HTTP_PORT` 建议 `8081` / `8082`。每个环境使用独立的泛域名与泛域名证书，例如开发 `*.dev.example.com`、测试 `*.test.example.com`、线上 `*.example.com`。
 
-启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.prod`），并把同一份文件交给 `--env-file` 供 Compose 插值：
+启动时通过 `ENV_FILE` 指定容器读取的文件（默认 `.env.prod`），并通过 `--env-file` 提供同一份文件供 Compose 插值：
 
 ```bash
 cd ops
@@ -150,7 +150,7 @@ ENV_FILE=.env.dev docker compose --env-file .env.dev up -d
 
 - `POSTGRES_PASSWORD` 和 `DATABASE_URL` 里的密码必须一致。
 - `CORS_ORIGINS` 同源部署留空；前后端分离时填管理端域名，禁止 `*`。
-- `ops/.env.*` 含密钥，权限设为 600，不要提交 Git，也不要贴到聊天工具。
+- `ops/.env.*` 含密钥，权限设为 600，禁止提交 Git 或经聊天工具传输。
 
 ### 14.4 构建并启动
 
@@ -160,7 +160,7 @@ docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build
 docker compose -f ops/docker-compose.yml --env-file ops/.env.prod ps
 ```
 
-也可以只启动一个站点。Compose 会按 `depends_on` 自动带上 `db` 和 `migrate`，但不会启动另一个站点：
+也可以只启动一个站点。Compose 会按 `depends_on` 一并启动 `db` 和 `migrate`，但不会启动另一个站点：
 
 ```bash
 # 只启动管理端（backend-admin + frontend-admin）
@@ -176,7 +176,7 @@ docker compose -f ops/docker-compose.yml stop backend-admin frontend-admin
 docker compose -f ops/docker-compose.yml stop backend-user frontend-user
 ```
 
-> 两个站点共享同一个 `db`；单独启动任一站点时都会先等一次性迁移服务成功（Alembic 幂等，已是最新版本时不会产生变更）。
+> 两个站点共享同一个 `db`；单独启动任一站点时都会先等一次性迁移服务成功（Alembic 幂等，数据库已是最新版本时不产生变更）。
 
 开发/测试环境复用同一份 compose 文件，通过 `ENV_FILE` 指定对应的配置文件（相对 `ops/` 目录，默认 `.env.prod`）：
 
@@ -202,13 +202,13 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 | `frontend-admin` | 管理端 Nginx 静态站点 + `/api` 反代           | 是（`HTTP_PORT:8080`）          |
 | `frontend-user` | 用户端 Nginx 静态站点 + `/api` 反代           | 是（`USER_HTTP_PORT:8080`）     |
 
-`db`、`redis`、`backend-admin`、`backend-user` 与两个前端服务配置了健康检查；`migrate` 为一次性任务，`celery-worker` / `celery-beat` 为后台进程，不提供 HTTP 探活，依靠 `restart: unless-stopped` 兜底；所有服务都有日志轮转和内存上限。
+`db`、`redis`、`backend-admin`、`backend-user` 与两个前端服务配置了健康检查；`migrate` 为一次性任务，`celery-worker` / `celery-beat` 为后台进程，不提供 HTTP 探活，由 `restart: unless-stopped` 保证自动重启；所有服务均配置了日志轮转和内存上限。
 
-> **不使用知识库时**：可把 `RAG_RERANK_ENABLED` / `RAG_QUERY_REWRITE_ENABLED` 置为 `false`，但 `celery-worker` 与 `celery-beat` 仍建议保持运行——权益的未来生效、到期流转、宽限期回收与每日对账都由 beat 投递、worker 执行；停掉后这些状态只能等下次进程恢复时补扫。`redis` 服务始终需要保留（短期记忆依赖它）。
+> **不使用知识库时**：可把 `RAG_RERANK_ENABLED` / `RAG_QUERY_REWRITE_ENABLED` 置为 `false`，但 `celery-worker` 与 `celery-beat` 仍建议保持运行——权益的未来生效、到期流转、宽限期回收与每日对账均由 beat 投递、worker 执行；停止后上述状态流转只能等进程恢复时补扫。`redis` 服务始终需要保留（短期记忆依赖它）。
 > **celery-worker 启动命令**：与 backend 同镜像，启动命令为 `celery -A internal.infrastructure.celery_app worker --loglevel=info -Q rag`；如需在 compose 外单独跑，宿主机先 `pip install celery[redis]` 后用同一份 `.env.prod` 启动即可。
 > **celery-beat 启动命令**：与 backend 同镜像，启动命令为 `celery -A internal.infrastructure.celery_app beat --loglevel=info --schedule=/tmp/celerybeat-schedule`（compose 服务已内置该命令）。beat 只负责投递、不执行任务，必须与 worker 同时存在；全局只能运行一个实例，切勿 `docker compose up --scale celery-beat=2`，否则定时任务会被重复投递。
 
-> CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend-admin`、`-backend-user`、`-frontend-admin`、`-frontend-user`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，便于直接改代码上线。
+> CI 会把镜像发布到 GHCR（`ghcr.io/<owner>/<repo>-backend-admin`、`-backend-user`、`-frontend-admin`、`-frontend-user`，支持 main 分支、`v*` tag 和 `sha-*`）。服务器资源紧张时，可以改用 CI 构建好的镜像：把对应服务的 `build` 配置替换为 `image: ghcr.io/...`。仓库默认仍采用本地构建，以便修改代码后直接上线。
 
 ### 14.4.1 RAG 部署依赖
 
@@ -216,37 +216,37 @@ ENV_FILE=.env.test docker compose --env-file .env.test up -d --build
 
 | 依赖 | 用途 | 不启用时 |
 |------|------|----------|
-| **PostgreSQL pgvector 扩展** | `document_chunks.embedding` 1024 维向量列 + HNSW cosine 索引 | 不装扩展则迁移 `0022_rag_documents` 失败；自建库时先 `CREATE EXTENSION IF NOT EXISTS vector;` |
-| **Redis** | 短期记忆（DB 0）+ Celery broker（DB 1）+ result backend（DB 2） | 短期记忆不可用；celery-worker 起不来则 ingest 任务堆积在 `queued` |
-| **OpenAI 兼容 LLM / Embedding / Rerank API** | 对话生成、query 改写、bge embedding、bge-reranker 精排 | 任一字段留空时对应功能自动降级；三个都没配则 RAG 不可用 |
+| **PostgreSQL pgvector 扩展** | `document_chunks.embedding` 1024 维向量列 + HNSW cosine 索引 | 未安装扩展时迁移 `0022_rag_documents` 失败；自建库时先执行 `CREATE EXTENSION IF NOT EXISTS vector;` |
+| **Redis** | 短期记忆（DB 0）+ Celery broker（DB 1）+ result backend（DB 2） | 短期记忆不可用；celery-worker 无法启动时 ingest 任务会积压在 `queued` 状态 |
+| **OpenAI 兼容 LLM / Embedding / Rerank API** | 对话生成、query 改写、bge embedding、bge-reranker 精排 | 任一字段留空时对应功能自动降级；三者均未配置时 RAG 不可用 |
 
 生产建议：
 
 - PostgreSQL 用 `pgvector/pgvector:pg17` 镜像（已内置扩展）；自建外部库时 DBA 需预装 `vector` 扩展。
 - 生产把 `VECTOR_STORE_PROVIDER` 设为 `pgvector`（复用业务库）或 `milvus`；`memory` 只用于开发，重启后向量数据会丢失。
 - Redis 用 `redis:7-alpine`，3 个 DB 通过逻辑隔离即可，无需起 3 个实例；AOF 开启，maxmemory 设 256mb + `allkeys-lru`。
-- LLM / Embedding / Rerank 推荐走云托管（SiliconFlow / DeepSeek / 内部 LLM 代理）；API Key 写入 `ops/.env.prod`，权限 600，不进 Git。
-- Celery worker 内存上限建议 512m（embedding 单次批处理 ≤ 20 条时够用）；如批量文档 ingest 频繁，可单独 scale 多个 worker。
+- LLM / Embedding / Rerank 建议使用云托管服务（SiliconFlow / DeepSeek / 内部 LLM 代理）；API Key 写入 `ops/.env.prod`，权限 600，禁止提交 Git。
+- Celery worker 内存上限建议 512m（embedding 单次批处理 ≤ 20 条时即可满足）；如批量文档 ingest 频繁，可单独扩容 worker 副本数。
 
 **复用已有 PostgreSQL / Redis**
 
-如果生产环境已经有现成的 PostgreSQL（含 pgvector）或 Redis（如云托管 RDS / ElastiCache / 公司内部实例），不需要起 compose 自带的 `db` / `redis` 容器：
+如果生产环境已经有现成的 PostgreSQL（含 pgvector）或 Redis（如云托管 RDS / ElastiCache / 公司内部实例），无需启动 Compose 自带的 `db` / `redis` 容器：
 
 1. 在 `ops/.env.prod` 中把 `DATABASE_URL` / `REDIS_URL` / `CELERY_BROKER_URL` / `CELERY_RESULT_BACKEND` 指向外部地址（参考本地开发 3.1 节的连接串写法）。
-2. 在 `ops/docker-compose.yml` 中**注释掉 `db` 和 `redis` 两个服务**，并把 `backend-admin` / `backend-user` / `migrate` / `celery-worker` / `celery-beat` 的 `depends_on` 中对应行删掉（否则 compose 会等一个不会启动的容器健康）。
-3. 外部 PostgreSQL 必须先 `CREATE EXTENSION IF NOT EXISTS vector;`；外部 Redis 需要开放 DB 0/1/2 三个逻辑库（或找运维开多 DB）。
-4. `migrate` 一次性任务仍由 compose 触发，它会直接连外部库执行 Alembic 升级，不需要改代码。
+2. 在 `ops/docker-compose.yml` 中**注释掉 `db` 和 `redis` 两个服务**，并把 `backend-admin` / `backend-user` / `migrate` / `celery-worker` / `celery-beat` 的 `depends_on` 中对应行删掉（否则 Compose 会等待一个不会启动的容器的健康检查）。
+3. 外部 PostgreSQL 必须先执行 `CREATE EXTENSION IF NOT EXISTS vector;`；外部 Redis 需要开放 DB 0/1/2 三个逻辑库（或由运维额外开通逻辑库）。
+4. `migrate` 一次性任务仍由 Compose 触发，将直接连接外部数据库执行 Alembic 升级，无需修改代码。
 
-### 14.4.2 MCP 会话保持档位（多 worker 粘性前提）
+### 14.4.2 MCP 会话保持模式（多 worker 会话亲和前提）
 
-智能体应用的 MCP「会话保持档位」（管理端配置页，`mcpSession.scope`）有两档：
+智能体应用的 MCP 会话保持模式（管理端配置页，`mcpSession.scope`）有两个选项：
 
-- **按运行（run，默认）**：每次运行独立建连、结束即关，对部署形态无要求，多 worker / 多副本可直接水平扩容。
-- **按会话（conversation）**：进程内会话池按 `(server 地址指纹, conversation_id)` 复用 MCP 连接，LRU 上限 64、空闲 300s 驱逐。池是**单进程内存态**，不跨 worker 共享。
+- **按运行（run，默认）**：每次运行独立建立连接、运行结束即关闭；对部署形态无要求，多 worker / 多副本可直接水平扩容。
+- **按会话（conversation）**：进程内会话池按 `(server 地址指纹, conversation_id)` 复用 MCP 连接，LRU 上限 64、空闲 300s 驱逐。会话池仅存在于**单进程内存**中，不跨 worker 共享。
 
-`WEB_CONCURRENCY>1` 或多副本部署且使用按会话档时，负载均衡需要**按会话做粘性路由**（如 Nginx `hash $conversation_id consistent`、网关按会话头分流），否则同一会话的请求落到不同 worker 只会各自重新握手——功能不受影响（未命中即退化为一次新握手，无错误语义），仅失去复用收益。用户端对话入口天然携带 conversation_id；无会话归属的调用（画布试运行、工作流子 run）会自动回落按运行档。
+`WEB_CONCURRENCY>1` 或多副本部署且使用按会话模式时，负载均衡需要**按会话做粘性路由**（如 Nginx `hash $conversation_id consistent`、网关按会话头分流），否则同一会话的请求被分发到不同 worker 时将各自重新握手；功能不受影响（未命中会话池时降级为一次新握手，不产生错误），仅连接复用不生效。用户端对话入口固定携带 conversation_id；无会话归属的调用（画布试运行、工作流子 run）会自动回落到按运行模式。
 
-Prometheus 指标 `boxia_mcp_handshake_total` / `boxia_mcp_session_reuse_total` / `boxia_mcp_pool_size` 可用于验证命中率：粘性生效时复用计数应随轮次增长、握手计数趋平。
+Prometheus 指标 `boxia_mcp_handshake_total` / `boxia_mcp_session_reuse_total` / `boxia_mcp_pool_size` 可用于验证复用命中率：会话保持生效时，复用计数应随对话轮次增长，握手计数趋平。
 
 ### 14.5 创建首个管理员
 
@@ -263,7 +263,7 @@ ADMIN_INITIAL_ROLE=superadmin
 ADMIN_INITIAL_MUST_CHANGE_PASSWORD=true
 ```
 
-**必须同时配置 `ADMIN_AUTO_INIT=true` 和 `ADMIN_INITIAL_PASSWORD` 才会执行**；只开开关不配密码会被跳过并输出日志。首次登录会强制改密。表中已有账号时自动跳过，不影响存量账号；密码不符合策略或角色不存在时跳过并输出告警日志。多副本同时首启时依赖 `username` 唯一索引 + `ON CONFLICT DO NOTHING` 兜底，仅一个实例实际写入，不会产生重复账号。
+**必须同时配置 `ADMIN_AUTO_INIT=true` 和 `ADMIN_INITIAL_PASSWORD` 才会执行**；只开开关不配密码会被跳过并输出日志。首次登录会强制改密。表中已有账号时自动跳过，不影响存量账号；密码不符合策略或角色不存在时跳过并输出告警日志。多副本同时首启时依赖 `username` 唯一索引 + `ON CONFLICT DO NOTHING` 做保底约束，仅一个实例实际写入，不会产生重复账号。
 
 > **首次登录并改密成功后**，请从 `ops/.env.prod` 移除 `ADMIN_INITIAL_PASSWORD`（或直接关闭 `ADMIN_AUTO_INIT`）并重新部署。该配置只在 `admin_users` 表为空时生效一次，移除不影响已创建的账号；保留它会让初始密码长期残留在 env 文件、容器环境（`docker inspect` 可见）和部署记录中。
 
@@ -345,9 +345,9 @@ server {
 
 `platform.example.com` 是精确匹配，优先级高于 `*.example.com`，顺序不影响结果。
 
-对应地把 `.env.prod` 的 `HTTP_PORT` / `USER_HTTP_PORT` 分别改为 `127.0.0.1:8080` / `127.0.0.1:8081`，让两个前端容器端口只绑定本机。
+对应地把 `.env.prod` 的 `HTTP_PORT` / `USER_HTTP_PORT` 分别改为 `127.0.0.1:8080` / `127.0.0.1:8081`，使两个前端容器端口仅绑定本机环回地址。
 
-如果外层还有云负载均衡或网关，同样要求它**保留原始 Host 头**；把域名改写成固定后端地址会导致所有请求落到平台作用域。
+如果外层还有云负载均衡或网关，同样要求**保留原始 Host 头**；若将域名改写为固定后端地址，所有请求都会被识别为平台作用域。
 
 ### 14.7 Docker Hub 访问受限时
 
@@ -407,7 +407,7 @@ docker compose -f ops/docker-compose.yml logs migrate
 1. 先备份数据库（见 14.10）。
 2. 拉取新代码。
 3. 重新构建并启动：`docker compose -f ops/docker-compose.yml --env-file ops/.env.prod up -d --build`。
-4. `migrate` 服务自动执行迁移，`backend-admin` / `backend-user` 等它成功后才启动。
+4. `migrate` 服务自动执行迁移，`backend-admin` / `backend-user` 在迁移成功后才启动。
 5. 按 14.8 验证。
 
 **回滚流程：**
@@ -435,7 +435,7 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
    0 3 * * * cd /opt/boxia-agent && bash ops/backup.sh >> /var/log/boxia-backup.log 2>&1
    ```
 2. 备份目录同步到独立存储（对象存储或另一台机器），避免和数据库同盘。
-3. **定期做恢复演练**：在测试环境用最新备份恢复一次，确认能启动并通过 `/health/ready`。没有演练过的备份不算可靠备份。
+3. **定期执行恢复演练**：在测试环境使用最新备份完成一次恢复，确认服务能启动并通过 `/health/ready`；备份可用性以恢复演练通过为准。
 
 ### 14.11 监控与日志
 
@@ -467,17 +467,16 @@ bash ops/restore.sh ops/backups/boxia-YYYYMMDD-HHMMSS.dump
 | 访问域名 502                                          | 对应 `frontend-admin` / `frontend-user` 容器是否健康；对应 `backend-admin` / `backend-user` 是否启动；Nginx 日志                              |
 | `/health/ready` 返回 503 `migration_outdated`         | 查看 `migrate` 服务日志，确认迁移是否成功                                                                                                    |
 | 登录返回 429                                          | 触发登录限流或账号锁定；查看 `Retry-After`                                                                                                   |
-| 容器启动后立即退出                                    | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库连不上                                                                         |
+| 容器启动后立即退出                                    | `docker compose logs <服务名>`，常见原因是环境变量缺失或数据库无法连接                                                                         |
 | 只读文件系统报错                                      | 应用需要写入临时目录时，确认 Compose 已挂载 `tmpfs`                                                                                          |
 | 磁盘占满                                              | 检查数据库 volume、备份目录和容器日志轮转                                                                                                    |
 | 时间不对导致令牌异常                                  | 检查服务器 NTP 时间同步                                                                                                                      |
 | 租户子域名返回 404 / 403                              | 404 多为 `ROOT_DOMAIN` 配置不符、租户不存在，或根域名未配 `DEFAULT_TENANT_CODE`；403 多为租户已停用                                          |
-| 未知域名也返回 404                                    | 这是预期行为：部署环境只认 `platform.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
+| 未知域名也返回 404                                    | 属于预期行为：部署环境仅匹配 `platform.<ROOT_DOMAIN>` 与 `<租户编码>.<ROOT_DOMAIN>`，不会回退到产品级平台；检查 DNS、`ROOT_DOMAIN` 与租户编码 |
 | 启动失败：`必须配置 ROOT_DOMAIN`                      | 除 `local` 外，`dev` / `test` / `prod` 都必须配置完整域名                                                                      |
 | 启动失败：`仅 local 环境允许开启 ALLOW_TENANT_HEADER` | 部署环境删除该配置或设为 `false`；请求头切换只用于本地回环主机                                                                               |
 | 所有子域名都进入平台作用域                            | 反向代理或网关没有透传原始 `Host` 头；或 `ROOT_DOMAIN` 配成了不包含该子域的根域名                                                            |
-| 本地 `acme.localhost` 打不开                          | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理）                                               |
+| 本地 `acme.localhost` 无法访问                        | 确认后端以 `APP_ENV=local` 启动；Vite 需允许 `*.localhost` 并透传原始 `Host`（仓库配置已处理）                                               |
 | 登录提示账号不属于该租户                              | 账号只能登录其所属作用域：产品级账号走 `platform`，租户账号走本租户子域名                                                                 |
 
 ---
-

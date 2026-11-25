@@ -1,6 +1,6 @@
 """20260731 双轨合并：共享 ReAct 内核 react.run_react_loop 单测。
 
-覆盖：事件顺序、多轮工具调用、轮次耗尽、参数解析兜底、executor 异常/缺省、
+覆盖：事件顺序、多轮工具调用、轮次耗尽、参数解析回退、executor 异常/缺省、
 sync 与 async executor 兼容、chat_kwargs 透传与不支持时的降级重试、usage 聚合。
 """
 
@@ -354,12 +354,12 @@ def test_budget_exceeded_stops_before_running_next_round_tools() -> None:
     assert result["content"] == BUDGET_EXCEEDED_MESSAGE
     assert touched == []
     assert [ev.kind for ev in events] == ["llm_start", "llm_end", "result"]
-    # 基线 + 本轮消耗都计入透出 usage
+    # 基线 + 本轮消耗都计入返回的 usage
     assert result["usage"]["total_tokens"] == 110
 
 
 def test_budget_not_judged_when_answer_converged() -> None:
-    """已收敛（无工具调用）时不判预算：超预算的最终回答照常透出。"""
+    """已收敛（无工具调用）时不判预算：超预算的最终回答照常返回。"""
     events = _collect(
         run_react_loop(
             llm=_ScriptedLLM([_Resp(content="最终回答", usage=_Usage(200, 100))]),
@@ -564,7 +564,7 @@ def test_approval_resume_drains_approved_round_without_extra_llm_start() -> None
 
 
 def test_approval_resume_drains_rejected_round_as_error_observation() -> None:
-    """拒绝续跑：不触达执行器，回灌带理由的拒绝 observation（is_error），模型收尾。"""
+    """拒绝续跑：不触达执行器，返回带理由的拒绝 observation（is_error）给模型，模型收尾。"""
     llm = _ScriptedLLM([_Resp(content="好的，已按现有信息回答。", finish_reason="stop")])
     touched: list[str] = []
 

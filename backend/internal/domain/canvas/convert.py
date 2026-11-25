@@ -70,7 +70,7 @@ def find_agent_loop_config(raw: dict[str, Any]) -> tuple[str, dict[str, Any]] | 
     直接按 {"type":"agent_loop","config":{...}} 读取永远读不到。
     本函数复用 convert_canvas，使读取方与 AgentLoopNodeHandler 拿到完全一致的
     config 字典（含 _flatten_named_param_lists 压平）；整图转换失败
-    （含不支持节点等）返回 None，调用方按"无 agent_loop 配置"走各自兜底。
+    （含不支持节点等）返回 None，调用方按"无 agent_loop 配置"走各自的默认处理逻辑。
     """
     try:
         canvas = convert_canvas(raw)
@@ -290,7 +290,7 @@ def _convert_value_expression(raw: Any) -> Expr | None:
             return GlobalVar(name=name)
         if isinstance(source, str) and source.startswith(REF_SOURCE_GLOBAL_PREFIX):
             return GlobalVar(name=name)
-        # 兜底：未知 ref source 按全局变量处理
+        # 默认分支：未知 ref source 按全局变量处理
         return GlobalVar(name=name)
 
     if kind == "object_ref":

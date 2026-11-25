@@ -2,8 +2,6 @@
 
 ## 12. 系统运行流程
 
-这一章把各个模块串起来，面试讲解时可以按这里的顺序展开。
-
 ### 12.1 启动流程
 
 1. `docker compose` 启动 PostgreSQL。
@@ -27,7 +25,7 @@ web/deps/tenant.py 读取 Host（去端口、转小写、去尾点）
   │    ├─ 不存在 → 404；已停用 → 403
   │    └─ 存在 → 租户作用域（tenant_id = 该租户）
   ├─ 根域名 → DEFAULT_TENANT_CODE 对应租户；未配置则 404
-  └─ 其他 Host → 404（绝不静默回退产品级平台）
+  └─ 其他 Host → 404（不会静默回退到产品级平台）
   ▼
 RequestContext（scope、tenant、resolution）
   ├─ /public/context：返回 app_env、tenant_resolution、tenant_switch_mode、platform_admin_host
@@ -37,7 +35,7 @@ RequestContext（scope、tenant、resolution）
 
 仓储层还会再按作用域过滤一次：平台只读写产品级数据（`tenant_id IS NULL`）；租户能“看到本租户 + 产品级”，但只能写本租户。即使上层校验有遗漏，SQL 层也不会跨租户读写。
 
-### 12.3 一次登录请求的完整旅程
+### 12.3 登录请求处理链路
 
 ```text
 浏览器
@@ -63,7 +61,7 @@ application/auth_service.py
 前端：access 放内存，refresh 放 localStorage
 ```
 
-### 12.4 一次应用查询/写入的旅程
+### 12.4 应用查询/写入处理链路
 
 ```text
 GET/POST /api/v1/admin/apps
@@ -94,16 +92,16 @@ UnitOfWork.commit()
   └─ 审计日志
 ```
 
-资源（工具 / 提示词 / 技能 / 知识）走同一套鉴权与作用域，只是换成 `web/admin/routers/resources.py` + `internal/application/apps/resource_service.py`。租户侧的「已开通应用」由 `tenant_application_instance` 承载（钉住图版本、配额、有效期），资源侧由 `resource_grant` 按租户开放。
+资源（工具 / 提示词 / 技能 / 知识）走同一套鉴权与作用域，只是换成 `web/admin/routers/resources.py` + `internal/application/apps/resource_service.py`。租户侧的「已开通应用」由 `tenant_application_instance` 承载（锁定图版本、配额、有效期），资源侧由 `resource_grant` 按租户开放。
 
-### 12.5 一次应用运行的旅程
+### 12.5 应用运行处理链路
 
 应用有两种运行形态，入口相同、执行器不同：
 
 | 形态 | 执行器 | 适用 |
 | --- | --- | --- |
 | 对话 / agent_loop | `ChatService` 的 ReAct 循环（`internal/domain/agent/react.py` 统一，`LLMClient` + 工具执行） | 用户端对话、工具调用轨迹 |
-| DAG / workflow | `GraphRuntime`（LangGraph 编译画布） | 节点编排、单节点调试、断点续跑 |
+| DAG / workflow | `GraphRuntime`（LangGraph 编译画布） | 节点编排、单节点调试、断点恢复 |
 
 ```text
 用户端 POST /api/v1/user/agents/{appId}/run/stream（SSE）
@@ -116,7 +114,7 @@ web/user/routers/agents.py 解析 application_id
   ▼
 internal/application/apps/chat_service.py
   ├─ 读取会话与历史消息（conversation / message）
-  ├─ chat：拼系统提示 + 历史 + 工具 → react.py 统一 ReAct 循环
+  ├─ chat：组装系统提示 + 历史消息 + 工具定义 → react.py 统一 ReAct 循环
   └─ workflow：web/deps/graph.py:build_runner() 构造 GraphRuntime
   ▼
 internal/domain/graph/runtime.py（GraphRuntime）
@@ -124,17 +122,17 @@ internal/domain/graph/runtime.py（GraphRuntime）
   ├─ 节点执行：llm / http / api_plugin / code / dataset / loop / ...
   ├─ RAG 节点：RetrievalService 召回 → rerank → 注入 prompt
   ├─ 工具节点：ToolExecutorService → ToolGateway（SSRF → 熔断 → 限流 → 连接池 → 重试 → 8KB 截断）
-  ├─ 接管路由（handoff）：agent_loop 节点声明接管，conversation 记录 owner / 接管链
-  ├─ 轮后长期记忆抽取：SSE 收尾投递 Celery memory_tasks，异步抽取落 agent_memory
-  ├─ 评测抽样：judge 抽样任务（Celery）异步给 run 打分
-  └─ checkpoint 落库（tenant 隔离），支持断点续跑 / 单节点调试
+  ├─ Agent 转交（handoff）：agent_loop 节点声明转交，conversation 记录 owner / 转交链
+  ├─ 轮后长期记忆抽取：SSE 收尾投递 Celery memory_tasks，异步抽取并写入 agent_memory
+  ├─ 评测抽样：裁判模型（LLM-as-Judge）抽样任务（Celery）异步为运行记录打分
+  └─ checkpoint 落库（tenant 隔离），支持断点恢复 / 单节点调试
   ▼
 SSE 事件流：节点开始 / 增量 token / 工具调用轨迹 / 节点结束 / 运行结束
   ▼
-写 run / run_node_execution / message，更新 usage ledger
+写 run / run_node_execution / message，更新用量记录
 ```
 
-发布链路则是：`application_graph`（草稿）→ 发布生成 `application_graph_version`（不可变）→ 市场开通生成 `tenant_application_instance` 并钉住版本 → 回滚 = 切换实例指向的版本。
+发布链路则是：`application_graph`（草稿）→ 发布生成 `application_graph_version`（不可变）→ 市场开通生成 `tenant_application_instance` 并锁定版本 → 回滚 = 切换实例指向的版本。
 
 ### 12.6 刷新令牌的轮换流程
 
@@ -174,4 +172,3 @@ alembic upgrade head
 生产 Compose 中由一次性 `migrate` 服务执行迁移，`backend-admin` / `backend-user` 等它成功后才启动，避免“代码已经更新、表结构还没更新”的窗口。
 
 ---
-

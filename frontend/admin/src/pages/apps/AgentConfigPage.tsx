@@ -86,7 +86,7 @@ interface SubAgentRow {
   description?: string
 }
 
-// M4-d：judge 键组数值控件被清空时的兜底口径（与后端 agent_config.py 默认值对齐）
+// M4-d：judge 键组数值控件被清空时使用的默认值（与后端 agent_config.py 对齐）
 const QualityGateDefaultPassScore = 7
 const QualityGateDefaultMaxRegen = 1
 const JudgeSamplingDefaultRate = 0.1

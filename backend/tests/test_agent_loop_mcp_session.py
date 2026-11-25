@@ -176,7 +176,7 @@ def test_distinct_fingerprint_creates_distinct_sessions(
 
 def test_ssrf_rechecked_on_execution(in_process_mcp_server) -> None:
     """执行路径 SSRF 复检（F17.3①）：loopback 地址被拦截，不发起任何连接，
-    observation 以 [error] 回灌模型自纠。"""
+    observation 以 [error] 前缀返回给模型，供其依据错误自行修正。"""
     in_process_mcp_server.reset()
     llm = _ScriptedLLM(
         [

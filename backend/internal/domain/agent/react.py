@@ -34,13 +34,13 @@ logger = logging.getLogger(__name__)
 # 工具执行器：按名称 + 参数 dict 执行，返回文本 observation。
 ToolExecutor = Callable[[str, dict[str, Any]], Awaitable[str] | str]
 
-# 轮次耗尽时的兜底回复（chat 侧沿用原用户友好文案；节点侧可覆盖）。
+# 轮次耗尽时的默认回复文案（chat 侧沿用原用户友好文案；节点侧可覆盖）。
 DEFAULT_MAX_ROUNDS_MESSAGE = "已达到最大工具调用轮数，请简化问题后重试。"
 
 # 白名单拒绝文案：模型幻觉/注入调用未声明工具时，不执行、不泄露租户全量目录。
 UNDECLARED_TOOL_MESSAGE = "工具未在应用中声明，拒绝执行: {name}"
 
-# 0074 PRD F11.1 单 run token 预算：超界停止循环时的 finish_reason 与兜底文案
+# 0074 PRD F11.1 单 run token 预算：超界停止循环时的 finish_reason 与提示文案
 BUDGET_EXCEEDED_REASON = "budget_exceeded"
 BUDGET_EXCEEDED_MESSAGE = (
     "（本次运行的 token 预算已用尽，停止继续推进，请简化问题或提高预算后重试）"
@@ -146,7 +146,7 @@ def parse_tool_arguments(raw: Any) -> dict[str, Any]:
 
     统一策略（原两轨分别为 "{}" 与 {"input": raw}）：
     dict 直接用；JSON 可解析且为 dict 用解析结果；其余包装为 {"input": ...}
-    让工具按单入参接收，并把原始文本作为 observation 反馈给模型自纠。
+    让工具按单入参接收，并把原始文本作为 observation 返回给模型，由模型自行修正参数。
     """
     if isinstance(raw, dict):
         return raw
@@ -232,7 +232,7 @@ async def _invoke_tool(
         if inspect.isawaitable(result):
             result = await result
         return str(result), False
-    except Exception as exc:  # noqa: BLE001 - 工具异常回灌给模型自纠，不上抛
+    except Exception as exc:  # noqa: BLE001 - 工具异常转为文本 observation 返回给模型，由其自行修正，不上抛
         logger.exception("ReAct 工具执行失败: tool=%s", name)
         return f"[error] {name}: {exc}", True
 
@@ -255,7 +255,7 @@ async def run_react_loop(
     handoff_targets: Mapping[str, str] | None = None,
     hand_back_name: str | None = None,
 ) -> AsyncIterator[ReactEvent]:
-    """跑 ReAct tool-calling 循环并以事件流产出过程与结果。
+    """执行 ReAct tool-calling 循环并以事件流产出过程与结果。
 
     - messages 就地追加 assistant(tool_calls)+tool 驱动记录，调用方可跨阶段复用
       同一列表；收敛轮的最终 assistant 回复不回填（由调用方落库/输出）；
@@ -271,16 +271,16 @@ async def run_react_loop(
       入 messages 后发 approval_required 事件并收尾
       result.finish_reason="awaiting_approval"；调用方据此保存快照。批准/拒绝
       后重进本循环续跑：末条 assistant 仍带未回答 tool_calls 时先排空该轮
-      （approved 集合正常执行、rejected 集合回灌拒绝 observation，均不再门控），
+      （approved 集合正常执行、rejected 集合返回拒绝 observation，均不再门控），
       再继续 LLM 轮次。max_rounds 预算按续跑轮重新起算（成本上限由 token_budget
-      经 usage_base 跨续跑累计兜底）；
+      经 usage_base 跨续跑累计保证）；
     - M4 PRD F14.9 接管门控：handoff_targets 为"接管声明工具名 → 目标应用 ID"
       映射，hand_back_name 为目标侧归位声明工具名；本轮调用命中其一（含快照续跑
       轮）时该轮任何工具都不执行，发 handoff 事件后收尾
       result.finish_reason="handed_off"/"handed_back"，且 result 载荷附加
       handoff 键（仅此路径出现，未命中载荷与改造前逐字段一致）。接管门排在
       人审门之前：同轮并存时接管生效，不产生审批挂起；
-    - LLM 调用异常原样上抛，由消费方决定兜底文案。
+    - LLM 调用异常原样上抛，由消费方决定提示文案。
     """
     extra = _filter_chat_kwargs(llm, chat_kwargs or {})
     allowed_names = {spec.name for spec in tool_specs}
@@ -317,7 +317,7 @@ async def run_react_loop(
         return None
 
     async def _drain_round(calls: list[_ToolCall], round_idx: int) -> AsyncIterator[ReactEvent]:
-        """执行一轮工具调用：逐调用发 tool_start/tool_end 并回灌 messages/traces。"""
+        """执行一轮工具调用：逐调用发 tool_start/tool_end 并将结果追加写入 messages/traces。"""
         for tc in calls:
             args = parse_tool_arguments(tc.arguments_raw)
             yield ReactEvent(
@@ -331,13 +331,13 @@ async def run_react_loop(
                 },
             )
             if tc.id in rejected_ids:
-                # F10 人审拒绝：不触达执行器，固定文案回灌让模型基于现有信息收尾
+                # F10 人审拒绝：不触达执行器，固定文案作为 observation 返回，让模型基于现有信息收尾
                 observation = APPROVAL_REJECTED_OBSERVATION.format(
                     comment=f"（理由：{rejection_comment}）" if rejection_comment else ""
                 )
                 is_error = True
             elif tc.name not in allowed_names:
-                # 白名单拒绝：不回显租户工具目录，仅提示未声明（token 也省给模型自纠）
+                # 白名单拒绝：不回显租户工具目录，仅提示未声明（同时节省 token，便于模型自行修正）
                 observation = UNDECLARED_TOOL_MESSAGE.format(name=tc.name)
                 is_error = True
             else:
@@ -509,6 +509,6 @@ async def run_react_loop(
         "finish_reason": finish_reason,
     }
     if handoff_payload is not None:
-        # additive：仅接管轮出现该键，消费方（agent_loop 节点）据此透出路由切换
+        # additive：仅接管轮出现该键，消费方（agent_loop 节点）据此输出路由切换信息
         result_payload["handoff"] = handoff_payload
     yield ReactEvent("result", result_payload)

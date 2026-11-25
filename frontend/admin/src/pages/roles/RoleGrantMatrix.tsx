@@ -117,7 +117,7 @@ export default function RoleGrantMatrix({
       }
       refreshAfterWrite()
     } catch (error) {
-      // 未开通/未审核等拦截整体失败：候选集本就不含这类资源，兜底提示
+      // 未开通/未审核等拦截整体失败：候选集本就不含这类资源，此处仅提示错误信息
       message.error(error instanceof Error ? error.message : '批量授权失败')
     } finally {
       setBatchBusy(false)

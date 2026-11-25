@@ -132,7 +132,7 @@ export function PublishBar({
         onClick={onPublish}
         style={{ background: '#7c3aed', borderColor: '#7c3aed' }}
       >
-        🚀 发布
+        发布
       </Button>
     </div>
   )

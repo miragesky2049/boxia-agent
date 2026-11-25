@@ -3,7 +3,7 @@
 验证：
 1. 无图片时 user content 是纯字符串（向后兼容）
 2. inputs["images"] 传入图片 URL 列表时，user content 是 multi-modal parts 数组
-3. config["images"] 也能作为兜底来源
+3. config["images"] 也能作为回退来源
 4. 非字符串元素被过滤
 """
 

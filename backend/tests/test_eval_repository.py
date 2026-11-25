@@ -385,7 +385,7 @@ class TestEvalRunAndResults:
         assert got == {run_ids[1]}
 
     def test_runtime_sample_unique_index_blocks_concurrent_double_insert(self, uow, scope) -> None:
-        """批末 review P2-1：双 worker 并行探测竞态由 DB 唯一索引兜底——
+        """批末 review P2-1：双 worker 并行探测竞态由 DB 唯一索引约束——
         同 run 第二条 runtime_sample 行必须撞约束（事务回滚 = 不重复计费）。"""
         tenant_id, app_id = scope
         repo = _repo(uow)

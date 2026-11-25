@@ -56,7 +56,7 @@ MAX_SUB_AGENTS = 5
 # 0074 PRD F6：MCP server 数与单 server 勾选工具数上限（防 spec 膨胀）
 MAX_MCP_SERVERS = 5
 MAX_MCP_TOOLS_PER_SERVER = 20
-# M4-b F17.3②：条目级调用超时（秒，表单严格整数校验；运行期兜底解析在 agent_loop）
+# M4-b F17.3②：条目级调用超时（秒，表单严格整数校验；运行期对脏值的容错解析在 agent_loop）
 MIN_MCP_TIMEOUT_SECONDS = 1
 MAX_MCP_TIMEOUT_SECONDS = 300
 # M4-b F17.4：会话保持档位；缺省 run 级（会话档池为 P1，本批仅落键与校验）
@@ -139,7 +139,7 @@ def validate_form(
     管理面未部署的实例必须拒绝开启 longTerm（组合根从 settings 传入）。
     self_application_id：当前被配置应用 ID（M4-c F14.1）——传入时拒绝 subAgents
     自引用；同租户可见/已发布/flow_type 属 DB 事实，配置面不做在线核验，
-    运行期由 AgentToolService.describe 兜底跳过（与 workflows 同口径）。
+    运行期由 AgentToolService.describe 直接跳过不可用项（与 workflows 同口径）。
     """
     issues: list[str] = []
 
@@ -242,7 +242,7 @@ def validate_form(
             issues.append("mcpSession.scope 只能是 run 或 conversation")
 
     # M4-d PRD F19.2：质量门键组校验。缺键合法（= 默认关闭）；携带时形状/边界必须严格，
-    # 脏值在配置面显式报错，而不是运行期被静默钳成默认（运行侧钳制仅作历史图兜底）
+    # 脏值在配置面显式报错，而不是运行期被静默钳成默认（运行侧钳制仅用于兼容历史图中的脏值）
     quality_gate = form.get("qualityGate")
     if quality_gate is not None:
         if not isinstance(quality_gate, dict):

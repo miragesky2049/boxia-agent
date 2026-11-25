@@ -455,7 +455,7 @@ def test_quality_summary_skeleton(
 def test_quality_summary_board_trend_and_flywheel(
     client: TestClient, headers: dict, app_id: UUID, fake_task: _FakeTask
 ) -> None:
-    """T-d9 看板与飞轮：7 日日均趋势 + 低分清单（带问句）→ 一键转评测集（from-run 消费）。
+    """T-d9 看板与评测闭环：7 日日均趋势 + 低分清单（带问句）→ 一键转评测集（from-run 消费）。
 
     采样行按对话租户（非平台）落库——同时锁定 T-d9 跨租户可见性修复。
     """
@@ -564,7 +564,7 @@ def test_quality_summary_board_trend_and_flywheel(
     assert item["question"] == f"线上问句{run_low}"
     assert item["reason"] == "漏答关键信息"
 
-    # 飞轮闭环：低分清单给出的 run_id 直接 from-run 转评测集，评测批可消费
+    # 闭环链路：低分清单给出的 run_id 直接 from-run 转评测集，评测批可消费
     ds_id = _mk_dataset(client, headers, app_id)
     captured = client.post(
         f"{BASE}/datasets/{ds_id}/cases/from-run",

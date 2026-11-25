@@ -47,7 +47,7 @@ EvalRepoDep = Annotated[EvalRepository, Depends(get_eval_repo)]
 
 # judge 打分统一 0~10 尺度，低分线取一半（F18.6 看板低分清单口径）
 _LOW_SCORE_THRESHOLD = 5
-# 低分清单一次透出上限：飞轮入口逐条人工判读，超窗口的历史行由 days 收窄即可
+# 低分清单单次返回上限：评测闭环入口逐条人工判读，超窗口的历史行由 days 收窄即可
 _LOW_SCORE_LIST_LIMIT = 20
 
 
@@ -424,7 +424,7 @@ def quality_summary(
     repo: EvalRepoDep,
     days: Annotated[int, Query(ge=1, le=90)] = 7,
 ) -> dict:
-    """F18.6 质量看板：最近完成批通过率 + 采样 7 日均分趋势 + 低分清单（飞轮入口）。
+    """F18.6 质量看板：最近完成批通过率 + 采样 7 日均分趋势 + 低分清单（评测闭环入口）。
 
     days 窗口只约束 runtime_samples（持续流入需限窗）；评测批由人工发起、数量
     有限，计数与最近通过率取全量。低分清单行带 run_id，前端一键 from-run 转评测集。

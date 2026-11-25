@@ -41,7 +41,7 @@ def _zero_usage() -> dict[str, int]:
 
 
 def extract_answer_text(output: Any) -> str:
-    """从图终态提取待评答案文本；无文本键时整体序列化兜底。"""
+    """从图终态提取待评答案文本；无文本键时整体序列化后返回。"""
     if isinstance(output, str):
         return output
     if isinstance(output, dict):
@@ -351,7 +351,7 @@ class EvalRunService:
                 )
                 return False, 0, f"评估器「{evaluator['name']}」judge 调用失败：{exc}"[:200], {}
             # 批末 review：判定线与运行时质量门同源——本消费方按 passScore 自判，
-            # 不信内核默认 7 兜底或模型拼写的 passed（passScore 脏值回内核常量）
+            # 不采用内核默认值 7 或模型给出的 passed 字段（passScore 非法时取内核常量）
             threshold = config.get("passScore")
             if isinstance(threshold, bool) or not isinstance(threshold, int):
                 threshold = DEFAULT_PASS_SCORE

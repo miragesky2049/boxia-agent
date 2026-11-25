@@ -2,7 +2,7 @@
 
 langgraph 天然支持并行分支汇合（多条边指向同一节点时，等所有上游完成后才触发）。
 本节点 handler 只做透传：compiler 在求值 inputs 时已经把所有上游分支的 outputs
-解析成具体值，这里直接原样吐出去即可。
+解析成具体值，这里直接原样返回即可。
 """
 
 from __future__ import annotations

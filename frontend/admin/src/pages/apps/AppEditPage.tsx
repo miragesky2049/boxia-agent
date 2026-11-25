@@ -281,7 +281,7 @@ export default function AppEditPage() {
   const ctxRef = useRef<FreeLayoutPluginContext | null>(null)
   const saveTimerRef = useRef<number | null>(null)
   const nodeCounterRef = useRef<Record<string, number>>({})
-  // 节点复制剪贴板：内存优先，localStorage 兜底跨刷新
+  // 节点复制剪贴板：内存优先，localStorage 用于跨刷新保留
   const nodeClipboardRef = useRef<{
     typeKey: string
     title?: string
@@ -787,7 +787,7 @@ export default function AppEditPage() {
 
   const handlePublish = useCallback(async () => {
     if (!id) return
-    // 发布是运行态闸门：先做严格校验，有 error 不发布
+    // 发布即进入运行态：先做严格校验，有 error 不发布
     const issues = await doValidate()
     const errors = issues.filter((i) => i.severity === 'error')
     if (errors.length > 0) {

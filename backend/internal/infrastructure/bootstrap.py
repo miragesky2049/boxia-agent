@@ -21,7 +21,7 @@ def ensure_platform_admin(settings: Settings) -> None:
     仅当 admin_auto_init_enabled（开关开启 + 密码已配置）且 admin_users 表为空时执行：
     1. 校验初始密码强度
     2. 查找配置的平台角色（默认 superadmin）
-    3. 插入首个平台管理员账号（ON CONFLICT 兜底多副本并发首启竞态）
+    3. 插入首个平台管理员账号（ON CONFLICT 处理多副本并发首启时的重复插入竞态）
     """
     if not settings.admin_auto_init_enabled:
         if settings.admin_auto_init:

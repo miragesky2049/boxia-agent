@@ -72,7 +72,7 @@ class TestValidateForm:
         assert validate_form(base, long_term_admin_available=True) == issues
         gated = validate_form(base, long_term_admin_available=False)
         assert any("管理面未部署" in i for i in gated)
-        # 关闭态不触发隐私闸门
+        # 关闭态不触发隐私校验
         base["memory"]["longTerm"]["enabled"] = False
         assert not any("管理面" in i for i in validate_form(base, long_term_admin_available=False))
         # review 修正：bool/float/字符串都不是合法"整数"输入，必须显式报错

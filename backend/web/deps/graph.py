@@ -105,7 +105,7 @@ def register_conversation_services(
     admin 画布试运行专用（DDD 三期从 apps_admin 收敛至此）：
     试运行没有真实应用 ID（application_id 可为 DEBUG_APPLICATION_ID），
     默认不校验应用维度，只按租户 + 用户收口，避免消息节点写入真实应用会话时报"不属于当前应用"。
-    tenant_id 缺失时兜底平台租户（与原 apps_admin helper 行为一致）。
+    tenant_id 缺失时默认使用平台租户（与原 apps_admin helper 行为一致）。
     """
     effective_tenant_id = tenant_id or PLATFORM_TENANT_ID
     sync_conv_repo = SyncConversationRepository(uow.session)

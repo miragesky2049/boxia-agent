@@ -1,4 +1,4 @@
-"""0074 PRD F6.4：管理端 MCP discover 端点层回归（鉴权、SSRF 422、server 不可达 503 兜底）。
+"""0074 PRD F6.4：管理端 MCP discover 端点层回归（鉴权、SSRF 422、server 不可达返回 503）。
 
 服务层缓存/透传细节已在 test_mcp_discovery_service.py 覆盖，本文件只锁 HTTP 契约。
 """

@@ -300,7 +300,7 @@ class WorkflowService:
 
         payload = run.get("interrupt_payload")
         if not isinstance(payload, dict) or not payload:
-            # 兜底：DB 无冗余 payload 时从 checkpointer 读
+            # DB 无冗余 payload 时，改从 checkpointer 读取
             runner = await self._runner_factory(
                 self._app_service,
                 self._uow,
@@ -491,7 +491,7 @@ class WorkflowService:
 
     # ========== 内部 ==========
     def _assert_workflow_application(self, application_id: UUID) -> dict[str, Any]:
-        """可见性闸门 + 形态校验：用户端 workflow 接口拒绝 chatflow / agent（0074）。"""
+        """可见性校验 + 形态校验：用户端 workflow 接口拒绝 chatflow / agent（0074）。"""
         app_card = self._app_service.assert_user_can_view(
             application_id, self._tenant_id, self._user_id
         )

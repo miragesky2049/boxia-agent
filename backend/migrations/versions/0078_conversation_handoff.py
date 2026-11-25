@@ -1,4 +1,4 @@
-"""0078 conversation 接管路由态两列（M4 PRD F14.9，U7 裁决）。
+"""0078 conversation 转交路由状态（handoff）两列（M4 PRD F14.9，U7 裁决）。
 
 背景（docs/agent-m4-prd.md F14.9）：
 - active_application_id：发言权指针，NULL=归属应用（application_id）应答；

@@ -4,7 +4,7 @@
 这两个 async ABC；实际 DB 仓储（`ConversationRepository` / `MessageRepository`）是 sync 的。
 这里做一层薄适配：
 - 调用方在请求级把 tenant_id / user_id / application_id 绑定进 adapter
-- create / append 时优先用领域对象上的字段，缺省时用绑定值兜底
+- create / append 时优先用领域对象上的字段，缺省时以绑定值作为默认
 """
 
 from __future__ import annotations

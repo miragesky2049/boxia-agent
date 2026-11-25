@@ -1,13 +1,13 @@
 """把 ToolGateway + ToolEntity 体系适配成画布节点期望的 `tool_executor` service。
 
-画布节点（LLM ReAct 循环 / API 插件节点）通过 `ctx.services.get("tool_executor")` 拿执行器，
+画布节点（LLM ReAct 循环 / API 插件节点）通过 `ctx.services.get("tool_executor")` 获取执行器，
 调用签名：`observation: str = await tool_executor(name, args)`。
 
 本 service 负责：
 1. 按 name 从 ToolCatalog 端口查 ToolEntity（可见范围由注入的目录实现决定 = 当前租户 + 平台授权）
 2. 用 `build_tools` 构造运行期 Tool 实例（HttpTool / McpTool / EchoTool）
 3. 绑定 AgentRunContext（tenant_id / user_id / agent_id / conversation_id / run_id）
-4. 调 `tool.invoke(args, ctx)`，任何异常转成文本 observation 回灌 LLM，不抛给主循环
+4. 调 `tool.invoke(args, ctx)`，任何异常转成文本 observation 返回给 LLM，不抛给主循环
 """
 
 from __future__ import annotations
@@ -128,7 +128,7 @@ class ToolExecutorService:
 
         tool = self._tools_cache.get(name)
         if tool is None:
-            # 20260731 review：错误 observation 会回灌给模型并可能展示于 trace，
+            # 20260731 review：错误 observation 会返回给模型并可能展示于 trace，
             # 全量枚举租户工具目录（上限 200 个）属于信息泄露，只回显截断样本
             names = sorted(self._tools_cache.keys())
             sample = "、".join(names[:MAX_AVAILABLE_TOOLS_SHOWN])

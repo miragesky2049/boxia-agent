@@ -15,8 +15,8 @@
 | ASGI 服务器 | uvicorn[standard] | `>=0.32` | 开发 `--reload`，生产由 `WEB_CONCURRENCY` 控制 worker 数 |
 | 数据校验 | pydantic-settings、python-dotenv | `>=2.6 / >=1.0` | 环境变量配置、`.env` 加载 |
 | ORM / 迁移 | sqlalchemy、sqlalchemy-utils、alembic、psycopg[binary] | `>=2.0.36 / >=0.41 / >=1.14 / >=3.2` | 仓储、UnitOfWork、行级多租户过滤、Alembic 迁移 |
-| 图运行时 | langgraph、langgraph-checkpoint-postgres | `>=1.2.18 / >=3.2.0` | DAG 编译、断点续跑、`AsyncPostgresSaver` |
-| Agent / 工具 | fastmcp、httpx | `>=4.0.0 / >=0.28` | MCP client、统一工具治理网关（HTTP/2 + 连接池） |
+| 图运行时 | langgraph、langgraph-checkpoint-postgres | `>=1.2.18 / >=3.2.0` | DAG 编译、断点恢复（checkpoint）、`AsyncPostgresSaver` |
+| Agent / 工具 | fastmcp、httpx | `>=4.0.0 / >=0.28` | MCP client、统一工具调用网关（HTTP/2 + 连接池） |
 | RAG | pgvector、pymilvus、pypdf、python-docx | `>=0.3 / >=2.4 / >=5.1 / >=1.1` | 向量召回双实现、PDF / Word 文档解析 |
 | 异步任务 | celery[redis] | `>=5.4` | RAG ingest 队列、beat 周期任务（权益生效 / 到期 / 宽限 / 对账） |
 | 缓存 | redis[hiredis] | `>=5.0` | 短期记忆 DB 0、Celery broker DB 1、结果后端 DB 2 |
@@ -53,7 +53,7 @@
 | --- | --- | --- |
 | 关系数据库 | `pgvector/pgvector:pg17` | PostgreSQL 17 + pgvector 扩展（HNSW 索引） |
 | 缓存 | `redis:7-alpine` | AOF 持久化、`maxmemory 256mb`、`allkeys-lru` |
-| 对象存储 | MinIO（可选，本地可切 fake_storage） | 知识库原文、上传文件 |
+| 对象存储 | MinIO（可选，本地可切换为 fake_storage） | 知识库原文、上传文件 |
 | 向量库（可选） | Milvus 2.4 | 通过 `pymilvus` 接入，`vector_store/factory.py` 按配置切换 |
 | 生产反代 | `nginxinc/nginx-unprivileged:1.27-alpine` | SPA 静态资源、`/api` 反代、限流、安全响应头 |
 | 构建镜像 | `python:3.12-slim`、`node:24-alpine` | 后端运行、前端构建 |
@@ -90,8 +90,8 @@ boxia-agent/
 │   │   ├── domain/              # 领域层（纯业务，不依赖框架）
 │   │   │   ├── entity/          # 实体：application / resource / role / user / tenant / department ...
 │   │   │   ├── repository/      # 仓储协议
-│   │   │   ├── agent/           # ReAct 统一循环（react）/ 记忆分层（memory）/ 接管路由（handoff）/
-│   │   │   │                    # judge 评测 / MCP client + 会话池 / tool_gateway 治理网关
+│   │   │   ├── agent/           # ReAct 统一循环（react）/ 记忆分层（memory）/ Agent 转交（handoff）/
+│   │   │   │                    # 裁判模型评测 / MCP client + 会话池 / tool_gateway 工具调用网关
 │   │   │   ├── canvas/          # 画布 DSL：node_type / node_meta / 转换 / 校验 / lint / 表达式
 │   │   │   ├── graph/           # 图运行时：compiler / runtime / checkpoint / state / nodes/*
 │   │   │   ├── llm/             # LLM 适配层：client / adapter / messages / multimodal
@@ -134,9 +134,9 @@ boxia-agent/
 └── README.md
 ```
 
-### 5.2 根目录文件为什么这样放
+### 5.2 根目录说明
 
-| 路径                      | 用途                             | 为什么在根目录                    |
+| 路径                      | 用途                             | 置于根目录的原因                  |
 |---------------------------|----------------------------------|-----------------------------------|
 | `backend/`、`frontend/`   | 两个可独立构建的应用             | 按端拆分，互不依赖                |
 | `ops/`                    | 跨端的开发、检查、部署、备份脚本 | 不属于任何一个端                  |
@@ -145,21 +145,21 @@ boxia-agent/
 
 ### 5.3 代码分层约定
 
-1. **Web 层只做“翻译”**：参数校验、协议转换，不写业务规则。
+1. **Web 层只做协议适配**：参数校验、协议转换，不写业务规则。
 2. **业务规则在 `internal/application`**：用例服务负责编排；应用相关的用例集中在 `internal/application/apps/`。
 3. **领域能力在 `internal/domain`**：画布解析、图运行时、Agent Loop、LLM 适配、RAG 检索都在领域层，可脱离 FastAPI 单测。
 4. **数据库操作在 `internal/infrastructure/repository`**：仓储只负责读写。
 5. **事务统一提交**：仓储内部只 `flush()`，应用服务在用例结束时统一 `commit()`；审计日志和业务数据在同一个事务里。
 6. **新增管理端接口默认受保护**：`web/admin/router.py` 统一挂载管理员鉴权，再按 `page:*` / `button:*` / `tool:*` / `document:*` 收窄。
 
-### 5.4 想改某个功能，应该动哪里
+### 5.4 功能改动定位
 
 | 需求                 | 通常要改的文件                                                                                                                                                                 |
 |----------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | 新增一个管理端接口   | `backend/web/admin/routers/xxx.py`（路由）+ `backend/web/admin/schemas/xxx.py`（模型）→ `backend/internal/application/xxx_service.py`（业务）→ 仓储实现 |
 | 调整画布节点类型     | `backend/internal/domain/canvas/node_type.py`（编码）+ `node_meta.py`（元数据）+ `internal/domain/graph/nodes/*`（运行实现）                                                     |
 | 调整图执行           | `backend/internal/domain/graph/compiler.py`、`runtime.py`、`state.py`、`checkpoint.py`                                                                                          |
-| 调整 Agent 循环      | `backend/internal/domain/agent/react.py`、`tools.py`、`tool_executor.py`、`tool_gateway.py`（接管路由 `handoff.py`、记忆 `memory.py`）                                          |
+| 调整 Agent 循环      | `backend/internal/domain/agent/react.py`、`tools.py`、`tool_executor.py`、`tool_gateway.py`（Agent 转交 `handoff.py`、记忆 `memory.py`）                                          |
 | 调整 RAG             | `backend/internal/domain/retrieval/*` + `backend/internal/application/ingestion_service.py`                                                                                     |
 | 新增一张表           | `backend/internal/infrastructure/model/xxx.py`（ORM）→ `backend/internal/domain/entity/xxx.py`（实体）→ 生成 Alembic 迁移                                                        |
 | 新增一个管理端页面   | `frontend/admin/src/pages/`（页面）→ `frontend/admin/src/router.tsx`（路由）→ `frontend/admin/src/api/`（接口封装）                                                              |
@@ -170,7 +170,7 @@ boxia-agent/
 
 ### 5.5 本地断点调试
 
-前端 Vite 会把 `/api` 代理到 `127.0.0.1:8000`（管理端 `web.app_admin:app`），断点打在对应路由即可，例如 `backend/web/admin/routers/public.py` 的 `get_public_context`。
+前端 Vite 会把 `/api` 代理到 `127.0.0.1:8000`（管理端 `web.app_admin:app`），断点设置在对应路由即可，例如 `backend/web/admin/routers/public.py` 的 `get_public_context`。
 
 **关键：调试启动时不要加 `--reload`**。reload 会 fork 子进程，IDE 断点落在父进程上不生效。
 
@@ -182,12 +182,12 @@ boxia-agent/
 2. 勾选 **Module name**（不是 Script path），填 `uvicorn`
 3. **Parameters**：`web.app_admin:app --host 127.0.0.1 --port 8000`
 4. **Working directory**：`D:\OtherCode\PythonProject\boxia-agent\backend`
-5. **Python interpreter**：必须选 `backend\.venv` 的解释器（见下方「常见坑」）
-6. 打断点后 Shift+F9（Debug）启动，访问 <http://localhost:5173/api/v1/public/context> 即命中
+5. **Python interpreter**：必须选 `backend\.venv` 的解释器（见下方「常见问题」）
+6. 设置断点后 Shift+F9（Debug）启动，访问 <http://localhost:5173/api/v1/public/context> 即命中
 
-方式二：直接调试测试。光标放到测试函数内，Ctrl+Shift+F9 跑该用例，断点打在被测接口 / 服务上即可，适合跟逻辑。
+方式二：直接调试测试。将光标置于测试函数内，按 Ctrl+Shift+F9 执行该用例，断点设置在被测接口 / 服务上即可，便于跟踪执行逻辑。
 
-方式三：附加进程。若坚持用命令行 `--reload` 启动，Run → **Attach to Process…**，选中监听 8000 端口的 uvicorn 子进程（不是 reload 父进程）。
+方式三：附加进程。若仍需使用命令行 `--reload` 启动，Run → **Attach to Process…**，选中监听 8000 端口的 uvicorn 子进程（不是 reload 父进程）。
 
 #### VS Code
 
@@ -212,20 +212,20 @@ boxia-agent/
 }
 ```
 
-打断点后 F5 启动即可。用户端把模块换成 `web.app_user:app`、端口改成 `8001`。
+设置断点后 F5 启动即可。用户端把模块换成 `web.app_user:app`、端口改成 `8001`。
 
-#### 常见坑：Python 解释器选错
+#### 常见问题：Python 解释器选错
 
-报错形如 `ModuleNotFoundError: No module named 'uuid6'`，且 traceback 里 site-packages 路径指向**其他项目**的 venv（如 `D:\GitlabCode\...\.venv`），说明 IDE 用了别的项目的解释器——只是工作目录指到了本仓库，能找到源码却找不到依赖。
+报错形如 `ModuleNotFoundError: No module named 'uuid6'`，且 traceback 中 site-packages 路径指向**其他项目**的 venv（如 `D:\GitlabCode\...\.venv`），说明 IDE 使用了其他项目的解释器——工作目录虽指向本仓库，可找到源码，却无法找到依赖。
 
 修复：
 
 - PyCharm：**File → Settings → Project → Python Interpreter**，Add Local Interpreter → Existing，指向 `backend\.venv\Scripts\python.exe`；运行配置里的 Python interpreter 同步修改。
 - VS Code：Ctrl+Shift+P → **Python: Select Interpreter**，选 `backend\.venv`。
 
-改对后 traceback 中的路径应全部落在 `boxia-agent\backend\.venv` 下。
+修正后 traceback 中的路径应全部位于 `boxia-agent\backend\.venv` 下。
 
-#### 常见坑：Windows 启动用户端（8001）与残留 worker
+#### 常见问题：Windows 启动用户端（8001）与残留 worker
 
 用户端标准启动方式（在 `backend/` 目录下）：
 
@@ -250,12 +250,12 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 ## 6. 配置说明
 
-### 6.1 配置文件从哪来
+### 6.1 配置来源
 
 - 本地开发：复制 `backend/.env.example` 为 `backend/.env` 后修改。
 - 部署：在 `ops/` 下新建 `.env.prod`（开发/测试环境分别新建 `.env.dev`、`.env.test`），按 14.3 的清单填写。
 
-真实配置文件都已被 `.gitignore` 忽略，不会进入 Git。第一次使用先确认必填项，其余变量都有默认值，可以等需要时再调整：
+真实配置文件均已被 `.gitignore` 忽略，不会进入 Git。首次使用时确认必填项即可，其余变量均有默认值，可按需调整：
 
 | 配置文件 | 必填项 |
 |----------|--------|
@@ -364,7 +364,7 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 - `dev` / `test` / `prod`：必须配置 `ROOT_DOMAIN`，且不能是 `localhost`、`*.localhost` 或 IP 地址；禁止开启 `ALLOW_TENANT_HEADER`。
 - `prod` 额外要求：`JWT_SECRET` 至少 32 字符且不能是示例占位值；`CORS_ORIGINS` 不允许 `*`。
 
-这些检查是为了避免“复制示例配置直接上线”或漏配域名时把请求放进最高权限的产品级平台。
+上述校验用于防止复制示例配置直接上线，或漏配域名时把请求接入权限最高的产品级平台。
 
 ### 6.4 多租户域名与使用方式
 
@@ -378,11 +378,11 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 **域名是作用域的唯一事实来源。** 部署环境必须配置 `ROOT_DOMAIN`，只能通过二级域名访问；部署环境中的 `localhost`、回环地址、未知域名与多级子域名一律返回 404。`X-Tenant-Code` 请求头与 `?tenant=` 参数只在 `local` 环境、且 `ALLOW_TENANT_HEADER=true` 时生效，并且只在回环/本机主机上生效。
 
-本地不配置 `ROOT_DOMAIN` 时自动回退 `localhost`，因此可以直接验证真实子域名：
+本地未配置 `ROOT_DOMAIN` 时自动回退 `localhost`，可按真实子域名方式直接验证：
 
 | 本地访问地址                              | 作用域                   | 解析方式                       |
 |-------------------------------------------|--------------------------|--------------------------------|
-| `http://localhost:5173`                   | 产品级平台（无请求头时） | 默认兜底 `resolution=default`  |
+| `http://localhost:5173`                   | 产品级平台（无请求头时） | 默认回退 `resolution=default`  |
 | `http://localhost:5173/login?tenant=acme` | 租户 `acme`              | 请求头模式 `resolution=header` |
 | `http://platform.localhost:5173`       | 产品级平台               | 域名 `resolution=host`         |
 | `http://acme.localhost:5173`              | 租户 `acme`              | 域名 `resolution=host`         |
@@ -396,12 +396,12 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 | 测试环境部署 | `test`        | 必填，如 `test.example.com` | `platform.test.example.com` | `acme.test.example.com` | 仅二级域名                                    |
 | 线上环境     | `prod`        | 必填，如 `example.com`      | `platform.example.com`      | `acme.example.com`      | 仅二级域名                                    |
 
-`/public/context` 与 `/admin/context` 会返回 `app_env`、`tenant_resolution`、`tenant_switch_mode` 与 `platform_admin_host`，登录页和管理端侧边栏会展示环境与解析来源，便于排查“为什么进了错误租户”。
+`/public/context` 与 `/admin/context` 会返回 `app_env`、`tenant_resolution`、`tenant_switch_mode` 与 `platform_admin_host`，登录页和管理端侧边栏会展示环境与解析来源，便于定位租户解析异常。
 
 **数据隔离规则**
 
 - 业务表统一带 `tenant_id`：产品级统一使用配置的产品级租户 UUID（`PLATFORM_TENANT_ID`），租户使用真实租户 ID；仓储过滤为 `tenant_id IN (当前租户, PLATFORM_TENANT_ID)`。
-- 应用通过 `tenant_application_instance` 开通：未开通的租户看不到该应用；开通时可钉住图版本、配置配额与有效期。
+- 应用通过 `tenant_application_instance` 开通：未开通的租户无法看到该应用；开通时可锁定图版本、配置配额与有效期。
 - 工具资源通过 `resource_grant` 授权给租户；应用与工具授权都只在授权作用域内生效。
 - 用户的数据范围由角色 + 管理单元（`user_mgmt_unit_grants`）决定；应用还支持按部门（含子树）/指定人员配置实例级可见范围。
 - 登录、刷新与访问令牌都绑定作用域，跨作用域使用直接返回 401。
@@ -419,17 +419,17 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 ## 7. 登录、权限与安全
 
-### 7.1 两种令牌，通俗理解
+### 7.1 两种令牌机制说明
 
 登录成功后服务器返回两个令牌：
 
-- **Access Token（访问令牌）**：短期的“临时通行证”，默认 30 分钟。前端只放在内存里，刷新页面后会用 Refresh Token 重新换取，不需要重新登录。
-- **Refresh Token（刷新令牌）**：长期的“续期凭证”，默认 14 天。数据库只保存它的哈希值，不保存明文。
+- **Access Token（访问令牌）**：短期令牌，默认 30 分钟。前端仅保存在内存中，刷新页面后通过 Refresh Token 重新换取，无需重新登录。
+- **Refresh Token（刷新令牌）**：长期令牌，默认 14 天。数据库仅保存其哈希值，不保存明文。
 
 安全机制：
 
-- 刷新令牌**用过一次就作废**，同时发一个新的（单次轮换）。
-- 如果旧的刷新令牌被再次使用，系统会认为可能被盗用，撤销整条会话链，要求重新登录。
+- 刷新令牌**单次使用**：使用一次后立即作废，同时签发新令牌（单次轮换）。
+- 如果旧的刷新令牌被再次使用，系统判定存在盗用可能，撤销整条会话链，要求重新登录。
 - 登出、改密、禁用或删除账号时，该账号已有令牌立即失效。
 - 令牌绑定作用域：Access Token 里的 `tid` 必须与账号归属、当前子域名一致，跨作用域访问会被拒绝。
 - 管理端与用户端令牌使用不同 `aud`，不能互相冒用。
@@ -460,12 +460,12 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 
 约束与规则：
 
-- 每次请求都以数据库中的实时角色、权限与账号状态为准（`AdminPrincipal.permissions` 每次重建），不信任令牌里的旧角色信息。
+- 每次请求都以数据库中的实时角色、权限与账号状态为准（`AdminPrincipal.permissions` 每次重建），不信任令牌中的历史角色信息。
 - `system:console:access` 控制管理端登录；`system:data:all` 跳过数据授权过滤，但仍受租户隔离约束。
 - 超级管理员角色拥有所属作用域全部权限，功能权限与数据授权均不可单独调整。
 - 平台角色不能授予租户专属菜单与按钮（`menu:grants`、`menu:users`、`menu:departments`、`menu:employments`、`menu:mgmt-units` 等）；租户角色不能授予平台级租户管理权限（`menu:tenants` 等）。
 - 授权只允许授予调用者已拥有的权限，复制角色同样校验；写入时对角色行加锁，避免并发授权互相覆盖。
-- 前端隐藏菜单和按钮只是体验优化，所有接口都以服务端权限校验为准，不满足返回 403。
+- 前端隐藏菜单和按钮仅为体验优化，所有接口均以服务端权限校验为准，不满足返回 403。
 
 **应用与资源的可见性**：
 
@@ -496,8 +496,8 @@ powershell -NoProfile -Command "Get-CimInstance Win32_Process -Filter \"Name='py
 - 仓库**不包含任何默认账号或默认密码**，第一个管理员必须手动创建。
 - `backend/.env`、`ops/.env.*` 不进入 Git；仓库只保留 `backend/.env.example` 模板。
 - 生产环境的示例 `JWT_SECRET` 会被校验拒绝，必须换成随机值（`openssl rand -hex 32`）。
-- CI 中的 E2E 测试密码在运行时随机生成，不写死在仓库里。
-- `backend/tests/`、`frontend/admin/e2e/` 里的固定口令只用于一次性测试数据库，不是真实凭据。
+- CI 中的 E2E 测试密码在运行时随机生成，不固化在仓库中。
+- `backend/tests/`、`frontend/admin/e2e/` 中的固定口令仅用于一次性测试数据库，不是真实凭据。
 
 ### 7.6 上线安全验收清单
 
@@ -581,11 +581,11 @@ Authorization: Bearer <access_token>
 | POST   | `/admin/apps/batch`                      | 批量物理删除（1-100，逐项独立事务，部分成功返回明细）     |
 | GET    | `/admin/apps/{id}/graph`                 | 读取草稿图 `{schema_json, graph_schema_version, runtime_mode}` |
 | PUT    | `/admin/apps/{id}/graph`                 | 保存草稿图（整图覆盖）                                     |
-| POST   | `/admin/apps/validate-graph`             | 校验图：环检测、Start/End 唯一性、变量类型，不落库          |
+| POST   | `/admin/apps/validate-graph`             | 校验图：环检测、Start/End 唯一性、变量类型，不写入数据库      |
 | GET    | `/admin/apps/{id}/graph-versions`        | 发布版本列表                                               |
 | POST   | `/admin/apps/{id}/graph-rollback`        | 回滚到指定版本                                             |
 | POST   | `/admin/apps/{id}/publish`               | 发布：严格校验通过后生成不可变图版本                       |
-| POST   | `/admin/apps/{id}/graph-pin`             | 钉住字段/图版本                                            |
+| POST   | `/admin/apps/{id}/graph-pin`             | 锁定字段/图版本                                            |
 | POST   | `/admin/apps/{id}/listing`               | 上架 / 下架市场                                            |
 | POST   | `/admin/apps/{id}/enabled`               | 启用 / 停用                                                |
 | GET/PUT| `/admin/apps/{id}/visibility`            | 读取/替换实例级可见范围（部门含子树 / 指定人员）           |
@@ -593,7 +593,7 @@ Authorization: Bearer <access_token>
 | DELETE | `/admin/apps/{id}/tenant-config`         | 删除租户级覆盖配置                                         |
 | POST   | `/admin/apps/debug/run/stream`           | SSE 整图调试运行（节点实时状态 + 日志）                    |
 | POST   | `/admin/apps/debug/run/node`             | 单节点调试运行                                             |
-| POST   | `/admin/apps/debug/run/stream/resume`    | 人工审批后续跑                                             |
+| POST   | `/admin/apps/debug/run/stream/resume`    | 人工审批后恢复执行                                         |
 | GET    | `/admin/apps/{id}/conversations`         | 调试会话列表                                               |
 | GET    | `/admin/apps/conversations/{id}/messages`| 调试会话消息                                               |
 | DELETE | `/admin/apps/conversations/{id}`         | 删除调试会话                                               |
@@ -610,7 +610,7 @@ Authorization: Bearer <access_token>
 | POST | `/admin/marketplace/subscribe`                          | 租户自助开通应用                                         |
 | GET  | `/admin/marketplace/my-apps`                            | 当前租户已开通应用                                       |
 | POST | `/admin/marketplace/applications/{id}/run`              | 运行应用，body 为 `{inputs}`                             |
-| POST | `/admin/marketplace/applications/{id}/runs/{thread_id}/resume` | 人工审批恢复运行                                  |
+| POST | `/admin/marketplace/applications/{id}/runs/{thread_id}/resume` | 人工审批后恢复执行                                  |
 | GET  | `/admin/marketplace/applications/{id}/runs`             | 运行历史                                                 |
 | GET  | `/admin/marketplace/applications/{id}/inputs`           | 应用启动参数 Schema                                      |
 | GET  | `/admin/marketplace/runs/{run_id}`                      | 运行详情（节点级状态/耗时/用量）                         |
@@ -705,7 +705,7 @@ ingest 状态机：`pending → queued → processing → ready` 或 `failed`（
    ⑦ 按「[资料 N | 章节路径]」拼装注入 prompt
 ```
 
-降级策略：rerank 失败退化为向量余弦过滤；query 改写失败退化为原始 query；embedding 临时故障由 Celery retry 兜底。
+降级策略：rerank 失败退化为向量余弦过滤；query 改写失败退化为原始 query；embedding 临时故障由 Celery retry 保底处理。
 
 ### 8.7 角色、用户、授权与租户接口
 
@@ -803,7 +803,7 @@ ingest 状态机：`pending → queued → processing → ready` 或 `failed`（
 | `boxia_llm_tokens_total` | Counter | LLM token 用量（prompt / completion） |
 | `boxia_tool_invoke_duration_seconds` | Histogram | 工具调用耗时 |
 | `boxia_tool_invoke_total` | Counter | 工具调用次数（含 success / error / circuit_open / rate_limited） |
-| `boxia_agent_run_iterations` | Histogram | 单次 agent 运行的 function calling 迭代数 |
+| `boxia_agent_run_iterations` | Histogram | 单次智能体运行的 function calling 迭代数 |
 
 ### 8.9 用户端接口
 
@@ -906,7 +906,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | 409    | `CONFLICT`                        | 名称重复或唯一约束冲突                 |
 | 422    | `VALIDATION_ERROR`                | 参数或业务校验失败（含 `errors` 明细） |
 | 429    | `ACCOUNT_LOCKED` / `RATE_LIMITED` | 登录锁定或触发限流，含 `Retry-After`   |
-| 500    | `INTERNAL_ERROR`                  | 服务异常，只返回通用文案，堆栈只进日志 |
+| 500    | `INTERNAL_ERROR`                  | 服务异常，只返回通用文案，堆栈仅写入日志 |
 | 503    | `SERVICE_UNAVAILABLE`             | 依赖不可用（如就绪检查失败）           |
 
 ---
@@ -946,7 +946,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `resource` | 统一资源目录：`type`（tool/prompt/skill/knowledge）、`owner_type`/`owner_id`、`config`、版本、启停/废弃 |
 | `resource_grant` | 统一资源授权：`resource_id` + `tenant_id`，供资源页与市场使用 |
 | `resource_grants` | 旧 RBAC 授权表：`resource_type` + `resource_id` + `tenant_id` + 可空 `role_id`，角色授权与授权汇总接口仍在用（兼容期） |
-| `tools` | 可执行工具定义：`type`（http/mcp）、`config`（URL/headers/schema/治理参数）、启停 |
+| `tools` | 可执行工具定义：`type`（http/mcp）、`config`（URL/headers/schema/限流与熔断参数）、启停 |
 | `documents` | 知识库文档：标题、来源、原文、`content_hash`、`ingest_status`、`ingest_error`、`chunk_count` |
 | `document_chunks` | 文档分块：`chunk_index`、`content`、`embedding`（pgvector 1024 维）、`metadata`（含 `heading_path`） |
 | `model_provider` | 模型供应商：名称、`base_url`、`api_key`、归属 |
@@ -956,9 +956,9 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 | `conversation` | 会话：租户、用户、应用、标题 |
 | `message` | 消息：角色、内容、工具调用、`run_id`、元数据 |
 | `tenant_settings` | 租户运行时配置：默认模型、允许模型白名单、工具白名单 |
-| `tenant_usage_ledger` | 租户 token 用量账本：应用、运行、节点、模型、prompt/completion/total tokens |
+| `tenant_usage_ledger` | 租户 token 用量记录：应用、运行、节点、模型、prompt/completion/total tokens |
 | `event_webhook` | 事件 Webhook：租户、应用、事件类型、URL、启停 |
-| `checkpoints` / `checkpoint_blobs` / `checkpoint_writes` / `checkpoint_migrations` | LangGraph 断点续跑与时间旅行所需的状态快照 |
+| `checkpoints` / `checkpoint_blobs` / `checkpoint_writes` / `checkpoint_migrations` | LangGraph 断点恢复与时间旅行所需的状态快照 |
 | `alembic_version` | 当前迁移版本 |
 
 约定：
@@ -970,7 +970,7 @@ TENANT_LOGIN=$(curl -s -X POST http://127.0.0.1:8000/api/v1/admin/auth/login \
 - 资源名称和描述使用 `pg_trgm` 索引，支持模糊搜索。
 - RAG 向量列依赖 `pgvector` 扩展；使用 Milvus 时由 `VECTOR_STORE_PROVIDER` 切换实现。
 - `run.workflow_id` 为历史列名，语义上是应用 ID。
-- 迁移 `0037_drop_legacy` 起，旧版 agent/workflow/skill/component/prompt 相关表已物理下线；`0043_drop_legacy_field_version` 又下线了字段级版本表，当前只保留应用模型所需的表。
+- 迁移 `0037_drop_legacy` 起，旧应用模型（agent/workflow/skill/component/prompt）相关表已移除；`0043_drop_legacy_field_version` 又移除了字段级版本表，当前只保留应用模型所需的表。
 
 ### 9.2 迁移命令
 

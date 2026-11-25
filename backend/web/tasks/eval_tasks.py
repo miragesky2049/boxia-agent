@@ -3,7 +3,7 @@
 发起接口 start_batch 落 eval_run 行并提交后投递 run_batch(tenant_id, eval_run_id)；
 worker 进程自建 UoW（先例 memory_tasks），逐 case 经 build_runner 锁定
 graph_version 发布快照直调，run 行带 is_eval=true 归因。
-重试契约：EvalRunService.run_batch 内部已兜底把批落 completed/error 终态，本层
+重试契约：EvalRunService.run_batch 内部已保证把批次落为 completed/error 终态，本层
 只兜装配段异常并回写 error；不再整批重投——重跑等于重复计费与重复结果行。
 """
 
@@ -113,7 +113,7 @@ def _build_service(uow: SqlAlchemyUnitOfWork, eval_run_id: UUID) -> EvalRunServi
 
 @celery_app.task(name="eval.run_batch", bind=True)
 def run_batch(self, tenant_id: str, eval_run_id: str) -> None:  # noqa: ANN001 - celery bind 注入 self
-    """执行一整批评测直调与判定（进度经 eval_run.progress 心跳透出）。"""
+    """执行一整批评测直调与判定（进度写入 eval_run.progress 心跳供查询）。"""
     try:
         uow = SqlAlchemyUnitOfWork()
     except Exception as exc:  # noqa: BLE001 - 数据库会话都建不起来，只能记日志放弃
@@ -124,7 +124,7 @@ def run_batch(self, tenant_id: str, eval_run_id: str) -> None:  # noqa: ANN001 -
         uow.apply_scope((), apply_role_filter=False)
         service = _build_service(uow, UUID(eval_run_id))
         _persistent_loop().run_until_complete(service.run_batch(UUID(tenant_id), UUID(eval_run_id)))
-    except Exception as exc:  # noqa: BLE001 - run_batch 内部已兜底终态；走到这里属装配段异常
+    except Exception as exc:  # noqa: BLE001 - run_batch 内部已保证终态落库；走到这里属装配段异常
         logger.exception("评测批任务装配失败 eval_run=%s", eval_run_id)
         try:
             EvalRepository(uow.session).update_eval_run(

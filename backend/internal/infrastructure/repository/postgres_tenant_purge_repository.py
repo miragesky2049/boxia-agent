@@ -56,7 +56,7 @@ _SNAPSHOT_SQL = """
 # - run.workflow_id 对 application RESTRICT，run 必须先于 owned application；
 # - application_apply/documents 为 RESTRICT，必须先于 application/tenants；
 # - application/resource 仅删租户多态所有行，平台行（owner_type='platform'）绝不触碰；
-# - message 末位兜底（正常已随 conversation CASCADE）。
+# - message 末位补删（正常已随 conversation CASCADE）。
 _PURGE_STEPS: tuple[tuple[str, str], ...] = (
     (
         "application_user_variable",

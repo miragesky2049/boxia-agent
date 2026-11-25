@@ -6,7 +6,7 @@
     SMOKE_ADMIN_USER=xxx SMOKE_ADMIN_PASSWORD='yyy' .venv/Scripts/python.exe scripts/smoke_quality_gate.py
 校验：
 1. admin GET/PUT agent-config 携 qualityGate（四处同构：passScore=10 必不过 → 观察重生）；
-2. 用户端 SSE：judge 帧逐判定透出、result 帧与门关态差异仅 additive judge 键；
+2. 用户端 SSE：judge 帧逐条输出判定、result 帧与门关态差异仅 additive judge 键；
 3. judgeModel 指向不存在模型 → judge 调用异常 fail-open（score=None/error=true）且对话正常收尾；
 4. 收尾恢复门关闭默认组。
 """
@@ -133,7 +133,7 @@ def main() -> None:
     assert "judge" not in frames3, "门已关闭仍出现 judge 帧"
     assert "judge" not in frames3["result"][-1], "门已关闭 result 帧仍带 judge 键"
 
-    print("SMOKE PASS T-d7 质量门：重生=2次判定 fail-open=标记透出 门关态=基线一致")
+    print("SMOKE PASS T-d7 质量门：重生=2次判定 fail-open=标记输出 门关态=基线一致")
 
 
 if __name__ == "__main__":
