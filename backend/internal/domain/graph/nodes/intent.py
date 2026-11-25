@@ -104,7 +104,7 @@ def _extract_id(content: str, valid_ids: set[int]) -> int | None:
 
 
 def _match_by_keyword(query: str, intents: list[dict[str, Any]]) -> int | None:
-    """无 LLM 时的兜底：意图名称出现在输入里即命中。"""
+    """无 LLM 时的降级匹配：意图名称出现在输入里即命中。"""
     text = (query or "").strip()
     if not text:
         return None

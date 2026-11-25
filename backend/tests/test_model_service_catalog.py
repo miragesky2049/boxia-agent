@@ -1,4 +1,4 @@
-"""T8: ModelService.list_catalog 返回字段与默认值兜底单测。
+"""T8: ModelService.list_catalog 返回字段与默认值回退单测。
 
 验证：
 - DB 表为空时回退到 settings.llm_model_id + llm_temperature/llm_max_tokens

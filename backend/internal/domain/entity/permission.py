@@ -154,7 +154,7 @@ PERMISSION_BY_CODE: dict[str, PermissionDefinition] = {
 # 租户作用域不包含平台级租户管理权限
 PLATFORM_ONLY_CODES: frozenset[str] = frozenset(
     {
-        # 0070：租户侧「应用管理」由 menu:tenant-apps 承接（订阅列表+管理范围），
+        # 0070：租户侧「应用管理」由 menu:tenant-apps 承载（订阅列表+管理范围），
         # 面向普通用户的应用运行在用户端，租户 console 不再下发 menu:apps/page:apps
         "menu:apps",
         "page:apps",

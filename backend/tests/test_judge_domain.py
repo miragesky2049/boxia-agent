@@ -15,7 +15,7 @@ from internal.domain.llm.client import LLMResponse, LLMUsage
 
 
 class _FakeLLM:
-    """按脚本顺序吐出 content 的假 LLM 客户端，记录每次 chat 入参。"""
+    """按脚本顺序返回 content 的假 LLM 客户端，记录每次 chat 入参。"""
 
     def __init__(self, contents: list[str]) -> None:
         self._contents = list(contents)
@@ -70,7 +70,7 @@ def test_judge_tolerates_markdown_fence() -> None:
 
 
 def test_judge_passes_default_threshold_when_field_missing() -> None:
-    # 模型漏写 passed 时按默认通过分 7 推导（rubric 模板内已声明阈值，此为兜底）
+    # 模型漏写 passed 时按默认通过分 7 推导（rubric 模板内已声明阈值，此为防御性回退）
     assert _run(_FakeLLM(['{"score": 7}'])).passed is True
     assert _run(_FakeLLM(['{"score": 6}'])).passed is False
 

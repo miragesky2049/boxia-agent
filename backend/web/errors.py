@@ -38,7 +38,7 @@ def _error_response(
 
 
 def install_exception_handlers(app: FastAPI) -> None:
-    """注册业务、校验、HTTP、数据库与兜底异常处理器。"""
+    """注册业务、校验、HTTP、数据库与未捕获异常处理器。"""
 
     @app.exception_handler(AppError)
     async def _handle_app_error(_: Request, exc: AppError) -> JSONResponse:

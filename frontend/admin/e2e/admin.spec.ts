@@ -9,7 +9,6 @@ if (!ADMIN_PASSWORD) {
 }
 const VIEWER_USERNAME = process.env.E2E_VIEWER_USERNAME ?? 'e2e_viewer'
 const VIEWER_INITIAL_PASSWORD = 'Portal-Read-1234'
-const VIEWER_NEW_PASSWORD = 'Portal-Read-5678'
 
 async function login(
   page: Page,
@@ -160,20 +159,101 @@ test.describe('资源与应用', () => {
   })
 })
 
-test.describe('改密与只读权限', () => {
-  test('首次登录强制改密，只读账号不可写', async ({ request, page }) => {
+// 0071 起内置 viewer 不再下发 system:console:access，登录管理端直接被拒；
+// 强制改密流程改由「仅有控制台+应用页访问权」的自定义角色账号验证。
+const RO_ROLE_CODE = 'e2e-console-ro'
+const RO_ROLE_NAME = 'E2E 控制台只读'
+const RO_USERNAME = process.env.E2E_RO_USERNAME ?? 'e2e_ro_console'
+const RO_INITIAL_PASSWORD = 'Portal-Ro-1234'
+const RO_NEW_PASSWORD = 'Portal-Ro-5678'
+
+/** 幂等准备自定义角色：控制台访问 + 应用页，不含任何 button 权限；每次覆盖权限避免漂移。 */
+async function ensureConsoleReadOnlyRole(
+  request: APIRequestContext,
+  token: string,
+): Promise<string> {
+  const auth = { Authorization: `Bearer ${token}` }
+  const roles = (await (await request.get('/api/v1/admin/roles', { headers: auth })).json()) as {
+    id: string
+    code: string
+  }[]
+  const existing = roles.find((item) => item.code === RO_ROLE_CODE)
+  const roleId = existing
+    ? existing.id
+    : (
+        (await (
+          await request.post('/api/v1/admin/roles', {
+            headers: auth,
+            data: {
+              code: RO_ROLE_CODE,
+              name: RO_ROLE_NAME,
+              description: 'E2E：可进控制台但无写操作权限',
+            },
+          })
+        ).json()) as { id: string }
+      ).id
+  const put = await request.put(`/api/v1/admin/roles/${roleId}/permissions`, {
+    headers: auth,
+    data: { codes: ['system:console:access', 'menu:apps', 'page:apps'] },
+  })
+  expect(put.status(), await put.text()).toBeLessThan(400)
+  return roleId
+}
+
+async function ensureReadOnlyUser(
+  request: APIRequestContext,
+  token: string,
+  roleId: string,
+): Promise<void> {
+  const auth = { Authorization: `Bearer ${token}` }
+  const list = (await (
+    await request.get(`/api/v1/admin/admin-users?keyword=${RO_USERNAME}`, { headers: auth })
+  ).json()) as { items: { id: string; username: string }[] }
+  const existing = list.items.find((item) => item.username === RO_USERNAME)
+  if (existing) {
+    const reset = await request.post(`/api/v1/admin/admin-users/${existing.id}/password`, {
+      headers: auth,
+      data: { new_password: RO_INITIAL_PASSWORD },
+    })
+    expect(reset.status()).toBe(204)
+    return
+  }
+  const created = await request.post('/api/v1/admin/admin-users', {
+    headers: auth,
+    data: {
+      username: RO_USERNAME,
+      display_name: 'E2E 控制台只读用户',
+      password: RO_INITIAL_PASSWORD,
+      role_id: roleId,
+    },
+  })
+  expect(created.status(), await created.text()).toBe(201)
+}
+
+test.describe('改密与权限', () => {
+  test('viewer 登录管理端被拒（0071 行为）', async ({ request, page }) => {
     const token = await adminToken(request)
     await ensureViewer(request, token)
 
-    await login(page, VIEWER_USERNAME, VIEWER_INITIAL_PASSWORD)
+    await login(page, VIEWER_USERNAME, VIEWER_INITIAL_PASSWORD, false)
+    await expect(page.getByText('账号未获得管理端访问权限')).toBeVisible()
+    await expect(page).toHaveURL(/\/login/)
+  })
+
+  test('首次登录强制改密，未授权操作不可见', async ({ request, page }) => {
+    const token = await adminToken(request)
+    const roleId = await ensureConsoleReadOnlyRole(request, token)
+    await ensureReadOnlyUser(request, token, roleId)
+
+    await login(page, RO_USERNAME, RO_INITIAL_PASSWORD)
     await expect(page).toHaveURL(/\/change-password/)
-    await page.getByLabel('当前密码').fill(VIEWER_INITIAL_PASSWORD)
-    await page.getByLabel('新密码', { exact: true }).fill(VIEWER_NEW_PASSWORD)
-    await page.getByLabel('确认新密码').fill(VIEWER_NEW_PASSWORD)
+    await page.getByLabel('当前密码').fill(RO_INITIAL_PASSWORD)
+    await page.getByLabel('新密码', { exact: true }).fill(RO_NEW_PASSWORD)
+    await page.getByLabel('确认新密码').fill(RO_NEW_PASSWORD)
     await page.getByRole('button', { name: '确认修改' }).click()
     await expect(page).toHaveURL(/\/login/)
 
-    await login(page, VIEWER_USERNAME, VIEWER_NEW_PASSWORD)
+    await login(page, RO_USERNAME, RO_NEW_PASSWORD)
     await expect(page).toHaveURL(/\/apps$/)
     await expect(page.getByRole('button', { name: '新建应用' })).toHaveCount(0)
 

@@ -199,7 +199,7 @@ async def run_conversation_stream(
         # M4 PRD F14.9：手动归位不发 run，清路由态 + 通告帧（4xx 校验已在预检收口）
         handback_cid = payload.conversation_id
         if handback_cid is None:
-            # 预检已拦截此形态，此处仅类型收窄兜底
+            # 预检已拦截此形态，此处仅做类型收窄
             raise ValidationError("handback 必须提供 conversation_id")
         handback_ctx = service.prepare_handback(application_id, handback_cid)
         return _sse_response(
@@ -210,7 +210,7 @@ async def run_conversation_stream(
             ),
             "chat_failed",
         )
-    # M4 PRD F14.9：接管路由在 SSE 之前收口（目标不可见 → JSON 4xx，原路由保持不动）
+    # M4 PRD F14.9：转交路由（handoff）在 SSE 之前完成校验（目标不可见 → JSON 4xx，原路由保持不动）
     route_app_id = service.resolve_handoff_application(
         application_id,
         conversation_id=payload.conversation_id,

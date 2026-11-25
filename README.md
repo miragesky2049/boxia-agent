@@ -4,11 +4,11 @@
 
 > 面向企业内部的 **AI 应用编排与运营平台**。管理员在管理端用可视化画布组合模型、提示词、工具与知识库，把编排好的应用发布到市场，按租户与角色授权给最终用户使用。
 >
-> 内置 RAG 检索增强（pgvector / Milvus + bge embedding + cross-encoder rerank）、统一工具治理网关（熔断 / 限流 / 重试 / 连接池 / SSRF 防护）、HTTP 与 MCP 双工具协议、多租户行级数据隔离、RBAC 权限、审计日志与 OpenTelemetry 可观测性。技术栈为 FastAPI + React 18 + PostgreSQL 17 + Redis + Celery，Docker Compose 一键拉起。
+> 内置 RAG 检索增强（pgvector / Milvus + bge embedding + cross-encoder rerank）、统一工具调用网关（ToolGateway，熔断 / 限流 / 重试 / 连接池 / SSRF 防护）、HTTP 与 MCP 双工具协议、多租户行级数据隔离、RBAC 权限、审计日志与 OpenTelemetry 可观测性。技术栈为 FastAPI + React 18 + PostgreSQL 17 + Redis + Celery，可通过 Docker Compose 一键启动。
 
 ---
 
-## 📜 开源协议
+## 开源协议
 
 本项目采用 [Apache License 2.0](./LICENSE) 开源，可自由使用、修改、分发，包括商业用途，只需保留版权与许可声明。
 
@@ -18,17 +18,17 @@
 
 ---
 
-## 🚀 30 秒速通
+## 快速开始
 
-### 一句话这是什么
+### 项目简介
 
-一个"**不写代码就能搭企业 AI 应用**"的平台：管理员在画布上编排应用 → 发布到市场 → 授权给租户 → 租户员工在用户端直接对话，或由租户管理员在管理端自助试运行与查看运行记录。
+通过零代码可视化编排构建企业 AI 应用的平台：管理员在画布上编排应用 → 发布到市场 → 授权给租户 → 租户员工在用户端直接对话，或由租户管理员在管理端自助试运行与查看运行记录。
 
-### 一张图看懂架构
+### 整体架构
 
 ```text
                         ┌─────────────────────┐
-   你的浏览器 ──────────►│  Nginx (生产反代)   │
+   浏览器     ──────────►│  Nginx (生产反代)   │
                         └────┬───────┬───────┘
                              │       │
               ┌──────────────┘       └──────────────┐
@@ -48,11 +48,11 @@
    │  │   entitlement / grant / resource / model / audit ...    │  │
    │  ├─────────────────────────────────────────────────────────┤  │
    │  │ domain 领域层（纯业务，可脱离框架单测）                  │  │
-   │  │   GraphRuntime（LangGraph DAG：调试 / 试运行 / 断点续跑）│  │
-   │  │   ReAct 统一对话循环 + 接管路由（handoff）+ SSE          │  │
-   │  │   记忆分层（摘要压缩 + 长期记忆抽取）+ 评测（judge 飞轮） │  │
+   │  │   GraphRuntime（LangGraph DAG：调试 / 试运行 / 断点恢复）│  │
+   │  │   ReAct 统一对话循环 + Agent 转交（handoff）+ SSE        │  │
+   │  │   记忆管理（摘要压缩 + 长期记忆抽取）+ 评测（裁判模型）   │  │
    │  │   ToolGateway（SSRF/熔断/限流/重试/连接池）+ MCP 会话池  │  │
-   │  │   RetrievalService（RAG 召回 + 精排 + prompt 注入）      │  │
+   │  │   RetrievalService（RAG 召回 + 精排 + 注入提示词）       │  │
    │  ├─────────────────────────────────────────────────────────┤  │
    │  │ infrastructure：ORM 仓储 / UnitOfWork / Redis / 向量库 / │  │
    │  │   对象存储 / 代码沙箱 / Celery 任务 / OTel 可观测性      │  │
@@ -67,8 +67,8 @@
    └──────────┘  └──────────┘  └──────┬───────┘
                                       ▼
                               ┌──────────────┐
-                              │ 外部租户工具  │  ◄── SSRF 防护 + 治理网关
-                              │ HTTP / MCP   │      （MCP 会话池保持）
+                              │ 外部租户工具  │  ◄── SSRF 防护 + 调用网关
+                              │ HTTP / MCP   │      （MCP 会话保持）
                               └──────────────┘
 ```
 
@@ -77,7 +77,7 @@
 - **用户端前端**：React 18 + Ant Design 5 + react-markdown 对话渲染
 - **数据层**：PostgreSQL 17（pgvector）+ Redis 7 + Celery（RAG ingest / 长期记忆抽取 / 权益与评测周期任务）+ MinIO 对象存储（可切本地）
 
-### 📸 功能一览（真实截图，免启动预览）
+### 功能预览（界面截图）
 
 以下截图来自本地运行环境（演示数据），按「平台管理员 → 租户管理员 → 最终用户」三种视角展示。
 
@@ -107,9 +107,9 @@
 | --- | --- |
 | ![我的应用](docs/assets/screenshots/user-apps.png) | ![对话运行](docs/assets/screenshots/user-chat.png) |
 
-### 5 分钟把项目跑起来
+### 启动步骤
 
-> 前提：已装 **Git、Docker Desktop、Python 3.12、uv、Node.js 20+/22+、pnpm 11**。详见 [准备软件](docs/getting-started.md#2-准备软件)。
+> 前提：已安装 **Git、Docker Desktop、Python 3.12、uv、Node.js 20+/22+、pnpm 11**。详见 [准备软件](docs/getting-started.md#2-准备软件)。
 
 ```bash
 # 1. 拉代码
@@ -142,11 +142,11 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 浏览器打开 <http://localhost:5173>，用 `admin` + 第 4 步设置的密码登录，**首次登录强制改密**。
 
-> 💡 **懒人一键启动**（需要 Git Bash）：仓库根目录执行 `./ops/dev.sh`，会自动完成 2~5 步，并额外拉起 Redis、Celery worker（RAG + 权益周期任务）与 beat 定时调度器（权益生效/到期流转、宽限期回收、对账），以及清理上次残留的 Vite / Uvicorn 端口占用（但仍需先创建管理员）。
+> **一键启动脚本**（需要 Git Bash）：在仓库根目录执行 `./ops/dev.sh`，会自动完成第 2~5 步，并额外启动 Redis、Celery worker（RAG + 权益周期任务）与 beat 定时调度器（权益生效/到期流转、宽限期回收、对账），同时清理上次运行残留的 Vite / Uvicorn 端口占用（仍需先创建管理员）。
 
-### 端口速查
+### 端口一览
 
-| 服务            | 本地地址                              | 谁在用               |
+| 服务            | 本地地址                              | 使用方               |
 |-----------------|---------------------------------------|----------------------|
 | 管理端前端      | http://localhost:5173                 | 平台/租户管理员      |
 | 用户端前端      | http://localhost:5174                 | 普通员工             |
@@ -156,27 +156,27 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | PostgreSQL      | 127.0.0.1:5432                        | 后端                 |
 | Redis           | 127.0.0.1:6379                        | 记忆 / Celery        |
 
-### 接下来去哪？
+### 相关文档
 
-- 跑起来想搭第一个应用 → [画布编排 5 分钟上手](docs/features.md#画布编排-5-分钟上手)
-- 想给应用接外部接口（HTTP/MCP）→ [工具接入 5 分钟上手](docs/features.md#工具接入-5-分钟上手)
-- 卡住了 → [新手常见问题](docs/getting-started.md#4-新手常见问题)
-- 想改代码 → [目录结构与代码分层](docs/development.md#5-目录结构与代码分层)
-- 想看完整依赖版本 → [技术栈清单](docs/development.md#技术栈清单)
-- 想部署上线 → [生产环境落地部署](docs/deployment.md#14-生产环境落地部署)
-- 想面试讲清楚 → [面试讲解指南](docs/interview.md#13-面试讲解指南)
+- 搭建第一个应用 → [画布编排快速上手](docs/features.md#画布编排快速上手)
+- 为应用接入外部接口（HTTP / MCP）→ [工具接入快速上手](docs/features.md#工具接入快速上手)
+- 启动或运行遇到问题 → [常见问题](docs/getting-started.md#4-常见问题)
+- 修改代码 → [目录结构与代码分层](docs/development.md#5-目录结构与代码分层)
+- 查看完整依赖版本 → [技术栈清单](docs/development.md#技术栈清单)
+- 部署上线 → [生产环境部署](docs/deployment.md#14-生产环境部署)
+- 面试或对外讲解 → [面试讲解指南](docs/interview.md#13-面试讲解指南)
 
 ---
 
-## 🧰 技术栈一览
+## 技术栈一览
 
 | 层 | 关键选型 | 用在哪 |
 | --- | --- | --- |
 | **后端运行时** | Python 3.12、FastAPI 0.115、Uvicorn | `web.app_admin:app` / `web.app_user:app` 两个 ASGI 站点 |
 | **ORM / 迁移** | SQLAlchemy 2.0、Alembic、psycopg 3 | 仓储、UnitOfWork、行级多租户过滤 |
-| **图运行时** | LangGraph 1.2、langgraph-checkpoint-postgres | DAG 编译执行、断点续跑、调试 / 试运行 SSE |
-| **Agent 与工具** | FastMCP 4、httpx（HTTP/2 + keep-alive） | ReAct 对话循环、MCP client、统一工具治理网关 |
-| **RAG** | pgvector、pymilvus（可选）、pypdf、python-docx | 文档切分 → embedding → 向量召回 → cross-encoder 精排 |
+| **图运行时** | LangGraph 1.2、langgraph-checkpoint-postgres | DAG 编译执行、断点恢复、调试 / 试运行 SSE |
+| **Agent 与工具** | FastMCP 4、httpx（HTTP/2 + keep-alive） | ReAct 对话循环、MCP client、统一工具调用网关（ToolGateway） |
+| **RAG** | pgvector、pymilvus（可选）、pypdf、python-docx | 文档切分（chunking）→ 向量化（embedding）→ 向量召回 → cross-encoder 精排 |
 | **异步任务** | Celery 5（Redis broker）、celery beat | RAG ingest、长期记忆抽取、评测抽样、权益生效 / 到期 / 宽限期回收 / 对账 |
 | **缓存 / 短期记忆** | Redis 7（hiredis） | 多 DB 用途：短期记忆、Celery broker、结果后端 |
 | **认证** | PyJWT、bcrypt | Access Token（30 min）+ Refresh Token（DB 存 SHA-256） |
@@ -185,7 +185,7 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 | **用户端前端** | React 18、Ant Design 5、react-markdown + remark-gfm、highlight.js、react-router 7 | 应用市场卡片、对话流式渲染、Markdown + GFM |
 | **对象存储** | MinIO（可切本地 fake） | 知识库原文、上传文件 |
 | **生产反代** | Nginx 1.27-alpine（unprivileged） | SPA 静态资源、`/api` 反代、限流、安全响应头 |
-| **容器与编排** | Docker（python:3.12-slim / node:24-alpine）、Docker Compose | `ops/docker-compose.yml` 一键起 db / redis / migrate / backend / celery / frontend |
+| **容器与编排** | Docker（python:3.12-slim / node:24-alpine）、Docker Compose | `ops/docker-compose.yml` 一键启动 db / redis / migrate / backend / celery / frontend |
 | **质量门禁** | ruff、mypy、pytest、pre-commit（后端）；oxlint、prettier、vitest、Playwright（前端） | 提交前与 CI 统一检查 |
 
 > 详细的版本、依赖清单与目录映射见 [docs/development.md §技术栈清单](docs/development.md#技术栈清单)。
@@ -194,19 +194,19 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 > 建议在 **Git Bash**（Windows）、macOS 或 Linux 终端中执行本文命令。仓库中的 `ops/*.sh` 脚本需要 Bash；Windows 安装 [Git for Windows](https://git-scm.com/download/win) 即可获得 Git Bash。
 >
-> ⚠️ PowerShell 里的 `bash` 指向 WSL（`C:\Windows\System32\bash.exe`），而 Docker Desktop 自带的默认发行版 `docker-desktop` 没有 `/bin/bash`，直接执行会报 `execvpe(/bin/bash) failed: No such file or directory`。请改用 Git Bash，或显式指定 Git Bash 路径：`& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh`。
+> PowerShell 中的 `bash` 指向 WSL（`C:\Windows\System32\bash.exe`），而 Docker Desktop 自带的默认发行版 `docker-desktop` 没有 `/bin/bash`，直接执行会报 `execvpe(/bin/bash) failed: No such file or directory`。请改用 Git Bash，或显式指定 Git Bash 路径：`& "C:\Program Files\Git\bin\bash.exe" ops/dev.sh`。
 
 ---
 
-## 🧭 应用模型速览（必读）
+## 应用模型概述
 
-平台统一为 **应用（Application）** 模型，老 agent/workflow/skill/component/prompt 链路已物理下线。理解以下 4 个概念即可上手：
+平台统一为 **应用（Application）** 模型，旧应用模型（agent/workflow/skill/component/prompt）链路已移除。理解以下 4 个概念即可上手：
 
 | 概念 | 归属 | 说明 |
 | --- | --- | --- |
 | **应用 Application** | 平台（产品级） | 一个可视化画布 = 一张 DAG / agent_loop 图，存 `application` + `application_graph`；发布后生成不可变图版本。租户不直接建应用，而是开通实例 |
 | **资源 Resource** | 平台或租户 | 工具、提示词、技能、知识四类统一存 `resource` 表；通过 `resource_grant` 开放给租户 |
-| **租户实例 TenantApplicationInstance** | 租户 | 租户从市场自助开通产品级应用后生成的运行实例（含授权方式、配额、有效期、钉住的图版本），存 `tenant_application_instance` |
+| **租户实例 TenantApplicationInstance** | 租户 | 租户从市场自助开通产品级应用后生成的运行实例（含授权方式、配额、有效期、锁定的图版本），存 `tenant_application_instance` |
 | **角色授权 RoleGrant** | 角色 | 角色可被授权资源（工具 / 提示词 / 技能 / 知识）；应用通过市场实例与可见范围控制 |
 
 **两类管理端入口**：
@@ -220,20 +220,20 @@ cd ../user && pnpm install && pnpm run dev                      # 用户端 http
 
 ---
 
-## 📚 文档导航
+## 文档导航
 
 | 分册 | 内容 | 适合谁 |
 | --- | --- | --- |
-| [docs/getting-started.md](docs/getting-started.md) | 1-4 章：项目定位、准备软件、第一次启动、新手常见问题 | 第一次跑起来 |
-| [docs/development.md](docs/development.md) | 5-9 章：目录结构、断点调试、配置、权限安全、接口手册、数据库迁移 | 改代码、查配置 |
-| [docs/features.md](docs/features.md) | 10 章：管理端功能（画布编排 / 工具接入 5 分钟上手） | 搭第一个应用 |
-| [docs/testing.md](docs/testing.md) | 11 章：测试与质量门禁 | CI / 提交前 |
-| [docs/architecture.md](docs/architecture.md) | 12 章：系统运行流程（启动、多租户、登录、应用运行、令牌轮换、迁移） | 讲架构 |
+| [docs/getting-started.md](docs/getting-started.md) | 1-4 章：项目定位、准备软件、首次启动、常见问题 | 首次本地运行 |
+| [docs/development.md](docs/development.md) | 5-9 章：目录结构、断点调试、配置、权限安全、接口手册、数据库迁移 | 修改代码、查询配置 |
+| [docs/features.md](docs/features.md) | 10 章：管理端功能（画布编排、工具接入快速上手） | 搭建第一个应用 |
+| [docs/testing.md](docs/testing.md) | 11 章：测试与质量门禁 | CI / 提交前检查 |
+| [docs/architecture.md](docs/architecture.md) | 12 章：系统运行流程（启动、多租户、登录、应用运行、令牌轮换、迁移） | 理解与讲解架构 |
 | [docs/interview.md](docs/interview.md) | 13 章：面试讲解指南 | 面试 / 对外介绍 |
-| [docs/deployment.md](docs/deployment.md) | 14 章：生产部署（HTTPS、备份、监控、回滚、RAG 依赖） | 上线运维 |
+| [docs/deployment.md](docs/deployment.md) | 14 章：生产部署（HTTPS、备份、监控、回滚、RAG 依赖） | 生产上线与运维 |
 
 ---
 
-## 15. 许可证
+## 许可证
 
 本项目采用 [Apache License 2.0](./LICENSE) 开源。第三方组件（coze-studio，Apache-2.0）的版权与归属声明见 [NOTICE](./NOTICE)。

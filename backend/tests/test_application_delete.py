@@ -124,7 +124,7 @@ def _seed_app_related_data(app_id: str, tenant_id: str, department_id: str) -> d
         )
 
         # 0072 起 resource_grants 的 CHECK 收紧，无法再播种 app 档授权；
-        # 清理器仍保留 app 档 DELETE 作为存量兜底（删除行数恒为 0）。
+        # 清理器仍保留 app 档 DELETE 用于存量数据冗余清理（删除行数恒为 0）。
 
         # 权益套餐项（多态 object_type='app'）
         plan_id = uuid4()
@@ -366,7 +366,7 @@ def test_delete_cascades_all_related_data(
     body = response.json()
     assert body["name"] == "待删应用"
     assert body["deleted"]["run"] >= 1
-    # 0072：app 档授权已不可播种，兜底 DELETE 恒为 0 行
+    # 0072：app 档授权已不可播种，冗余 DELETE 恒为 0 行
     assert body["deleted"]["resource_grants"] == 0
     assert body["deleted"]["entitlement_plan_item"] >= 1
 

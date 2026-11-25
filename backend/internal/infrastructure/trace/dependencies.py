@@ -8,7 +8,7 @@ from .context import TraceContext, get_trace_context
 
 
 def get_trace() -> TraceContext:
-    """依赖函数：返回当前请求的 trace 上下文，无活跃 span 时返回空串兜底。"""
+    """依赖函数：返回当前请求的 trace 上下文，无活跃 span 时返回各字段为空值的默认上下文。"""
     ctx = get_trace_context()
     if ctx is None:
         return TraceContext(trace_id="", span_id="", parent_span_id=None)

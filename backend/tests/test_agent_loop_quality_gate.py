@@ -1,7 +1,7 @@
 """M4-d PRD F19.2：agent_loop 收敛后运行时质量门单测。
 
 门语义：judge 打分 score ≥ passScore 视为通过（阈值判定归本消费方，不受内核
-默认 7 兜底干扰）；不达标且重生未超 maxRegen → critique 作 user 消息追加、
+默认阈值 7 干扰）；不达标且重生未超 maxRegen → critique 作 user 消息追加、
 再跑一次 execute；judge 自身 usage 计入本 run usage/tokenBudget；达上限仍不
 过 → fail-open 放行（U13）；judge 调用异常 → fail-open 放行原答案并标记。
 审批挂起轮/接管轮/预算触顶轮/子 run（C8）/空答案轮不付 judge 成本。
@@ -129,7 +129,7 @@ class _ScriptedModel:
 
 
 def _judge_resp(score: int, critique: str = "", *, passed: Any = ...) -> _Resp:
-    """judge 结构化输出：passed 键默认缺省（走内核 score>=7 兜底），显式传入可覆盖。
+    """judge 结构化输出：passed 键缺省时内核按默认阈值 score>=7 判定，显式传入可覆盖。
 
     门的判定始终按消费方 passScore（F19.2），与 payload.passed 的关系由用例锁定。
     """
@@ -279,7 +279,7 @@ def test_gate_pass_score_overrides_kernel_default_and_payload() -> None:
 
     llm2 = _ScriptedModel(
         [_Resp(content="回答B")],
-        # 内核缺省兜底 7 会判过，消费方 passScore=9 必须判不过 → maxRegen 0 则只跑一次 judge
+        # 内核默认阈值 7 会判过，消费方 passScore=9 必须判不过 → maxRegen 0 则只执行一次 judge
         [_judge_resp(7, "未达线", passed=True)],
     )
     result2 = _run(llm2, _gate_config({"enabled": True, "passScore": 9, "maxRegen": 0}))

@@ -135,7 +135,7 @@ def test_append_rejects_cross_tenant_conversation() -> None:
 
 
 def test_append_allows_when_conversation_missing() -> None:
-    # 会话刚创建尚未落库的兜底场景：conv_row=None 时放行 append（不抛错）
+    # 会话刚创建尚未落库时也需兼容：conv_row=None 时放行 append（不抛错）
     tenant_id, user_id, app_id = uuid4(), uuid4(), uuid4()
     repo = _msg_adapter(tenant_id=tenant_id, user_id=user_id, application_id=app_id, conv_row=None)
     msg = Message(message_id=uuid4(), conversation_id=uuid4(), role="user", content="hi")

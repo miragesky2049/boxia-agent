@@ -290,7 +290,7 @@ def _extract_namespace_refs(text: str) -> list[tuple[str, str]]:
     return refs
 
 
-# ---------- 4. 模型引用存在性（发布闸门） ----------
+# ---------- 4. 模型引用存在性（发布校验） ----------
 
 # coze 画布模型键为 modleName（保留其拼写），兼容旧 modelName；节点 handler 双键读取
 _MODEL_CONFIG_KEYS = ("modleName", "modelName")
@@ -300,9 +300,9 @@ def lint_model_refs(graph: CanvasGraph, known_models: set[str] | None) -> list[V
     """检查节点配置的模型名是否在启用中的模型目录内。
 
     20261107 复盘（E2E 图片智能体用户端 400）：画布发布了目录中不存在的占位模型，
-    运行时才被上游网关拒绝；提前到发布闸门拦截。仅在调用方传入目录集合时检查
-    （草稿保存不传，允许编辑中间态）。模型留空跳过（意图/问答节点为可选模型
-    兜底），非字符串值（模板表达式）跳过——运行时才求值，无法静态判定。
+    运行时才被上游网关拒绝；提前到发布校验阶段拦截。仅在调用方传入目录集合时检查
+    （草稿保存不传，允许编辑中间态）。模型留空跳过（意图/问答节点模型为可选项，
+    运行时回退默认值），非字符串值（模板表达式）跳过——运行时才求值，无法静态判定。
     """
     if known_models is None:
         return []
@@ -405,7 +405,7 @@ def _normalize_type(raw: str) -> str:
 def _check_compatibility(source: str, target: str) -> str:
     """返回 "ok" / "warn"。"""
     if source == "string":
-        return "ok"  # string 几乎可以喂给任何字段（运行时强转）
+        return "ok"  # string 几乎可以赋给任何类型的字段（运行时强转）
     if source == "any" or target == "any":
         return "ok"
     if source == "object" and target == "string":

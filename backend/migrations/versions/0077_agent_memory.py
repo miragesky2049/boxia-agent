@@ -5,7 +5,7 @@
   召回注入（F16.4）读取；用户管理面（F16.6）可查看/删除/清空（隐私硬条件）；
 - 列类型口径对齐 conversation 表：tenant_id/user_id/application_id 均为 UUID；
 - 不做数据库唯一约束控重：近重复由抽取管线内 LLM 对照现有记忆给 update/去重
-  指令（F16.3，单段管线），容量由 maxMemories FIFO 归档兜底；
+  指令（F16.3，单段管线），容量超限由 maxMemories FIFO 归档旧记忆控制；
 - **embedding 列不建**（F16.5 开工时 ALTER + 历史回填，pgvector 扩展 0022 已就绪，
   理由同 U10 不预留口径）。
 """

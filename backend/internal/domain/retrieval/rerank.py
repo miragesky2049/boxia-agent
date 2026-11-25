@@ -92,6 +92,6 @@ class SiliconFlowRerankClient(RerankClient):
             idx = int(item.get("index") or 0)
             score = float(item.get("relevance_score") or item.get("score") or 0.0)
             parsed.append(RerankResult(index=idx, score=score))
-        # 兜底按 score 降序
+        # 统一按 score 降序排列，不依赖上游返回顺序
         parsed.sort(key=lambda r: r.score, reverse=True)
         return parsed

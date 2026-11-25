@@ -1,6 +1,6 @@
 """功能收敛：应用不再走资源授权（resource_grants），存量折算进可见范围（app_visibility_scope）。
 
-背景：0068 起应用的用户端闸门（list_visible_for_user / assert_user_can_view）只读
+背景：0068 起应用的用户端可见性校验（list_visible_for_user / assert_user_can_view）只读
 app_visibility_scope / app_visibility_whitelist，不再消费 resource_grants
 (resource_type='app')；「角色授权 → 资源授权 → 应用」页签写入的授权没有任何生效点，
 造成"两处配置、只有一处生效"的误导。域模型同步：access.py 的 RESOURCE_TYPES
@@ -14,7 +14,7 @@ app_visibility_scope / app_visibility_whitelist，不再消费 resource_grants
 - 应用行已不存在（孤儿授权）的不折算，随最终 DELETE 一并清理。
 
 downgrade 不可逆：app grants 已无消费方，回滚旧版本代码后应用页签显示为未授权，
-不影响实际访问控制（闸门一直是可见范围）。
+不影响实际访问控制（访问控制一直基于可见范围）。
 """
 
 from collections.abc import Sequence

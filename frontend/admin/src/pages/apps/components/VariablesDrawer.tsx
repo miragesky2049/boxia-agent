@@ -454,7 +454,7 @@ export function VariablesDrawer({
   )
 }
 
-// 后端 system 列表为空时的本地兜底（例如接口不可达）
+// 后端 system 列表为空时使用的本地默认列表（例如接口不可达）
 function fallbackSystemVars(flowType: FlowType): SystemVariable[] {
   const common: SystemVariable[] = [
     { name: 'USER_ID', label: '当前用户 ID' },

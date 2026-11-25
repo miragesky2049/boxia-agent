@@ -200,5 +200,5 @@ def test_find_agent_loop_config_absent_or_unconvertible_returns_none():
         find_agent_loop_config({"nodes": [{"id": "s", "type": "1", "data": {}}], "edges": []})
         is None
     )
-    # 整图含不支持节点 → 转换失败兜底 None，调用方走各自降级
+    # 整图含不支持节点 → 转换失败返回 None，调用方走各自降级
     assert find_agent_loop_config({"nodes": [{"id": "x", "type": "99999"}], "edges": []}) is None

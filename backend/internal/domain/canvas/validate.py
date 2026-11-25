@@ -155,7 +155,7 @@ def validate_raw_graph(
 
     convert 失败时返回 error 级问题。用于 save_graph 前的快速校验。
     variable_names / system_names 传入时，额外检查未声明的命名空间变量引用（warning）。
-    known_models 传入时（发布闸门），检查节点模型引用在启用目录内（error）；草稿保存不传。
+    known_models 传入时（发布校验），检查节点模型引用在启用目录内（error）；草稿保存不传。
     """
     from internal.domain.canvas.convert import CanvasConvertError, convert_canvas
     from internal.domain.canvas.lint import lint_graph, lint_model_refs, lint_variable_refs

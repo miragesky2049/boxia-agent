@@ -55,7 +55,7 @@ def get_visibility(
     service: ApplicationService = AppServiceDep,
     scope_service: AdminScopeService = AdminScopeServiceDep,
 ) -> dict:
-    """读取本租户内某应用的可见范围（未配置时按平台模板兜底，带 configured 标记）。
+    """读取本租户内某应用的可见范围（未配置时返回平台模板生成的默认可见范围，带 configured 标记）。
 
     附 manageable 标记：当前用户是否可管理该应用，前端据此渲染只读详情。
     """

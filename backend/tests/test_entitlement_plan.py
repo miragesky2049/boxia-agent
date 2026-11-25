@@ -92,7 +92,7 @@ def test_create_plan_validation_gates(uow, tenant):
 
 
 def test_apply_plan_uses_template_defaults(uow, tenant):
-    """开通展开条目：auth_type/quota 取模板默认，expire 按 duration_days 顺延，reason 兜底套餐名。"""
+    """开通展开条目：auth_type/quota 取模板默认，expire 按 duration_days 顺延，reason 缺省取套餐名。"""
     now = datetime.now(UTC)
     skill_id = _create_resource(uow, "skill")
     tool_id = _create_resource(uow, "tool")

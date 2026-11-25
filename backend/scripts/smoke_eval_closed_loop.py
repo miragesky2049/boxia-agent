@@ -1,4 +1,4 @@
-"""M4-d T-d9 真机冒烟：采样飞轮端到端（低分线上样本 → 看板 → 一键转评测集 → 评测批消费）。
+"""M4-d T-d9 真机冒烟：采样评测闭环端到端（低分线上样本 → 看板 → 一键转评测集 → 评测批消费）。
 
 前置：admin 8000 / user 8001（scripts/serve_noreload.py admin|user）与 celery worker
 （celery -A internal.infrastructure.celery_app worker -Q rag --pool=solo）在跑。
@@ -8,7 +8,7 @@
 校验：
 1. judgeSampling（rate=1.0 + 必低分 rubric）四处同构回读并发布；
 2. 对话后采样行进入 quality/summary 的 trend 与 low_score_items（含问句预览，
-   同时证明 T-d9 跨租户可见性修复：采样行落对话租户仍可按应用归因透出）；
+   同时证明 T-d9 跨租户可见性修复：采样行落对话租户仍可按应用归因查看）；
 3. 低分清单 run_id 直接 from-run 转评测集（问句/终答回填）；
 4. 以该数据集发起评测批，worker 真跑终态 completed 且报告消费了捕获用例；
 5. 清理数据集/评估器（FK CASCADE 连带评测行），恢复采样关闭默认组并发布。
@@ -126,11 +126,11 @@ def main() -> None:
             f"[看板] run={run_id} 低分={low['score']} 窗口采样数={summary['runtime_samples']['count']}"
         )
 
-        # 3. 飞轮：低分清单 run_id 一键 from-run 转评测集
+        # 3. 评测闭环：低分清单 run_id 一键 from-run 转评测集
         ts = time.strftime("%m%d%H%M%S")
         ds = admin.post(
             "/eval/datasets",
-            json={"application_id": APP, "name": f"飞轮冒烟-{ts}", "description": "T-d9 smoke"},
+            json={"application_id": APP, "name": f"闭环冒烟-{ts}", "description": "T-d9 smoke"},
         )
         assert ds.status_code == 201, ds.text
         ds_id = ds.json()["id"]
@@ -143,7 +143,7 @@ def main() -> None:
 
         # 4. 评测批消费该用例（恒过规则评估器；worker 真跑图，终态 completed）
         ev = admin.post(
-            "/eval/evaluators", json={"name": f"飞轮冒烟恒过-{ts}", "type": "rule", "config": {}}
+            "/eval/evaluators", json={"name": f"闭环冒烟恒过-{ts}", "type": "rule", "config": {}}
         )
         assert ev.status_code == 201, ev.text
         ev_id = ev.json()["id"]
@@ -187,7 +187,7 @@ def main() -> None:
             assert admin.delete(f"/eval/evaluators/{ev_id}").status_code == 204, (
                 f"评估器残留 {ev_id}"
             )
-    print("SMOKE PASS T-d9 飞轮：低分入看板→一键转评测集→评测批消费→清理恢复")
+    print("SMOKE PASS T-d9 评测闭环：低分入看板→一键转评测集→评测批消费→清理恢复")
 
 
 if __name__ == "__main__":

@@ -54,7 +54,7 @@ MODE_GRANT = "grant"
 MODE_REVOKE = "revoke"
 _MODES = (MODE_GRANT, MODE_REVOKE)
 
-# P1-5 批量上限：服务层兜底校验（接口层 payload 另有 max_length）
+# P1-5 批量上限：服务层重复校验（接口层 payload 另有 max_length）
 _BATCH_MAX_ITEMS = 200
 
 # P3-8 Idempotency-Key 长度上限：与 entitlement_request_log.request_id VARCHAR(128) 对齐

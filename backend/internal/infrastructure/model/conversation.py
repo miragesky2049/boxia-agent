@@ -38,7 +38,7 @@ class ConversationModel(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
-    # M4 PRD F14.9：接管路由态（active NULL=归属应用应答；目标应用删除时 SET NULL 自动归位）
+    # M4 PRD F14.9：转交路由状态（active NULL=归属应用应答；目标应用删除时 SET NULL 自动归位）
     active_application_id: Mapped[UUID | None] = mapped_column(
         Uuid(as_uuid=True), ForeignKey("application.id", ondelete="SET NULL")
     )

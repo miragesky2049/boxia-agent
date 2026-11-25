@@ -439,7 +439,7 @@ function IntentListEditor({
           color: '#9ca3af',
         }}
       >
-        其他（未命中任何意图时的兜底出口）
+        其他（未命中任何意图时的默认出口）
       </div>
       <Button size="small" onClick={addItem} style={{ alignSelf: 'flex-start' }} type="dashed">
         + 添加意图

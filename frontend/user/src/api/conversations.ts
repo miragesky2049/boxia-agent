@@ -5,7 +5,7 @@ export interface ConversationSummary {
   title: string
   created_at: string | null
   updated_at: string | null
-  /** M4 PRD F14.10：接管中透出发言权应用（additive，不在接管中无此两键） */
+  /** M4 PRD F14.10：接管中返回当前发言权应用（additive，不在接管中无此两键） */
   active_application_id?: string
   active_application?: string
 }

@@ -33,7 +33,7 @@ describe('chatflowStart 内置启动参数', () => {
     expect(merged.find((p) => p.name === 'extra')?.builtin).toBeUndefined()
   })
 
-  it('脏数据容错：非数组返回仅内置，缺名条目按 param_N 兜底、空名被过滤', () => {
+  it('脏数据容错：非数组返回仅内置，缺名条目按 param_N 命名补齐、空名被过滤', () => {
     expect(listStartInputParams(undefined, 'chatflow').map((p) => p.name)).toEqual(
       CHATFLOW_START_BUILTIN_PARAMS.map((p) => p.name),
     )

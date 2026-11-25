@@ -389,14 +389,14 @@ describe('EvalPanel 质量', () => {
     expect(screen.getByText('5', { selector: metrics })).toBeTruthy()
   })
 
-  it('渲染逐日趋势与低分清单，低分行一键加入评测集（F18.6 飞轮）', async () => {
+  it('渲染逐日趋势与低分清单，低分行一键加入评测集（F18.6 评测闭环）', async () => {
     route('/admin/apps/app-1/quality/summary', qualitySummaryBoard)
     route('/admin/eval/datasets$', { items: [datasetA] })
     route('/admin/eval/datasets/d1/cases/from-run', { ...caseOne, id: 'c9' }, 'POST')
     renderPanel()
     fireEvent.click(screen.getByRole('tab', { name: '质量' }))
     await waitFor(() => expect(screen.getByText('极光是什么')).toBeTruthy())
-    // 趋势表透出窗口内有数据的一天（零样本日也成行，均分显示 —）
+    // 趋势表展示窗口内有数据的一天（零样本日也成行，均分显示 —）
     expect(screen.getByText('2026-11-07')).toBeTruthy()
     expect(screen.getByText('2026-11-01')).toBeTruthy()
     expect(screen.getByText('答非所问')).toBeTruthy()

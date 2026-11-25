@@ -77,7 +77,7 @@ export interface QualityTrendPoint {
   avg_score: number | null
 }
 
-// T-d9 低分清单行：run_id 即飞轮入口（from-run 转评测集）的入参
+// T-d9 低分清单行：run_id 即评测闭环入口（from-run 转评测集）的入参
 export interface QualityLowItem {
   run_id: string
   question: string
