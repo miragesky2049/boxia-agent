@@ -12,7 +12,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:coverage": "vitest run --coverage",
+    "test:coverage": "vitest run --coverage --pool=forks --maxWorkers=2 --testTimeout=180000 --hookTimeout=180000",
     "e2e": "playwright test",
     "preview": "vite preview --mode prod"
   },

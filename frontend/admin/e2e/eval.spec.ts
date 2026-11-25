@@ -69,9 +69,24 @@ test('评测页签全链路', async ({ page }) => {
   // 用例管理抽屉关闭后 DOM 残留，限定当前打开的抽屉再点关闭
   await page.locator('.ant-drawer-open .ant-drawer-close').click()
 
-  const checkboxes = page.locator('.ant-table-tbody input[type="checkbox"]')
-  await checkboxes.nth(0).click()
-  await checkboxes.nth(1).click()
+  // diff 要求两批属于同一数据集（跨集 422）；列表按更新时间排序，首两行可能分属不同数据集，
+  // 须按「数据集」列（td0 勾选、td1 状态、td2 数据集）配对后再勾选。
+  // 其他 Tab 的表格残留在 DOM（antd Tabs 懒卸载），用带勾选框的行锁定运行表（仅 RunsPanel 有 rowSelection）
+  const rows = page.locator('.ant-table-tbody tr.ant-table-row:has(input[type="checkbox"])')
+  const rowCount = await rows.count()
+  let pair: [number, number] | null = null
+  outer: for (let i = 0; i < rowCount; i++) {
+    const nameA = (await rows.nth(i).locator('td').nth(2).innerText()).trim()
+    for (let j = i + 1; j < rowCount; j++) {
+      if ((await rows.nth(j).locator('td').nth(2).innerText()).trim() === nameA) {
+        pair = [i, j]
+        break outer
+      }
+    }
+  }
+  expect(pair, '运行列表应存在同一数据集的两个批次').not.toBeNull()
+  await rows.nth(pair![0]).locator('input[type="checkbox"]').click()
+  await rows.nth(pair![1]).locator('input[type="checkbox"]').click()
   const diffButton = page.getByRole('button', { name: '对比选中' })
   await expect(diffButton).toBeEnabled()
   await diffButton.click()
